@@ -1,0 +1,30 @@
+// events.vein — testing the `audience` barrier on `hear`.
+// A First-Class object can CARRY shapes/marks: `shard Combat $Session #Trusted { ... }`.
+// A `hear ... audience $Session #Trusted` only fires when the EMITTER carries ALL of them.
+//
+// Here two shards emit @Damage: Combat carries $Session #Trusted, Sneaky carries nothing.
+// The Auditor's audience lets Combat's event through and BLOCKS Sneaky's.
+// Run:  veinc render samples/events.vein /      (watch the log: one fires, one is blocked)
+//       veinc ir     samples/events.vein        (see @carries and @audience)
+
+bundle Demo {
+    event @Request  { path: string }
+    event @Damage   { amount: int }
+    event @Response { status: int, body: string }
+
+    // Carries the credentials the auditor requires.
+    shard Combat $Session #Trusted {
+        hear @Request as req { emit @Damage { amount: 5 } }
+    }
+
+    // Carries nothing — its @Damage should be blocked by the audience barrier.
+    shard Sneaky {
+        hear @Request as req { emit @Damage { amount: 99 } }
+    }
+
+    shard Auditor {
+        hear @Damage as d audience $Session #Trusted {
+            emit @Response { status: 200, body: "audited trusted damage " + d.amount + " from " + d.from.kind + "." + d.from.name }
+        }
+    }
+}

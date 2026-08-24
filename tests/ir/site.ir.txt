@@ -1,0 +1,35 @@
+VeinIR v1  file=samples/site.vein
+Bundle Site
+|--- Use Web
+|--- Publicator SiteApi
+|    |--- Event @Request  doc="An inbound HTTP request."
+|    |    `--- Field path: string
+|    |--- Event @Html  doc="A fragment of HTML contributed by some shard."
+|    |    `--- Field markup: string
+|    |--- Event @Render  doc="Signal that all fragments are in; assemble the page."
+|    `--- Event @Response  doc="The response to send back."
+|         |--- Field status: int
+|         `--- Field body: string
+|--- Shard Header
+|    `--- Hear @Request as req
+|         `--- Emit @Html
+|              `--- Arg markup = Str "<h1>VeinScript</h1>"
+|--- Shard Body
+|    `--- Hear @Request as req
+|         `--- Emit @Html
+|              `--- Arg markup = Str "<p>Reactive page, assembled from fragments.</p>"
+|--- Shard Kernel
+|    `--- Hear @Request as req
+|         `--- Emit @Render
+`--- ShardView Page
+     |--- Var html: string
+     |--- Hear @Html as f
+     |    `--- Assign += html
+     |         `--- Path f.markup
+     `--- Hear @Render as r
+          `--- Emit @Response
+               |--- Arg status = Int 200
+               `--- Arg body = Concat
+                    |--- Str "<html><body>"
+                    |--- Ref html
+                    `--- Str "</body></html>"

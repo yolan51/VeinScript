@@ -1,0 +1,30 @@
+VeinIR v1  file=samples/demo.vein
+Bundle Demo
+|--- Use Core
+|--- Publicator DemoCore
+|    |--- Shape $Health  doc="Hit points and mana for any living identity."
+|    |    |--- Field hp: int  folds=sum
+|    |    `--- Field mp: int
+|    `--- Event @Damaged  doc="Damage applied after mitigation."
+|         |--- Field amount: int
+|         `--- Field victim: Entity
+|--- SF hurt  params=(victim: Entity, amount: int)
+|    `--- Emit @Damaged
+|         |--- Arg amount = Ref amount
+|         `--- Arg victim = Ref victim
+`--- Shard Drain
+     |--- Target $Health #Enemy as self
+     |    `--- EachTick
+     |         |--- Assign -= ::Health.hp
+     |         |    `--- Int 1
+     |         `--- Chance 30%
+     |              `--- Emit @Damaged
+     |                   |--- Arg amount = Int 5
+     |                   `--- Arg victim = Ref self
+     `--- Settled
+          `--- If
+               |--- Cond = Binary <=
+               |    |--- Path ::Health.hp
+               |    `--- Int 0
+               `--- Then
+                    `--- Mark self #Dead

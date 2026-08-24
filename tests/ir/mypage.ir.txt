@@ -1,0 +1,75 @@
+VeinIR v1  file=samples/mypage.vein
+Bundle App
+|--- Use Web
+|--- Publicator PageApi
+|    |--- Event @Request
+|    |    `--- Field path: string
+|    |--- Event @Html
+|    |    `--- Field markup: string
+|    |--- Event @Script
+|    |    `--- Field code: string
+|    |--- Event @Style
+|    |    `--- Field css: string
+|    |--- Event @Render
+|    `--- Event @Response
+|         |--- Field status: int
+|         `--- Field body: string
+|--- Builder Heading  kind=html params=(text: string)
+|    `--- Body = Concat
+|         |--- Str "<h1>"
+|         |--- Ref text
+|         `--- Str "</h1>"
+|--- Builder CounterView  kind=html params=()
+|    `--- Body = Str "<p>Count: <span id=\"n\">0</span></p>"
+|--- Builder Button  kind=html params=(label: string)
+|    `--- Body = Concat
+|         |--- Str "<button onclick=\"inc()\">"
+|         |--- Ref label
+|         `--- Str "</button>"
+|--- Builder Item  kind=html params=(label: string)
+|    `--- Body = Concat
+|         |--- Str "<li>"
+|         |--- Ref label
+|         `--- Str "</li>"
+|--- Builder IncFn  kind=script params=()
+|    `--- Body = Str "let c=0; function inc(){ c+=1; document.getElementById('n')...."
+|--- Builder BaseCss  kind=style params=()
+|    `--- Body = Str "body{font-family:sans-serif;margin:2rem} button{cursor:point..."
+|--- Shard Ui
+|    `--- Hear @Request as req
+|         |--- Bring BaseCss
+|         |--- Bring Heading
+|         |    `--- Arg = Str "Counter"
+|         |--- Bring CounterView
+|         |--- Bring Button
+|         |    `--- Arg = Str "+1"
+|         |--- Bring Item  count=8
+|         |    `--- Arg = Str "row"
+|         `--- Bring IncFn
+|--- Shard Kernel
+|    `--- Hear @Request as req
+|         `--- Emit @Render
+`--- ShardView MyPage
+     |--- Var html: string
+     |--- Var js: string
+     |--- Var css: string
+     |--- Hear @Html as f
+     |    `--- Assign += html
+     |         `--- Path f.markup
+     |--- Hear @Script as s
+     |    `--- Assign += js
+     |         `--- Path s.code
+     |--- Hear @Style as st
+     |    `--- Assign += css
+     |         `--- Path st.css
+     `--- Hear @Render as r
+          `--- Emit @Response
+               |--- Arg status = Int 200
+               `--- Arg body = Concat
+                    |--- Str "<!doctype html><html><head><style>"
+                    |--- Ref css
+                    |--- Str "</style></head><body>"
+                    |--- Ref html
+                    |--- Str "<script>"
+                    |--- Ref js
+                    `--- Str "</script></body></html>"

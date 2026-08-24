@@ -1,0 +1,113 @@
+VeinIR v1  file=samples/handles.vein
+Bundle App
+|--- Use Web
+|--- Publicator PageApi
+|    |--- Event @Request
+|    |    `--- Field path: string
+|    |--- Event @Html
+|    |    `--- Field markup: string
+|    |--- Event @Script
+|    |    `--- Field code: string
+|    |--- Event @Style
+|    |    `--- Field css: string
+|    |--- Event @Render
+|    |--- Event @Response
+|    |    |--- Field status: int
+|    |    `--- Field body: string
+|    |--- Shape $Id
+|    |    `--- Field name: string
+|    |--- Shape $Class
+|    |    `--- Field name: string
+|    |--- Shape $Fn
+|    |    |--- Field name: string
+|    |    `--- Field body: string
+|    `--- Shape $Button
+|         |--- Field id: Id
+|         |--- Field class: Class
+|         |--- Field onclick: Fn
+|         `--- Field label: string
+|--- Builder Display  kind=html params=(slot: Id, initial: string)
+|    `--- Body = Concat
+|         |--- Str "<span id=\""
+|         |--- Path slot.name
+|         |--- Str "\">"
+|         |--- Ref initial
+|         `--- Str "</span>"
+|--- Builder Button  kind=html params=(b: Button)
+|    `--- Body = Concat
+|         |--- Str "<button id=\""
+|         |--- Path b.id.name
+|         |--- Str "\" class=\""
+|         |--- Path b.class.name
+|         |--- Str "\" onclick=\""
+|         |--- Path b.onclick.name
+|         |--- Str "()\">"
+|         |--- Path b.label
+|         `--- Str "</button>"
+|--- Builder Define  kind=script params=(f: Fn)
+|    `--- Body = Concat
+|         |--- Str "function "
+|         |--- Path f.name
+|         |--- Str "(){ "
+|         |--- Path f.body
+|         `--- Str " }"
+|--- Builder Rule  kind=style params=(c: Class, decl: string)
+|    `--- Body = Concat
+|         |--- Str "."
+|         |--- Path c.name
+|         |--- Str "{"
+|         |--- Ref decl
+|         `--- Str "}"
+|--- Shard Ui
+|    `--- Hear @Request as req
+|         |--- Let counter = New $Id
+|         |    `--- Arg name = Str "counter"
+|         |--- Let primary = New $Class
+|         |    `--- Arg name = Str "primary"
+|         |--- Let inc = New $Fn
+|         |    |--- Arg name = Str "inc"
+|         |    `--- Arg body = Concat
+|         |         |--- Str "let e=document.getElementById('"
+|         |         |--- Path counter.name
+|         |         `--- Str "'); e.innerText=(+e.innerText)+1"
+|         |--- Bring Rule
+|         |    |--- Arg = Ref primary
+|         |    `--- Arg = Str "cursor:pointer;font-weight:bold"
+|         |--- Bring Display
+|         |    |--- Arg = Ref counter
+|         |    `--- Arg = Str "0"
+|         |--- Bring Button
+|         |    `--- Arg = New $Button
+|         |         |--- Arg id = Ref counter
+|         |         |--- Arg class = Ref primary
+|         |         |--- Arg onclick = Ref inc
+|         |         `--- Arg label = Str "+1"
+|         `--- Bring Define
+|              `--- Arg = Ref inc
+|--- Shard Kernel
+|    `--- Hear @Request as req
+|         `--- Emit @Render
+`--- ShardView MyPage
+     |--- Var html: string
+     |--- Var js: string
+     |--- Var css: string
+     |--- Hear @Html as f
+     |    `--- Assign += html
+     |         `--- Path f.markup
+     |--- Hear @Script as s
+     |    `--- Assign += js
+     |         `--- Path s.code
+     |--- Hear @Style as st
+     |    `--- Assign += css
+     |         `--- Path st.css
+     `--- Hear @Render as r
+          `--- Emit @Response
+               |--- Arg status = Int 200
+               `--- Arg body = Concat
+                    |--- Str "<!doctype html><html><head><style>"
+                    |--- Ref css
+                    |--- Str "</style></head><body>"
+                    |--- Ref html
+                    |--- Str "<script>"
+                    |--- Ref js
+                    `--- Str "</script></body></html>"

@@ -1,0 +1,52 @@
+// demo.vein — an Identity Oriented Programming sample. Exercises the hard lexer cases
+// ($ @ # sigils, 30% percent, virtual newline terminators) and the IOP core:
+// shape/shard/target/each tick/settled/emit/mark, folds, and if/else.
+// Traced end-to-end in docs/EXAMPLE-PIPELINE.md.
+
+bundle Demo {
+    use Core
+
+    publicator DemoCore {
+        shared("Hit points and mana for any living identity.")
+        shape $Health {
+            hp: int folds sum      // many shards may drain hp in one tick; sum the deltas
+            mp: int
+        }
+
+        shared("Damage applied after mitigation.")
+        event @Damaged {
+            amount: int
+            victim: Entity
+        }
+    }
+
+    // An SF never returns a value — it emits events (each auto-tagged with origin/source).
+    // A single SF can emit many times, just like a shard.
+    SF hurt(victim: Entity, amount: int) {
+        emit @Damaged {
+            amount: amount
+            victim: victim
+        }
+    }
+
+    shard Drain {
+        target $Health #Enemy as self {
+            each tick {
+                ::Health.hp -= 1
+
+                chance 30% {
+                    emit @Damaged {
+                        amount: 5
+                        victim: self
+                    }
+                }
+            }
+        }
+
+        settled {
+            if ::Health.hp <= 0 {
+                mark self #Dead
+            }
+        }
+    }
+}

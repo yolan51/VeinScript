@@ -1,0 +1,47 @@
+// shaped.vein — elements modeled as SHAPES (structured data), rendered by builders that are
+// given the shape VALUE. Instead of raw HTML strings scattered around, each element's data
+// (id/class/label/onclick) is a typed shape you provide to the builder.
+// Run:  veinc render samples/shaped.vein /
+
+bundle App {
+    use Web
+
+    publicator PageApi {
+        event @Request  { path: string }
+        event @Html     { markup: string }
+        event @Render   { }
+        event @Response { status: int, body: string }
+
+        // Element data as shapes:
+        shape $Heading { text: string }
+        shape $Button  { id: string, class: string, label: string, onclick: string }
+    }
+
+    // Builders take the shape value and render it (the template lives here, once).
+    builder html Heading(h: Heading) {
+        "<h1>" + h.text + "</h1>"
+    }
+    builder html Button(b: Button) {
+        "<button id=\"" + b.id + "\" class=\"" + b.class + "\" onclick=\"" + b.onclick + "()\">" + b.label + "</button>"
+    }
+
+    // Provide the builders with values (shape literals).
+    shard Ui {
+        hear @Request as req {
+            bring Heading(Heading { text: "Counter" })
+            bring Button(Button { id: "inc", class: "primary", label: "+1", onclick: "inc" })
+        }
+    }
+
+    shard Kernel {
+        hear @Request as req { emit @Render { } }
+    }
+
+    ShardView MyPage {
+        var html: string
+        hear @Html as f { html += f.markup }
+        hear @Render as r {
+            emit @Response { status: 200, body: "<html><body>" + html + "</body></html>" }
+        }
+    }
+}

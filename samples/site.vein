@@ -1,0 +1,54 @@
+// site.vein — a reactive website in IOP. A page is ASSEMBLED, not returned:
+//   @Request -> content shards emit @Html fragments -> ShardView concatenates them
+//   -> on @Render the ShardView emits the finished @Response page.
+// Run it:  veinc render samples/site.vein  /
+
+bundle Site {
+    use Web
+
+    publicator SiteApi {
+        shared("An inbound HTTP request.")
+        event @Request { path: string }
+
+        shared("A fragment of HTML contributed by some shard.")
+        event @Html { markup: string }
+
+        shared("Signal that all fragments are in; assemble the page.")
+        event @Render { }
+
+        shared("The response to send back.")
+        event @Response { status: int, body: string }
+    }
+
+    // Content providers: each hears a request and emits its fragment (auto origin/source).
+    shard Header {
+        hear @Request as req { emit @Html { markup: "<h1>VeinScript</h1>" } }
+    }
+
+    shard Body {
+        hear @Request as req {
+            emit @Html { markup: "<p>Reactive page, assembled from fragments.</p>" }
+        }
+    }
+
+    // Kernel closes the request phase (declared last, so @Render is queued after the fragments).
+    shard Kernel {
+        hear @Request as req { emit @Render { } }
+    }
+
+    // The ShardView: tons of `hear`, concatenating HTML (and JS) into one page, then rendering.
+    ShardView Page {
+        var html: string
+
+        hear @Html as f {
+            html += f.markup
+        }
+
+        hear @Render as r {
+            emit @Response {
+                status: 200
+                body: "<html><body>" + html + "</body></html>"
+            }
+        }
+    }
+}

@@ -1,0 +1,61 @@
+VeinIR v1  file=samples/shaped.vein
+Bundle App
+|--- Use Web
+|--- Publicator PageApi
+|    |--- Event @Request
+|    |    `--- Field path: string
+|    |--- Event @Html
+|    |    `--- Field markup: string
+|    |--- Event @Render
+|    |--- Event @Response
+|    |    |--- Field status: int
+|    |    `--- Field body: string
+|    |--- Shape $Heading
+|    |    `--- Field text: string
+|    `--- Shape $Button
+|         |--- Field id: string
+|         |--- Field class: string
+|         |--- Field label: string
+|         `--- Field onclick: string
+|--- Builder Heading  kind=html params=(h: Heading)
+|    `--- Body = Concat
+|         |--- Str "<h1>"
+|         |--- Path h.text
+|         `--- Str "</h1>"
+|--- Builder Button  kind=html params=(b: Button)
+|    `--- Body = Concat
+|         |--- Str "<button id=\""
+|         |--- Path b.id
+|         |--- Str "\" class=\""
+|         |--- Path b.class
+|         |--- Str "\" onclick=\""
+|         |--- Path b.onclick
+|         |--- Str "()\">"
+|         |--- Path b.label
+|         `--- Str "</button>"
+|--- Shard Ui
+|    `--- Hear @Request as req
+|         |--- Bring Heading
+|         |    `--- Arg = New $Heading
+|         |         `--- Arg text = Str "Counter"
+|         `--- Bring Button
+|              `--- Arg = New $Button
+|                   |--- Arg id = Str "inc"
+|                   |--- Arg class = Str "primary"
+|                   |--- Arg label = Str "+1"
+|                   `--- Arg onclick = Str "inc"
+|--- Shard Kernel
+|    `--- Hear @Request as req
+|         `--- Emit @Render
+`--- ShardView MyPage
+     |--- Var html: string
+     |--- Hear @Html as f
+     |    `--- Assign += html
+     |         `--- Path f.markup
+     `--- Hear @Render as r
+          `--- Emit @Response
+               |--- Arg status = Int 200
+               `--- Arg body = Concat
+                    |--- Str "<html><body>"
+                    |--- Ref html
+                    `--- Str "</body></html>"

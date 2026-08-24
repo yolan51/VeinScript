@@ -1,0 +1,67 @@
+// handles.vein — HTML / JS / CSS cross-linked by HANDLES (id, class, function).
+// A handle is a shape carrying a name (and, for a function, a body). Declare each ONCE, then hand
+// the SAME handle value to the element, the script, and the style. The name can't drift, because it
+// lives in one place.  Run:  veinc render samples/handles.vein /
+
+bundle App {
+    use Web
+
+    publicator PageApi {
+        event @Request  { path: string }
+        event @Html     { markup: string }
+        event @Script   { code: string }
+        event @Style    { css: string }
+        event @Render   { }
+        event @Response { status: int, body: string }
+
+        // Handle types (would ship in `use Web`):
+        shape $Id    { name: string }
+        shape $Class { name: string }
+        shape $Fn    { name: string, body: string }
+
+        // Element data references handles instead of loose strings:
+        shape $Button { id: Id, class: Class, onclick: Fn, label: string }
+    }
+
+    // Builders read the name/body OFF the handle — one source of truth per name.
+    builder html Display(slot: Id, initial: string) {
+        "<span id=\"" + slot.name + "\">" + initial + "</span>"
+    }
+    builder html Button(b: Button) {
+        "<button id=\"" + b.id.name + "\" class=\"" + b.class.name + "\" onclick=\"" + b.onclick.name + "()\">" + b.label + "</button>"
+    }
+    builder script Define(f: Fn) {
+        "function " + f.name + "(){ " + f.body + " }"
+    }
+    builder style Rule(c: Class, decl: string) {
+        "." + c.name + "{" + decl + "}"
+    }
+
+    shard Ui {
+        hear @Request as req {
+            // Declare each handle ONCE. inc's body reads counter.name, so "counter" is written once.
+            let counter = Id { name: "counter" }
+            let primary = Class { name: "primary" }
+            let inc     = Fn { name: "inc", body: "let e=document.getElementById('" + counter.name + "'); e.innerText=(+e.innerText)+1" }
+
+            bring Rule(primary, "cursor:pointer;font-weight:bold")
+            bring Display(counter, "0")
+            bring Button(Button { id: counter, class: primary, onclick: inc, label: "+1" })
+            bring Define(inc)
+        }
+    }
+
+    shard Kernel { hear @Request as req { emit @Render { } } }
+
+    ShardView MyPage {
+        var html: string
+        var js: string
+        var css: string
+        hear @Html as f   { html += f.markup }
+        hear @Script as s { js += s.code }
+        hear @Style as st { css += st.css }
+        hear @Render as r {
+            emit @Response { status: 200, body: "<!doctype html><html><head><style>" + css + "</style></head><body>" + html + "<script>" + js + "</script></body></html>" }
+        }
+    }
+}

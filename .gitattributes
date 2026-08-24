@@ -1,0 +1,4 @@
+# Keep LF endings everywhere so golden files (tests/ir/*.ir.txt) and the bash test script stay
+# byte-stable across platforms; Windows PowerShell scripts keep CRLF.
+* text=auto eol=lf
+*.ps1 text eol=crlf

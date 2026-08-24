@@ -1,0 +1,28 @@
+VeinIR v1  file=samples/events.vein
+Bundle Demo
+|--- Event @Request
+|    `--- Field path: string
+|--- Event @Damage
+|    `--- Field amount: int
+|--- Event @Response
+|    |--- Field status: int
+|    `--- Field body: string
+|--- Shard Combat  carries=[$Session #Trusted]
+|    `--- Hear @Request as req
+|         `--- Emit @Damage
+|              `--- Arg amount = Int 5
+|--- Shard Sneaky
+|    `--- Hear @Request as req
+|         `--- Emit @Damage
+|              `--- Arg amount = Int 99
+`--- Shard Auditor
+     `--- Hear @Damage as d  audience=[$Session #Trusted]
+          `--- Emit @Response
+               |--- Arg status = Int 200
+               `--- Arg body = Concat
+                    |--- Str "audited trusted damage "
+                    |--- Path d.amount
+                    |--- Str " from "
+                    |--- Path d.from.kind
+                    |--- Str "."
+                    `--- Path d.from.name
