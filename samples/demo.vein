@@ -17,6 +17,8 @@ bundle Demo {
         event @Damaged {
             amount: int
             victim: Entity
+            $Health.hp = 0             // pull one field off $Health (defaulted, so optional at emit)
+            var note: string = "hit"   // a `var` member — same `=`/required rule as a field
         }
     }
 

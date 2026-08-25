@@ -7,7 +7,9 @@ Bundle Demo
 |    |    `--- Field mp: int
 |    `--- Event @Damaged  doc="Damage applied after mitigation."
 |         |--- Field amount: int
-|         `--- Field victim: Entity
+|         |--- Field victim: Entity
+|         |--- Include $Health.hp = Int 0
+|         `--- Var note: string = Str "hit"
 |--- SF hurt  params=(victim: Entity, amount: int)
 |    `--- Emit @Damaged
 |         |--- Arg amount = Ref amount

@@ -42,17 +42,37 @@ public sealed class AstTree
         UseDecl u => Leaf("Use", u.Alias is null ? u.Name : $"{u.Name} as {u.Alias}", u.Span),
         ShapeDecl s => WithAttrs(Node("Shape", "$" + s.Name, s.Span, s.Members.Select(ShapeMember)), Doc(s.Doc)),
         TypeDecl t => Node("Type", t.Name, t.Span, t.Fields.Select(Field)),
-        EventDecl e => WithAttrs(Node("Event", "@" + e.Name, e.Span, e.Fields.Select(Field)), Doc(e.Doc)),
+        EventDecl e => WithAttrs(Node("Event", "@" + e.Name, e.Span, e.Members.Select(SigMember)), Doc(e.Doc)),
         EnumDecl en => Node("Enum", en.Name, en.Span, en.Cases.Select(c => Leaf("Case", c, en.Span))),
         FuncDecl f => WithAttrs(Node("SF", f.Name, f.Span, Block(f.Body)), ("params", Params(f.Params))),
         VarDecl v => Var(v),
         ShardDecl sh => WithAttrs(Node("Shard", sh.Name, sh.Span, sh.Members.Select(Member)), Carries(sh.CarriedShapes, sh.CarriedMarks)),
         ViewDecl vw => WithAttrs(Node("ShardView", vw.Name, vw.Span, vw.Members.Select(Member)), Carries(vw.CarriedShapes, vw.CarriedMarks)),
         BridgeDecl br => WithAttrs(Node("Bridge", br.Name, br.Span, br.Members.Select(Member)), Carries(br.CarriedShapes, br.CarriedMarks)),
-        BuilderDecl bl => WithAttrs(Node("Builder", bl.Name, bl.Span, new[] { Wrapper("Body", "", bl.Body) }),
-                                    ("kind", bl.Kind), ("params", Params(bl.Params))),
+        BuilderDecl bl => WithAttrs(Node("Builder", bl.Name, bl.Span, bl.Members.Select(SigMember)), BuilderKind(bl)),
         _ => Leaf(d.GetType().Name, "", d.Span)
     };
+
+    private static readonly string[] OutputFields = { "markup", "code", "css" };
+    private (string, string)? BuilderKind(BuilderDecl bl)
+    {
+        var output = bl.Members.OfType<FieldDecl>().FirstOrDefault(f => OutputFields.Contains(f.Name));
+        return output is null ? null : ("kind", output.Name switch { "code" => "script", "css" => "style", _ => "html" });
+    }
+
+    /// A member of an event/builder body: a field/var, or a `$Shape` include.
+    private IrNode SigMember(Node m) => m switch
+    {
+        FieldDecl f => Field(f),
+        ShapeInclude si => Include(si),
+        _ => Leaf(m.GetType().Name, "", m.Span)
+    };
+
+    private IrNode Include(ShapeInclude si)
+    {
+        string head = "$" + si.Shape + (si.Field is null ? "" : "." + si.Field);
+        return si.Default is null ? Leaf("Include", head, si.Span) : Wrapper("Include", head, si.Default);
+    }
 
     private IrNode Var(VarDecl v)
     {
@@ -69,7 +89,9 @@ public sealed class AstTree
 
     private IrNode Field(FieldDecl f)
     {
-        var n = Leaf("Field", $"{f.Name}: {Type(f.Type)}", f.Span);
+        string kind = f.IsVar ? "Var" : "Field";
+        string primary = f.Type is null ? f.Name : $"{f.Name}: {Type(f.Type)}";
+        var n = f.Default is null ? Leaf(kind, primary, f.Span) : Wrapper(kind, primary, f.Default);
         return f.Fold is null ? n : WithAttrs(n, ("folds", f.Fold));
     }
 
@@ -115,7 +137,9 @@ public sealed class AstTree
         ContinueStmt => Leaf("Continue", "", s.Span),
         AssignStmt a => Node("Assign", $"{AssignOp(a.Op)} {Path(a.Target)}", a.Span, new[] { Expr(a.Value) }),
         MarkStmt mk => Leaf(mk.Remove ? "Unmark" : "Mark", $"{Path(mk.Target)} #{mk.Mark}", mk.Span),
-        EmitStmt em => Node("Emit", "@" + em.Event, em.Span, em.Fields.Select(ArgField)),
+        EmitStmt em => em.FillRest
+            ? WithAttrs(Node("Emit", "@" + em.Event, em.Span, em.Fields.Select(ArgField)), ("fill", "?"))
+            : Node("Emit", "@" + em.Event, em.Span, em.Fields.Select(ArgField)),
         DestroyStmt d => Leaf("Destroy", Path(d.Target), d.Span),
         AttachStmt at => AttachNode(at),
         ChanceStmt c => Node("Chance", Pct(c.Probability), c.Span, Block(c.Body)),
@@ -150,7 +174,10 @@ public sealed class AstTree
     private IrNode Bring(BringStmt br)
     {
         var n = Node("Bring", br.Builder, br.Span, br.Args.Select(ArgExpr));
-        return br.Count is null ? n : WithAttrs(n, ("count", Count(br.Count)));
+        var attrs = new List<(string, string)?>();
+        if (br.Count is not null) attrs.Add(("count", Count(br.Count)));
+        if (br.FillRest) attrs.Add(("fill", "?"));
+        return attrs.Count == 0 ? n : WithAttrs(n, attrs.ToArray());
     }
 
     // ---- expressions ----------------------------------------------------
@@ -245,7 +272,7 @@ public sealed class AstTree
 
     private string Params(IReadOnlyList<Param> ps) => "(" + string.Join(", ", ps.Select(p => $"{p.Name}: {Type(p.Type)}")) + ")";
 
-    private string Type(TypeRef t) => t.Name + (t.Args.Count > 0 ? "<" + string.Join(", ", t.Args.Select(Type)) + ">" : "");
+    private string Type(TypeRef? t) => t is null ? "infer" : t.Name + (t.Args.Count > 0 ? "<" + string.Join(", ", t.Args.Select(Type)) + ">" : "");
 
     private string Count(Expr e) => e is LiteralExpr { Kind: LiteralKind.Int } l ? Convert.ToString(l.Value, CultureInfo.InvariantCulture) ?? "0" : Inline(e);
 

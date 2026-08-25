@@ -36,11 +36,12 @@ public static class AstPrinter
                 break;
             case EventDecl ev:
                 Line(sb, ind, tag($"event {ev.Name}") + Doc(d));
-                foreach (var f in ev.Fields) Line(sb, ind + 1, Field(f));
+                foreach (var m in ev.Members) Line(sb, ind + 1, SigMember(m));
                 break;
             case EnumDecl e: Line(sb, ind, $"enum {e.Name} {{ {string.Join(", ", e.Cases)} }}"); break;
             case BuilderDecl bl:
-                Line(sb, ind, tag($"builder {bl.Kind} {bl.Name}({string.Join(", ", bl.Params.Select(p => p.Name + ": " + Type(p.Type)))}) = {Ex(bl.Body)}"));
+                Line(sb, ind, tag($"builder {bl.Name}") + Doc(d));
+                foreach (var m in bl.Members) Line(sb, ind + 1, SigMember(m));
                 break;
             case FuncDecl fn:
                 Line(sb, ind, tag($"{(fn.IsPure ? "SF" : "fn")} {fn.Name}({string.Join(", ", fn.Params.Select(p => p.Name + ": " + Type(p.Type)))}) -> {(fn.Return is null ? "void" : Type(fn.Return))}"));
@@ -115,17 +116,23 @@ public static class AstPrinter
             case ContinueStmt: Line(sb, ind, "continue"); break;
             case AssignStmt a: Line(sb, ind, $"{Ex(a.Target)} {AsgOp(a.Op)} {Ex(a.Value)}"); break;
             case MarkStmt mk: Line(sb, ind, $"{(mk.Remove ? "unmark" : "mark")} {Ex(mk.Target)} #{mk.Mark}"); break;
-            case EmitStmt em: Line(sb, ind, $"emit @{em.Event} {{ {string.Join(", ", em.Fields.Select(f => f.Name + ": " + Ex(f.Value)))} }}"); break;
+            case EmitStmt em: Line(sb, ind, $"emit @{em.Event} {{ {string.Join(", ", em.Fields.Select(f => f.Name + ": " + Ex(f.Value)).Append(em.FillRest ? "?" : null).Where(x => x is not null))} }}"); break;
             case DestroyStmt d: Line(sb, ind, $"destroy {Ex(d.Target)}"); break;
             case AttachStmt at: Line(sb, ind, $"{(at.Remove ? "unattach" : "attach")} ${at.Shape}"); break;
             case ChanceStmt c: Line(sb, ind, $"chance {c.Probability:P0}"); PrintBlock(sb, c.Body, ind + 1); break;
-            case BringStmt br: Line(sb, ind, $"bring {(br.Count is null ? "" : Ex(br.Count) + " ")}{br.Builder}({string.Join(", ", br.Args.Select(Ex))})"); break;
+            case BringStmt br: Line(sb, ind, $"bring {(br.Count is null ? "" : Ex(br.Count) + " ")}{br.Builder}({string.Join(", ", br.Args.Select(Ex).Append(br.FillRest ? "?" : null).Where(x => x is not null))})"); break;
             case ExprStmt e: Line(sb, ind, Ex(e.Expr)); break;
         }
     }
 
-    private static string Field(FieldDecl f) => $"{f.Name}: {Type(f.Type)}{(f.Fold is null ? "" : " folds " + f.Fold)}";
-    private static string Type(TypeRef t) => t.Name + (t.Args.Count > 0 ? "<" + string.Join(", ", t.Args.Select(Type)) + ">" : "");
+    private static string SigMember(Node m) => m switch
+    {
+        FieldDecl f => $"{(f.IsVar ? "var " : "")}{f.Name}{(f.Type is null ? "" : ": " + Type(f.Type))}{(f.Fold is null ? "" : " folds " + f.Fold)}{(f.Default is null ? "" : " = " + Ex(f.Default))}",
+        ShapeInclude si => $"${si.Shape}{(si.Field is null ? "" : "." + si.Field)}{(si.Default is null ? "" : " = " + Ex(si.Default))}",
+        _ => m.GetType().Name
+    };
+    private static string Field(FieldDecl f) => $"{f.Name}: {Type(f.Type)}{(f.Fold is null ? "" : " folds " + f.Fold)}{(f.Default is null ? "" : " = " + Ex(f.Default))}";
+    private static string Type(TypeRef? t) => t is null ? "infer" : t.Name + (t.Args.Count > 0 ? "<" + string.Join(", ", t.Args.Select(Type)) + ">" : "");
     private static string Doc(Decl d) => d.Doc is null ? "" : $"   // {d.Doc}";
 
     private static string AsgOp(AssignOp o) => o switch

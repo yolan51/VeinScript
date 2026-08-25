@@ -31,14 +31,26 @@ public sealed record PublicatorDecl(string Name, IReadOnlyList<Decl> Members, So
 
 public sealed record ShapeDecl(string Name, IReadOnlyList<Node> Members, SourceSpan Span) : Decl(Span);
 public sealed record TypeDecl(string Name, IReadOnlyList<FieldDecl> Fields, SourceSpan Span) : Decl(Span);
-public sealed record EventDecl(string Name, IReadOnlyList<FieldDecl> Fields, SourceSpan Span) : Decl(Span);
 public sealed record EnumDecl(string Name, IReadOnlyList<string> Cases, SourceSpan Span) : Decl(Span);
 
-public sealed record FieldDecl(string Name, TypeRef Type, string? Fold, SourceSpan Span) : Node(Span);
+// `event` and `builder` share a signature body of members (fields / vars / shape-includes).
+// `=` ⇒ defaulted (overridable); no `=` ⇒ required.
+public sealed record EventDecl(string Name, IReadOnlyList<Node> Members, SourceSpan Span) : Decl(Span);
 
-/// A pre-built element template. Kind is "html" | "script" | "style". Body is a string-producing
-/// expression. Instantiated with `bring` (which emits the matching fragment event).
-public sealed record BuilderDecl(string Kind, string Name, IReadOnlyList<Param> Params, Expr Body, SourceSpan Span) : Decl(Span);
+/// A pre-built element/template. Its body is a signature; the output field (markup/code/css) carries
+/// the template and determines the kind. Instantiated with `bring`.
+public sealed record BuilderDecl(string Name, IReadOnlyList<Node> Members, SourceSpan Span) : Decl(Span);
+
+// A field or var. Type is null when inferred (`x = 5`). Default set ⇒ optional; null ⇒ required.
+// `Fold` applies only to shape fields. In a builder, a field named markup/code/css is the output.
+public sealed record FieldDecl(string Name, TypeRef? Type, string? Fold, Expr? Default, SourceSpan Span) : Node(Span)
+{
+    public bool IsVar { get; init; }
+}
+
+/// A `$Shape` include inside an event/builder body: pulls in all of the shape's fields, or one field
+/// with `$Shape.field`. `Default` (via `=`) makes it optional.
+public sealed record ShapeInclude(string Shape, string? Field, Expr? Default, SourceSpan Span) : Node(Span);
 
 public sealed record FuncDecl(
     bool IsPure, string Name, IReadOnlyList<Param> Params, TypeRef? Return, Block Body, SourceSpan Span)
@@ -116,12 +128,15 @@ public sealed record ExprStmt(Expr Expr, SourceSpan Span) : Stmt(Span);
 
 // IOP statements (surface sugar; desugared in M3) --------------------------
 public sealed record MarkStmt(bool Remove, Expr Target, string Mark, SourceSpan Span) : Stmt(Span);
-public sealed record EmitStmt(string Event, IReadOnlyList<FieldInit> Fields, SourceSpan Span) : Stmt(Span);
+// FillRest (`?`) means: fill every field not listed here — default if it has one, else a typed zero
+// placeholder for required fields — so it compiles/runs for testing.
+public sealed record EmitStmt(string Event, IReadOnlyList<FieldInit> Fields, bool FillRest, SourceSpan Span) : Stmt(Span);
 public sealed record DestroyStmt(Expr Target, SourceSpan Span) : Stmt(Span);
 public sealed record AttachStmt(bool Remove, string Shape, Expr Target, IReadOnlyList<FieldInit>? Init, SourceSpan Span) : Stmt(Span);
 public sealed record ChanceStmt(double Probability, Block Body, SourceSpan Span) : Stmt(Span);
-/// `bring [Count] Builder(args)` — instantiate a builder (optionally Count times).
-public sealed record BringStmt(Expr? Count, string Builder, IReadOnlyList<Expr> Args, SourceSpan Span) : Stmt(Span);
+/// `bring [Count] Builder(args)` — instantiate a builder (optionally Count times). FillRest (`?`)
+/// fills any params not supplied with typed zero placeholders.
+public sealed record BringStmt(Expr? Count, string Builder, IReadOnlyList<Expr> Args, bool FillRest, SourceSpan Span) : Stmt(Span);
 
 // ---- expressions --------------------------------------------------------
 

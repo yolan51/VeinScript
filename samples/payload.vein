@@ -1,0 +1,26 @@
+// payload.vein — emit payload ergonomics.
+//  * event fields can have DEFAULTS (`amount: int = 1`) — optional at emit, override to change.
+//  * omitted fields AUTO-FILL from the current context (the event being heard, then locals) by name.
+//  * hear reads the payload with plain field access on the binding (no sigil): `s.amount`.
+// Run:  veinc render samples/payload.vein /      (body shows the auto-filled amount)
+
+bundle Demo {
+    event @Request   { path: string }
+    event @Hit       { amount: int = 1 }     // default 1 — omit it to accept the default
+    event @SyncedHit { amount: int }         // no default — auto-filled from context on emit
+    event @Response  { status: int, body: string }
+
+    shard Source {
+        hear @Request as req { emit @Hit }               // amount omitted -> default 1
+    }
+
+    bridge Sync {
+        hear @Hit as h { emit @SyncedHit }               // amount auto-filled from h (current context)
+    }
+
+    shard Report {
+        hear @SyncedHit as s {
+            emit @Response { status: 200, body: "amount " + s.amount + " from " + s.from.kind + "." + s.from.name }
+        }
+    }
+}

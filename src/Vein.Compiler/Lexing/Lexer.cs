@@ -274,6 +274,7 @@ public sealed class Lexer
             case ')': kind = TokenKind.RParen; break;
             case '[': kind = TokenKind.LBracket; break;
             case ']': kind = TokenKind.RBracket; break;
+            case '?': kind = TokenKind.Question; break;
             case '.': kind = TokenKind.Dot; break;
             case ',': kind = TokenKind.Comma; break;
             case '|': kind = TokenKind.Pipe; break;

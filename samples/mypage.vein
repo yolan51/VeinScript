@@ -17,13 +17,13 @@ bundle App {
         event @Response { status: int, body: string }
     }
 
-    // Pre-built elements. Kind = html (default) | script | style.
-    builder html Heading(text: string)   { "<h1>" + text + "</h1>" }
-    builder html CounterView()           { "<p>Count: <span id=\"n\">0</span></p>" }
-    builder html Button(label: string)   { "<button onclick=\"inc()\">" + label + "</button>" }
-    builder html Item(label: string)     { "<li>" + label + "</li>" }
-    builder script IncFn()               { "let c=0; function inc(){ c+=1; document.getElementById('n').innerText=c; }" }
-    builder style  BaseCss()             { "body{font-family:sans-serif;margin:2rem} button{cursor:pointer}" }
+    // Pre-built elements: params then an output field (markup/code/css) whose value is the template.
+    builder Heading    { text: string   markup = "<h1>" + text + "</h1>" }
+    builder CounterView { markup = "<p>Count: <span id=\"n\">0</span></p>" }
+    builder Button     { label: string  markup = "<button onclick=\"inc()\">" + label + "</button>" }
+    builder Item       { label: string  markup = "<li>" + label + "</li>" }
+    builder IncFn      { code = "let c=0; function inc(){ c+=1; document.getElementById('n').innerText=c; }" }
+    builder BaseCss    { css = "body{font-family:sans-serif;margin:2rem} button{cursor:pointer}" }
 
     // A shard brings in as many elements as the page needs.
     shard Ui {

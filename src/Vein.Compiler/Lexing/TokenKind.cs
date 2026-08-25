@@ -30,6 +30,7 @@ public enum TokenKind
     // punctuation
     LBrace, RBrace, LParen, RParen,
     LBracket, RBracket,     // list literals / indexing (D9a)
+    Question,               // `?` — fill-the-rest placeholder in emit/bring
     Scope,          // ::
     Arrow,          // ->
     Dot, Colon, Comma, Pipe,

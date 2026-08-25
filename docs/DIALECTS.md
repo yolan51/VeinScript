@@ -79,8 +79,10 @@ JS backend.
 | `shape $View { … }`                        | a renderable view identity                          |
 | `shard Router { target $Route as r { … } }`| dispatch by targeting route identities             |
 | `event @Request { … }` + `hear`            | requests are messages shards hear                  |
+| `builder Name { params… markup = … }` + `bring` | reusable html/script/css templates (markup→`@Html`, code→`@Script`, css→`@Style`); a `ShardView` hears the fragments and assembles the document |
 
-Open (deferred): markup/templating, client vs server split, async. Specified once the game domain +
+Markup/templating is handled by `builder`/`bring` (see [LANGUAGE.md §3.9](LANGUAGE.md); samples
+`handles`/`mypage`/`shaped`). Open (deferred): client vs server split, async. Specified once the game domain +
 C# backend work end-to-end.
 
 ---

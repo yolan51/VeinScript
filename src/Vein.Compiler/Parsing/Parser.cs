@@ -190,10 +190,42 @@ public sealed class Parser
     {
         var s = Here; Advance();
         string name = Expect(TokenKind.EventRef, "@EventName").Text;
+        return new EventDecl(name, ParseSigBody(), s);
+    }
+
+    /// The shared `{ members }` body of an event/builder: fields, vars, and `$Shape` includes,
+    /// separated by whitespace / newline / optional comma. `=` marks a member optional.
+    private List<Node> ParseSigBody()
+    {
         Expect(TokenKind.LBrace, "'{'");
-        var fields = ParseFieldList();
+        var members = new List<Node>();
+        SkipTerms();
+        while (!Check(TokenKind.RBrace) && !AtEnd)
+        {
+            members.Add(ParseSigMember());
+            Match(TokenKind.Comma);
+            SkipTerms();
+        }
         Expect(TokenKind.RBrace, "'}'");
-        return new EventDecl(name, fields, s);
+        return members;
+    }
+
+    private Node ParseSigMember()
+    {
+        var s = Here;
+        if (Check(TokenKind.ShapeRef))                                   // $Shape or $Shape.field
+        {
+            string shape = Advance().Text;
+            string? field = Match(TokenKind.Dot) ? ExpectName("field name").Text : null;
+            Expr? sd = Match(TokenKind.Assign) ? ParseExpr() : null;
+            return new ShapeInclude(shape, field, sd, s);
+        }
+        bool isVar = Match(TokenKind.KwVar);                             // optional `var`
+        string name = ExpectName("member name").Text;
+        TypeRef? type = Match(TokenKind.Colon) ? ParseTypeRef() : null;  // type optional (inferred)
+        string? fold = Match(TokenKind.KwFolds) ? Expect(TokenKind.Ident, "fold reducer").Text : null;
+        Expr? def = Match(TokenKind.Assign) ? ParseExpr() : null;        // `=` ⇒ defaulted
+        return new FieldDecl(name, type, fold, def, s) { IsVar = isVar };
     }
 
     private EnumDecl ParseEnum()
@@ -228,7 +260,8 @@ public sealed class Parser
         Expect(TokenKind.Colon, "':'");
         var type = ParseTypeRef();
         string? fold = Match(TokenKind.KwFolds) ? Expect(TokenKind.Ident, "fold reducer").Text : null;
-        return new FieldDecl(name, type, fold, s);
+        Expr? def = Match(TokenKind.Assign) ? ParseExpr() : null;   // `name: Type = default`
+        return new FieldDecl(name, type, fold, def, s);
     }
 
     private TypeRef ParseTypeRef()
@@ -322,25 +355,10 @@ public sealed class Parser
     private BuilderDecl ParseBuilder()
     {
         var s = Here; Advance();
-        // `builder <kind> Name(...)` or `builder Name(...)` (kind defaults to html).
-        string first = Expect(TokenKind.Ident, "builder kind or name").Text;
-        string kind, name;
-        if (Check(TokenKind.Ident)) { kind = first; name = Advance().Text; }
-        else { kind = "html"; name = first; }
-        Expect(TokenKind.LParen, "'('");
-        var ps = new List<Param>();
-        if (!Check(TokenKind.RParen))
-        {
-            ps.Add(ParseParam());
-            while (Match(TokenKind.Comma)) ps.Add(ParseParam());
-        }
-        Expect(TokenKind.RParen, "')'");
-        Expect(TokenKind.LBrace, "'{'");
-        SkipTerms();
-        var body = ParseExpr();
-        SkipTerms();
-        Expect(TokenKind.RBrace, "'}'");
-        return new BuilderDecl(kind, name, ps, body, s);
+        // `builder Name { members }` — same body as an event; the output field (markup/code/css)
+        // carries the template and determines the kind.
+        string name = Expect(TokenKind.Ident, "builder name").Text;
+        return new BuilderDecl(name, ParseSigBody(), s);
     }
 
     private ViewDecl ParseView()
@@ -567,8 +585,32 @@ public sealed class Parser
     {
         var s = Here; Advance();
         string ev = Expect(TokenKind.EventRef, "@EventName").Text;
-        var fields = ParseStructBody();
-        return new EmitStmt(ev, fields, s);
+        var fields = new List<FieldInit>();
+        bool fill = false;
+
+        if (Match(TokenKind.Question))                    // emit @E ?
+            fill = true;
+        else if (Check(TokenKind.LBrace))                 // emit @E { a: 1, ? }
+        {
+            Advance();
+            SkipTerms();
+            while (!Check(TokenKind.RBrace) && !AtEnd)
+            {
+                if (Match(TokenKind.Question)) fill = true;
+                else
+                {
+                    var fs = Here;
+                    string name = ExpectName("field name").Text;
+                    Expect(TokenKind.Colon, "':'");
+                    fields.Add(new FieldInit(name, ParseExpr(), fs));
+                }
+                Match(TokenKind.Comma);
+                SkipTerms();
+            }
+            Expect(TokenKind.RBrace, "'}'");
+        }
+        // else: `emit @E` — omitted fields still fill from defaults/context at runtime.
+        return new EmitStmt(ev, fields, fill, s);
     }
 
     private AttachStmt ParseAttach(bool remove)
@@ -600,8 +642,24 @@ public sealed class Parser
             (Check(TokenKind.Ident) && Peek(1).Kind != TokenKind.LParen))
             count = ParsePrimary();
         string name = Expect(TokenKind.Ident, "builder name").Text;
-        var args = ParseArgs();
-        return new BringStmt(count, name, args, s);
+
+        var args = new List<Expr>();
+        bool fill = false;
+        if (Match(TokenKind.Question))                    // bring X ?
+            fill = true;
+        else if (Check(TokenKind.LParen))                 // bring X(a, ?)
+        {
+            Advance();
+            if (!Check(TokenKind.RParen))
+                while (true)
+                {
+                    if (Match(TokenKind.Question)) { fill = true; break; }
+                    args.Add(ParseExpr());
+                    if (!Match(TokenKind.Comma)) break;
+                }
+            Expect(TokenKind.RParen, "')'");
+        }
+        return new BringStmt(count, name, args, fill, s);
     }
 
     private Stmt ParseAssignOrExpr()

@@ -27,6 +27,7 @@ public sealed class Interp
     private readonly VeinIdentityRegistry _registry = new();   // the Vein First-Class graph (nodes)
     private readonly List<GraphEdge> _edges = new();           //   … and its emit edges
     private string _bundle = "";
+    private Dictionary<string, IrType> _types = new(StringComparer.Ordinal);
     private int _eventSeq;
     private Dictionary<string, object?>? _current;   // the event currently being handled (for cause/trail)
     private string? _responseBody;
@@ -40,6 +41,7 @@ public sealed class Interp
     public RenderResult Render(IrModule module, string requestPath)
     {
         _bundle = module.Name;
+        _types = module.Types.ToDictionary(t => t.Name, StringComparer.Ordinal);
         // Register every First-Class object (one unified mechanism) and wire its hear handlers.
         foreach (var shard in module.Shards)
         {
@@ -244,6 +246,17 @@ public sealed class Interp
                 {
                     var payload = new Dictionary<string, object?>(StringComparer.Ordinal);
                     foreach (var (field, val) in si.Fields) payload[field] = Eval(val, self, locals);
+                    // Fill omitted payload fields: a field's default, else the current context (the
+                    // event being handled, then locals) by matching name. Explicit fields win.
+                    if (_types.TryGetValue(si.TypeName, out var et))
+                        foreach (var fld in et.Fields)
+                        {
+                            if (fld.Name is "origin" or "source" || payload.ContainsKey(fld.Name)) continue;
+                            if (fld.Default is not null) payload[fld.Name] = Eval(fld.Default, self, locals);
+                            else if (_current is not null && _current.TryGetValue(fld.Name, out var cv)) payload[fld.Name] = cv;
+                            else if (locals.TryGetValue(fld.Name, out var lv)) payload[fld.Name] = lv;
+                            else if (si.FillRest) payload[fld.Name] = ZeroVal(fld.Type.Name);   // `?` placeholder
+                        }
                     // Auto provenance. Two layers kept separate:
                     //   from   = the First-Class object that emitted (runtime identity)
                     //   origin = the ECS entity, when emitted in an entity context (none here yet)
@@ -294,4 +307,10 @@ public sealed class Interp
     private static double AsDouble(object? o) => o switch { double d => d, long l => l, int i => i, bool b => b ? 1 : 0, _ => 0 };
     private static string Str(object? o) => o switch { null => "", string s => s, double d => d.ToString(CultureInfo.InvariantCulture), bool b => b ? "true" : "false", _ => o.ToString() ?? "" };
     private static object? Default(string typeName) => typeName switch { "string" => "", "int" => 0L, "float" => 0.0, "bool" => false, _ => null };
+
+    // Typed zero used to satisfy required fields under `?` (fill-the-rest).
+    private static object? ZeroVal(string typeName) => typeName switch
+    {
+        "int" => 0L, "float" => 0.0, "bool" => false, "percent" => 0.0, "string" => "", _ => ""
+    };
 }

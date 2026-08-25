@@ -1,0 +1,79 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ae="using:AvaloniaEdit"
+        x:Class="Vein.Workbench.MainWindow"
+        Width="1320" Height="860"
+        Title="VeinScript Workbench">
+  <DockPanel>
+    <Menu DockPanel.Dock="Top">
+      <MenuItem Header="_File">
+        <MenuItem Header="_New" Click="OnNew" InputGesture="Ctrl+N" />
+        <MenuItem Header="_Open File…" Click="OnOpen" InputGesture="Ctrl+O" />
+        <MenuItem Header="Open _Folder…" Click="OnOpenFolder" InputGesture="Ctrl+K" />
+        <Separator />
+        <MenuItem Header="_Save" Click="OnSave" InputGesture="Ctrl+S" />
+        <MenuItem Header="Save _As…" Click="OnSaveAs" InputGesture="Ctrl+Shift+S" />
+        <Separator />
+        <MenuItem Header="E_xit" Click="OnExit" />
+      </MenuItem>
+      <MenuItem Header="_Edit">
+        <MenuItem Header="_Undo" Click="OnUndo" InputGesture="Ctrl+Z" />
+        <MenuItem Header="_Redo" Click="OnRedo" InputGesture="Ctrl+Y" />
+        <Separator />
+        <MenuItem Header="Cu_t" Click="OnCut" InputGesture="Ctrl+X" />
+        <MenuItem Header="_Copy" Click="OnCopy" InputGesture="Ctrl+C" />
+        <MenuItem Header="_Paste" Click="OnPaste" InputGesture="Ctrl+V" />
+        <Separator />
+        <MenuItem Header="Select _All" Click="OnSelectAll" InputGesture="Ctrl+A" />
+      </MenuItem>
+      <MenuItem Header="_Build">
+        <MenuItem Header="_Build" Click="OnBuild" InputGesture="Ctrl+B" />
+        <MenuItem Header="Build + _Inspect IR" Click="OnBuildInspect" InputGesture="Ctrl+Shift+B" />
+      </MenuItem>
+      <MenuItem Header="_Run">
+        <MenuItem Header="_Run" Click="OnRun" InputGesture="F5" />
+      </MenuItem>
+      <MenuItem Header="_View">
+        <MenuItem Header="Toggle _Project Explorer" Click="OnToggleExplorer" />
+        <MenuItem Header="Toggle _Bottom Panel" Click="OnToggleBottom" />
+      </MenuItem>
+    </Menu>
+
+    <Border DockPanel.Dock="Bottom" Background="#252526" Padding="10,3">
+      <TextBlock Name="StatusBar" Text="Ready" />
+    </Border>
+
+    <Grid RowDefinitions="*,4,240">
+      <Grid Grid.Row="0" Name="TopCols" ColumnDefinitions="230,4,*,4,390">
+        <DockPanel Grid.Column="0" Name="ExplorerPanel">
+          <TextBlock DockPanel.Dock="Top" Text="Project Explorer" Margin="8,6" FontWeight="Bold" />
+          <TreeView Name="ProjectTree" DoubleTapped="OnProjectItemActivated" />
+        </DockPanel>
+        <GridSplitter Grid.Column="1" Width="4" Background="#333" />
+
+        <ae:TextEditor Grid.Column="2" Name="Editor"
+                       ShowLineNumbers="True"
+                       FontFamily="Cascadia Code,Consolas,Menlo,monospace" FontSize="14" />
+
+        <GridSplitter Grid.Column="3" Width="4" Background="#333" />
+        <DockPanel Grid.Column="4">
+          <TextBlock DockPanel.Dock="Top" Text="Inspector — IR Tree" Margin="8,6" FontWeight="Bold" />
+          <TreeView Name="IrTree" />
+        </DockPanel>
+      </Grid>
+
+      <GridSplitter Grid.Row="1" Height="4" Background="#333" />
+
+      <TabControl Grid.Row="2" Name="BottomPanel">
+        <TabItem Header="Diagnostics">
+          <ListBox Name="Diagnostics" DoubleTapped="OnDiagnosticActivated"
+                   FontFamily="Cascadia Code,Consolas,monospace" FontSize="13" />
+        </TabItem>
+        <TabItem Header="Raw IR">
+          <ae:TextEditor Name="RawIr" IsReadOnly="True" ShowLineNumbers="False"
+                         FontFamily="Cascadia Code,Consolas,monospace" FontSize="13" />
+        </TabItem>
+      </TabControl>
+    </Grid>
+  </DockPanel>
+</Window>

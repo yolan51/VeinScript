@@ -23,18 +23,25 @@ bundle App {
         shape $Button { id: Id, class: Class, onclick: Fn, label: string }
     }
 
-    // Builders read the name/body OFF the handle — one source of truth per name.
-    builder html Display(slot: Id, initial: string) {
-        "<span id=\"" + slot.name + "\">" + initial + "</span>"
+    // Builders: `builder Name { params… ; markup/code/css = template }`. The output field's name
+    // decides the kind (markup→html, code→script, css→style); required params have no `=`.
+    builder Display {
+        slot: Id
+        initial: string
+        markup = "<span id=\"" + slot.name + "\">" + initial + "</span>"
     }
-    builder html Button(b: Button) {
-        "<button id=\"" + b.id.name + "\" class=\"" + b.class.name + "\" onclick=\"" + b.onclick.name + "()\">" + b.label + "</button>"
+    builder Button {
+        b: Button
+        markup = "<button id=\"" + b.id.name + "\" class=\"" + b.class.name + "\" onclick=\"" + b.onclick.name + "()\">" + b.label + "</button>"
     }
-    builder script Define(f: Fn) {
-        "function " + f.name + "(){ " + f.body + " }"
+    builder Define {
+        f: Fn
+        code = "function " + f.name + "(){ " + f.body + " }"
     }
-    builder style Rule(c: Class, decl: string) {
-        "." + c.name + "{" + decl + "}"
+    builder Rule {
+        c: Class
+        decl: string
+        css = "." + c.name + "{" + decl + "}"
     }
 
     shard Ui {

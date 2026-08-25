@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- VeinScript highlighting for AvaloniaEdit. Keywords mirror Vein.Compiler/Lexing/Lexer.cs
+     (the Keywords map + the M2 additions + ShardView). Keep this list in sync with the lexer. -->
+<SyntaxDefinition name="VeinScript" xmlns="http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008">
+  <Color name="Comment" foreground="#6A9955" />
+  <Color name="String"  foreground="#CE9178" />
+  <Color name="Number"  foreground="#B5CEA8" />
+  <Color name="Keyword" foreground="#569CD6" fontWeight="bold" />
+  <Color name="Sigil"   foreground="#4EC9B0" />
+  <Color name="Scope"   foreground="#4EC9B0" />
+
+  <RuleSet ignoreCase="false">
+    <Span color="Comment" begin="//" />
+    <Span color="Comment" multiline="true" begin="/\*" end="\*/" />
+
+    <Span color="String">
+      <Begin>"</Begin>
+      <End>"</End>
+      <RuleSet>
+        <Span begin="\\" end="." />
+      </RuleSet>
+    </Span>
+
+    <!-- $Shape / @Event / #Mark references and ::Path scope -->
+    <Rule color="Sigil">[$@#][A-Za-z_][A-Za-z0-9_]*</Rule>
+    <Rule color="Scope">::[A-Za-z_][A-Za-z0-9_]*</Rule>
+    <!-- `?` fill-the-rest placeholder in emit/bring -->
+    <Rule color="Sigil">\?</Rule>
+
+    <Keywords color="Keyword">
+      <Word>bundle</Word>   <Word>use</Word>       <Word>publicator</Word> <Word>shared</Word>
+      <Word>shape</Word>    <Word>event</Word>     <Word>shard</Word>      <Word>ShardView</Word>
+      <Word>bridge</Word>   <Word>target</Word>    <Word>each</Word>       <Word>tick</Word>
+      <Word>settled</Word>  <Word>start</Word>     <Word>hear</Word>       <Word>emit</Word>
+      <Word>mark</Word>     <Word>unmark</Word>    <Word>attach</Word>     <Word>unattach</Word>
+      <Word>to</Word>       <Word>from</Word>      <Word>destroy</Word>    <Word>chance</Word>
+      <Word>folds</Word>    <Word>sync</Word>      <Word>audience</Word>   <Word>as</Word>
+      <Word>SF</Word>       <Word>builder</Word>   <Word>bring</Word>      <Word>count</Word>
+      <Word>let</Word>      <Word>var</Word>       <Word>return</Word>     <Word>when</Word>
+      <Word>else</Word>     <Word>if</Word>        <Word>while</Word>      <Word>repeat</Word>
+      <Word>match</Word>    <Word>break</Word>     <Word>continue</Word>   <Word>type</Word>
+      <Word>enum</Word>     <Word>fn</Word>        <Word>and</Word>        <Word>or</Word>
+      <Word>not</Word>      <Word>true</Word>      <Word>false</Word>      <Word>map</Word>
+      <Word>random</Word>   <Word>in</Word>
+    </Keywords>
+
+    <Rule color="Number">\b\d+(\.\d+)?%?\b</Rule>
+  </RuleSet>
+</SyntaxDefinition>

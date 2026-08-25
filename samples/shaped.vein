@@ -17,12 +17,14 @@ bundle App {
         shape $Button  { id: string, class: string, label: string, onclick: string }
     }
 
-    // Builders take the shape value and render it (the template lives here, once).
-    builder html Heading(h: Heading) {
-        "<h1>" + h.text + "</h1>"
+    // Builders take the shape value and render it (the template — an output field — lives here, once).
+    builder Heading {
+        h: Heading
+        markup = "<h1>" + h.text + "</h1>"
     }
-    builder html Button(b: Button) {
-        "<button id=\"" + b.id + "\" class=\"" + b.class + "\" onclick=\"" + b.onclick + "()\">" + b.label + "</button>"
+    builder Button {
+        b: Button
+        markup = "<button id=\"" + b.id + "\" class=\"" + b.class + "\" onclick=\"" + b.onclick + "()\">" + b.label + "</button>"
     }
 
     // Provide the builders with values (shape literals).

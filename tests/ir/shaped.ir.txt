@@ -17,13 +17,15 @@ Bundle App
 |         |--- Field class: string
 |         |--- Field label: string
 |         `--- Field onclick: string
-|--- Builder Heading  kind=html params=(h: Heading)
-|    `--- Body = Concat
+|--- Builder Heading  kind=html
+|    |--- Field h: Heading
+|    `--- Field markup = Concat
 |         |--- Str "<h1>"
 |         |--- Path h.text
 |         `--- Str "</h1>"
-|--- Builder Button  kind=html params=(b: Button)
-|    `--- Body = Concat
+|--- Builder Button  kind=html
+|    |--- Field b: Button
+|    `--- Field markup = Concat
 |         |--- Str "<button id=\""
 |         |--- Path b.id
 |         |--- Str "\" class=\""

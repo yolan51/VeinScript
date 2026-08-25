@@ -76,8 +76,8 @@ Held so they aren't accidentally repurposed. Assign a meaning or cut before v1.0
 | `on` | event/UI handler sugar (`on click { … }`) — desktop domain |
 | `audience` | networking/replication scope (who sees an identity/event) |
 | `bridge` | interop / FFI boundary |
-| `bring` | scoped/local import |
-| `builder` | constructor / factory block |
+| `bring` | instantiate a `builder` (`bring [N] Name(args)`), binding args positionally + emitting its output event |
+| `builder` | a reusable element template: signature body (params + one `markup`/`code`/`css` output field) |
 | `mute` `unmute` | disable / re-enable a shard or handler |
 | `transform` | AST macro / source transform, or Transform component sugar |
 

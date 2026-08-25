@@ -1,11 +1,13 @@
+using System.Text.Json;
 using Vein.Compiler.Diagnostics;
 using Vein.Compiler.Ir;
 using Vein.Compiler.Lexing;
 using Vein.Compiler.Parsing;
+using Vein.Compiler.Tooling;
 
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("usage: veinc <tokens|ast|ir|render|graph> <file.vein> [path]");
+    Console.Error.WriteLine("usage: veinc <tokens|ast|ir|render|graph|events|scaffold> <file.vein> [arg]");
     return 2;
 }
 
@@ -105,6 +107,41 @@ switch (command)
                 foreach (var e in result.Edges)
                     Console.WriteLine($"    {e.FromKind}.{e.FromName}  --@{e.Event}-->");
             }
+        }
+        break;
+    }
+
+    case "events":
+    {
+        var tokens = new Lexer(source, Path.GetFileName(path), diagnostics).Tokenize();
+        var unit = new Parser(tokens, diagnostics).ParseUnit();
+        if (!diagnostics.HasErrors)
+        {
+            var events = EventCatalog.Catalog(unit);
+            if (args.Contains("--json"))
+                Console.WriteLine(JsonSerializer.Serialize(events, new JsonSerializerOptions { WriteIndented = true }));
+            else
+                Console.Write(EventCatalog.Render(events));
+        }
+        break;
+    }
+
+    case "scaffold":
+    {
+        if (args.Length < 3) { Console.Error.WriteLine("usage: veinc scaffold <file.vein> <EventName>"); return 2; }
+        string want = args[2].TrimStart('@');
+        var tokens = new Lexer(source, Path.GetFileName(path), diagnostics).Tokenize();
+        var unit = new Parser(tokens, diagnostics).ParseUnit();
+        if (!diagnostics.HasErrors)
+        {
+            var events = EventCatalog.Catalog(unit);
+            var match = events.FirstOrDefault(e => string.Equals(e.Name, want, StringComparison.Ordinal));
+            if (match is null)
+            {
+                Console.Error.WriteLine($"no event '{want}'. available: {string.Join(", ", events.Select(e => "@" + e.Name))}");
+                return 2;
+            }
+            Console.Write(EventCatalog.Scaffold(match));
         }
         break;
     }

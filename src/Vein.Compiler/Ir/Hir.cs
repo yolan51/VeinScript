@@ -20,7 +20,7 @@ public sealed record IrTypeRef(string Name, IReadOnlyList<IrTypeRef> Args, bool 
 public enum IrTypeKind { Struct, Enum, Component, Message, Tag }
 public enum FoldReducer { Sum, Min, Max, Replace, First, All, Any }
 
-public sealed record IrField(string Name, IrTypeRef Type, FoldReducer? Fold);
+public sealed record IrField(string Name, IrTypeRef Type, FoldReducer? Fold, IrExpr? Default = null);
 public sealed record IrEnumCase(string Name, int Ordinal);
 
 public sealed record IrType(
@@ -98,5 +98,5 @@ public sealed record IrBinary(IrBinOp Op, IrExpr Left, IrExpr Right) : IrExpr;
 public enum IrUnOp { Neg, Not }
 public sealed record IrUnary(IrUnOp Op, IrExpr Operand) : IrExpr;
 
-public sealed record IrStructInit(string TypeName, IReadOnlyList<(string Field, IrExpr Value)> Fields) : IrExpr;
+public sealed record IrStructInit(string TypeName, IReadOnlyList<(string Field, IrExpr Value)> Fields, bool FillRest = false) : IrExpr;
 public sealed record IrList(IReadOnlyList<IrExpr> Items) : IrExpr;

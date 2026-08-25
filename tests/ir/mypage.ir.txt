@@ -14,27 +14,30 @@ Bundle App
 |    `--- Event @Response
 |         |--- Field status: int
 |         `--- Field body: string
-|--- Builder Heading  kind=html params=(text: string)
-|    `--- Body = Concat
+|--- Builder Heading  kind=html
+|    |--- Field text: string
+|    `--- Field markup = Concat
 |         |--- Str "<h1>"
 |         |--- Ref text
 |         `--- Str "</h1>"
-|--- Builder CounterView  kind=html params=()
-|    `--- Body = Str "<p>Count: <span id=\"n\">0</span></p>"
-|--- Builder Button  kind=html params=(label: string)
-|    `--- Body = Concat
+|--- Builder CounterView  kind=html
+|    `--- Field markup = Str "<p>Count: <span id=\"n\">0</span></p>"
+|--- Builder Button  kind=html
+|    |--- Field label: string
+|    `--- Field markup = Concat
 |         |--- Str "<button onclick=\"inc()\">"
 |         |--- Ref label
 |         `--- Str "</button>"
-|--- Builder Item  kind=html params=(label: string)
-|    `--- Body = Concat
+|--- Builder Item  kind=html
+|    |--- Field label: string
+|    `--- Field markup = Concat
 |         |--- Str "<li>"
 |         |--- Ref label
 |         `--- Str "</li>"
-|--- Builder IncFn  kind=script params=()
-|    `--- Body = Str "let c=0; function inc(){ c+=1; document.getElementById('n')...."
-|--- Builder BaseCss  kind=style params=()
-|    `--- Body = Str "body{font-family:sans-serif;margin:2rem} button{cursor:point..."
+|--- Builder IncFn  kind=script
+|    `--- Field code = Str "let c=0; function inc(){ c+=1; document.getElementById('n')...."
+|--- Builder BaseCss  kind=style
+|    `--- Field css = Str "body{font-family:sans-serif;margin:2rem} button{cursor:point..."
 |--- Shard Ui
 |    `--- Hear @Request as req
 |         |--- Bring BaseCss

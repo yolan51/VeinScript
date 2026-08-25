@@ -15,8 +15,11 @@ public sealed class Lower
     private readonly DiagnosticBag _diag;
     private readonly SortedSet<string> _tags = new(StringComparer.Ordinal);
     private readonly Dictionary<string, BuilderDecl> _builders = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<FieldDecl>> _shapeFields = new(StringComparer.Ordinal);
 
     public Lower(DiagnosticBag diagnostics) => _diag = diagnostics;
+
+    private static readonly string[] OutputFields = { "markup", "code", "css" };
 
     public IrModule LowerBundle(BundleDecl bundle)
     {
@@ -24,14 +27,19 @@ public sealed class Lower
         var funcs = new List<IrFunction>();
         var shards = new List<IrShard>();
 
-        // First pass: collect builder templates (used to desugar `bring`), including inside publicators.
-        void CollectBuilders(IEnumerable<Decl> ms)
+        // First pass: collect builders (for `bring`) and shape fields (for `$Shape` include expansion),
+        // including inside publicators.
+        void Collect(IEnumerable<Decl> ms)
         {
             foreach (var m in ms)
-                if (m is BuilderDecl bd) _builders[bd.Name] = bd;
-                else if (m is PublicatorDecl pub) CollectBuilders(pub.Members);
+                switch (m)
+                {
+                    case BuilderDecl bd: _builders[bd.Name] = bd; break;
+                    case ShapeDecl s: _shapeFields[s.Name] = s.Members.OfType<FieldDecl>().ToList(); break;
+                    case PublicatorDecl pub: Collect(pub.Members); break;
+                }
         }
-        CollectBuilders(bundle.Members);
+        Collect(bundle.Members);
 
         // `publicator` is flattened here (its members are already Exported) — HIR is identical whether
         // or not the AST retained the grouping.
@@ -74,7 +82,7 @@ public sealed class Lower
         foreach (var member in s.Members)
         {
             if (member is FieldDecl f)
-                fields.Add(new IrField(f.Name, LowerTypeRef(f.Type), ParseFold(f.Fold, f.Span)));
+                fields.Add(new IrField(f.Name, Ty(f.Type), ParseFold(f.Fold, f.Span), LowerDefault(f.Default)));
             else if (member is EnumDecl en)
                 extraEnums.Add(LowerEnum(en, scope: s.Name));
         }
@@ -85,12 +93,42 @@ public sealed class Lower
 
     private IrType LowerType(TypeDecl t) => new(
         t.Name, IrTypeKind.Struct,
-        t.Fields.Select(f => new IrField(f.Name, LowerTypeRef(f.Type), ParseFold(f.Fold, f.Span))).ToList(),
+        t.Fields.Select(f => new IrField(f.Name, Ty(f.Type), ParseFold(f.Fold, f.Span), LowerDefault(f.Default))).ToList(),
         Array.Empty<IrEnumCase>(), t.Doc, Array.Empty<IrAttr>());
+
+    private IrExpr? LowerDefault(Expr? e) => e is null ? null : LowerExpr(e);
+    private IrTypeRef Ty(TypeRef? t) => t is null ? IrTypeRef.Of("infer") : LowerTypeRef(t);
+
+    /// Expand an event/builder body to ordered (name, type, default) fields — `$Shape` includes pull
+    /// in the shape's fields; `$Shape.field` pulls one.
+    private List<(string Name, TypeRef? Type, Expr? Default)> ExpandMembers(IEnumerable<Node> members)
+    {
+        var list = new List<(string, TypeRef?, Expr?)>();
+        foreach (var m in members)
+        {
+            if (m is FieldDecl f) list.Add((f.Name, f.Type, f.Default));
+            else if (m is ShapeInclude si)
+            {
+                if (_shapeFields.TryGetValue(si.Shape, out var fs))
+                {
+                    if (si.Field is not null)
+                    {
+                        var one = fs.FirstOrDefault(x => x.Name == si.Field);
+                        if (one is not null) list.Add((one.Name, one.Type, si.Default ?? one.Default));
+                        else _diag.Warning("VS0211", $"Shape '${si.Shape}' has no field '{si.Field}'.", si.Span);
+                    }
+                    else foreach (var sf in fs) list.Add((sf.Name, sf.Type, sf.Default));
+                }
+                else _diag.Warning("VS0210", $"Unknown shape '${si.Shape}' in include.", si.Span);
+            }
+        }
+        return list;
+    }
 
     private IrType LowerEvent(EventDecl e)
     {
-        var fields = e.Fields.Select(f => new IrField(f.Name, LowerTypeRef(f.Type), null)).ToList();
+        var fields = ExpandMembers(e.Members)
+            .Select(m => new IrField(m.Name, Ty(m.Type), null, LowerDefault(m.Default))).ToList();
         // Every event is auto-tagged with its emitter's identity on emit (origin/source).
         fields.Add(new IrField("origin", IrTypeRef.Of("Entity"), null));
         fields.Add(new IrField("source", IrTypeRef.Of("Entity"), null));
@@ -289,7 +327,7 @@ public sealed class Lower
             }
             case EmitStmt em:
                 return new IrExprStmt(new IrRuntimeCall("Emit",
-                    new IrExpr[] { new IrStructInit(em.Event, em.Fields.Select(LowerFieldInit).ToList()) }));
+                    new IrExpr[] { new IrStructInit(em.Event, em.Fields.Select(LowerFieldInit).ToList(), em.FillRest) }));
             case DestroyStmt d:
                 return new IrExprStmt(new IrRuntimeCall("DestroyEntity", new[] { LowerExpr(d.Target) }));
             case AttachStmt at:
@@ -317,8 +355,9 @@ public sealed class Lower
         }
     }
 
-    /// `bring [N] Builder(args)` desugars to: bind params, then emit the fragment event — repeated N
-    /// times. No new IR node: it becomes a repeat loop (or a plain block) of let + emit.
+    /// `bring [N] Builder(args)` desugars to: bind params, then emit the builder's output fragment
+    /// event — repeated N times. Params are the builder's members minus its output field (markup/
+    /// code/css); that output field's `=` value is the template. No new IR node.
     private IrStmt LowerBring(BringStmt br)
     {
         if (!_builders.TryGetValue(br.Builder, out var b))
@@ -326,27 +365,53 @@ public sealed class Lower
             _diag.Error("VS0203", $"Unknown builder '{br.Builder}'.", br.Span);
             return new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
         }
-        if (br.Args.Count != b.Params.Count)
-            _diag.Error("VS0204", $"Builder '{b.Name}' expects {b.Params.Count} args, got {br.Args.Count}.", br.Span);
 
-        (string ev, string field) = b.Kind switch
+        var output = b.Members.OfType<FieldDecl>().FirstOrDefault(f => OutputFields.Contains(f.Name));
+        if (output?.Default is null)
         {
-            "script" => ("Script", "code"),
-            "style" => ("Style", "css"),
+            _diag.Error("VS0205", $"Builder '{b.Name}' needs an output field (markup/code/css) with a value.", br.Span);
+            return new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
+        }
+        (string ev, string field) = output.Name switch
+        {
+            "code" => ("Script", "code"),
+            "css" => ("Style", "css"),
             _ => ("Html", "markup")
         };
 
+        // Parameters = every member except the output field, with $Shape includes expanded.
+        var prms = ExpandMembers(b.Members.Where(m => !ReferenceEquals(m, output)));
+        if (!br.FillRest && br.Args.Count > prms.Count)
+            _diag.Error("VS0204", $"Builder '{b.Name}' takes {prms.Count} param(s), got {br.Args.Count}.", br.Span);
+
         var stmts = new List<IrStmt>();
-        for (int i = 0; i < b.Params.Count && i < br.Args.Count; i++)
-            stmts.Add(new IrLet(b.Params[i].Name, null, LowerExpr(br.Args[i]), false));
+        for (int i = 0; i < prms.Count; i++)
+        {
+            var (name, type, def) = prms[i];
+            IrExpr value = i < br.Args.Count ? LowerExpr(br.Args[i])
+                         : def is not null ? LowerExpr(def)
+                         : br.FillRest ? ZeroLiteral(type?.Name ?? "string")
+                         : new IrLiteral(null, IrLiteralKind.Int);
+            stmts.Add(new IrLet(name, null, value, false));
+        }
         stmts.Add(new IrExprStmt(new IrRuntimeCall("Emit",
-            new IrExpr[] { new IrStructInit(ev, new[] { (field, LowerExpr(b.Body)) }) })));
+            new IrExpr[] { new IrStructInit(ev, new[] { (field, LowerExpr(output.Default)) }) })));
         var body = new IrBlock(stmts);
 
         return br.Count is null
             ? body
             : new IrLoop(IrLoopKind.Repeat, null, null, null, null, LowerExpr(br.Count), body);
     }
+
+    /// A typed zero placeholder used to satisfy required fields/params under `?` (for testing).
+    private static IrExpr ZeroLiteral(string typeName) => typeName switch
+    {
+        "int" => new IrLiteral(0L, IrLiteralKind.Int),
+        "float" => new IrLiteral(0.0, IrLiteralKind.Float),
+        "bool" => new IrLiteral(false, IrLiteralKind.Bool),
+        "percent" => new IrLiteral(0.0, IrLiteralKind.Percent),
+        _ => new IrLiteral("", IrLiteralKind.String)   // string, Entity, shapes, … → placeholder
+    };
 
     private IrStmt LowerAssign(AssignStmt a)
     {

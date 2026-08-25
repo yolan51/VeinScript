@@ -26,15 +26,18 @@ Bundle App
 |         |--- Field class: Class
 |         |--- Field onclick: Fn
 |         `--- Field label: string
-|--- Builder Display  kind=html params=(slot: Id, initial: string)
-|    `--- Body = Concat
+|--- Builder Display  kind=html
+|    |--- Field slot: Id
+|    |--- Field initial: string
+|    `--- Field markup = Concat
 |         |--- Str "<span id=\""
 |         |--- Path slot.name
 |         |--- Str "\">"
 |         |--- Ref initial
 |         `--- Str "</span>"
-|--- Builder Button  kind=html params=(b: Button)
-|    `--- Body = Concat
+|--- Builder Button  kind=html
+|    |--- Field b: Button
+|    `--- Field markup = Concat
 |         |--- Str "<button id=\""
 |         |--- Path b.id.name
 |         |--- Str "\" class=\""
@@ -44,15 +47,18 @@ Bundle App
 |         |--- Str "()\">"
 |         |--- Path b.label
 |         `--- Str "</button>"
-|--- Builder Define  kind=script params=(f: Fn)
-|    `--- Body = Concat
+|--- Builder Define  kind=script
+|    |--- Field f: Fn
+|    `--- Field code = Concat
 |         |--- Str "function "
 |         |--- Path f.name
 |         |--- Str "(){ "
 |         |--- Path f.body
 |         `--- Str " }"
-|--- Builder Rule  kind=style params=(c: Class, decl: string)
-|    `--- Body = Concat
+|--- Builder Rule  kind=style
+|    |--- Field c: Class
+|    |--- Field decl: string
+|    `--- Field css = Concat
 |         |--- Str "."
 |         |--- Path c.name
 |         |--- Str "{"

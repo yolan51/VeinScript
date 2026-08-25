@@ -1,0 +1,28 @@
+VeinIR v1  file=samples/payload.vein
+Bundle Demo
+|--- Event @Request
+|    `--- Field path: string
+|--- Event @Hit
+|    `--- Field amount: int = Int 1
+|--- Event @SyncedHit
+|    `--- Field amount: int
+|--- Event @Response
+|    |--- Field status: int
+|    `--- Field body: string
+|--- Shard Source
+|    `--- Hear @Request as req
+|         `--- Emit @Hit
+|--- Bridge Sync
+|    `--- Hear @Hit as h
+|         `--- Emit @SyncedHit
+`--- Shard Report
+     `--- Hear @SyncedHit as s
+          `--- Emit @Response
+               |--- Arg status = Int 200
+               `--- Arg body = Concat
+                    |--- Str "amount "
+                    |--- Path s.amount
+                    |--- Str " from "
+                    |--- Path s.from.kind
+                    |--- Str "."
+                    `--- Path s.from.name

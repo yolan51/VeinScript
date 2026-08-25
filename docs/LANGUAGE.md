@@ -127,18 +127,56 @@ A `#Mark` is boolean identity state with no fields. Referenced with `#`; added/r
 
 ```
 event @Damaged {
-    amount: int
+    amount: int              // required (no `=`)
     victim: Entity
+    $Position                // include $Position — pulls in ALL of its fields
+    $Health.hp = 0           // include one field, defaulted (optional at emit)
+    var note: string = "hit" // a `var` member — same rules as a field
 }
 ```
 
 Sent with `emit`, reacted to with `hear` (§4). Referenced with the `@` sigil.
+
+**Signature body (shared with `builder`, §3.9).** The `{ … }` after `event`/`builder` is a list of
+members separated by whitespace, newline, or optional comma. Each member is one of:
+
+- `[var] name [: type] [= default]` — a field (or `var`). No `type` ⇒ inferred.
+- `$Shape` — include every field of that shape. `$Shape.field` includes a single field.
+
+`=` marks a member **defaulted** (optional, overridable); no `=` marks it **required**. `veinc events`
+and the `?` fill-the-rest sigil report and satisfy exactly the members listed here (with `$Shape`
+includes expanded to their fields).
 
 ### 3.8 References & collections
 
 - Non-nullable by default; nullable is `T?`.
 - Built-in generics `list<T>`, `map<K,V>`, `set<T>`. User-defined generics are deferred
   ([D10](SYNTAX-DECISIONS.md#d10)).
+
+### 3.9 `builder` — a reusable element template
+
+A `builder` uses the same signature body as `event` (§3.7): parameters (fields/`var`s/`$Shape`
+includes) plus exactly one **output field** whose value is the template. The output field's name
+decides the kind:
+
+| output field | kind   | emitted event |
+|--------------|--------|---------------|
+| `markup`     | html   | `@Html`       |
+| `code`       | script | `@Script`     |
+| `css`        | style  | `@Style`      |
+
+```
+builder Button {
+    label: string                                    // required param
+    onclick = "noop"                                 // defaulted param
+    markup = "<button onclick=\"" + onclick + "\">" + label + "</button>"   // output ⇒ html
+}
+```
+
+There is no `( )` parameter list and no trailing kind keyword. Instantiate with `bring` (§4), which
+binds arguments positionally to the parameters (every member except the output field, with `$Shape`
+includes expanded), fills defaults, and emits the output event. `bring N Name(…)` repeats N times;
+`?` fills the rest.
 
 ---
 
