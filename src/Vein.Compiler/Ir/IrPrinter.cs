@@ -95,6 +95,7 @@ public static class IrPrinter
         IrLiteral l => l.Kind == IrLiteralKind.String ? $"\"{l.Value}\"" : $"{l.Value}",
         IrLocalRef r => r.Name,
         IrSelfRef => "self",
+        IrEntityRef => "Entity",
         IrScopeRef s => $"{s.Module}::{s.Name}",
         IrTypeNameExpr t => t.Name,
         IrFieldAccess f => $"{E(f.Receiver)}.{f.Field}",

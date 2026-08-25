@@ -3,11 +3,12 @@ using Vein.Compiler.Diagnostics;
 using Vein.Compiler.Ir;
 using Vein.Compiler.Lexing;
 using Vein.Compiler.Parsing;
+using Vein.Compiler.Project;
 using Vein.Compiler.Tooling;
 
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("usage: veinc <tokens|ast|ir|render|graph|events|scaffold> <file.vein> [arg]");
+    Console.Error.WriteLine("usage: veinc <tokens|ast|ir|render|graph|events|scaffold|symbols> <file.vein> [arg]");
     return 2;
 }
 
@@ -143,6 +144,30 @@ switch (command)
             }
             Console.Write(EventCatalog.Scaffold(match));
         }
+        break;
+    }
+
+    case "symbols":
+    {
+        // Cross-bundle discovery: load the app + every bundle it loads, list qualified names, flag
+        // collisions. `path` is the app file.
+        var model = ProjectLoader.Load(path, diagnostics);
+        if (args.Contains("--json"))
+        {
+            var payload = new
+            {
+                app = model.AppName,
+                collisions = model.Collisions,
+                symbols = model.Symbols.Select(s => new
+                {
+                    qualified = s.QualifiedName,
+                    author = s.Author, bundle = s.Bundle, publicator = s.Publicator,
+                    kind = s.Kind.ToString(), name = s.Name
+                })
+            };
+            Console.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        else Console.Write(model.Render());
         break;
     }
 

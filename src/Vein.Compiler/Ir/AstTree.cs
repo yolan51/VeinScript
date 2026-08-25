@@ -20,7 +20,7 @@ public sealed class AstTree
         CollectShapes(unit.Bundles);
     }
 
-    public List<IrNode> Roots(CompilationUnit unit) => unit.Bundles.Select(Decl).ToList();
+    public List<IrNode> Roots(CompilationUnit unit) => unit.Apps.Select(Decl).Concat(unit.Bundles.Select(Decl)).ToList();
 
     private void CollectShapes(IEnumerable<Decl> decls)
     {
@@ -37,7 +37,8 @@ public sealed class AstTree
 
     private IrNode Decl(Decl d) => d switch
     {
-        BundleDecl b => Node("Bundle", b.Name, b.Span, b.Members.Select(Decl)),
+        BundleDecl b => WithAttrs(Node("Bundle", b.Name, b.Span, b.Members.Select(Decl)), b.Author is null ? null : ("author", b.Author)),
+        AppDecl app => Node("App", app.Name, app.Span, app.Loads.Select(l => Leaf("Load", Quote(l), app.Span))),
         PublicatorDecl p => Node("Publicator", p.Name, p.Span, p.Members.Select(Decl)),
         UseDecl u => Leaf("Use", u.Alias is null ? u.Name : $"{u.Name} as {u.Alias}", u.Span),
         ShapeDecl s => WithAttrs(Node("Shape", "$" + s.Name, s.Span, s.Members.Select(ShapeMember)), Doc(s.Doc)),
@@ -217,6 +218,8 @@ public sealed class AstTree
                     _ => ("Str", Quote(l.Value as string ?? ""), New())
                 };
             case NameExpr n: return ("Ref", n.Name, New());
+            case EntityExpr: return ("Ref", "Entity", New());
+            case StarRefExpr sr: return ("Ref", AstPrinter.StarText(sr), New());
             case SelfScopeExpr or ScopeExpr or MemberExpr or IndexExpr: return ("Path", Path(e), New());
             case ShapeRefExpr r: return ("Ref", "$" + r.Name, New());
             case EventRefExpr r: return ("Ref", "@" + r.Name, New());

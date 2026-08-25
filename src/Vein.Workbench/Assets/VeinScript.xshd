@@ -41,7 +41,7 @@
       <Word>match</Word>    <Word>break</Word>     <Word>continue</Word>   <Word>type</Word>
       <Word>enum</Word>     <Word>fn</Word>        <Word>and</Word>        <Word>or</Word>
       <Word>not</Word>      <Word>true</Word>      <Word>false</Word>      <Word>map</Word>
-      <Word>random</Word>   <Word>in</Word>
+      <Word>random</Word>   <Word>in</Word>        <Word>Entity</Word>
     </Keywords>
 
     <Rule color="Number">\b\d+(\.\d+)?%?\b</Rule>

@@ -1,0 +1,18 @@
+// yolan's Combat bundle. `by yolan` sets the author — the root of every qualified name here, e.g.
+// *yolan.Combat.@Request. It also references alice's colliding event via a `*` path to stay unambiguous.
+
+bundle Combat by yolan {
+    event @Request { path: string }
+    event @Damage  { amount: int }
+
+    shape $Health { hp: int folds sum }
+
+    shard Kernel {
+        hear @Request as req {
+            // A collision-safe cross-bundle reference: even though both bundles are named Combat and
+            // both define @Request, the author root picks the right one. (Not linked/run yet.)
+            let other = *alice.Combat.@Request
+            emit @Damage { amount: 5 }
+        }
+    }
+}

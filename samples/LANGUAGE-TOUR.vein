@@ -1,0 +1,398 @@
+// ============================================================================================
+//  VeinScript — LANGUAGE TOUR
+//  A single-file digest of every sample in samples/, concatenated for reading/discussion.
+//  (Each bundle is independent — this file is a reference, not one compiled program.)
+//
+//  VeinScript is an Identity Oriented Programming (IOP) language:
+//    * DATA lives in `shape`s (identity components) and `event`s (messages).
+//    * BEHAVIOR lives in `shard`s (systems) and `SF`s (shard-functions; emit-only, never return).
+//    * There is NO general `class`. Sigils tag references:  $Shape   @Event   #Mark   ::SelfScope
+//    * Shards react to events with `hear`, mutate targeted identities, and `emit` new events.
+//    * `folds` reconciles concurrent writes to a field (sum/min/max/…).
+//    * Output (HTML/JS/CSS, etc.) is ASSEMBLED reactively: shards emit fragments, a `ShardView`
+//      hears them and concatenates the final artifact.
+//
+//  Sections:
+//    1. demo      — core IOP: shape/shard/target/each tick/settled/emit/mark, folds, SF, chance
+//    2. payload   — emit ergonomics: field defaults, context auto-fill, `?` fill-the-rest
+//    3. events    — the `audience` barrier + event provenance (from/origin)
+//    4. site      — a reactive website: fragments assembled by a ShardView
+//    5. mypage    — `builder` templates + `bring` (html/script/css from output fields)
+//    6. shaped    — `$Shape` includes: a shape's fields flatten into a builder's params
+//    7. handles   — cross-linking html/js/css through shared handle values (one source of truth)
+// ============================================================================================
+
+
+// ============================================================================================
+//  1. demo.vein — CORE IOP
+//  Exercises the IOP core: shape/shard/target/each tick/settled/emit/mark, folds, if/else, SF,
+//  chance, and `$Shape.field` / `var` members inside an event. Traced in docs/EXAMPLE-PIPELINE.md.
+// ============================================================================================
+
+bundle Demo {
+    use Core
+
+    publicator DemoCore {
+        shared("Hit points and mana for any living identity.")
+        shape $Health {
+            hp: int folds sum      // many shards may drain hp in one tick; sum the deltas
+            mp: int
+        }
+
+        shared("Damage applied after mitigation.")
+        event @Damaged {
+            amount: int
+            victim: Entity
+            $Health.hp = 0             // pull one field off $Health (defaulted, so optional at emit)
+            var note: string = "hit"   // a `var` member — same `=`/required rule as a field
+        }
+    }
+
+    // An SF never returns a value — it emits events (each auto-tagged with origin/source).
+    // A single SF can emit many times, just like a shard.
+    SF hurt(victim: Entity, amount: int) {
+        emit @Damaged {
+            amount: amount
+            victim: victim
+        }
+    }
+
+    shard Drain {
+        target $Health #Enemy as self {
+            each tick {
+                ::Health.hp -= 1
+
+                chance 30% {
+                    emit @Damaged {
+                        amount: 5
+                        victim: self
+                    }
+                }
+            }
+        }
+
+        settled {
+            if ::Health.hp <= 0 {
+                mark self #Dead
+            }
+        }
+    }
+}
+
+
+// ============================================================================================
+//  2. payload.vein — EMIT PAYLOAD ERGONOMICS
+//    * event fields can have DEFAULTS (`amount: int = 1`) — optional at emit, override to change.
+//    * omitted fields AUTO-FILL from the current context (the event being heard, then locals).
+//    * hear reads the payload with plain field access on the binding (no sigil): `s.amount`.
+//  Run:  veinc render samples/payload.vein /
+// ============================================================================================
+
+bundle Demo {
+    event @Request   { path: string }
+    event @Hit       { amount: int = 1 }     // default 1 — omit it to accept the default
+    event @SyncedHit { amount: int }         // no default — auto-filled from context on emit
+    event @Response  { status: int, body: string }
+
+    shard Source {
+        hear @Request as req { emit @Hit }               // amount omitted -> default 1
+    }
+
+    bridge Sync {
+        hear @Hit as h { emit @SyncedHit }               // amount auto-filled from h (current context)
+    }
+
+    shard Report {
+        hear @SyncedHit as s {
+            emit @Response { status: 200, body: "amount " + s.amount + " from " + s.from.kind + "." + s.from.name }
+        }
+    }
+}
+
+
+// ============================================================================================
+//  3. events.vein — THE `audience` BARRIER + PROVENANCE
+//  A First-Class object can CARRY shapes/marks: `shard Combat $Session #Trusted { ... }`.
+//  A `hear ... audience $Session #Trusted` only fires when the EMITTER carries ALL of them.
+//  Every event also carries provenance you can read on the binding: `d.from.kind`, `d.from.name`.
+//  Run:  veinc render samples/events.vein /   (one @Damage fires, the other is blocked)
+// ============================================================================================
+
+bundle Demo {
+    event @Request  { path: string }
+    event @Damage   { amount: int }
+    event @Response { status: int, body: string }
+
+    // Carries the credentials the auditor requires.
+    shard Combat $Session #Trusted {
+        hear @Request as req { emit @Damage { amount: 5 } }
+    }
+
+    // Carries nothing — its @Damage should be blocked by the audience barrier.
+    shard Sneaky {
+        hear @Request as req { emit @Damage { amount: 99 } }
+    }
+
+    shard Auditor {
+        hear @Damage as d audience $Session #Trusted {
+            emit @Response { status: 200, body: "audited trusted damage " + d.amount + " from " + d.from.kind + "." + d.from.name }
+        }
+    }
+}
+
+
+// ============================================================================================
+//  4. site.vein — A REACTIVE WEBSITE
+//  A page is ASSEMBLED, not returned:
+//    @Request -> content shards emit @Html fragments -> ShardView concatenates them
+//    -> on @Render the ShardView emits the finished @Response page.
+//  Run:  veinc render samples/site.vein /
+// ============================================================================================
+
+bundle Site {
+    use Web
+
+    publicator SiteApi {
+        shared("An inbound HTTP request.")
+        event @Request { path: string }
+
+        shared("A fragment of HTML contributed by some shard.")
+        event @Html { markup: string }
+
+        shared("Signal that all fragments are in; assemble the page.")
+        event @Render { }
+
+        shared("The response to send back.")
+        event @Response { status: int, body: string }
+    }
+
+    // Content providers: each hears a request and emits its fragment (auto origin/source).
+    shard Header {
+        hear @Request as req { emit @Html { markup: "<h1>VeinScript</h1>" } }
+    }
+
+    shard Body {
+        hear @Request as req {
+            emit @Html { markup: "<p>Reactive page, assembled from fragments.</p>" }
+        }
+    }
+
+    // Kernel closes the request phase (declared last, so @Render is queued after the fragments).
+    shard Kernel {
+        hear @Request as req { emit @Render { } }
+    }
+
+    // The ShardView: tons of `hear`, concatenating HTML into one page, then rendering.
+    ShardView Page {
+        var html: string
+
+        hear @Html as f {
+            html += f.markup
+        }
+
+        hear @Render as r {
+            emit @Response {
+                status: 200
+                body: "<html><body>" + html + "</body></html>"
+            }
+        }
+    }
+}
+
+
+// ============================================================================================
+//  5. mypage.vein — `builder` TEMPLATES + `bring`
+//  A `builder` is a reusable element: params, then ONE output field whose value is the template.
+//  The output field's name decides the kind:  markup -> @Html,  code -> @Script,  css -> @Style.
+//  `bring` instantiates it (optionally N times); a ShardView hears the fragments and assembles.
+//  Run:  veinc render samples/mypage.vein /
+// ============================================================================================
+
+bundle App {
+    use Web
+
+    publicator PageApi {
+        event @Request  { path: string }
+        event @Html     { markup: string }
+        event @Script   { code: string }
+        event @Style    { css: string }
+        event @Render   { }
+        event @Response { status: int, body: string }
+    }
+
+    // Pre-built elements: params then an output field (markup/code/css) whose value is the template.
+    builder Heading    { text: string   markup = "<h1>" + text + "</h1>" }
+    builder CounterView { markup = "<p>Count: <span id=\"n\">0</span></p>" }
+    builder Button     { label: string  markup = "<button onclick=\"inc()\">" + label + "</button>" }
+    builder Item       { label: string  markup = "<li>" + label + "</li>" }
+    builder IncFn      { code = "let c=0; function inc(){ c+=1; document.getElementById('n').innerText=c; }" }
+    builder BaseCss    { css = "body{font-family:sans-serif;margin:2rem} button{cursor:pointer}" }
+
+    // A shard brings in as many elements as the page needs.
+    shard Ui {
+        hear @Request as req {
+            bring BaseCss()
+            bring Heading("Counter")
+            bring CounterView()
+            bring Button("+1")
+            bring 8 Item("row")        // build eight list items
+            bring IncFn()
+        }
+    }
+
+    shard Kernel {
+        hear @Request as req { emit @Render { } }
+    }
+
+    // The page: hears html/script/style fragments and assembles one document.
+    ShardView MyPage {
+        var html: string
+        var js: string
+        var css: string
+
+        hear @Html as f   { html += f.markup }
+        hear @Script as s { js += s.code }
+        hear @Style as st { css += st.css }
+
+        hear @Render as r {
+            emit @Response {
+                status: 200
+                body: "<!doctype html><html><head><style>" + css + "</style></head><body>" + html + "<script>" + js + "</script></body></html>"
+            }
+        }
+    }
+}
+
+
+// ============================================================================================
+//  6. shaped.vein — `$Shape` INCLUDES FLATTEN INTO BUILDER PARAMS
+//  Instead of taking a whole shape VALUE as a param (which forces a shape literal at the call site
+//  and repeats the name), a builder INCLUDES the shape (`$Heading`): its fields become the params
+//  directly. Then `bring Button("inc","primary","+1","inc")` — no literal, no repeated name.
+//  (`bring Button ?` in the Workbench expands `?` into the flattened fields to fill.)
+//  Run:  veinc render samples/shaped.vein /
+// ============================================================================================
+
+bundle App {
+    use Web
+
+    publicator PageApi {
+        event @Request  { path: string }
+        event @Html     { markup: string }
+        event @Render   { }
+        event @Response { status: int, body: string }
+
+        // Element data as shapes:
+        shape $Heading { text: string }
+        shape $Button  { id: string, class: string, label: string, onclick: string }
+    }
+
+    // Builders INCLUDE the shape ($Heading / $Button) — its fields become the builder's params
+    // directly, so there's no literal to construct and no name to repeat at the `bring` site.
+    builder Heading {
+        $Heading
+        markup = "<h1>" + text + "</h1>"
+    }
+    builder Button {
+        $Button
+        markup = "<button id=\"" + id + "\" class=\"" + class + "\" onclick=\"" + onclick + "()\">" + label + "</button>"
+    }
+
+    // Provide the fields straight — positionally, or `bring Button ?` to see/fill them.
+    shard Ui {
+        hear @Request as req {
+            bring Heading("Counter")
+            bring Button("inc", "primary", "+1", "inc")
+        }
+    }
+
+    shard Kernel {
+        hear @Request as req { emit @Render { } }
+    }
+
+    ShardView MyPage {
+        var html: string
+        hear @Html as f { html += f.markup }
+        hear @Render as r {
+            emit @Response { status: 200, body: "<html><body>" + html + "</body></html>" }
+        }
+    }
+}
+
+
+// ============================================================================================
+//  7. handles.vein — CROSS-LINKING HTML / JS / CSS THROUGH HANDLES
+//  A handle is a shape carrying a name (and, for a function, a body). Declare each ONCE, then hand
+//  the SAME handle value to the element, the script, and the style — the name can't drift because
+//  it lives in one place. Builders read the name/body off the handle.
+//  Run:  veinc render samples/handles.vein /
+// ============================================================================================
+
+bundle App {
+    use Web
+
+    publicator PageApi {
+        event @Request  { path: string }
+        event @Html     { markup: string }
+        event @Script   { code: string }
+        event @Style    { css: string }
+        event @Render   { }
+        event @Response { status: int, body: string }
+
+        // Handle types (would ship in `use Web`):
+        shape $Id    { name: string }
+        shape $Class { name: string }
+        shape $Fn    { name: string, body: string }
+
+        // Element data references handles instead of loose strings:
+        shape $Button { id: Id, class: Class, onclick: Fn, label: string }
+    }
+
+    // Builders: params… then an output field (markup/code/css) whose value is the template.
+    builder Display {
+        slot: Id
+        initial: string
+        markup = "<span id=\"" + slot.name + "\">" + initial + "</span>"
+    }
+    builder Button {
+        b: Button
+        markup = "<button id=\"" + b.id.name + "\" class=\"" + b.class.name + "\" onclick=\"" + b.onclick.name + "()\">" + b.label + "</button>"
+    }
+    builder Define {
+        f: Fn
+        code = "function " + f.name + "(){ " + f.body + " }"
+    }
+    builder Rule {
+        c: Class
+        decl: string
+        css = "." + c.name + "{" + decl + "}"
+    }
+
+    shard Ui {
+        hear @Request as req {
+            // Declare each handle ONCE. inc's body reads counter.name, so "counter" is written once.
+            let counter = Id { name: "counter" }
+            let primary = Class { name: "primary" }
+            let inc     = Fn { name: "inc", body: "let e=document.getElementById('" + counter.name + "'); e.innerText=(+e.innerText)+1" }
+
+            bring Rule(primary, "cursor:pointer;font-weight:bold")
+            bring Display(counter, "0")
+            bring Button(Button { id: counter, class: primary, onclick: inc, label: "+1" })
+            bring Define(inc)
+        }
+    }
+
+    shard Kernel { hear @Request as req { emit @Render { } } }
+
+    ShardView MyPage {
+        var html: string
+        var js: string
+        var css: string
+        hear @Html as f   { html += f.markup }
+        hear @Script as s { js += s.code }
+        hear @Style as st { css += st.css }
+        hear @Render as r {
+            emit @Response { status: 200, body: "<!doctype html><html><head><style>" + css + "</style></head><body>" + html + "<script>" + js + "</script></body></html>" }
+        }
+    }
+}

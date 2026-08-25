@@ -1,4 +1,5 @@
 using Vein.Compiler.Ir;
+using Vein.Compiler.Parsing;
 using Vein.Compiler.Service;
 using Vein.Compiler.Tooling;
 using Xunit;
@@ -171,6 +172,122 @@ public class ServiceTests
             .ToList();
         Assert.Contains("Script", emitted);
         Assert.DoesNotContain("Html", emitted);
+    }
+
+    [Fact]
+    public void Bundle_declares_author()
+    {
+        var r = Compile("bundle Combat by yolan { event @Request { path: string } }");
+        Assert.True(r.Success);
+        Assert.Equal("yolan", r.Ast!.Bundles[0].Author);
+    }
+
+    [Fact]
+    public void App_declaration_parses_loads()
+    {
+        var r = Compile("app MyGame { load \"a.vein\"  load \"b.vein\" }");
+        Assert.True(r.Success);
+        var app = r.Ast!.Apps.Single();
+        Assert.Equal("MyGame", app.Name);
+        Assert.Equal(new[] { "a.vein", "b.vein" }, app.Loads.ToArray());
+    }
+
+    [Fact]
+    public void Star_ref_parses_and_lowers_to_scope_ref()
+    {
+        var r = Compile("bundle B { event @D { x: int } shard S { hear @R as q { let o = *alice.Combat.@Request } } }");
+        Assert.True(r.Success);
+        Assert.Contains("*alice.Combat.@Request", r.IrText);   // parsed + displayed as a qualified ref
+        var lowered = r.Modules[0].Shards.SelectMany(s => s.Methods).Any(m => HasScopeRef(m.Body));
+        Assert.True(lowered);
+    }
+
+    private static bool HasScopeRef(IrStmt s)
+    {
+        bool Ex(IrExpr e) => e switch
+        {
+            IrScopeRef => true,
+            IrStructInit si => si.Fields.Any(f => Ex(f.Value)),
+            IrRuntimeCall rc => rc.Args.Any(Ex),
+            IrCall c => Ex(c.Callee) || c.Args.Any(Ex),
+            IrBinary b => Ex(b.Left) || Ex(b.Right),
+            IrUnary u => Ex(u.Operand),
+            IrFieldAccess fa => Ex(fa.Receiver),
+            IrIndex ix => Ex(ix.Receiver) || Ex(ix.Index),
+            IrList li => li.Items.Any(Ex),
+            _ => false
+        };
+        return s switch
+        {
+            IrBlock b => b.Statements.Any(HasScopeRef),
+            IrExprStmt es => Ex(es.Expr),
+            IrLet l => l.Init is not null && Ex(l.Init),
+            IrAssign a => Ex(a.Value),
+            IrIf i => HasScopeRef(i.Then) || (i.Else is not null && HasScopeRef(i.Else)),
+            IrLoop lp => HasScopeRef(lp.Body),
+            IrMatch mt => mt.Arms.Any(a => HasScopeRef(a.Body)) || (mt.Else is not null && HasScopeRef(mt.Else)),
+            _ => false
+        };
+    }
+
+    [Fact]
+    public void Entity_is_valid_as_a_type()
+    {
+        // `Entity` is a reserved keyword but must still parse in type position.
+        var r = Compile("bundle B { event @Moved { who: Entity } }");
+        Assert.True(r.Success);
+        var moved = EventCatalog.Catalog(r.Ast!).Single(e => e.Name == "Moved");
+        Assert.Equal("Entity", moved.Fields.Single(f => f.Name == "who").Type);
+    }
+
+    [Fact]
+    public void Entity_expression_lowers_to_ir_entity_ref()
+    {
+        var r = Compile("bundle B { event @R { path: string } event @Out { who: Entity } " +
+                        "shard S { hear @R as q { emit @Out { who: Entity } } } }");
+        Assert.True(r.Success);
+        var hasEntityRef = r.Modules[0].Shards.SelectMany(s => s.Methods).Any(m => HasEntityRef(m.Body));
+        Assert.True(hasEntityRef);
+    }
+
+    [Fact]
+    public void Entity_evaluates_to_zero_without_an_entity_context()
+    {
+        // No `target` scope is entered, so the nearest-entity id is 0.
+        var r = Compile("bundle B { event @Request { path: string } event @Response { status: int, body: string } " +
+                        "shard S { hear @Request as q { emit @Response { status: 200, body: \"\" + Entity } } } }");
+        Assert.True(r.Success);
+        var res = new Interp().Render(r.Modules[0], "/");
+        Assert.Equal("0", res.Body);
+    }
+
+    // True if any IrEntityRef is reachable from a statement.
+    private static bool HasEntityRef(IrStmt s)
+    {
+        bool Ex(IrExpr e) => e switch
+        {
+            IrEntityRef => true,
+            IrStructInit si => si.Fields.Any(f => Ex(f.Value)),
+            IrRuntimeCall rc => rc.Args.Any(Ex),
+            IrCall c => Ex(c.Callee) || c.Args.Any(Ex),
+            IrBinary b => Ex(b.Left) || Ex(b.Right),
+            IrUnary u => Ex(u.Operand),
+            IrFieldAccess fa => Ex(fa.Receiver),
+            IrIndex ix => Ex(ix.Receiver) || Ex(ix.Index),
+            IrList li => li.Items.Any(Ex),
+            _ => false
+        };
+        return s switch
+        {
+            IrBlock b => b.Statements.Any(HasEntityRef),
+            IrExprStmt es => Ex(es.Expr),
+            IrLet l => l.Init is not null && Ex(l.Init),
+            IrAssign a => Ex(a.Value),
+            IrIf i => HasEntityRef(i.Then) || (i.Else is not null && HasEntityRef(i.Else)),
+            IrLoop lp => HasEntityRef(lp.Body),
+            IrMatch mt => mt.Arms.Any(a => HasEntityRef(a.Body)) || (mt.Else is not null && HasEntityRef(mt.Else)),
+            _ => false
+        };
     }
 
     // Collect the TypeName of every IrStructInit reachable from a statement (for finding emitted events).

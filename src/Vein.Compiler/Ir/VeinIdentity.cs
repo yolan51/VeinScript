@@ -58,3 +58,14 @@ public sealed class VeinIdentityRegistry
     public VeinFirstClass? Resolve(VeinIdentity id) => _byHandle.GetValueOrDefault(id.Handle);
     public IReadOnlyList<VeinFirstClass> All => _all;
 }
+
+/// The ECS *entity* id allocator — the SECOND identity layer (see the note atop this file). Entities
+/// are what `target` cycles and what `self`/`Entity` refer to; ids are plain ints, distinct from the
+/// First-Class handles above. `0` is reserved for "no entity" (used where there is no entity context).
+public sealed class VeinEntityRegistry
+{
+    private int _seq;
+    /// Allocate the next entity id (always >= 1; 0 means "no entity").
+    public int Allocate() => ++_seq;
+    public int Count => _seq;
+}

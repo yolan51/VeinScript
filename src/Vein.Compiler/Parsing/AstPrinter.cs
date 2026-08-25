@@ -8,6 +8,7 @@ public static class AstPrinter
     public static string Print(CompilationUnit unit)
     {
         var sb = new StringBuilder();
+        foreach (var a in unit.Apps) PrintDecl(sb, a, 0);
         foreach (var b in unit.Bundles) PrintDecl(sb, b, 0);
         return sb.ToString();
     }
@@ -18,8 +19,12 @@ public static class AstPrinter
         switch (d)
         {
             case BundleDecl b:
-                Line(sb, ind, $"bundle {b.Name}");
+                Line(sb, ind, $"bundle {b.Name}{(b.Author is null ? "" : " by " + b.Author)}");
                 foreach (var m in b.Members) PrintDecl(sb, m, ind + 1);
+                break;
+            case AppDecl app:
+                Line(sb, ind, $"app {app.Name}");
+                foreach (var l in app.Loads) Line(sb, ind + 1, $"load \"{l}\"");
                 break;
             case UseDecl u: Line(sb, ind, $"use {u.Name}{(u.Alias is null ? "" : " as " + u.Alias)}"); break;
             case ShapeDecl s:
@@ -133,6 +138,13 @@ public static class AstPrinter
     };
     private static string Field(FieldDecl f) => $"{f.Name}: {Type(f.Type)}{(f.Fold is null ? "" : " folds " + f.Fold)}{(f.Default is null ? "" : " = " + Ex(f.Default))}";
     private static string Type(TypeRef? t) => t is null ? "infer" : t.Name + (t.Args.Count > 0 ? "<" + string.Join(", ", t.Args.Select(Type)) + ">" : "");
+
+    /// `*Author.Bundle.Publicator.@Event` canonical text.
+    public static string StarText(StarRefExpr sr)
+    {
+        string sig = sr.Sigil switch { MemberSigil.Event => "@", MemberSigil.Shape => "$", MemberSigil.Mark => "#", _ => "" };
+        return "*" + string.Join(".", sr.Path) + "." + sig + sr.Member;
+    }
     private static string Doc(Decl d) => d.Doc is null ? "" : $"   // {d.Doc}";
 
     private static string AsgOp(AssignOp o) => o switch
@@ -146,6 +158,8 @@ public static class AstPrinter
         LiteralExpr l => l.Kind == LiteralKind.String ? $"\"{l.Value}\"" : $"{l.Value}",
         NameExpr n => n.Name,
         SelfScopeExpr s => $"::{s.Name}",
+        EntityExpr => "Entity",
+        StarRefExpr sr => StarText(sr),
         ScopeExpr sc => $"{sc.Module}::{sc.Name}",
         ShapeRefExpr sr => $"${sr.Name}",
         EventRefExpr er => $"@{er.Name}",

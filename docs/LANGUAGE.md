@@ -47,6 +47,29 @@ bundle Demo {
 `shared("…")` is a doc/attribute attached to the following declaration; it is preserved into the HIR
 and emitted as a doc comment. `use N as M` aliases an import (planned).
 
+### 2.1 Author & cross-bundle references (`by`, `app`, `*`)
+
+At scale, bundle names collide between authors, so a bundle may declare an **author/pseudo** with `by`:
+
+```
+bundle Combat by yolan { … }        // rooted as *yolan.Combat.…
+```
+
+An **app** file names the bundles that compose one program (no entry point — IOP is reactive; see §4):
+
+```
+app MyGame {
+    load "yolan_combat.vein"
+    load "alice_combat.vein"
+}
+```
+
+The `*` sigil is a **collision-safe qualified reference**: `*Author.Bundle.Publicator.@Event` (also
+`$Shape`, or a plain member). The leading segments are a suffix of `Author.Bundle.Publicator` — qualify
+with only as many as needed to be unique; if two authors clash, add the author. `veinc symbols` lists
+every qualified name and flags collisions ([TOOLING.md](TOOLING.md)). *This pass is discovery +
+resolution only; linking loaded bundles into one running program is a follow-on.*
+
 ---
 
 ## 3. Data
@@ -203,6 +226,7 @@ shard Drain {
 | Construct | Meaning |
 |-----------|---------|
 | `target C… #T… as self { … }` | bind `self` to each identity matching the shapes/marks named; the general iteration form (§5.3) |
+| `Entity` | keyword; as a type an entity id (`int`), as an expression the **nearest** entity's id — the enclosing `target` binding (same value as a bare `self`), or `0` when no entity is in scope. Distinct from the First-Class identity layer (Shard/ShardView/…). *Runtime note:* the interpreter does not yet execute `target`/tick loops, so today `Entity` reads `0` outside a materialized entity; the id becomes live with the ECS runtime. |
 | `each tick { … }` | per-frame phase, run over the target set |
 | `settled { … }` | post-update phase (cleanup/resolution) |
 | `::Shape.field` | the current identity's component field (`self`-scope) |

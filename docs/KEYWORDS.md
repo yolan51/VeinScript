@@ -13,13 +13,15 @@ dialect. There is no general `class`.
 
 ---
 
-## 1. Keywords currently in the lexer (closure — all 49)
+## 1. Keywords currently in the lexer (closure — all 51)
 
 ### General core
 
 | Keyword | Syntax | Meaning | Notes |
 |---------|--------|---------|-------|
-| `bundle` | `bundle N { … }` | module | |
+| `bundle` | `bundle N [by author] { … }` | module; optional author/pseudo roots its qualified name | |
+| `app` | `app N { load "f.vein" … }` | project manifest: the set of bundles that compose a program | multi-file |
+| `by` | `bundle N by author` | author/pseudo of a bundle (collision root) | |
 | `use` | `use N [as M]` | import | |
 | `publicator` | `publicator N { … }` | export group | |
 | `shared` | `shared("doc")` | doc attribute on next decl | → HIR metadata |
@@ -71,7 +73,6 @@ Held so they aren't accidentally repurposed. Assign a meaning or cut before v1.0
 
 | Keyword | Leaning / candidate use |
 |---------|-------------------------|
-| `by` | was `push`'s separator (cut); candidate: range/iteration step (`repeat 0..10 by 2`) |
 | `start` | shard once-on-create lifecycle (`start { … }` → `start()`) |
 | `on` | event/UI handler sugar (`on click { … }`) — desktop domain |
 | `audience` | networking/replication scope (who sees an identity/event) |
@@ -117,7 +118,7 @@ D3/D5).
 | Type | Meaning | C# (ShardECS) |
 |------|---------|---------------|
 | `Vec2` `Vec3` `Vec4` | float vectors | `Vector2/3/4` |
-| `Entity` | opaque identity id | `int` (World id) |
+| `Entity` | ECS entity id — a **keyword** (§ core-IOP). As a type it holds an entity id; as an expression it yields the **nearest entity's** id (the enclosing `target` binding), or `0` when there is no entity in scope | `int` (World id) |
 | `Color` | rgba float | `Vector4` |
 
 Map onto the runtime the C# backend targets (`Transform3DComponent`, `VisualComponent`, `Vector3` —
@@ -145,11 +146,11 @@ Identifiers resolved to built-in reducers — **not keywords**, so no new keywor
 
 ## 4. Closure check
 
-Keywords in the lexer map: **49**. Classified above as **36 core** (17 general core + 19 core-IOP¹),
-**2 core-lib** (`random`, `count`), **10 reserved** (`by` `start` `on` `audience` `bridge` `bring`
-`builder` `mute` `unmute` `transform`), **1 cut** (`push`). 36 + 2 + 10 + 1 = **49**. ✅
+Keywords in the lexer map: **51**. Classified above as **39 core** (19 general core + 20 core-IOP¹),
+**2 core-lib** (`random`, `count`), **9 reserved** (`start` `on` `audience` `bridge` `bring`
+`builder` `mute` `unmute` `transform`), **1 cut** (`push`). 39 + 2 + 9 + 1 = **51**. ✅
 
-¹ core-IOP = `shape` `event` `shard` `target` `each` `tick` `settled` `folds` `mark` `unmark`
+¹ core-IOP = `shape` `event` `shard` `target` `each` `tick` `settled` `folds` `mark` `unmark` `Entity`
 `attach` `unattach` `to` `from` `emit` `hear` `destroy` `chance` `sync` — plus the general-core rows
 that already existed in the lexer (`when` `else` are general core; `if`/`while` are adds, not counted
 in the 49). If a keyword is added to [Lexer.cs](../src/Vein.Compiler/Lexing/Lexer.cs), it **must** be

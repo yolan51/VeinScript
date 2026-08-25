@@ -1,0 +1,11 @@
+// alice's Combat bundle — same bundle NAME and same @Request event name as yolan's, by a different
+// author. Qualified as *alice.Combat.@Request. This is the collision the discovery tool flags.
+
+bundle Combat by alice {
+    event @Request { path: string }
+    event @Loot    { gold: int }
+
+    shard Kernel {
+        hear @Request as req { emit @Loot { gold: 10 } }
+    }
+}

@@ -26,6 +26,8 @@ public enum TokenKind
     // keywords added in Milestone 2 (see docs/SYNTAX-DECISIONS.md, docs/KEYWORDS.md §2)
     KwFn, KwType, KwEnum, KwIf, KwWhile, KwRepeat, KwBreak, KwContinue, KwMatch,
     KwShardView,    // output-assembly construct: hears fragment events, concatenates a page
+    KwEntity,       // the ECS entity type; as an expression, the nearest entity's int id
+    KwApp,          // app manifest: the set of bundles that compose a project
 
     // punctuation
     LBrace, RBrace, LParen, RParen,

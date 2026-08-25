@@ -403,14 +403,17 @@ public sealed class Lower
             : new IrLoop(IrLoopKind.Repeat, null, null, null, null, LowerExpr(br.Count), body);
     }
 
+    private static string SigilChar(MemberSigil s) => s switch
+    { MemberSigil.Event => "@", MemberSigil.Shape => "$", MemberSigil.Mark => "#", _ => "" };
+
     /// A typed zero placeholder used to satisfy required fields/params under `?` (for testing).
     private static IrExpr ZeroLiteral(string typeName) => typeName switch
     {
-        "int" => new IrLiteral(0L, IrLiteralKind.Int),
+        "int" or "Entity" => new IrLiteral(0L, IrLiteralKind.Int),   // Entity is an int id
         "float" => new IrLiteral(0.0, IrLiteralKind.Float),
         "bool" => new IrLiteral(false, IrLiteralKind.Bool),
         "percent" => new IrLiteral(0.0, IrLiteralKind.Percent),
-        _ => new IrLiteral("", IrLiteralKind.String)   // string, Entity, shapes, … → placeholder
+        _ => new IrLiteral("", IrLiteralKind.String)   // string, shapes, … → placeholder
     };
 
     private IrStmt LowerAssign(AssignStmt a)
@@ -447,7 +450,12 @@ public sealed class Lower
                 return new IrLiteral(l.Value, MapLit(l.Kind));
             case NameExpr n: return new IrLocalRef(n.Name);
             case SelfScopeExpr ss: return new IrFieldAccess(new IrSelfRef(), ss.Name);
+            case EntityExpr: return new IrEntityRef();
             case ScopeExpr sc: return new IrScopeRef(sc.Module, sc.Name);
+            // `*` qualified cross-bundle ref. Not linked/resolved at runtime yet (surface + tooling
+            // pass): lower to a scope ref carrying the dotted path + sigil'd member so the IR is
+            // representable; project tooling does the real resolution/collision checks.
+            case StarRefExpr star: return new IrScopeRef(string.Join(".", star.Path), SigilChar(star.Sigil) + star.Member);
             case ShapeRefExpr sr: return new IrTypeNameExpr(sr.Name);
             case EventRefExpr er: return new IrTypeNameExpr(er.Name);
             case MarkRefExpr mr: _tags.Add(mr.Name); return new IrTypeNameExpr(mr.Name);

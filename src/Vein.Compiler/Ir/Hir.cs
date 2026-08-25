@@ -85,6 +85,7 @@ public enum IrLiteralKind { Int, Float, Percent, String, Bool }
 public sealed record IrLiteral(object? Value, IrLiteralKind Kind) : IrExpr;
 public sealed record IrLocalRef(string Name) : IrExpr;             // param/local/global — resolved later
 public sealed record IrSelfRef : IrExpr;                            // the identity bound by `target`
+public sealed record IrEntityRef : IrExpr;                          // `Entity` — the nearest entity's int id
 public sealed record IrScopeRef(string Module, string Name) : IrExpr;
 public sealed record IrTypeNameExpr(string Name) : IrExpr;          // bare shape/event/mark reference
 public sealed record IrFieldAccess(IrExpr Receiver, string Field) : IrExpr;

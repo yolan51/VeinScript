@@ -58,18 +58,20 @@ public sealed class Parser
     {
         var start = Here;
         var bundles = new List<BundleDecl>();
+        var apps = new List<AppDecl>();
         SkipTerms();
         while (!AtEnd)
         {
             try
             {
                 if (Check(TokenKind.KwBundle)) bundles.Add(ParseBundle());
-                else { _diag.Error("VS0101", $"Expected 'bundle', found '{Cur.Text}'.", Here); Synchronize(); }
+                else if (Check(TokenKind.KwApp)) apps.Add(ParseApp());
+                else { _diag.Error("VS0101", $"Expected 'bundle' or 'app', found '{Cur.Text}'.", Here); Synchronize(); }
             }
             catch (ParseError) { Synchronize(); }
             SkipTerms();
         }
-        return new CompilationUnit(bundles, start);
+        return new CompilationUnit(bundles, start) { Apps = apps };
     }
 
     private BundleDecl ParseBundle()
@@ -77,10 +79,36 @@ public sealed class Parser
         var start = Here;
         Expect(TokenKind.KwBundle, "'bundle'");
         string name = Expect(TokenKind.Ident, "bundle name").Text;
+        // Optional author/pseudo: `bundle Combat by yolan` — the root of its qualified name.
+        string? author = Match(TokenKind.KwBy) ? ExpectName("author").Text : null;
         Expect(TokenKind.LBrace, "'{'");
         var members = ParseDeclList(exported: false, until: TokenKind.RBrace);
         Expect(TokenKind.RBrace, "'}'");
-        return new BundleDecl(name, members, start);
+        return new BundleDecl(name, members, start) { Author = author };
+    }
+
+    /// `app N { load "path" … }` — the loaded-bundle set. No entry point (IOP is reactive).
+    private AppDecl ParseApp()
+    {
+        var start = Here;
+        Expect(TokenKind.KwApp, "'app'");
+        string name = Expect(TokenKind.Ident, "app name").Text;
+        Expect(TokenKind.LBrace, "'{'");
+        var loads = new List<string>();
+        SkipTerms();
+        while (!Check(TokenKind.RBrace) && !AtEnd)
+        {
+            // `load` is a contextual keyword inside the app body.
+            if ((Check(TokenKind.Ident) || IsKeyword(Cur.Kind)) && Cur.Text == "load")
+            {
+                Advance();
+                loads.Add(Expect(TokenKind.String, "a file path string after 'load'").Value as string ?? "");
+            }
+            else { _diag.Error("VS0106", $"Expected 'load', found '{Cur.Text}'.", Here); Advance(); }
+            SkipTerms();
+        }
+        Expect(TokenKind.RBrace, "'}'");
+        return new AppDecl(name, loads, start);
     }
 
     /// Parse declarations until `until`. Handles `shared("doc")` prefixes and `publicator` groups.
@@ -267,7 +295,8 @@ public sealed class Parser
     private TypeRef ParseTypeRef()
     {
         var s = Here;
-        string name = Expect(TokenKind.Ident, "type").Text;
+        // `Entity` is a keyword but also the ECS entity type, so accept it in type position.
+        string name = Check(TokenKind.KwEntity) ? Advance().Text : Expect(TokenKind.Ident, "type").Text;
         var args = new List<TypeRef>();
         if (Match(TokenKind.Lt))
         {
@@ -780,6 +809,8 @@ public sealed class Parser
             case TokenKind.EventRef: return new EventRefExpr(Advance().Text, s);
             case TokenKind.MarkRef: return new MarkRefExpr(Advance().Text, s);
             case TokenKind.Scope: { Advance(); return new SelfScopeExpr(Expect(TokenKind.Ident, "component name after '::'").Text, s); }
+            case TokenKind.KwEntity: { Advance(); return new EntityExpr(s); }
+            case TokenKind.Star: return ParseStarRef();
             case TokenKind.LParen: { Advance(); var e = ParseExpr(); Expect(TokenKind.RParen, "')'"); return e; }
             case TokenKind.LBracket: return ParseListLit();
             case TokenKind.Ident:
@@ -793,6 +824,27 @@ public sealed class Parser
             default:
                 _diag.Error("VS0104", $"Unexpected '{Cur.Text}' in expression.", s);
                 throw new ParseError();
+        }
+    }
+
+    /// `*Author.Bundle.Publicator.@Event` — a collision-safe cross-bundle reference. The leading dotted
+    /// idents are a suffix of `Author.Bundle.Publicator`; the final segment is the member (a sigil'd
+    /// `@Event`/`$Shape`/`#Mark`, or a plain name). Only valid in operand position, so `*` here never
+    /// clashes with the multiply operator (which is infix, handled in ParseBinary).
+    private StarRefExpr ParseStarRef()
+    {
+        var s = Here;
+        Expect(TokenKind.Star, "'*'");
+        var path = new List<string> { ExpectName("qualified name after '*'").Text };
+        Expect(TokenKind.Dot, "'.'");
+        while (true)
+        {
+            if (Check(TokenKind.EventRef)) return new StarRefExpr(path, Advance().Text, MemberSigil.Event, s);
+            if (Check(TokenKind.ShapeRef)) return new StarRefExpr(path, Advance().Text, MemberSigil.Shape, s);
+            if (Check(TokenKind.MarkRef)) return new StarRefExpr(path, Advance().Text, MemberSigil.Mark, s);
+            var name = ExpectName("member or path segment").Text;
+            if (Match(TokenKind.Dot)) { path.Add(name); continue; }   // another segment follows
+            return new StarRefExpr(path, name, MemberSigil.None, s);
         }
     }
 

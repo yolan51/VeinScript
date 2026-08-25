@@ -39,6 +39,7 @@ public sealed class Lexer
         ["while"] = TokenKind.KwWhile,         ["repeat"] = TokenKind.KwRepeat,
         ["break"] = TokenKind.KwBreak,         ["continue"] = TokenKind.KwContinue,
         ["match"] = TokenKind.KwMatch,         ["ShardView"] = TokenKind.KwShardView,
+        ["Entity"] = TokenKind.KwEntity,       ["app"] = TokenKind.KwApp,
     };
 
     private readonly string _src;

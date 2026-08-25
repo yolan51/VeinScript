@@ -25,6 +25,8 @@ public sealed class Interp
     private readonly Queue<(string Name, Dictionary<string, object?> Payload)> _queue = new();
     private readonly List<string> _log = new();
     private readonly VeinIdentityRegistry _registry = new();   // the Vein First-Class graph (nodes)
+    private readonly VeinEntityRegistry _entities = new();     // ECS entity ids (second identity layer)
+    private long _currentEntity;                               // the nearest entity in scope; 0 = none
     private readonly List<GraphEdge> _edges = new();           //   … and its emit edges
     private string _bundle = "";
     private Dictionary<string, IrType> _types = new(StringComparer.Ordinal);
@@ -196,8 +198,11 @@ public sealed class Interp
             case IrLocalRef r:
                 if (locals.TryGetValue(r.Name, out var lv)) return lv;
                 if (self.State.TryGetValue(r.Name, out var sv)) return sv;
+                // A bare `self` used as a value = the nearest entity's id (aligns with `Entity`).
+                if (r.Name == "self") return _currentEntity;
                 return null;
             case IrSelfRef: return self.Name;
+            case IrEntityRef: return _currentEntity;   // `Entity` — nearest entity's int id (0 = none)
             case IrFieldAccess f:
             {
                 var recv = Eval(f.Receiver, self, locals);
@@ -306,11 +311,17 @@ public sealed class Interp
     private static long AsLong(object? o) => o switch { long l => l, int i => i, double d => (long)d, _ => 0 };
     private static double AsDouble(object? o) => o switch { double d => d, long l => l, int i => i, bool b => b ? 1 : 0, _ => 0 };
     private static string Str(object? o) => o switch { null => "", string s => s, double d => d.ToString(CultureInfo.InvariantCulture), bool b => b ? "true" : "false", _ => o.ToString() ?? "" };
+    // Entity scope plumbing. The target/tick runtime (follow-on) brackets each targeted entity with
+    // Enter/Leave so `Entity` and a bare `self` resolve to that entity's freshly-allocated id. Until
+    // that runtime lands, no entity scope is entered, so `_currentEntity` stays 0 ("no entity").
+    private long EnterEntity() => _currentEntity = _entities.Allocate();
+    private void LeaveEntity(long previous) => _currentEntity = previous;
+
     private static object? Default(string typeName) => typeName switch { "string" => "", "int" => 0L, "float" => 0.0, "bool" => false, _ => null };
 
     // Typed zero used to satisfy required fields under `?` (fill-the-rest).
     private static object? ZeroVal(string typeName) => typeName switch
     {
-        "int" => 0L, "float" => 0.0, "bool" => false, "percent" => 0.0, "string" => "", _ => ""
+        "int" or "Entity" => 0L, "float" => 0.0, "bool" => false, "percent" => 0.0, "string" => "", _ => ""
     };
 }

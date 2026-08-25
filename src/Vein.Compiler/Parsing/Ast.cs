@@ -10,7 +10,11 @@ public abstract record Node(SourceSpan Span);
 
 // ---- top level ----------------------------------------------------------
 
-public sealed record CompilationUnit(IReadOnlyList<BundleDecl> Bundles, SourceSpan Span) : Node(Span);
+public sealed record CompilationUnit(IReadOnlyList<BundleDecl> Bundles, SourceSpan Span) : Node(Span)
+{
+    /// `app N { load … }` manifests declared at the top level of this unit.
+    public IReadOnlyList<AppDecl> Apps { get; init; } = Array.Empty<AppDecl>();
+}
 
 // ---- declarations -------------------------------------------------------
 
@@ -22,8 +26,18 @@ public abstract record Decl(SourceSpan Span) : Node(Span)
     public bool Exported { get; init; }
 }
 
-public sealed record BundleDecl(string Name, IReadOnlyList<Decl> Members, SourceSpan Span) : Decl(Span);
+public sealed record BundleDecl(string Name, IReadOnlyList<Decl> Members, SourceSpan Span) : Decl(Span)
+{
+    /// The author/pseudo from `bundle N by author`; null → treated as "local". Root of the qualified
+    /// name `Author.Bundle.Publicator.member` used for cross-bundle discovery/`*` references.
+    public string? Author { get; init; }
+}
 public sealed record UseDecl(string Name, string? Alias, SourceSpan Span) : Decl(Span);
+
+/// `app N { load "path" … }` — the set of bundles (across files) that compose one project. No entry
+/// point: IOP is reactive, so every loaded bundle participates. Loads are file paths relative to the
+/// app file. Used by the project loader for cross-bundle discovery + `*` resolution.
+public sealed record AppDecl(string Name, IReadOnlyList<string> Loads, SourceSpan Span) : Decl(Span);
 
 /// A `publicator N { … }` group. Retained in the AST (name + members) for tooling/printing;
 /// lowering flattens it (its members are already tagged Exported), so the HIR is unchanged.
@@ -146,6 +160,13 @@ public enum LiteralKind { Int, Float, Percent, String, Bool }
 public sealed record LiteralExpr(object? Value, LiteralKind Kind, SourceSpan Span) : Expr(Span);
 public sealed record NameExpr(string Name, SourceSpan Span) : Expr(Span);
 public sealed record SelfScopeExpr(string Name, SourceSpan Span) : Expr(Span);          // ::Health
+public sealed record EntityExpr(SourceSpan Span) : Expr(Span);                          // Entity — nearest entity's id
+
+/// The sigil of the final member of a `*` qualified path.
+public enum MemberSigil { Event, Shape, Mark, None }
+/// `*Author.Bundle.Publicator.@Event` — a collision-safe cross-bundle reference. `Path` is a suffix of
+/// `Author.Bundle.Publicator` (qualify only as far as needed to be unique); `Member` is the final name.
+public sealed record StarRefExpr(IReadOnlyList<string> Path, string Member, MemberSigil Sigil, SourceSpan Span) : Expr(Span);
 public sealed record ScopeExpr(string Module, string Name, SourceSpan Span) : Expr(Span); // Math::clamp
 public sealed record ShapeRefExpr(string Name, SourceSpan Span) : Expr(Span);           // $Health
 public sealed record EventRefExpr(string Name, SourceSpan Span) : Expr(Span);           // @Damaged

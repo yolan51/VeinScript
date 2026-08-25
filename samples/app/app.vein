@@ -1,0 +1,13 @@
+// app.vein — a project MANIFEST: the set of bundles (across files, from different authors) that
+// compose one program. There is no entry point — IOP is reactive, so every loaded bundle participates.
+// Discover everything, collision-safe, with:
+//   veinc symbols samples/app/app.vein            (human listing; flags name collisions)
+//   veinc symbols samples/app/app.vein --json     (same data for tooling)
+//
+// Both loaded files declare a bundle NAMED Combat but by DIFFERENT authors (yolan, alice), and both
+// declare @Request — a collision the author root resolves: `*yolan.Combat.@Request` is unique.
+
+app MyGame {
+    load "yolan_combat.vein"
+    load "alice_combat.vein"
+}

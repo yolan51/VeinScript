@@ -93,8 +93,36 @@ emit @Hit {
 The scaffold is a snippet: it deliberately isn't valid VeinScript until you replace the `?`s. Replace
 them (or delete the optional lines to accept defaults), and it parses/renders like any `emit`.
 
+## `veinc symbols <app.vein> [--json]` — cross-bundle discovery
+
+An **app file** lists the bundles (across files, possibly different authors) that compose a program:
+
+```
+app MyGame {
+    load "yolan_combat.vein"
+    load "alice_combat.vein"
+}
+```
+
+`veinc symbols` loads the app + every bundle it `load`s and prints every member as a **fully-qualified**
+name `*Author.Bundle[.Publicator].member`, flagging `[COLLISION]` where a simple name is defined under
+more than one author/bundle. That is the collision-avoidance mechanism: reference a symbol in code with
+a `*` path, qualified with as many leading segments (up to the author) as needed to be unique —
+`*alice.Combat.@Request` vs `*yolan.Combat.@Request`.
+
+```
+$ veinc symbols samples/app/app.vein
+app MyGame  (9 symbols, 3 name collision(s))
+  bundle Combat by alice
+    *alice.Combat.@Request   (Event)   [COLLISION — qualify with author]
+    …
+```
+
+This is **discovery + resolution only** (surface + tooling). Linking the loaded bundles into one running
+program (`veinc render app.vein`) is a follow-on.
+
 ## Scope / follow-on
 
-- Discovery is **within the file** today (all bundles in it, incl. `publicator` groups). Cross-file
-  "events shared from other bundles" needs `use`/import resolution or the definition registry — then
-  `@` completion spans the workspace. Tracked as follow-on.
+- Single-file discovery (`veinc events`) is **within the file**; `veinc symbols` spans the app's loaded
+  bundles. Editor `@`/`*` completion across the workspace, and actually linking + running an app, are
+  follow-ons.
