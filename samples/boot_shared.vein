@@ -1,0 +1,30 @@
+// boot_shared.vein — the "same entry everywhere" pattern: a shared @Boot event + payload shape.
+// Each bundle has ONE entry (`start @Boot`) with the same payload, so every bundle boots the same way.
+//
+// NOTE (honest state): cross-bundle @event sharing (one @Boot owned by a common bundle, referenced as
+// *studio.Core.@Boot) lands with app link+run. Until then each bundle names @Boot with the same shape.
+//
+// Run:  veinc render samples/boot_shared.vein
+//       veinc render samples/boot_shared.vein --set seed=7     (override every bundle's boot seed)
+
+bundle World by studio {
+    event @Boot     { seed: int, mode: string = "play" }   // the shared entry shape
+    event @Response { status: int, body: string }
+
+    start @Boot { seed: 42 }                                // mode defaults to "play"
+
+    shard Sim {
+        hear @Boot as b { emit @Response { status: 200, body: "world seed=" + b.seed + " mode=" + b.mode } }
+    }
+}
+
+bundle Ui by studio {
+    event @Boot     { seed: int, mode: string = "play" }   // same entry shape as World
+    event @Response { status: int, body: string }
+
+    start @Boot { seed: 42, mode: "menu" }                 // same shape, different payload
+
+    shard Screen {
+        hear @Boot as b { emit @Response { status: 200, body: "ui mode=" + b.mode } }
+    }
+}
