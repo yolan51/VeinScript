@@ -53,6 +53,62 @@ public class ProjectTests
     }
 
     [Fact]
+    public void Loader_collects_start_signatures_and_accepts_valid_override()
+    {
+        var dir = Directory.CreateTempSubdirectory("veinapp");
+        try
+        {
+            File.WriteAllText(Path.Combine(dir.FullName, "game.vein"),
+                "bundle Game by yolan { start @Boot { seed: 1 } event @Boot { seed: int } }");
+            var appPath = Path.Combine(dir.FullName, "app.vein");
+            File.WriteAllText(appPath, "app T { load \"game.vein\" start { seed: 9 } }");
+
+            var diag = new DiagnosticBag();
+            var m = ProjectLoader.Load(appPath, diag);
+
+            Assert.False(diag.HasErrors);
+            Assert.Contains(m.Starts, s => s.Bundle == "Game" && s.Event == "Boot" && s.Fields.Any(f => f.Name == "seed"));
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
+    [Fact]
+    public void Loader_rejects_unknown_override_field()
+    {
+        var dir = Directory.CreateTempSubdirectory("veinapp");
+        try
+        {
+            File.WriteAllText(Path.Combine(dir.FullName, "game.vein"),
+                "bundle Game { start @Boot { seed: 1 } event @Boot { seed: int } }");
+            var appPath = Path.Combine(dir.FullName, "app.vein");
+            File.WriteAllText(appPath, "app T { load \"game.vein\" start { bogus: 9 } }");
+
+            var diag = new DiagnosticBag();
+            ProjectLoader.Load(appPath, diag);
+            Assert.True(diag.HasErrors);   // 'bogus' is not in @Boot
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
+    [Fact]
+    public void Loader_rejects_override_when_bundle_has_no_start()
+    {
+        var dir = Directory.CreateTempSubdirectory("veinapp");
+        try
+        {
+            File.WriteAllText(Path.Combine(dir.FullName, "plain.vein"),
+                "bundle Plain { event @X { n: int } }");
+            var appPath = Path.Combine(dir.FullName, "app.vein");
+            File.WriteAllText(appPath, "app T { load \"plain.vein\" start { n: 9 } }");
+
+            var diag = new DiagnosticBag();
+            ProjectLoader.Load(appPath, diag);
+            Assert.True(diag.HasErrors);   // bundle declares no `start` to override
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
+    [Fact]
     public void Loader_reports_missing_load_target()
     {
         var dir = Directory.CreateTempSubdirectory("veinapp");

@@ -39,7 +39,7 @@ public sealed class AstTree
     {
         BundleDecl b => WithAttrs(Node("Bundle", b.Name, b.Span, b.Members.Select(Decl)), b.Author is null ? null : ("author", b.Author)),
         AppDecl app => Node("App", app.Name, app.Span,
-            app.Loads.Select(l => Leaf("Load", Quote(l), app.Span)).Concat(app.Start is null ? Enumerable.Empty<IrNode>() : new[] { Decl(app.Start) })),
+            app.Loads.Select(LoadNode).Concat(app.Start is null ? Enumerable.Empty<IrNode>() : new[] { Decl(app.Start) })),
         StartDecl st => Node("Start", "@" + st.Event, st.Span, st.Fields.Select(ArgField).Concat(st.FillRest ? new[] { Leaf("Fill", "?", st.Span) } : Enumerable.Empty<IrNode>())),
         PublicatorDecl p => Node("Publicator", p.Name, p.Span, p.Members.Select(Decl)),
         UseDecl u => Leaf("Use", u.Alias is null ? u.Name : $"{u.Name} as {u.Alias}", u.Span),
@@ -55,6 +55,13 @@ public sealed class AstTree
         BuilderDecl bl => WithAttrs(Node("Builder", bl.Name, bl.Span, bl.Members.Select(SigMember)), BuilderKind(bl)),
         _ => Leaf(d.GetType().Name, "", d.Span)
     };
+
+    private IrNode LoadNode(AppLoad l)
+    {
+        if (!l.HasStart) return Leaf("Load", Quote(l.Path), l.Span);
+        var kids = l.Overrides.Select(ArgField).Concat(l.Fill ? new[] { Leaf("Fill", "?", l.Span) } : Enumerable.Empty<IrNode>());
+        return Node("Load", Quote(l.Path), l.Span, new[] { Node("StartOverride", "", l.Span, kids) });
+    }
 
     private static readonly string[] OutputFields = { "markup", "code", "css" };
     private (string, string)? BuilderKind(BuilderDecl bl)

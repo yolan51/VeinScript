@@ -8,7 +8,8 @@
 // declare @Request — a collision the author root resolves: `*yolan.Combat.@Request` is unique.
 
 app MyGame {
-    load "yolan_combat.vein"
+    // Override yolan's Combat start payload — boot it with our own value (fills only what we change;
+    // `veinc symbols` shows the bundle's start signature so you know what fields exist).
+    load "yolan_combat.vein" start { path: "/home" }
     load "alice_combat.vein"
-    start @Request { path: "/" }   // the boot event + payload (parsed now; fires once app link+run lands)
 }

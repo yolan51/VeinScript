@@ -168,6 +168,11 @@ switch (command)
             {
                 app = model.AppName,
                 collisions = model.Collisions,
+                starts = model.Starts.Select(b => new
+                {
+                    author = b.Author, bundle = b.Bundle, @event = b.Event,
+                    fields = b.Fields.Select(f => new { name = f.Name, type = f.Type, required = f.Required })
+                }),
                 symbols = model.Symbols.Select(s => new
                 {
                     qualified = s.QualifiedName,

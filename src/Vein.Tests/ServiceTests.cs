@@ -189,7 +189,7 @@ public class ServiceTests
         Assert.True(r.Success);
         var app = r.Ast!.Apps.Single();
         Assert.Equal("MyGame", app.Name);
-        Assert.Equal(new[] { "a.vein", "b.vein" }, app.Loads.ToArray());
+        Assert.Equal(new[] { "a.vein", "b.vein" }, app.Loads.Select(l => l.Path).ToArray());
     }
 
     [Fact]
@@ -198,6 +198,17 @@ public class ServiceTests
         var r = Compile("app A { load \"x.vein\"  start @Go { seed: 1 } }");
         Assert.True(r.Success);
         Assert.Equal("Go", r.Ast!.Apps.Single().Start!.Event);
+    }
+
+    [Fact]
+    public void App_load_start_override_parses()
+    {
+        var r = Compile("app A { load \"x.vein\" start { seed: 9 } }");
+        Assert.True(r.Success);
+        var load = r.Ast!.Apps.Single().Loads.Single();
+        Assert.Equal("x.vein", load.Path);
+        Assert.True(load.HasStart);
+        Assert.Contains(load.Overrides, f => f.Name == "seed");
     }
 
     [Fact]

@@ -63,6 +63,23 @@ app MyGame {
 }
 ```
 
+### Overriding a loaded bundle's start (using others' bundles)
+
+A dev composing **someone else's** bundle overrides its start payload at the **load site** — filling only
+the fields they want to change; the rest keep the bundle's own values:
+
+```
+app MyGame {
+    load "yolan_physics.vein" start { gravity: 9.8 }   // boot yolan's bundle with our value
+    load "ui.vein"
+}
+```
+
+The override body is emit-style (so `?` works), targets "the loaded bundle's start" (no need to name the
+event), and is validated against that bundle's start signature — an unknown field, or a bundle with no
+`start`, is an error. `veinc symbols` prints each bundle's start signature so you know what to fill.
+(Surface + tooling now; the override is *applied* when app link+run lands.)
+
 ### Semantics
 - The runtime fires the declared event with the declared payload **instead of** the built-in
   `@Request { path }`.
@@ -140,7 +157,7 @@ today.
 | provenance (`from`/`id`/`cause`/`trail`), `audience` barrier | **runs** |
 | boot event via `start` (bundle level) + `--set` overrides | **runs** (`veinc render samples/boot.vein`) |
 | no `start` → default `@Request { path }` | **runs** (back-compat) |
-| app-level `start` | **parses**; fires once app link+run lands |
+| app-level `start`; load-site `start { … }` override (parsed + validated by `veinc symbols`) | fires once app link+run lands |
 | `target`/`each tick`/`folds`/`settled`, `Entity` id | designed, **not executed** |
 | app link + run (`veinc render app.vein`) | **follow-on** |
 

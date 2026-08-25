@@ -118,8 +118,30 @@ app MyGame  (9 symbols, 3 name collision(s))
     …
 ```
 
-This is **discovery + resolution only** (surface + tooling). Linking the loaded bundles into one running
-program (`veinc render app.vein`) is a follow-on.
+### Boot overrides — using someone else's bundle
+
+A loaded bundle may declare its own boot event (`start @E { … }`, see [RUNTIME.md](RUNTIME.md)). An app
+dev can **override that payload at the load site** and boot the bundle with their own values:
+
+```
+app MyGame {
+    load "yolan_combat.vein" start { path: "/home" }   // fill only what you change
+    load "alice_combat.vein"
+}
+```
+
+`veinc symbols` prints each loaded bundle's **start signature** so you know what to fill, and validates
+the override — an unknown field, or overriding a bundle that has no `start`, is an error:
+
+```
+  bundle Combat by yolan
+    start @Request { path: string }   (boot — fill via `load … start { … }`)
+    …
+```
+
+This is **discovery + resolution only** (surface + tooling): the override is parsed, shown, and checked.
+Linking the loaded bundles into one running program and actually firing the (overridden) starts
+(`veinc render app.vein`) is a follow-on.
 
 ## Scope / follow-on
 

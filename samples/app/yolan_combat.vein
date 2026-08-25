@@ -2,6 +2,8 @@
 // *yolan.Combat.@Request. It also references alice's colliding event via a `*` path to stay unambiguous.
 
 bundle Combat by yolan {
+    start @Request { path: "/" }        // this bundle's own boot event + default payload
+
     event @Request { path: string }
     event @Damage  { amount: int }
 

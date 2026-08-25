@@ -1,4 +1,5 @@
 using Vein.Compiler.Parsing;
+using Vein.Compiler.Tooling;
 
 namespace Vein.Compiler.Project;
 
@@ -28,6 +29,14 @@ public sealed record QualifiedSymbol(
     public string SigilName => Sigil + Name;
 }
 
+/// A loaded bundle's boot signature, so an app dev can discover what its `start` payload looks like and
+/// which fields a load-site `start { … }` override may fill.
+public sealed record BundleStart(string Author, string Bundle, string Event, IReadOnlyList<Sig.Field> Fields)
+{
+    public string Signature =>
+        $"start @{Event} {{ {string.Join(", ", Fields.Select(f => f.Name + ": " + f.Type))} }}";
+}
+
 public enum ResolveStatus { Resolved, Unresolved, Ambiguous }
 public sealed record ResolveResult(ResolveStatus Status, QualifiedSymbol? Symbol, IReadOnlyList<QualifiedSymbol> Candidates);
 
@@ -35,6 +44,9 @@ public sealed class ProjectModel
 {
     public required string AppName { get; init; }
     public required IReadOnlyList<QualifiedSymbol> Symbols { get; init; }
+
+    /// The boot signature of every loaded bundle that declares a `start`.
+    public IReadOnlyList<BundleStart> Starts { get; init; } = Array.Empty<BundleStart>();
 
     /// Simple member names (with sigil) reachable under more than one distinct owner path — these are
     /// the collisions that FORCE the user to qualify a `*` reference with more segments (up to author).
@@ -76,6 +88,8 @@ public sealed class ProjectModel
         foreach (var g in Symbols.GroupBy(s => (s.Author, s.Bundle)).OrderBy(g => g.Key.Author).ThenBy(g => g.Key.Bundle))
         {
             sb.AppendLine($"  bundle {g.Key.Bundle} by {g.Key.Author}");
+            var boot = Starts.FirstOrDefault(x => x.Author == g.Key.Author && x.Bundle == g.Key.Bundle);
+            if (boot is not null) sb.AppendLine($"    {boot.Signature}   (boot — fill via `load … start {{ … }}`)");
             foreach (var s in g.OrderBy(x => x.Publicator ?? "").ThenBy(x => x.Kind).ThenBy(x => x.Name, StringComparer.Ordinal))
             {
                 string flag = collisions.Contains(s.SigilName) ? "   [COLLISION — qualify with author]" : "";

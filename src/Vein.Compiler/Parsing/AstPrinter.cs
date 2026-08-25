@@ -24,7 +24,7 @@ public static class AstPrinter
                 break;
             case AppDecl app:
                 Line(sb, ind, $"app {app.Name}");
-                foreach (var l in app.Loads) Line(sb, ind + 1, $"load \"{l}\"");
+                foreach (var l in app.Loads) Line(sb, ind + 1, LoadText(l));
                 if (app.Start is not null) Line(sb, ind + 1, StartText(app.Start));
                 break;
             case StartDecl st:
@@ -142,6 +142,13 @@ public static class AstPrinter
     };
     private static string Field(FieldDecl f) => $"{f.Name}: {Type(f.Type)}{(f.Fold is null ? "" : " folds " + f.Fold)}{(f.Default is null ? "" : " = " + Ex(f.Default))}";
     private static string Type(TypeRef? t) => t is null ? "infer" : t.Name + (t.Args.Count > 0 ? "<" + string.Join(", ", t.Args.Select(Type)) + ">" : "");
+
+    private static string LoadText(AppLoad l)
+    {
+        if (!l.HasStart) return $"load \"{l.Path}\"";
+        var parts = l.Overrides.Select(f => f.Name + ": " + Ex(f.Value)).Append(l.Fill ? "?" : null).Where(x => x is not null);
+        return $"load \"{l.Path}\" start {{ {string.Join(", ", parts)} }}";
+    }
 
     private static string StartText(StartDecl st) =>
         $"start @{st.Event} {{ {string.Join(", ", st.Fields.Select(f => f.Name + ": " + Ex(f.Value)).Append(st.FillRest ? "?" : null).Where(x => x is not null))} }}";

@@ -34,14 +34,19 @@ public sealed record BundleDecl(string Name, IReadOnlyList<Decl> Members, Source
 }
 public sealed record UseDecl(string Name, string? Alias, SourceSpan Span) : Decl(Span);
 
-/// `app N { load "path" … [start @E { … }] }` — the set of bundles (across files) that compose one
-/// project. IOP is reactive: there is no entry *bundle*; `start` (optional) names the boot event + its
-/// payload. Loads are file paths relative to the app file.
-public sealed record AppDecl(string Name, IReadOnlyList<string> Loads, SourceSpan Span) : Decl(Span)
+/// `app N { load "path" [start { … }] … [start @E { … }] }` — the set of bundles (across files) that
+/// compose one project. IOP is reactive: there is no entry *bundle*; the app-level `start` (optional)
+/// names the app's own boot event.
+public sealed record AppDecl(string Name, IReadOnlyList<AppLoad> Loads, SourceSpan Span) : Decl(Span)
 {
     /// The app-level boot event, if declared. Takes precedence over any loaded bundle's `start`.
     public StartDecl? Start { get; init; }
 }
+
+/// One `load "path"` in an app, with an optional `start { … }` clause that OVERRIDES the loaded
+/// bundle's own start payload (the dev fills only the fields they want to change). `HasStart` records
+/// that a `start` clause was written (even if empty); `Fill` is the `?` fill-the-rest marker.
+public sealed record AppLoad(string Path, IReadOnlyList<FieldInit> Overrides, bool Fill, bool HasStart, SourceSpan Span) : Node(Span);
 
 /// `start @Event { payload }` — the boot event fired first when the program runs (an emit-style body,
 /// so `?` fill-the-rest applies). Allowed at bundle level (run a single file) and app level (§RUNTIME).
