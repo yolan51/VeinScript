@@ -17,21 +17,22 @@ bundle App {
         shape $Button  { id: string, class: string, label: string, onclick: string }
     }
 
-    // Builders take the shape value and render it (the template — an output field — lives here, once).
+    // Builders INCLUDE the shape ($Heading / $Button) — its fields become the builder's params
+    // directly, so there's no literal to construct and no name to repeat at the `bring` site.
     builder Heading {
-        h: Heading
-        markup = "<h1>" + h.text + "</h1>"
+        $Heading
+        markup = "<h1>" + text + "</h1>"
     }
     builder Button {
-        b: Button
-        markup = "<button id=\"" + b.id + "\" class=\"" + b.class + "\" onclick=\"" + b.onclick + "()\">" + b.label + "</button>"
+        $Button
+        markup = "<button id=\"" + id + "\" class=\"" + class + "\" onclick=\"" + onclick + "()\">" + label + "</button>"
     }
 
-    // Provide the builders with values (shape literals).
+    // Provide the fields straight — positionally, or `bring Button ?` to see/fill them.
     shard Ui {
         hear @Request as req {
-            bring Heading(Heading { text: "Counter" })
-            bring Button(Button { id: "inc", class: "primary", label: "+1", onclick: "inc" })
+            bring Heading("Counter")
+            bring Button("inc", "primary", "+1", "inc")
         }
     }
 

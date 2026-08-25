@@ -145,6 +145,20 @@ public class ServiceTests
     }
 
     [Fact]
+    public void Builder_shape_include_flattens_into_params()
+    {
+        // `$Button` include => the builder's params ARE Button's fields (no shape literal at `bring`).
+        var src = "bundle B { event @Html { markup: string } shape $Button { id: string, label: string } " +
+                  "builder Button { $Button  markup = id + label } }";
+        var ast = Compile(src).Ast!;
+        var shapes = Sig.Shapes(ast);
+        var builder = (Vein.Compiler.Parsing.BuilderDecl)ast.Bundles[0].Members.Single(m => m is Vein.Compiler.Parsing.BuilderDecl);
+        var output = builder.Members.OfType<Vein.Compiler.Parsing.FieldDecl>().First(f => f.Name == "markup");
+        var prms = Sig.Expand(builder.Members.Where(m => !ReferenceEquals(m, output)).ToList(), shapes);
+        Assert.Equal(new[] { "id", "label" }, prms.Select(p => p.Name).ToArray());
+    }
+
+    [Fact]
     public void Builder_output_field_infers_kind()
     {
         // `code` => the emitted event is @Script (not @Html); the output field decides the kind.
