@@ -1,0 +1,33 @@
+// stdlib/Input.vein — VeinScript Standard Library : Std.Input
+// Platform-independent input as EVENTS. Each backend (desktop, web, …) translates its native input into
+// these identities, so application code hears the SAME event regardless of platform:
+//     native input → runtime → *std.Input.…@Event → hear → shard → shape changes → view
+// Discover:  veinc symbols stdlib/Input.vein
+
+bundle Input by std {
+
+    // Positions are x,y floats here rather than $Vec2 to keep Input self-contained (a cross-bundle
+    // field-type reference can't resolve until app link+run). Composition with Std.Math.$Vec2 is a
+    // follow-on once linking lands.
+    publicator Mouse {
+        shared("A mouse/pointer button was pressed.")
+        event @MouseDown { x: float, y: float, button: int }
+
+        shared("A mouse/pointer button was released.")
+        event @MouseUp { x: float, y: float, button: int }
+
+        shared("The pointer moved.")
+        event @MouseMove { x: float, y: float }
+    }
+
+    publicator Keyboard {
+        shared("A key was pressed.")
+        event @KeyDown { key: string }
+
+        shared("A key was released.")
+        event @KeyUp { key: string }
+
+        shared("Text was entered (already composed — not raw key codes).")
+        event @TextInput { text: string }
+    }
+}

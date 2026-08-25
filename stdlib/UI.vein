@@ -1,0 +1,27 @@
+// stdlib/UI.vein — VeinScript Standard Library : Std.UI
+// Visual state as SHAPES + interaction as EVENTS — platform-independent. A backend RENDERER turns these
+// identities into pixels/DOM; no HTML/CSS/JS lives here (that's Std.Web's builders). Layout rectangles
+// reuse Std.Math.$Rect rather than a redundant $Bounds; visibility/enabled are marks by convention
+// (#Visible / #Enabled), not duplicated as shapes.
+// Discover:  veinc symbols stdlib/UI.vein
+
+bundle UI by std {
+
+    publicator Widgets {
+        shared("A run of display text.")
+        shape $Text { content: string }
+
+        shared("A button's label.")
+        shape $Button { label: string }
+
+        // Interaction events an identity emits/hears.
+        shared("An interactive element was activated.")
+        event @Click { }
+
+        shared("An element gained focus.")
+        event @Focus { }
+
+        shared("An element lost focus.")
+        event @Blur { }
+    }
+}

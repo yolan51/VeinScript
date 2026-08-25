@@ -1,0 +1,21 @@
+// stdlib/Math.vein — VeinScript Standard Library : Std.Math
+// Foundational VALUE shapes reused across every domain (positions, colors, rectangles). These are
+// Shapes = state; other domains use them as field types or as components. Platform-independent.
+// Discover:  veinc symbols stdlib/Math.vein
+
+bundle Math by std {
+
+    publicator Values {
+        shared("A 2D vector / point.")
+        shape $Vec2 { x: float, y: float }
+
+        shared("A 3D vector / point.")
+        shape $Vec3 { x: float, y: float, z: float }
+
+        shared("An rgba color, each channel in 0..1.")
+        shape $Color { r: float, g: float, b: float, a: float }
+
+        shared("An axis-aligned rectangle (position + extent).")
+        shape $Rect { x: float, y: float, width: float, height: float }
+    }
+}

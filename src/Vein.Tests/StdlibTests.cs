@@ -22,6 +22,55 @@ public class StdlibTests
     private static CompilationResult Compile(string path) =>
         new VeinCompilerService().Compile(new CompileRequest(Path.GetFileName(path), File.ReadAllText(path)));
 
+    private static CompilationResult CompileSrc(string src) =>
+        new VeinCompilerService().Compile(new CompileRequest("t.vein", src));
+
+    [Theory]
+    [InlineData("Core.vein")]
+    [InlineData("Web.vein")]
+    [InlineData("Math.vein")]
+    [InlineData("Input.vein")]
+    [InlineData("UI.vein")]
+    [InlineData("Time.vein")]
+    [InlineData("Diagnostics.vein")]
+    public void Stdlib_bundle_compiles(string file) => Assert.True(Compile(StdFile(file)).Success);
+
+    [Theory]
+    [InlineData("Math.vein", "*std.Math.Values.$Vec2")]
+    [InlineData("Input.vein", "*std.Input.Mouse.@MouseDown")]
+    [InlineData("UI.vein", "*std.UI.Widgets.$Button")]
+    [InlineData("Time.vein", "*std.Time.Clock.$Clock")]
+    [InlineData("Diagnostics.vein", "*std.Diagnostics.Report.$Diagnostic")]
+    public void Stdlib_bundle_exposes_shared_symbol(string file, string qualified)
+    {
+        var diag = new DiagnosticBag();
+        var model = ProjectLoader.Load(StdFile(file), diag);
+        Assert.False(diag.HasErrors);
+        Assert.Contains(model.Symbols, s => s.QualifiedName == qualified);
+    }
+
+    [Fact]
+    public void Math_value_shape_is_usable_as_a_field_type()
+    {
+        // A shape field may reference a value shape by name (interop; fully resolved at typecheck later).
+        Assert.True(CompileSrc("bundle B { shape $P { at: Vec2 } }").Success);
+    }
+
+    [Fact]
+    public void Input_event_round_trips_emit_to_hear()
+    {
+        // An @MouseDown-shaped payload round-trips emit→hear within one bundle (single-bundle runtime;
+        // cross-bundle consumption is a follow-on).
+        var r = CompileSrc(
+            "bundle B { event @Request { path: string } " +
+            "event @MouseDown { x: float, y: float, button: int } " +
+            "event @Response { status: int, body: string } " +
+            "shard In  { hear @Request as q { emit @MouseDown { x: 4.0, y: 2.0, button: 1 } } } " +
+            "shard Out { hear @MouseDown as m { emit @Response { status: 200, body: \"btn=\" + m.button } } } }");
+        Assert.True(r.Success);
+        Assert.Equal("btn=1", new Interp().Render(r.Modules[0], "/").Body);
+    }
+
     [Fact]
     public void Core_compiles_and_folds_are_lowered()
     {

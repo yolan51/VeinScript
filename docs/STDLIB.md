@@ -93,6 +93,38 @@ render *today*, within one bundle): `publicator Http` (@Request/@Html/@Render/@R
 **Marks:** standard capability marks (`#Enabled`, `#Visible`, `#Collidable`, …) are **conventions**
 only — there is no mark-declaration syntax, so they can't be shared symbols. Documented, not invented.
 
+### 5.1 Domain reference (increment 2)
+
+Five more platform-independent bundles (`bundle X by std`; public API `shared` in publicators, reachable
+as `*std.X.Publicator.member`). The `shared("…")` string on each declaration is its long-form doc.
+
+| Identity | Kind | Purpose · fields |
+|---|---|---|
+| `*std.Math.Values.$Vec2` | shape | 2D vector — `x, y: float` |
+| `*std.Math.Values.$Vec3` | shape | 3D vector — `x, y, z: float` |
+| `*std.Math.Values.$Color` | shape | rgba color (0..1) — `r, g, b, a: float` |
+| `*std.Math.Values.$Rect` | shape | axis-aligned rect — `x, y, width, height: float` |
+| `*std.Input.Mouse.@MouseDown` / `@MouseUp` | event | pointer button — `x, y: float, button: int` |
+| `*std.Input.Mouse.@MouseMove` | event | pointer moved — `x, y: float` |
+| `*std.Input.Keyboard.@KeyDown` / `@KeyUp` | event | key — `key: string` |
+| `*std.Input.Keyboard.@TextInput` | event | composed text — `text: string` |
+| `*std.UI.Widgets.$Text` | shape | display text — `content: string` |
+| `*std.UI.Widgets.$Button` | shape | button label — `label: string` |
+| `*std.UI.Widgets.@Click` / `@Focus` / `@Blur` | event | interaction (no payload) |
+| `*std.Time.Clock.$Clock` | shape | `now, delta: float` |
+| `*std.Time.Clock.@Tick` | event | a time step advanced |
+| `*std.Diagnostics.Report.$Diagnostic` | shape | `severity: int, message: string, line, column: int` |
+| `*std.Diagnostics.Report.@DiagnosticRaised` | event | `severity: int, message: string` |
+
+Notes: input positions are `x,y: float` (not `$Vec2`) — a cross-bundle field-type dependency can't
+resolve until link+run; UI layout reuses `*std.Math.Values.$Rect` rather than a redundant `$Bounds`;
+none of these domains need `folds` (Core's `$Pool` remains the demo).
+
+**Standard marks (conventions).** Capability marks have no declaration form, so they are shared *naming
+conventions*, applied with `mark self #X` and matched by `target … #X` / `audience #X`:
+`#Enabled #Visible #Focusable #Interactive #Selectable #Movable #Collidable #Destroyable #Renderable`.
+A first-class mark declaration (so these become validated shared symbols) is a follow-on (§6.4).
+
 ## 6. Missing capabilities for full consumption (isolated, general-purpose follow-ons)
 
 Each is a general language/runtime capability, **not** a stdlib-specific hack:
