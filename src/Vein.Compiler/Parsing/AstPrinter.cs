@@ -25,7 +25,6 @@ public static class AstPrinter
             case AppDecl app:
                 Line(sb, ind, $"app {app.Name}");
                 foreach (var l in app.Loads) Line(sb, ind + 1, LoadText(l));
-                if (app.Start is not null) Line(sb, ind + 1, StartText(app.Start));
                 break;
             case StartDecl st:
                 Line(sb, ind, StartText(st));

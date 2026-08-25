@@ -34,14 +34,10 @@ public sealed record BundleDecl(string Name, IReadOnlyList<Decl> Members, Source
 }
 public sealed record UseDecl(string Name, string? Alias, SourceSpan Span) : Decl(Span);
 
-/// `app N { load "path" [start { … }] … [start @E { … }] }` — the set of bundles (across files) that
-/// compose one project. IOP is reactive: there is no entry *bundle*; the app-level `start` (optional)
-/// names the app's own boot event.
-public sealed record AppDecl(string Name, IReadOnlyList<AppLoad> Loads, SourceSpan Span) : Decl(Span)
-{
-    /// The app-level boot event, if declared. Takes precedence over any loaded bundle's `start`.
-    public StartDecl? Start { get; init; }
-}
+/// `app N { load "path" [start { … }] … }` — the set of bundles (across files) that compose one project.
+/// IOP is reactive: an app has no boot event of its own; it composes bundles, each of which has its own
+/// single entry point (`start`). A load may override that bundle's start payload (see `AppLoad`).
+public sealed record AppDecl(string Name, IReadOnlyList<AppLoad> Loads, SourceSpan Span) : Decl(Span);
 
 /// One `load "path"` in an app, with an optional `start { … }` clause that OVERRIDES the loaded
 /// bundle's own start payload (the dev fills only the fields they want to change). `HasStart` records

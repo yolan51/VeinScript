@@ -193,14 +193,6 @@ public class ServiceTests
     }
 
     [Fact]
-    public void App_start_declares_boot_event()
-    {
-        var r = Compile("app A { load \"x.vein\"  start @Go { seed: 1 } }");
-        Assert.True(r.Success);
-        Assert.Equal("Go", r.Ast!.Apps.Single().Start!.Event);
-    }
-
-    [Fact]
     public void App_load_start_override_parses()
     {
         var r = Compile("app A { load \"x.vein\" start { seed: 9 } }");
@@ -217,6 +209,14 @@ public class ServiceTests
         var r = Compile("bundle B { start @Boot { n: 1 } event @Boot { n: int } }");
         Assert.True(r.Success);
         Assert.Equal("Boot", r.Modules[0].Start!.Event);
+    }
+
+    [Fact]
+    public void Bundle_with_two_starts_is_an_error()
+    {
+        // One bundle = one entry point.
+        var r = Compile("bundle B { start @A { } start @B { } event @A { } event @B { } }");
+        Assert.False(r.Success);
     }
 
     [Fact]

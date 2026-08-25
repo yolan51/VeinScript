@@ -95,30 +95,28 @@ public sealed class Parser
         string name = Expect(TokenKind.Ident, "app name").Text;
         Expect(TokenKind.LBrace, "'{'");
         var loads = new List<AppLoad>();
-        StartDecl? startDecl = null;
         SkipTerms();
         while (!Check(TokenKind.RBrace) && !AtEnd)
         {
-            // `load` is a contextual keyword inside the app body; a top-level `start` = the app's boot.
+            // `load` is a contextual keyword inside the app body. An app has no boot event of its own —
+            // it composes bundles; each bundle's own `start` is its entry point.
             if ((Check(TokenKind.Ident) || IsKeyword(Cur.Kind)) && Cur.Text == "load")
             {
                 var ls = Here;
                 Advance();
                 string p = Expect(TokenKind.String, "a file path string after 'load'").Value as string ?? "";
                 // Optional `start { … }` / `start ?` override of the loaded bundle's start payload.
-                // `start @Event …` (with a sigil) is the app-level boot, not a load override — leave it.
                 var fields = new List<FieldInit>();
                 bool fill = false;
                 bool hasStart = Check(TokenKind.KwStart) && Peek(1).Kind != TokenKind.EventRef;
                 if (hasStart) { Advance(); (fields, fill) = ParseEmitBody(); }
                 loads.Add(new AppLoad(p, fields, fill, hasStart, ls));
             }
-            else if (Check(TokenKind.KwStart)) startDecl = ParseStart();
-            else { _diag.Error("VS0106", $"Expected 'load' or 'start', found '{Cur.Text}'.", Here); Advance(); }
+            else { _diag.Error("VS0106", $"Expected 'load', found '{Cur.Text}'.", Here); Advance(); }
             SkipTerms();
         }
         Expect(TokenKind.RBrace, "'}'");
-        return new AppDecl(name, loads, start) { Start = startDecl };
+        return new AppDecl(name, loads, start);
     }
 
     /// Parse declarations until `until`. Handles `shared("doc")` prefixes and `publicator` groups.

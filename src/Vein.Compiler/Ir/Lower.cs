@@ -64,8 +64,11 @@ public sealed class Lower
         }
         foreach (var m in bundle.Members) LowerMember(m);
 
-        // Boot event: a bundle-level `start @E { … }` (first one wins). Null → runtime uses @Request.
-        var startDecl = bundle.Members.OfType<StartDecl>().FirstOrDefault();
+        // Boot event: a bundle has exactly ONE entry point — its `start @E { … }`. Null → @Request.
+        var startDecls = bundle.Members.OfType<StartDecl>().ToList();
+        if (startDecls.Count > 1)
+            _diag.Error("VS0210", $"bundle '{bundle.Name}' has {startDecls.Count} `start` entries; a bundle has exactly one entry point.", startDecls[1].Span);
+        var startDecl = startDecls.FirstOrDefault();
         var start = startDecl is null ? null : new IrStart(
             startDecl.Event,
             startDecl.Fields.Select(f => (f.Name, LowerExpr(f.Value))).ToList(),

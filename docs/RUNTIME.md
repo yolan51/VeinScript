@@ -43,23 +43,15 @@ So "what starts the program" is currently a baked-in `@Request`. Everything else
 **Problem:** the boot event is hard-coded to `@Request { path }`, which only fits web. A game wants to
 start with `@NewGame { seed: 42 }`; a tool with `@Run { args: … }`.
 
-**Proposal:** a `start` directive naming the **boot event + payload**. `start` is already a reserved
-keyword. It is allowed at **two levels** (per the design decision):
+**The rule: one bundle = one entry point.** Every bundle has **exactly one** `start @E { payload }` — its
+front door (two `start`s in a bundle is an error). An **app has no boot event of its own**: it composes
+bundles, and each bundle's own `start` is its entry. This keeps one meaning for `start`.
 
-### Bundle-level — runs a single file now
+### A bundle's entry — runs a single file now
 ```
 bundle Demo {
-    start @Request { path: "/" }      // fire this first when running Demo standalone
+    start @Request { path: "/" }      // the entry point; fired first when running Demo
     …
-}
-```
-
-### App-level — the project's boot (runs once link+run lands)
-```
-app MyGame {
-    load "world.vein"
-    load "ui.vein"
-    start @NewGame { seed: 42, players: 2 }
 }
 ```
 
@@ -83,10 +75,10 @@ event), and is validated against that bundle's start signature — an unknown fi
 ### Semantics
 - The runtime fires the declared event with the declared payload **instead of** the built-in
   `@Request { path }`.
-- **Precedence when running an app:** the app's `start` wins. If the app declares none and exactly one
-  loaded bundle declares a `start`, use it; if several do, that's a diagnostic (ambiguous boot).
-- **Fallback:** no `start` anywhere → the current `@Request { path }` default, so every existing sample
-  keeps working unchanged.
+- **Running an app:** each loaded bundle boots at its own single `start` entry; a load may override that
+  bundle's payload (above). There is no separate app-level boot.
+- **Fallback:** a bundle with no `start` → the built-in `@Request { path }` default, so every existing
+  sample keeps working unchanged.
 - **Payload** is an emit-style body (`{ field: value … }`) validated against the event exactly like any
   `emit`, so the **`?` fill-the-rest sigil works here too**:
   - `start @NewGame ?` — expand/see the whole payload; defaults shown, required fields left as `?` holes.
@@ -101,9 +93,9 @@ event), and is validated against that bundle's start signature — an unknown fi
 
 ### Grammar sketch
 ```
-appMember   = load | start ;
-bundleMember= … | start ;
-start       = "start" "@" IDENT structBody ;
+appMember   = "load" STRING [ "start" emitBody ] ;   // optional load-site payload override
+bundleMember= … | start ;                            // exactly one per bundle
+start       = "start" "@" IDENT emitBody ;
 ```
 
 ---
@@ -143,9 +135,10 @@ today.
   qualified symbol table for discovery and `*` resolution ([TOOLING.md](TOOLING.md)). No execution.
 - **Link (follow-on):** merge the loaded bundles into one runnable module, resolving `*` and `use`
   references and detecting real conflicts.
-- **Run (follow-on):** `veinc render app.vein` fires the app's `start` event through the linked program.
+- **Run (follow-on):** `veinc render app.vein` boots each loaded bundle at its own `start` entry (with any
+  load-site overrides applied) through the linked program.
 
-`start` is the piece that makes an app *runnable* rather than just *discoverable*.
+Each bundle's `start` entry is the piece that makes an app *runnable* rather than just *discoverable*.
 
 ---
 
@@ -157,7 +150,8 @@ today.
 | provenance (`from`/`id`/`cause`/`trail`), `audience` barrier | **runs** |
 | boot event via `start` (bundle level) + `--set` overrides | **runs** (`veinc render samples/boot.vein`) |
 | no `start` → default `@Request { path }` | **runs** (back-compat) |
-| app-level `start`; load-site `start { … }` override (parsed + validated by `veinc symbols`) | fires once app link+run lands |
+| one entry per bundle (2 `start`s = error) | **enforced** |
+| load-site `start { … }` override (parsed + validated by `veinc symbols`) | fires once app link+run lands |
 | `target`/`each tick`/`folds`/`settled`, `Entity` id | designed, **not executed** |
 | app link + run (`veinc render app.vein`) | **follow-on** |
 
@@ -165,6 +159,7 @@ today.
 - **Resolved:** external inputs reach the boot payload by **overriding named fields** of the `start`
   payload (see §3) — CLI supplies them, e.g. `--set path=/home`; today's `render <file> <path>` is the
   special case for `@Request { path }`.
-- Multiple `start`s across loaded bundles when no app `start` — hard error, or "run each"?
-- Does a bundle-level `start` also fire when the bundle is loaded as part of an app (per-bundle init), or
-  only when run standalone?
+- **Resolved:** one entry per bundle; an app has no boot event of its own — it boots each loaded bundle's
+  single `start` (with optional load-site override).
+- When an app boots several bundles, in what order do their entries fire (declaration order, or does
+  link-time dependency ordering matter)?
