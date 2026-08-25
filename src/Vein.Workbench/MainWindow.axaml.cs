@@ -498,14 +498,16 @@ public partial class MainWindow : Window
         string before = _editor.Text[..q];
 
         var emit = Regex.Match(before, @"emit\s+@(\w+)\s*$");
+        var start = Regex.Match(before, @"start\s+@(\w+)\s*$");   // a bundle's entry-point payload
         var bring = Regex.Match(before, @"bring\s+(?:\d+\s+)?(\w+)\s*$");
-        if (!emit.Success && !bring.Success) return;   // a plain fill-rest `?` — leave it
+        if (!emit.Success && !start.Success && !bring.Success) return;   // a plain fill-rest `?` — leave it
 
         var ast = _service.Compile(new CompileRequest("untitled.vein", _editor.Text)).Ast;
         if (ast is null) return;
 
         string? body = emit.Success ? EmitBody(ast, emit.Groups[1].Value)
-                                    : BringBody(ast, bring.Groups[1].Value);
+                     : start.Success ? EmitBody(ast, start.Groups[1].Value)   // start payload = the event's fields
+                     : BringBody(ast, bring.Groups[1].Value);
         if (body is null) return;
 
         _editor.Document.Replace(q, 1, body);          // replace the '?' with the expansion
