@@ -1,0 +1,54 @@
+// stdlib/Web.vein — VeinScript Standard Library : Std.Web
+// The web backend's domain: HTTP events + reusable html BUILDERS. Builders (markup/code/css) are where
+// platform-specific rendering legitimately lives — Std.Core stays platform-independent, Std.Web owns the
+// html. Authored `by std`; the public API is `shared` in publicators (reachable as *std.Web.<Pub>.<name>).
+//
+// This bundle also RENDERS standalone today, proving events + shapes + builders + shard + ShardView work
+// end to end:  veinc render stdlib/Web.vein /
+
+bundle Web by std {
+
+    // Http — the request/response + fragment events used to assemble a page reactively.
+    publicator Http {
+        shared("An inbound HTTP request.")
+        event @Request { path: string }
+
+        shared("A fragment of HTML contributed by some shard.")
+        event @Html { markup: string }
+
+        shared("All fragments are in — assemble and send the page.")
+        event @Render { }
+
+        shared("The response to send back.")
+        event @Response { status: int, body: string }
+    }
+
+    // Elements — reusable html builders. `bring Heading("…")` emits an @Html fragment.
+    publicator Elements {
+        shared("A top-level heading element.")
+        builder Heading { text: string   markup = "<h1>" + text + "</h1>" }
+
+        shared("A clickable button element.")
+        builder Button { label: string   markup = "<button>" + label + "</button>" }
+
+        shared("A paragraph of text.")
+        builder Text { body: string      markup = "<p>" + body + "</p>" }
+    }
+
+    // Demo — hears the (boot) @Request and brings a few elements, proving the builders render.
+    shard Demo {
+        hear @Request as req {
+            bring Heading("VeinScript Std.Web")
+            bring Text("A reusable html element library, assembled reactively.")
+            bring Button("Click me")
+            emit @Render { }
+        }
+    }
+
+    // Page — the ShardView: concatenates html fragments and emits the finished response.
+    ShardView Page {
+        var html: string
+        hear @Html as f   { html += f.markup }
+        hear @Render as r { emit @Response { status: 200, body: "<html><body>" + html + "</body></html>" } }
+    }
+}

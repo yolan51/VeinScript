@@ -1,0 +1,44 @@
+// stdlib/Core.vein — VeinScript Standard Library : Std.Core
+// The universal, platform-independent foundation every VeinScript program can build on: lifecycle
+// events, identity metadata, and the canonical `folds` demonstration. Authored `by std`; the
+// cross-bundle public API is `shared` inside publicators, so it is reachable as
+// *std.Core.<Publicator>.<name> and listed by:  veinc symbols stdlib/Core.vein
+//
+// STATUS: authored + discoverable + validated today. LOADING it across bundles at runtime
+// (use / qualified bring / app link+run) is a documented follow-on — see docs/STDLIB.md.
+
+bundle Core by std {
+
+    // Lifecycle — messages about an identity's existence and activation. Small, stable identities other
+    // bundles react to (`hear *std.Core.Lifecycle.@Spawn`).
+    publicator Lifecycle {
+        shared("An identity has come into existence.")
+        event @Spawn { }
+
+        shared("An identity should be removed.")
+        event @Destroy { }
+
+        shared("Activate an identity (make it live again).")
+        event @Enable { }
+
+        shared("Deactivate an identity without destroying it.")
+        event @Disable { }
+    }
+
+    // Meta — universal identity metadata carried as Shapes (state, not messages).
+    publicator Meta {
+        shared("A human-readable name for an identity.")
+        shape $Name { text: string }
+    }
+
+    // Quantity — the canonical `folds` example. Many independent systems may contribute to `current`;
+    // `folds sum` reconciles those concurrent writes additively, so contributors stay order-independent
+    // (see docs/LANGUAGE.md §3.5). Use it for health, resources, scores, stacking modifiers, …
+    publicator Quantity {
+        shared("A pool: a current value summed from all contributors, plus a ceiling.")
+        shape $Pool {
+            current: int folds sum
+            max: int
+        }
+    }
+}
