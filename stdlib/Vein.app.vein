@@ -1,0 +1,16 @@
+// stdlib/Vein.app.vein — the whole VeinScript Standard Library as one project, for discovery.
+// Run:  veinc symbols stdlib/Vein.app.vein          (lists every *Vein.Bundle.Publicator.member)
+//       veinc symbols stdlib/Vein.app.vein --json    (same, for tooling)
+// (This composes the library for browsing/validation; running it needs app link+run — a follow-on.)
+
+app Vein {
+    load "Core.vein"
+    load "Math.vein"
+    load "Transform.vein"
+    load "Input.vein"
+    load "UI.vein"
+    load "Time.vein"
+    load "Game.vein"
+    load "Web.vein"
+    load "Diagnostics.vein"
+}

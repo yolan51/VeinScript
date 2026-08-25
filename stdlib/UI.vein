@@ -1,11 +1,11 @@
-// stdlib/UI.vein — VeinScript Standard Library : Std.UI
+// stdlib/UI.vein — VeinScript Standard Library : Vein.UI
 // Visual state as SHAPES + interaction as EVENTS — platform-independent. A backend RENDERER turns these
-// identities into pixels/DOM; no HTML/CSS/JS lives here (that's Std.Web's builders). Layout rectangles
-// reuse Std.Math.$Rect rather than a redundant $Bounds; visibility/enabled are marks by convention
+// identities into pixels/DOM; no HTML/CSS/JS lives here (that's Vein.Web's builders). Layout rectangles
+// reuse Vein.Math.$Rect rather than a redundant $Bounds; visibility/enabled are marks by convention
 // (#Visible / #Enabled), not duplicated as shapes.
 // Discover:  veinc symbols stdlib/UI.vein
 
-bundle UI by std {
+bundle UI by Vein {
 
     publicator Widgets {
         shared("A run of display text.")
@@ -14,14 +14,25 @@ bundle UI by std {
         shared("A button's label.")
         shape $Button { label: string }
 
-        // Interaction events an identity emits/hears.
+        shared("A text input field with current value and placeholder.")
+        shape $Field { value: string, placeholder: string }
+
+        shared("An image element, by source path/url.")
+        shape $Image { source: string }
+    }
+
+    // Interaction occurrences carry the target Entity, so any bundle can react to a specific widget.
+    publicator Interaction {
         shared("An interactive element was activated.")
-        event @Click { }
+        event @Clicked { target: Entity }
 
         shared("An element gained focus.")
-        event @Focus { }
+        event @Focused { target: Entity }
 
         shared("An element lost focus.")
-        event @Blur { }
+        event @Blurred { target: Entity }
+
+        shared("The pointer entered an element.")
+        event @Hovered { target: Entity }
     }
 }

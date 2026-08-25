@@ -1,16 +1,16 @@
-// stdlib/Time.vein — VeinScript Standard Library : Std.Time
+// stdlib/Time.vein — VeinScript Standard Library : Vein.Time
 // Foundational time concepts. VeinScript targets more than games, so time is EVENT-DRIVEN, not
-// frame-assuming: a runtime emits @Tick when appropriate (a game every frame, an app on a timer), and
-// $Clock carries the current values. Platform-independent.
+// frame-assuming: a runtime emits @Ticked when appropriate (a game every frame, an app on a timer),
+// and $Clock carries the current values. Platform-independent.
 // Discover:  veinc symbols stdlib/Time.vein
 
-bundle Time by std {
+bundle Time by Vein {
 
     publicator Clock {
         shared("The current time: wall-clock `now` and the `delta` since the previous tick (seconds).")
         shape $Clock { now: float, delta: float }
 
-        shared("A time step advanced (frame, timer, or scheduler tick).")
-        event @Tick { }
+        shared("A time step advanced — carries the frame index and elapsed delta.")
+        event @Ticked { frame: int, delta: float }
     }
 }

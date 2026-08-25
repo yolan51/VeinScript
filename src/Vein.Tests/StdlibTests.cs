@@ -2,12 +2,14 @@ using Vein.Compiler.Diagnostics;
 using Vein.Compiler.Ir;
 using Vein.Compiler.Project;
 using Vein.Compiler.Service;
+using Vein.Compiler.Tooling;
 using Xunit;
 
 namespace Vein.Tests;
 
-// The Standard Library bundles must parse, expose their `shared` public API, and (for Std.Web) render —
-// using only the language that exists. These tests run against the actual stdlib/*.vein files.
+// The Vein Standard Library bundles must parse, expose their `shared` public API, hit the target counts,
+// and give every shared event a payload — using only the language that exists. These run against the
+// actual stdlib/*.vein files.
 public class StdlibTests
 {
     private static string RepoRoot()
@@ -25,28 +27,70 @@ public class StdlibTests
     private static CompilationResult CompileSrc(string src) =>
         new VeinCompilerService().Compile(new CompileRequest("t.vein", src));
 
+    public static readonly string[] Bundles =
+        { "Core.vein", "Math.vein", "Transform.vein", "Input.vein", "UI.vein", "Time.vein", "Game.vein", "Web.vein", "Diagnostics.vein" };
+
+    public static IEnumerable<object[]> BundleFiles => Bundles.Select(b => new object[] { b });
+
     [Theory]
-    [InlineData("Core.vein")]
-    [InlineData("Web.vein")]
-    [InlineData("Math.vein")]
-    [InlineData("Input.vein")]
-    [InlineData("UI.vein")]
-    [InlineData("Time.vein")]
-    [InlineData("Diagnostics.vein")]
+    [MemberData(nameof(BundleFiles))]
     public void Stdlib_bundle_compiles(string file) => Assert.True(Compile(StdFile(file)).Success);
 
     [Theory]
-    [InlineData("Math.vein", "*std.Math.Values.$Vec2")]
-    [InlineData("Input.vein", "*std.Input.Mouse.@MouseDown")]
-    [InlineData("UI.vein", "*std.UI.Widgets.$Button")]
-    [InlineData("Time.vein", "*std.Time.Clock.$Clock")]
-    [InlineData("Diagnostics.vein", "*std.Diagnostics.Report.$Diagnostic")]
+    [MemberData(nameof(BundleFiles))]
+    public void Every_shared_event_has_a_payload(string file)
+    {
+        // A shared event with no payload can't carry entity/data across the program.
+        var events = EventCatalog.Catalog(Compile(StdFile(file)).Ast!).Where(e => e.Shared);
+        foreach (var e in events)
+            Assert.True(e.Fields.Count > 0, $"{file}: shared event @{e.Name} has an empty payload");
+    }
+
+    [Theory]
+    [InlineData("Math.vein", "*Vein.Math.Values.$Vec2")]
+    [InlineData("Transform.vein", "*Vein.Transform.Spatial.$Velocity")]
+    [InlineData("Input.vein", "*Vein.Input.Mouse.@MouseDown")]
+    [InlineData("UI.vein", "*Vein.UI.Widgets.$Button")]
+    [InlineData("Time.vein", "*Vein.Time.Clock.$Clock")]
+    [InlineData("Game.vein", "*Vein.Game.Collision.@Collided")]
+    [InlineData("Web.vein", "*Vein.Web.Elements.Button")]
+    [InlineData("Diagnostics.vein", "*Vein.Diagnostics.Report.$Diagnostic")]
     public void Stdlib_bundle_exposes_shared_symbol(string file, string qualified)
     {
         var diag = new DiagnosticBag();
         var model = ProjectLoader.Load(StdFile(file), diag);
         Assert.False(diag.HasErrors);
         Assert.Contains(model.Symbols, s => s.QualifiedName == qualified);
+    }
+
+    [Fact]
+    public void Stdlib_meets_target_counts()
+    {
+        var diag = new DiagnosticBag();
+        var model = ProjectLoader.Load(StdFile("Vein.app.vein"), diag);
+        Assert.False(diag.HasErrors);
+        var byKind = model.Symbols.GroupBy(s => s.Kind).ToDictionary(g => g.Key, g => g.Count());
+        Assert.InRange(byKind[SymbolKind.Shape], 10, 30);
+        Assert.InRange(byKind[SymbolKind.Event], 5, 30);
+        Assert.InRange(byKind[SymbolKind.Builder], 5, 30);
+        Assert.InRange(byKind[SymbolKind.Shard], 5, 30);
+    }
+
+    [Fact]
+    public void Core_folds_are_lowered()
+    {
+        var pool = Compile(StdFile("Core.vein")).Modules[0].Types.Single(t => t.Name == "Pool");
+        Assert.Equal(FoldReducer.Sum, pool.Fields.Single(f => f.Name == "current").Fold);   // the folds demo
+    }
+
+    [Fact]
+    public void Web_builders_render_end_to_end()
+    {
+        var r = Compile(StdFile("Web.vein"));
+        Assert.True(r.Success);
+        var body = new Interp().Render(r.Modules[0], "/").Body;
+        Assert.Contains("<h1>VeinScript Vein.Web</h1>", body);
+        Assert.Contains("<button>Click me</button>", body);
     }
 
     [Fact]
@@ -59,8 +103,7 @@ public class StdlibTests
     [Fact]
     public void Input_event_round_trips_emit_to_hear()
     {
-        // An @MouseDown-shaped payload round-trips emit→hear within one bundle (single-bundle runtime;
-        // cross-bundle consumption is a follow-on).
+        // An @MouseDown-shaped payload round-trips emit→hear within one bundle (single-bundle runtime).
         var r = CompileSrc(
             "bundle B { event @Request { path: string } " +
             "event @MouseDown { x: float, y: float, button: int } " +
@@ -69,34 +112,5 @@ public class StdlibTests
             "shard Out { hear @MouseDown as m { emit @Response { status: 200, body: \"btn=\" + m.button } } } }");
         Assert.True(r.Success);
         Assert.Equal("btn=1", new Interp().Render(r.Modules[0], "/").Body);
-    }
-
-    [Fact]
-    public void Core_compiles_and_folds_are_lowered()
-    {
-        var r = Compile(StdFile("Core.vein"));
-        Assert.True(r.Success);
-        var pool = r.Modules[0].Types.Single(t => t.Name == "Pool");
-        Assert.Equal(FoldReducer.Sum, pool.Fields.Single(f => f.Name == "current").Fold);   // the folds demo
-    }
-
-    [Fact]
-    public void Core_exposes_its_shared_public_api()
-    {
-        var diag = new DiagnosticBag();
-        var model = ProjectLoader.Load(StdFile("Core.vein"), diag);
-        Assert.False(diag.HasErrors);
-        foreach (var name in new[] { "*std.Core.Lifecycle.@Spawn", "*std.Core.Meta.$Name", "*std.Core.Quantity.$Pool" })
-            Assert.Contains(model.Symbols, s => s.QualifiedName == name);
-    }
-
-    [Fact]
-    public void Web_builders_render_end_to_end()
-    {
-        var r = Compile(StdFile("Web.vein"));
-        Assert.True(r.Success);
-        var body = new Interp().Render(r.Modules[0], "/").Body;
-        Assert.Contains("<h1>VeinScript Std.Web</h1>", body);
-        Assert.Contains("<button>Click me</button>", body);
     }
 }

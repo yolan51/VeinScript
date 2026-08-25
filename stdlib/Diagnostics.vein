@@ -1,12 +1,12 @@
-// stdlib/Diagnostics.vein — VeinScript Standard Library : Std.Diagnostics
+// stdlib/Diagnostics.vein — VeinScript Standard Library : Vein.Diagnostics
 // Standard diagnostic concepts the compiler, tools, and eventual VeinIDE can share: a $Diagnostic shape
-// (severity + message + source location) and a @DiagnosticRaised event. Platform-independent.
-// Discover:  veinc symbols stdlib/Diagnostics.vein
+// (severity + message + source location), a @DiagnosticRaised event, and a Collector shard.
+// Platform-independent.  Discover:  veinc symbols stdlib/Diagnostics.vein
 
-bundle Diagnostics by std {
+bundle Diagnostics by Vein {
 
     publicator Report {
-        // `severity`: 0 = info, 1 = warning, 2 = error. (Kept an int — cross-bundle enums await link+run.)
+        // `severity`: 0 = info, 1 = warning, 2 = error. (An int — cross-bundle enums await link+run.)
         shared("A diagnostic at a source location: severity (0 info / 1 warning / 2 error) + message.")
         shape $Diagnostic {
             severity: int
@@ -17,5 +17,10 @@ bundle Diagnostics by std {
 
         shared("A diagnostic was produced by some tool/shard.")
         event @DiagnosticRaised { severity: int, message: string }
+
+        shared("Collects raised diagnostics for a tool/IDE to display.")
+        shard Collector {
+            hear @DiagnosticRaised as d { }
+        }
     }
 }

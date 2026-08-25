@@ -34,9 +34,9 @@ Cross-bundle references (surface + validated today): `emit`/`hear`/`start *Autho
 | shape/event + `folds`, publicator, `shared`, `by author` | **works** | stdlib is authored with these |
 | `veinc symbols` cross-bundle discovery + `*` validation | **works** | stdlib's public API is discoverable/validated |
 | single-bundle render (`emit`/`hear`/`bring`/`ShardView`) | **works** | a stdlib bundle can render *within itself* (proof) |
-| `use N` import resolution | **no-op** | can't `use Std.Core` to pull symbols into scope yet |
+| `use N` import resolution | **no-op** | can't `use Vein.Core` to pull symbols into scope yet |
 | `bring *Bundle.Builder` (qualified builders) | **missing** | can't consume another bundle's builders yet |
-| app **link + run** (load bundles, run together) | **missing** | can't actually *run* a program against `Std.*` yet |
+| app **link + run** (load bundles, run together) | **missing** | can't actually *run* a program against `Vein.*` yet |
 | `target`/`each tick`/`settled`/`folds` execution | **not executed** | stdlib shards are surface-only at runtime |
 | **mark declaration** (`#Mark { }`) | **does not exist** | marks are implicit names; "shared marks" can't be declared |
 
@@ -59,66 +59,50 @@ Shard = behavior · Bridge = domain sync · Renderer (backend) = platform visual
 
 ## 4. Hierarchy (one Core, domains on top, platform backends below)
 
-Bundles are single identifiers authored `by std`; the conceptual `Std.Core` maps to
-`bundle Core by std` and is referenced `*std.Core.…`. (Dotted names like `Std.Core` are **not** a
+Bundles are single identifiers authored `by Vein`; the conceptual `Vein.Core` maps to
+`bundle Core by Vein` and is referenced `*Vein.Core.…`. (Dotted names like `Vein.Core` are **not** a
 current language feature — a naming/`use` follow-on, §6.)
 
 ```
-Std.Core     — Lifecycle, Meta/Identity, Quantity(folds), (later) Math, Time, Collections
-Std.Input    — Mouse/Keyboard/Touch as EVENTS (platform-independent identities)
-Std.UI       — View/Panel/Text/Button as SHAPES + @Click etc.; backends render them
-Std.Graphics — Render/Sprite/Camera as shapes/events
-Std.Physics  — #Collidable, CollisionShape, @Collisioned, CollisionDetection shard
-Std.Web      — Http events + html BUILDERS (web is where markup/builders legitimately live)
-Std.Desktop  — Window/Clipboard/Files (platform-specific, behind the backend)
+Vein.Core     — Lifecycle, Meta/Identity, Quantity(folds), (later) Math, Time, Collections
+Vein.Input    — Mouse/Keyboard/Touch as EVENTS (platform-independent identities)
+Vein.UI       — View/Panel/Text/Button as SHAPES + @Click etc.; backends render them
+Vein.Graphics — Render/Sprite/Camera as shapes/events
+Vein.Physics  — #Collidable, CollisionShape, @Collisioned, CollisionDetection shard
+Vein.Web      — Http events + html BUILDERS (web is where markup/builders legitimately live)
+Vein.Desktop  — Window/Clipboard/Files (platform-specific, behind the backend)
 ```
 
-A single conceptual identity (e.g. `Std.Input.@MouseDown`) is defined **once**; each backend translates
+A single conceptual identity (e.g. `Vein.Input.@MouseDown`) is defined **once**; each backend translates
 its native input into that identity. No `Web.MouseDown` / `Desktop.MouseDown` duplication.
 
-## 5. Initial foundation (this pass)
+## 5. The library (author `Vein`)
 
-Deliberately minimal and platform-independent. Two bundles:
+Nine platform-independent bundles authored `by Vein`; each bundle's public API is `shared` inside
+publicators, reachable as `*Vein.Bundle.Publicator.member` and listed by
+`veinc symbols stdlib/Vein.app.vein`. Current totals: **24 shapes · 25 events · 6 builders · 7 shards ·
+19 publicators**. **Every shared event carries a payload** — an occurrence about an identity carries the
+`Entity` it concerns (`entity`/`target`/`a,b`), so events move real data across a program. `folds sum`
+is used only where genuinely multi-contributor (`$Pool`, `$Counter`, `$Velocity`).
 
-**`stdlib/Core.vein` — `bundle Core by std`** (the universal foundation):
-- `publicator Lifecycle`: `@Spawn`, `@Destroy`, `@Enable`, `@Disable` — existence/activation messages.
-- `publicator Meta`: `$Name { text: string }` — universal identity metadata (Shape = state).
-- `publicator Quantity`: `$Pool { current: int folds sum, max: int }` — the canonical **folds** demo:
-  many independent systems contribute to `current` additively, order-independent.
+| Bundle | Publicators · members |
+|---|---|
+| **Core** | `Lifecycle` (`@Spawned`/`@Destroyed`/`@Enabled`/`@Disabled {entity}`, shard `Reaper`) · `Meta` (`$Name` `$Tag` `$Layer`) · `Quantity` (`$Pool{current folds sum, max}` `$Counter{value folds sum}`) · `Relations` (`$Parent{of:Entity}` `$Owner{by:Entity}`) |
+| **Math** | `Values` (`$Vec2` `$Vec3` `$Vec4` `$Color` `$Rect`) |
+| **Transform** | `Spatial` (`$Position` `$Rotation` `$Scale` `$Velocity{x,y,z folds sum}`) · `Motion` (`@Moved{entity,x,y,z}`, shard `Integrator`) |
+| **Input** | `Mouse` (`@MouseDown`/`@MouseUp{x,y,button}` `@MouseMove{x,y}`) · `Keyboard` (`@KeyDown`/`@KeyUp{key}` `@TextInput{text}`) |
+| **UI** | `Widgets` (`$Text` `$Button` `$Field` `$Image`) · `Interaction` (`@Clicked`/`@Focused`/`@Blurred`/`@Hovered {target:Entity}`) |
+| **Time** | `Clock` (`$Clock{now,delta}` `@Ticked{frame,delta}`) |
+| **Game** | `Collision` (`$Collider` `@Collided{a,b:Entity}` shard `CollisionDetection`) · `Bodies` (`$Body` shard `GravitySystem`) · `Combat` (`@Damaged{target,amount}` shard `DamageSystem`) |
+| **Web** | `Http` (`@Request` `@Html` `@Style` `@Script` `@Render` `@Response`) · `Elements` (builders `Heading` `Paragraph` `Button` `Link` `Image` `ListItem`) · `Server` (shard `Router`) — renders standalone |
+| **Diagnostics** | `Report` (`$Diagnostic` `@DiagnosticRaised` shard `Collector`) |
 
-**`stdlib/Web.vein` — `bundle Web by std`** (proves events + shapes + **builders** + shard + ShardView
-render *today*, within one bundle): `publicator Http` (@Request/@Html/@Render/@Response) +
-`publicator Elements` (shared `Heading`/`Button` builders) + a `Demo` shard + `Page` ShardView.
-
-**Marks:** standard capability marks (`#Enabled`, `#Visible`, `#Collidable`, …) are **conventions**
-only — there is no mark-declaration syntax, so they can't be shared symbols. Documented, not invented.
-
-### 5.1 Domain reference (increment 2)
-
-Five more platform-independent bundles (`bundle X by std`; public API `shared` in publicators, reachable
-as `*std.X.Publicator.member`). The `shared("…")` string on each declaration is its long-form doc.
-
-| Identity | Kind | Purpose · fields |
-|---|---|---|
-| `*std.Math.Values.$Vec2` | shape | 2D vector — `x, y: float` |
-| `*std.Math.Values.$Vec3` | shape | 3D vector — `x, y, z: float` |
-| `*std.Math.Values.$Color` | shape | rgba color (0..1) — `r, g, b, a: float` |
-| `*std.Math.Values.$Rect` | shape | axis-aligned rect — `x, y, width, height: float` |
-| `*std.Input.Mouse.@MouseDown` / `@MouseUp` | event | pointer button — `x, y: float, button: int` |
-| `*std.Input.Mouse.@MouseMove` | event | pointer moved — `x, y: float` |
-| `*std.Input.Keyboard.@KeyDown` / `@KeyUp` | event | key — `key: string` |
-| `*std.Input.Keyboard.@TextInput` | event | composed text — `text: string` |
-| `*std.UI.Widgets.$Text` | shape | display text — `content: string` |
-| `*std.UI.Widgets.$Button` | shape | button label — `label: string` |
-| `*std.UI.Widgets.@Click` / `@Focus` / `@Blur` | event | interaction (no payload) |
-| `*std.Time.Clock.$Clock` | shape | `now, delta: float` |
-| `*std.Time.Clock.@Tick` | event | a time step advanced |
-| `*std.Diagnostics.Report.$Diagnostic` | shape | `severity: int, message: string, line, column: int` |
-| `*std.Diagnostics.Report.@DiagnosticRaised` | event | `severity: int, message: string` |
-
-Notes: input positions are `x,y: float` (not `$Vec2`) — a cross-bundle field-type dependency can't
-resolve until link+run; UI layout reuses `*std.Math.Values.$Rect` rather than a redundant `$Bounds`;
-none of these domains need `folds` (Core's `$Pool` remains the demo).
+Notes: game-specific capabilities live in their own **Game** bundle (non-game apps don't pull it in);
+Transform is general (spatial is used by apps + games). Input positions are `x,y: float`, not `$Vec2` —
+a cross-bundle field-type dependency can't resolve until link+run; UI layout reuses `*Vein.Math.Values.$Rect`
+rather than a redundant `$Bounds`. Stdlib shards use only **local** events + `target`/marks (no
+cross-bundle qualified refs), so each file's `veinc symbols` stays clean; cross-bundle wiring is the
+consumer's job.
 
 **Standard marks (conventions).** Capability marks have no declaration form, so they are shared *naming
 conventions*, applied with `mark self #X` and matched by `target … #X` / `audience #X`:
@@ -128,37 +112,37 @@ A first-class mark declaration (so these become validated shared symbols) is a f
 ## 6. Missing capabilities for full consumption (isolated, general-purpose follow-ons)
 
 Each is a general language/runtime capability, **not** a stdlib-specific hack:
-1. **Qualified `bring`** — `bring *std.Web.Elements.Button(…)` (mirror of the qualified event refs).
+1. **Qualified `bring`** — `bring *Vein.Web.Elements.Button(…)` (mirror of the qualified event refs).
 2. **`use` resolution** — make `use` bring another bundle's `shared` symbols into scope so bare names
    resolve (with `*` still available for disambiguation).
 3. **App link + run** — merge loaded bundles into one runnable program; route events/`*` at runtime.
 4. (Optional, later) **mark declarations** — a first-class `#Mark` decl so capability marks can be
    shared/validated like shapes/events, instead of being conventions.
 
-Until these land, `Std.*` is consumed by **copying the qualified identity** and validating via
+Until these land, `Vein.*` is consumed by **copying the qualified identity** and validating via
 `veinc symbols`; it runs only within a single bundle.
 
 ## 7. Naming rules
 - Identities are `PascalCase` (`@MouseDown`, `$Pool`, `Heading`). Fields are `lowerCamel` (`current`,
   `text`, `path`). No C#-isms, no abbreviations, no synonyms for one concept.
 - One concept = one identity, defined once, in the lowest layer that owns it (input events in
-  `Std.Input`, not per-domain). Different concepts get clearly different identities.
+  `Vein.Input`, not per-domain). Different concepts get clearly different identities.
 
 ## 8. Collisions & conflicts
 - Simple names *will* repeat across authors/bundles; the **author root + publicator path** disambiguate
-  (`*std.Core.Lifecycle.@Spawn` vs a game's `*acme.Combat.Sys.@Spawn`). `veinc symbols` flags clashes.
+  (`*Vein.Core.Lifecycle.@Spawn` vs a game's `*acme.Combat.Sys.@Spawn`). `veinc symbols` flags clashes.
 - Keep event payloads **small**; push derivable state into Shapes (e.g. `@Collisioned { a, b }` +
   `$Contact { point, normal, depth }` rather than a giant payload).
 
 ## 9. What NOT to add yet
 - No new keywords/lifecycle/event semantics; no second type system; no compiler hacks per stdlib type.
-- No `use Std.Core` dotted syntax, no mark declarations, no giant universal payloads, no HTML/CSS/JS in
-  Core (that lives in `Std.Web`), no whole-tree build — start at Core + Web, expand on demand.
+- No `use Vein.Core` dotted syntax, no mark declarations, no giant universal payloads, no HTML/CSS/JS in
+  Core (that lives in `Vein.Web`), no whole-tree build — start at Core + Web, expand on demand.
 
 ## 10. Recommended implementation order
-1. **Std.Core** (this pass) — Lifecycle, Meta, Quantity(folds).
-2. **Std.Web** (this pass) — prove builders/shard/ShardView render.
-3. Qualified `bring` (§6.1) → then **Std.UI** shapes + a renderer story.
+1. **Vein.Core** (this pass) — Lifecycle, Meta, Quantity(folds).
+2. **Vein.Web** (this pass) — prove builders/shard/ShardView render.
+3. Qualified `bring` (§6.1) → then **Vein.UI** shapes + a renderer story.
 4. `use` resolution + app link+run (§6.2–3) → real cross-bundle consumption; a `StdDemo` example app.
-5. Std.Input, Std.Physics (the `@Collisioned` capability), Std.Math — once consumption runs.
+5. Vein.Input, Vein.Physics (the `@Collisioned` capability), Vein.Math — once consumption runs.
 6. VeinIDE-in-VeinScript, consuming the stdlib with no special privileges (the architectural test).

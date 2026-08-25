@@ -1,12 +1,13 @@
-// stdlib/Web.vein — VeinScript Standard Library : Std.Web
-// The web backend's domain: HTTP events + reusable html BUILDERS. Builders (markup/code/css) are where
-// platform-specific rendering legitimately lives — Std.Core stays platform-independent, Std.Web owns the
-// html. Authored `by std`; the public API is `shared` in publicators (reachable as *std.Web.<Pub>.<name>).
+// stdlib/Web.vein — VeinScript Standard Library : Vein.Web
+// The web backend's domain: HTTP events + reusable html BUILDERS + a routing shard. Builders
+// (markup/code/css) are where platform-specific rendering legitimately lives — the rest of the stdlib
+// stays platform-independent, Vein.Web owns the html. Authored `by Vein`; public API `shared` in
+// publicators (reachable as *Vein.Web.<Pub>.<name>).
 //
-// This bundle also RENDERS standalone today, proving events + shapes + builders + shard + ShardView work
-// end to end:  veinc render stdlib/Web.vein /
+// This bundle also RENDERS standalone today (the non-shared Demo + Page below), proving events + shapes
+// + builders + shard + ShardView work end to end:  veinc render stdlib/Web.vein /
 
-bundle Web by std {
+bundle Web by Vein {
 
     // Http — the request/response + fragment events used to assemble a page reactively.
     publicator Http {
@@ -16,8 +17,14 @@ bundle Web by std {
         shared("A fragment of HTML contributed by some shard.")
         event @Html { markup: string }
 
-        shared("All fragments are in — assemble and send the page.")
-        event @Render { }
+        shared("A fragment of CSS.")
+        event @Style { css: string }
+
+        shared("A fragment of JavaScript.")
+        event @Script { code: string }
+
+        shared("All fragments are in — assemble and send the page for this path.")
+        event @Render { path: string }
 
         shared("The response to send back.")
         event @Response { status: int, body: string }
@@ -28,27 +35,43 @@ bundle Web by std {
         shared("A top-level heading element.")
         builder Heading { text: string   markup = "<h1>" + text + "</h1>" }
 
+        shared("A paragraph of text.")
+        builder Paragraph { body: string   markup = "<p>" + body + "</p>" }
+
         shared("A clickable button element.")
         builder Button { label: string   markup = "<button>" + label + "</button>" }
 
-        shared("A paragraph of text.")
-        builder Text { body: string      markup = "<p>" + body + "</p>" }
+        shared("An anchor / hyperlink.")
+        builder Link { href: string, label: string   markup = "<a href=\"" + href + "\">" + label + "</a>" }
+
+        shared("An image element.")
+        builder Image { source: string, alt: string   markup = "<img src=\"" + source + "\" alt=\"" + alt + "\">" }
+
+        shared("A list item.")
+        builder ListItem { text: string   markup = "<li>" + text + "</li>" }
     }
 
-    // Demo — hears the (boot) @Request and brings a few elements, proving the builders render.
+    // --- render demo (non-shared) — proves the builders assemble end to end -------------------------
+    // Declared before the Server router so its @Html fragments are queued before @Render.
     shard Demo {
         hear @Request as req {
-            bring Heading("VeinScript Std.Web")
-            bring Text("A reusable html element library, assembled reactively.")
+            bring Heading("VeinScript Vein.Web")
+            bring Paragraph("A reusable html element library, assembled reactively.")
             bring Button("Click me")
-            emit @Render { }
         }
     }
 
-    // Page — the ShardView: concatenates html fragments and emits the finished response.
     ShardView Page {
         var html: string
         hear @Html as f   { html += f.markup }
         hear @Render as r { emit @Response { status: 200, body: "<html><body>" + html + "</body></html>" } }
+    }
+
+    // Server — the routing capability (shared): turn a request into a render for its path.
+    publicator Server {
+        shared("Routes an inbound @Request to a page @Render for its path.")
+        shard Router {
+            hear @Request as req { emit @Render { path: req.path } }
+        }
     }
 }

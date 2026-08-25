@@ -1,44 +1,64 @@
-// stdlib/Core.vein — VeinScript Standard Library : Std.Core
-// The universal, platform-independent foundation every VeinScript program can build on: lifecycle
-// events, identity metadata, and the canonical `folds` demonstration. Authored `by std`; the
-// cross-bundle public API is `shared` inside publicators, so it is reachable as
-// *std.Core.<Publicator>.<name> and listed by:  veinc symbols stdlib/Core.vein
+// stdlib/Core.vein — VeinScript Standard Library : Vein.Core
+// The universal, platform-independent foundation: lifecycle occurrences, identity metadata, quantities
+// (folds), and identity relationships. Authored `by Vein`; the cross-bundle public API is `shared`
+// inside publicators, so it is reachable as *Vein.Core.<Publicator>.<name> and listed by:
+//     veinc symbols stdlib/Core.vein
 //
 // STATUS: authored + discoverable + validated today. LOADING it across bundles at runtime
-// (use / qualified bring / app link+run) is a documented follow-on — see docs/STDLIB.md.
+// (qualified bring / use / app link+run) is a documented follow-on — see docs/STDLIB.md.
 
-bundle Core by std {
+bundle Core by Vein {
 
-    // Lifecycle — messages about an identity's existence and activation. Small, stable identities other
-    // bundles react to (`hear *std.Core.Lifecycle.@Spawn`).
+    // Lifecycle — occurrences about an identity's existence/activation. Every event carries the entity
+    // it concerns, so listeners in other bundles know WHICH identity changed.
     publicator Lifecycle {
-        shared("An identity has come into existence.")
-        event @Spawn { }
+        shared("An identity came into existence.")
+        event @Spawned { entity: Entity }
 
-        shared("An identity should be removed.")
-        event @Destroy { }
+        shared("An identity was removed.")
+        event @Destroyed { entity: Entity }
 
-        shared("Activate an identity (make it live again).")
-        event @Enable { }
+        shared("An identity was activated.")
+        event @Enabled { entity: Entity }
 
-        shared("Deactivate an identity without destroying it.")
-        event @Disable { }
+        shared("An identity was deactivated (without being destroyed).")
+        event @Disabled { entity: Entity }
+
+        shared("Reacts to @Destroyed to run teardown for the identity.")
+        shard Reaper {
+            hear @Destroyed as e { }
+        }
     }
 
     // Meta — universal identity metadata carried as Shapes (state, not messages).
     publicator Meta {
         shared("A human-readable name for an identity.")
         shape $Name { text: string }
+
+        shared("A free-form category label.")
+        shape $Tag { value: string }
+
+        shared("A sorting/rendering layer index.")
+        shape $Layer { index: int }
     }
 
-    // Quantity — the canonical `folds` example. Many independent systems may contribute to `current`;
-    // `folds sum` reconciles those concurrent writes additively, so contributors stay order-independent
-    // (see docs/LANGUAGE.md §3.5). Use it for health, resources, scores, stacking modifiers, …
+    // Quantity — the canonical `folds` domain. Many independent systems contribute; `folds sum`
+    // reconciles concurrent writes additively, order-independent (docs/LANGUAGE.md §3.5).
     publicator Quantity {
-        shared("A pool: a current value summed from all contributors, plus a ceiling.")
-        shape $Pool {
-            current: int folds sum
-            max: int
-        }
+        shared("A pool: a current value summed from all contributors, plus a ceiling (health, mana, …).")
+        shape $Pool { current: int folds sum, max: int }
+
+        shared("A plain counter every contributor adds into.")
+        shape $Counter { value: int folds sum }
+    }
+
+    // Relations — identity relationships expressed as Shapes that carry another Entity (IOP: a
+    // relationship is a component, not a pointer graph).
+    publicator Relations {
+        shared("Parent link: this identity's parent Entity.")
+        shape $Parent { of: Entity }
+
+        shared("Ownership link: the Entity that owns this identity.")
+        shape $Owner { by: Entity }
     }
 }

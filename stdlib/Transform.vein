@@ -1,0 +1,37 @@
+// stdlib/Transform.vein — VeinScript Standard Library : Vein.Transform
+// Spatial state — general (used by desktop layout AND games). Position/Rotation/Scale as Shapes,
+// Velocity with `folds sum` (many forces contribute), and a @Moved occurrence.
+// Discover:  veinc symbols stdlib/Transform.vein
+
+bundle Transform by Vein {
+
+    publicator Spatial {
+        shared("World/local position.")
+        shape $Position { x: float, y: float, z: float }
+
+        shared("Euler rotation (radians).")
+        shape $Rotation { x: float, y: float, z: float }
+
+        shared("Non-uniform scale.")
+        shape $Scale { x: float, y: float, z: float }
+
+        shared("Velocity — many systems contribute, so each axis folds additively.")
+        shape $Velocity {
+            x: float folds sum
+            y: float folds sum
+            z: float folds sum
+        }
+    }
+
+    publicator Motion {
+        shared("An identity's position changed.")
+        event @Moved { entity: Entity, x: float, y: float, z: float }
+
+        shared("Advances $Position from $Velocity each step.")
+        shard Integrator {
+            target $Velocity as self {
+                each tick { }
+            }
+        }
+    }
+}

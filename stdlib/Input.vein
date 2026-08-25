@@ -1,14 +1,13 @@
-// stdlib/Input.vein — VeinScript Standard Library : Std.Input
-// Platform-independent input as EVENTS. Each backend (desktop, web, …) translates its native input into
+// stdlib/Input.vein — VeinScript Standard Library : Vein.Input
+// Platform-independent input as EVENTS. Each backend (desktop, web, …) translates native input into
 // these identities, so application code hears the SAME event regardless of platform:
-//     native input → runtime → *std.Input.…@Event → hear → shard → shape changes → view
+//     native input → runtime → *Vein.Input.…@Event → hear → shard → shape changes → view
 // Discover:  veinc symbols stdlib/Input.vein
 
-bundle Input by std {
+bundle Input by Vein {
 
-    // Positions are x,y floats here rather than $Vec2 to keep Input self-contained (a cross-bundle
-    // field-type reference can't resolve until app link+run). Composition with Std.Math.$Vec2 is a
-    // follow-on once linking lands.
+    // Positions are x,y floats here (not $Vec2) to keep Input self-contained — a cross-bundle field-type
+    // reference can't resolve until app link+run. Composition with Vein.Math.$Vec2 is a follow-on.
     publicator Mouse {
         shared("A mouse/pointer button was pressed.")
         event @MouseDown { x: float, y: float, button: int }
