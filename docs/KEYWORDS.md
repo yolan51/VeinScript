@@ -22,6 +22,7 @@ dialect. There is no general `class`.
 | `bundle` | `bundle N [by author] { … }` | module; optional author/pseudo roots its qualified name | |
 | `app` | `app N { load "f.vein" … }` | project manifest: the set of bundles that compose a program | multi-file |
 | `by` | `bundle N by author` | author/pseudo of a bundle (collision root) | |
+| `start` | `start @E { … }` (bundle/app) · `start { … }` (shard) | boot event + payload; or shard once-on-create | see RUNTIME.md |
 | `use` | `use N [as M]` | import | |
 | `publicator` | `publicator N { … }` | export group | |
 | `shared` | `shared("doc")` | doc attribute on next decl | → HIR metadata |
@@ -73,7 +74,6 @@ Held so they aren't accidentally repurposed. Assign a meaning or cut before v1.0
 
 | Keyword | Leaning / candidate use |
 |---------|-------------------------|
-| `start` | shard once-on-create lifecycle (`start { … }` → `start()`) |
 | `on` | event/UI handler sugar (`on click { … }`) — desktop domain |
 | `audience` | networking/replication scope (who sees an identity/event) |
 | `bridge` | interop / FFI boundary |
@@ -146,9 +146,9 @@ Identifiers resolved to built-in reducers — **not keywords**, so no new keywor
 
 ## 4. Closure check
 
-Keywords in the lexer map: **51**. Classified above as **39 core** (19 general core + 20 core-IOP¹),
-**2 core-lib** (`random`, `count`), **9 reserved** (`start` `on` `audience` `bridge` `bring`
-`builder` `mute` `unmute` `transform`), **1 cut** (`push`). 39 + 2 + 9 + 1 = **51**. ✅
+Keywords in the lexer map: **51**. Classified above as **40 core** (20 general core + 20 core-IOP¹),
+**2 core-lib** (`random`, `count`), **8 reserved** (`on` `audience` `bridge` `bring`
+`builder` `mute` `unmute` `transform`), **1 cut** (`push`). 40 + 2 + 8 + 1 = **51**. ✅
 
 ¹ core-IOP = `shape` `event` `shard` `target` `each` `tick` `settled` `folds` `mark` `unmark` `Entity`
 `attach` `unattach` `to` `from` `emit` `hear` `destroy` `chance` `sync` — plus the general-core rows

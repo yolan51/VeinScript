@@ -38,7 +38,7 @@ So "what starts the program" is currently a baked-in `@Request`. Everything else
 
 ---
 
-## 3. Booting with `start` (proposed)
+## 3. Booting with `start` (implemented — bundle level)
 
 **Problem:** the boot event is hard-coded to `@Request { path }`, which only fits web. A game wants to
 start with `@NewGame { seed: 42 }`; a tool with `@Run { args: … }`.
@@ -138,8 +138,9 @@ today.
 |-------|-------|
 | reactive emit/hear loop, `ShardView` assembly, `@Response` | **runs** |
 | provenance (`from`/`id`/`cause`/`trail`), `audience` barrier | **runs** |
-| boot event | **hard-coded `@Request`** (→ `start` proposal) |
-| `start` directive (bundle + app) | **proposed (this doc)** |
+| boot event via `start` (bundle level) + `--set` overrides | **runs** (`veinc render samples/boot.vein`) |
+| no `start` → default `@Request { path }` | **runs** (back-compat) |
+| app-level `start` | **parses**; fires once app link+run lands |
 | `target`/`each tick`/`folds`/`settled`, `Entity` id | designed, **not executed** |
 | app link + run (`veinc render app.vein`) | **follow-on** |
 

@@ -58,10 +58,18 @@ public sealed class Lower
                 case BridgeDecl br: shards.Add(LowerShardLike(br.Name, br.Members, "bridge", br.Doc, br.CarriedShapes, br.CarriedMarks)); break;
                 case UseDecl: break;                 // resolved away
                 case VarDecl: break;                 // module-level state: not modeled yet
+                case StartDecl: break;               // captured separately below (module boot)
                 default: break;
             }
         }
         foreach (var m in bundle.Members) LowerMember(m);
+
+        // Boot event: a bundle-level `start @E { … }` (first one wins). Null → runtime uses @Request.
+        var startDecl = bundle.Members.OfType<StartDecl>().FirstOrDefault();
+        var start = startDecl is null ? null : new IrStart(
+            startDecl.Event,
+            startDecl.Fields.Select(f => (f.Name, LowerExpr(f.Value))).ToList(),
+            startDecl.FillRest);
 
         // Marks discovered while lowering become Tag types (deduped).
         foreach (var tag in _tags)
@@ -70,7 +78,7 @@ public sealed class Lower
                     Array.Empty<IrField>(), Array.Empty<IrEnumCase>(), null,
                     new[] { IrAttr.Of("tag") }));
 
-        return new IrModule(bundle.Name, types, funcs, shards);
+        return new IrModule(bundle.Name, types, funcs, shards) { Start = start };
     }
 
     // ---- data -----------------------------------------------------------

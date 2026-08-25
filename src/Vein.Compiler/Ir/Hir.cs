@@ -44,7 +44,15 @@ public sealed record IrModule(
     string Name,
     IReadOnlyList<IrType> Types,
     IReadOnlyList<IrFunction> Functions,
-    IReadOnlyList<IrShard> Shards);
+    IReadOnlyList<IrShard> Shards)
+{
+    /// The boot event to fire when this module runs, from a `start @E { … }` decl. Null → the runtime
+    /// falls back to `@Request { path }`. See docs/RUNTIME.md.
+    public IrStart? Start { get; init; }
+}
+
+/// A lowered boot directive: the event to fire first and its (already-lowered) payload fields.
+public sealed record IrStart(string Event, IReadOnlyList<(string Field, IrExpr Value)> Fields, bool FillRest);
 
 public sealed record IrAttr(string Name, IReadOnlyList<object?> Args)
 {

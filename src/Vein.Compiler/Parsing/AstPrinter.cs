@@ -25,6 +25,10 @@ public static class AstPrinter
             case AppDecl app:
                 Line(sb, ind, $"app {app.Name}");
                 foreach (var l in app.Loads) Line(sb, ind + 1, $"load \"{l}\"");
+                if (app.Start is not null) Line(sb, ind + 1, StartText(app.Start));
+                break;
+            case StartDecl st:
+                Line(sb, ind, StartText(st));
                 break;
             case UseDecl u: Line(sb, ind, $"use {u.Name}{(u.Alias is null ? "" : " as " + u.Alias)}"); break;
             case ShapeDecl s:
@@ -138,6 +142,9 @@ public static class AstPrinter
     };
     private static string Field(FieldDecl f) => $"{f.Name}: {Type(f.Type)}{(f.Fold is null ? "" : " folds " + f.Fold)}{(f.Default is null ? "" : " = " + Ex(f.Default))}";
     private static string Type(TypeRef? t) => t is null ? "infer" : t.Name + (t.Args.Count > 0 ? "<" + string.Join(", ", t.Args.Select(Type)) + ">" : "");
+
+    private static string StartText(StartDecl st) =>
+        $"start @{st.Event} {{ {string.Join(", ", st.Fields.Select(f => f.Name + ": " + Ex(f.Value)).Append(st.FillRest ? "?" : null).Where(x => x is not null))} }}";
 
     /// `*Author.Bundle.Publicator.@Event` canonical text.
     public static string StarText(StarRefExpr sr)

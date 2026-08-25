@@ -1,0 +1,17 @@
+// boot.vein — `start` names the boot event + payload, replacing the default @Request { path }.
+// The payload is an emit-style body, so `?` fill-the-rest works here too (`start @NewGame ?`).
+// Run:  veinc render samples/boot.vein
+//       veinc render samples/boot.vein --set seed=99      (override a payload field at boot)
+
+bundle Game {
+    start @NewGame { seed: 42, players: 2 }
+
+    event @NewGame  { seed: int, players: int }
+    event @Response { status: int, body: string }
+
+    shard Kernel {
+        hear @NewGame as g {
+            emit @Response { status: 200, body: "new game seed=" + g.seed + " players=" + g.players }
+        }
+    }
+}

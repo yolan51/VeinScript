@@ -10,4 +10,5 @@
 app MyGame {
     load "yolan_combat.vein"
     load "alice_combat.vein"
+    start @Request { path: "/" }   // the boot event + payload (parsed now; fires once app link+run lands)
 }

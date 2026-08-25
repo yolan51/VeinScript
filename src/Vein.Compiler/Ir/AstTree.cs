@@ -38,7 +38,9 @@ public sealed class AstTree
     private IrNode Decl(Decl d) => d switch
     {
         BundleDecl b => WithAttrs(Node("Bundle", b.Name, b.Span, b.Members.Select(Decl)), b.Author is null ? null : ("author", b.Author)),
-        AppDecl app => Node("App", app.Name, app.Span, app.Loads.Select(l => Leaf("Load", Quote(l), app.Span))),
+        AppDecl app => Node("App", app.Name, app.Span,
+            app.Loads.Select(l => Leaf("Load", Quote(l), app.Span)).Concat(app.Start is null ? Enumerable.Empty<IrNode>() : new[] { Decl(app.Start) })),
+        StartDecl st => Node("Start", "@" + st.Event, st.Span, st.Fields.Select(ArgField).Concat(st.FillRest ? new[] { Leaf("Fill", "?", st.Span) } : Enumerable.Empty<IrNode>())),
         PublicatorDecl p => Node("Publicator", p.Name, p.Span, p.Members.Select(Decl)),
         UseDecl u => Leaf("Use", u.Alias is null ? u.Name : $"{u.Name} as {u.Alias}", u.Span),
         ShapeDecl s => WithAttrs(Node("Shape", "$" + s.Name, s.Span, s.Members.Select(ShapeMember)), Doc(s.Doc)),

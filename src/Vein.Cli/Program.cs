@@ -74,11 +74,21 @@ switch (command)
         var unit = new Parser(tokens, diagnostics).ParseUnit();
         if (!diagnostics.HasErrors)
         {
-            string requestPath = args.Length > 2 ? args[2] : "/";
+            // Positional arg = request path (legacy @Request); `--set k=v` overrides boot payload fields.
+            string requestPath = "/";
+            var inputs = new Dictionary<string, object?>(StringComparer.Ordinal);
+            for (int i = 2; i < args.Length; i++)
+            {
+                var a = args[i];
+                string? pair = a == "--set" && i + 1 < args.Length ? args[++i]
+                             : a.StartsWith("--set=") ? a["--set=".Length..] : null;
+                if (pair is not null) { var kv = pair.Split('=', 2); if (kv.Length == 2) inputs[kv[0]] = Coerce(kv[1]); }
+                else if (!a.StartsWith("--")) requestPath = a;
+            }
             var lower = new Lower(diagnostics);
             foreach (var bundle in unit.Bundles)
             {
-                var result = new Interp().Render(lower.LowerBundle(bundle), requestPath);
+                var result = new Interp().Render(lower.LowerBundle(bundle), requestPath, inputs);
                 foreach (var line in result.Log) Console.Error.WriteLine($"  · {line}");
                 if (result.Body is not null)
                     Console.WriteLine($"HTTP {result.Status}\n{result.Body}");
@@ -182,3 +192,7 @@ return diagnostics.HasErrors ? 1 : 0;
 static string Display(Token t) =>
     t.Kind == TokenKind.Term ? "" :
     t.Value is not null ? $"{t.Text}  = {t.Value}" : t.Text;
+
+// Coerce a `--set k=v` value to int/bool where it parses, else keep the string.
+static object? Coerce(string v) =>
+    long.TryParse(v, out var l) ? l : bool.TryParse(v, out var b) ? b : v;

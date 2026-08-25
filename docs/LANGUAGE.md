@@ -70,6 +70,18 @@ with only as many as needed to be unique; if two authors clash, add the author. 
 every qualified name and flags collisions ([TOOLING.md](TOOLING.md)). *This pass is discovery +
 resolution only; linking loaded bundles into one running program is a follow-on.*
 
+**Booting — `start`.** A bundle (or app) may name the boot event + payload; the runtime fires it first
+instead of the default `@Request { path }`. The body is emit-style, so `?` fill-the-rest works, and
+`veinc render … --set field=value` overrides payload fields at boot (see [RUNTIME.md](RUNTIME.md)):
+
+```
+bundle Game {
+    start @NewGame { seed: 42, players: 2 }
+    event @NewGame { seed: int, players: int }
+    …
+}
+```
+
 ---
 
 ## 3. Data

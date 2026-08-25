@@ -40,7 +40,7 @@ public sealed class Interp
         string? Body, long Status, IReadOnlyList<string> Log,
         IReadOnlyList<VeinFirstClass> Nodes, IReadOnlyList<GraphEdge> Edges);
 
-    public RenderResult Render(IrModule module, string requestPath)
+    public RenderResult Render(IrModule module, string requestPath, IReadOnlyDictionary<string, object?>? inputs = null)
     {
         _bundle = module.Name;
         _types = module.Types.ToDictionary(t => t.Name, StringComparer.Ordinal);
@@ -66,9 +66,32 @@ public sealed class Interp
             }
         }
 
+        // Boot: fire the declared `start` event + payload, else the default @Request { path }.
         var reqFc = _registry.Register("request", VeinKind.Runtime);
-        Emit("Request", new Dictionary<string, object?>
-            { ["path"] = requestPath, ["from"] = FromOf(reqFc), ["origin"] = null, ["bundle"] = _bundle });
+        var bootInst = new Instance { Name = "boot", Fc = reqFc };
+        var noLocals = new Dictionary<string, object?>();
+        string bootEvent;
+        var boot = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (module.Start is { } st)
+        {
+            bootEvent = st.Event;
+            foreach (var (field, val) in st.Fields) boot[field] = Eval(val, bootInst, noLocals);
+            // Fill remaining declared fields from their defaults (or a zero placeholder under `?`).
+            if (_types.TryGetValue(bootEvent, out var et))
+                foreach (var fld in et.Fields)
+                {
+                    if (fld.Name is "origin" or "source" || boot.ContainsKey(fld.Name)) continue;
+                    if (fld.Default is not null) boot[fld.Name] = Eval(fld.Default, bootInst, noLocals);
+                    else if (st.FillRest) boot[fld.Name] = ZeroVal(fld.Type.Name);
+                }
+        }
+        else { bootEvent = "Request"; boot["path"] = requestPath; }
+
+        // Run inputs override named payload fields (e.g. CLI --set path=/home). See docs/RUNTIME.md.
+        if (inputs is not null) foreach (var kv in inputs) boot[kv.Key] = kv.Value;
+
+        boot["from"] = FromOf(reqFc); boot["origin"] = null; boot["bundle"] = _bundle;
+        Emit(bootEvent, boot);
 
         int guard = 0;
         while (_queue.Count > 0 && guard++ < 10_000)

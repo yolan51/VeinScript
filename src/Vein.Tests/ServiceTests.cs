@@ -193,6 +193,51 @@ public class ServiceTests
     }
 
     [Fact]
+    public void App_start_declares_boot_event()
+    {
+        var r = Compile("app A { load \"x.vein\"  start @Go { seed: 1 } }");
+        Assert.True(r.Success);
+        Assert.Equal("Go", r.Ast!.Apps.Single().Start!.Event);
+    }
+
+    [Fact]
+    public void Bundle_start_lowers_to_module_boot()
+    {
+        var r = Compile("bundle B { start @Boot { n: 1 } event @Boot { n: int } }");
+        Assert.True(r.Success);
+        Assert.Equal("Boot", r.Modules[0].Start!.Event);
+    }
+
+    [Fact]
+    public void Start_fires_boot_event_with_payload()
+    {
+        var r = Compile("bundle B { start @Boot { n: 7 } event @Boot { n: int } " +
+                        "event @Response { status: int, body: string } " +
+                        "shard S { hear @Boot as b { emit @Response { status: 200, body: \"n=\" + b.n } } } }");
+        Assert.True(r.Success);
+        Assert.Equal("n=7", new Interp().Render(r.Modules[0], "/").Body);
+    }
+
+    [Fact]
+    public void Render_input_overrides_boot_field()
+    {
+        var r = Compile("bundle B { start @Boot { n: 7 } event @Boot { n: int } " +
+                        "event @Response { status: int, body: string } " +
+                        "shard S { hear @Boot as b { emit @Response { status: 200, body: \"n=\" + b.n } } } }");
+        var res = new Interp().Render(r.Modules[0], "/", new Dictionary<string, object?> { ["n"] = 99L });
+        Assert.Equal("n=99", res.Body);
+    }
+
+    [Fact]
+    public void No_start_falls_back_to_request()
+    {
+        var r = Compile("bundle B { event @Request { path: string } event @Response { status: int, body: string } " +
+                        "shard S { hear @Request as q { emit @Response { status: 200, body: q.path } } } }");
+        Assert.Null(r.Modules[0].Start);
+        Assert.Equal("/hello", new Interp().Render(r.Modules[0], "/hello").Body);
+    }
+
+    [Fact]
     public void Star_ref_parses_and_lowers_to_scope_ref()
     {
         var r = Compile("bundle B { event @D { x: int } shard S { hear @R as q { let o = *alice.Combat.@Request } } }");

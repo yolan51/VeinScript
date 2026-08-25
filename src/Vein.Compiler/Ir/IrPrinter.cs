@@ -9,6 +9,8 @@ public static class IrPrinter
     {
         var sb = new StringBuilder();
         sb.AppendLine($"module {m.Name}");
+        if (m.Start is { } st)
+            sb.AppendLine($"{Ind(1)}start @{st.Event} {{ {string.Join(", ", st.Fields.Select(f => f.Field + ": " + E(f.Value)).Append(st.FillRest ? "?" : null).Where(x => x is not null))} }}");
         foreach (var t in m.Types) PrintType(sb, t);
         foreach (var f in m.Functions) PrintFunc(sb, f, 1);
         foreach (var s in m.Shards) PrintShard(sb, s);

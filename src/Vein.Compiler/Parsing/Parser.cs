@@ -95,20 +95,22 @@ public sealed class Parser
         string name = Expect(TokenKind.Ident, "app name").Text;
         Expect(TokenKind.LBrace, "'{'");
         var loads = new List<string>();
+        StartDecl? startDecl = null;
         SkipTerms();
         while (!Check(TokenKind.RBrace) && !AtEnd)
         {
-            // `load` is a contextual keyword inside the app body.
+            // `load` is a contextual keyword inside the app body; `start` names the boot event.
             if ((Check(TokenKind.Ident) || IsKeyword(Cur.Kind)) && Cur.Text == "load")
             {
                 Advance();
                 loads.Add(Expect(TokenKind.String, "a file path string after 'load'").Value as string ?? "");
             }
-            else { _diag.Error("VS0106", $"Expected 'load', found '{Cur.Text}'.", Here); Advance(); }
+            else if (Check(TokenKind.KwStart)) startDecl = ParseStart();
+            else { _diag.Error("VS0106", $"Expected 'load' or 'start', found '{Cur.Text}'.", Here); Advance(); }
             SkipTerms();
         }
         Expect(TokenKind.RBrace, "'}'");
-        return new AppDecl(name, loads, start);
+        return new AppDecl(name, loads, start) { Start = startDecl };
     }
 
     /// Parse declarations until `until`. Handles `shared("doc")` prefixes and `publicator` groups.
@@ -163,6 +165,7 @@ public sealed class Parser
                 throw new ParseError();
             case TokenKind.KwLet: return ParseVar(mutable: false);
             case TokenKind.KwVar: return ParseVar(mutable: true);
+            case TokenKind.KwStart: return ParseStart();   // bundle-level boot event
             default:
                 _diag.Error("VS0102", $"Unexpected '{Cur.Text}' at declaration level.", Here);
                 throw new ParseError();
@@ -614,12 +617,18 @@ public sealed class Parser
     {
         var s = Here; Advance();
         string ev = Expect(TokenKind.EventRef, "@EventName").Text;
+        var (fields, fill) = ParseEmitBody();
+        return new EmitStmt(ev, fields, fill, s);
+    }
+
+    /// The tail shared by `emit`/`start`: `?` (fill-the-rest), `{ a: 1, ? }`, or nothing (`@E` alone —
+    /// omitted fields fill from defaults/context at runtime).
+    private (List<FieldInit> Fields, bool Fill) ParseEmitBody()
+    {
         var fields = new List<FieldInit>();
         bool fill = false;
-
-        if (Match(TokenKind.Question))                    // emit @E ?
-            fill = true;
-        else if (Check(TokenKind.LBrace))                 // emit @E { a: 1, ? }
+        if (Match(TokenKind.Question)) fill = true;
+        else if (Check(TokenKind.LBrace))
         {
             Advance();
             SkipTerms();
@@ -638,8 +647,17 @@ public sealed class Parser
             }
             Expect(TokenKind.RBrace, "'}'");
         }
-        // else: `emit @E` — omitted fields still fill from defaults/context at runtime.
-        return new EmitStmt(ev, fields, fill, s);
+        return (fields, fill);
+    }
+
+    /// `start @Event { payload }` — the boot event (bundle- or app-level). Reuses the emit body.
+    private StartDecl ParseStart()
+    {
+        var s = Here;
+        Expect(TokenKind.KwStart, "'start'");
+        string ev = Expect(TokenKind.EventRef, "@EventName after 'start'").Text;
+        var (fields, fill) = ParseEmitBody();
+        return new StartDecl(ev, fields, fill, s);
     }
 
     private AttachStmt ParseAttach(bool remove)
