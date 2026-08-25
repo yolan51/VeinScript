@@ -43,9 +43,13 @@ So "what starts the program" is currently a baked-in `@Request`. Everything else
 **Problem:** the boot event is hard-coded to `@Request { path }`, which only fits web. A game wants to
 start with `@NewGame { seed: 42 }`; a tool with `@Run { args: … }`.
 
-**The rule: one bundle = one entry point.** Every bundle has **exactly one** `start @E { payload }` — its
-front door (two `start`s in a bundle is an error). An **app has no boot event of its own**: it composes
-bundles, and each bundle's own `start` is its entry. This keeps one meaning for `start`.
+**The rule: a bundle has AT MOST one entry point.** Zero or one `start @E { payload }`:
+- **one** — the bundle's front door (two is an error);
+- **none** — a **purely reactive** bundle that only `hear`s events others emit (most bundles: content
+  providers, physics, logging…). It has no entry of its own and isn't booted directly.
+
+An **app has no boot event of its own**: it composes bundles, and each bundle that *has* a `start` boots
+at it. This keeps one meaning for `start`.
 
 ### A bundle's entry — runs a single file now
 ```
@@ -150,7 +154,7 @@ Each bundle's `start` entry is the piece that makes an app *runnable* rather tha
 | provenance (`from`/`id`/`cause`/`trail`), `audience` barrier | **runs** |
 | boot event via `start` (bundle level) + `--set` overrides | **runs** (`veinc render samples/boot.vein`) |
 | no `start` → default `@Request { path }` | **runs** (back-compat) |
-| one entry per bundle (2 `start`s = error) | **enforced** |
+| at most one entry per bundle (0 = reactive, 2 = error) | **enforced** |
 | load-site `start { … }` override (parsed + validated by `veinc symbols`) | fires once app link+run lands |
 | `target`/`each tick`/`folds`/`settled`, `Entity` id | designed, **not executed** |
 | app link + run (`veinc render app.vein`) | **follow-on** |
@@ -159,7 +163,7 @@ Each bundle's `start` entry is the piece that makes an app *runnable* rather tha
 - **Resolved:** external inputs reach the boot payload by **overriding named fields** of the `start`
   payload (see §3) — CLI supplies them, e.g. `--set path=/home`; today's `render <file> <path>` is the
   special case for `@Request { path }`.
-- **Resolved:** one entry per bundle; an app has no boot event of its own — it boots each loaded bundle's
-  single `start` (with optional load-site override).
+- **Resolved:** a bundle has at most one entry (`start`); zero = a purely reactive bundle. An app has no
+  boot event of its own — it boots each loaded bundle that *has* a `start` (with optional override).
 - When an app boots several bundles, in what order do their entries fire (declaration order, or does
   link-time dependency ordering matter)?

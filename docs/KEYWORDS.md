@@ -22,7 +22,7 @@ dialect. There is no general `class`.
 | `bundle` | `bundle N [by author] { … }` | module; optional author/pseudo roots its qualified name | |
 | `app` | `app N { load "f.vein" … }` | project manifest: the set of bundles that compose a program | multi-file |
 | `by` | `bundle N by author` | author/pseudo of a bundle (collision root) | |
-| `start` | `start @E { … }` (bundle entry — one per bundle) · `load "f" start { … }` (override) · `start { … }` (shard) | a bundle's single boot event; a load-site payload override; or shard once-on-create | see RUNTIME.md |
+| `start` | `start @E { … }` (bundle entry — at most one; none = reactive) · `load "f" start { … }` (override) · `start { … }` (shard) | a bundle's boot event; a load-site payload override; or shard once-on-create | see RUNTIME.md |
 | `use` | `use N [as M]` | import | |
 | `publicator` | `publicator N { … }` | export group | |
 | `shared` | `shared("doc")` | doc attribute on next decl | → HIR metadata |
