@@ -78,12 +78,19 @@ its native input into that identity. No `Web.MouseDown` / `Desktop.MouseDown` du
 
 ## 5. The library (author `Vein`)
 
-Nine platform-independent bundles authored `by Vein`; each bundle's public API is `shared` inside
-publicators, reachable as `*Vein.Bundle.Publicator.member` and listed by
-`veinc symbols stdlib/Vein.app.vein`. Current totals: **24 shapes · 25 events · 6 builders · 7 shards ·
-19 publicators**. **Every shared event carries a payload** — an occurrence about an identity carries the
-`Entity` it concerns (`entity`/`target`/`a,b`), so events move real data across a program. `folds sum`
-is used only where genuinely multi-contributor (`$Pool`, `$Counter`, `$Velocity`).
+Nine platform-independent bundles authored `by Vein`. A bundle has two layers:
+
+- **Publicators = the shared API** (`shared` shapes/events/builders), reachable across bundles as
+  `*Vein.Bundle.Publicator.member` and listed by `veinc symbols stdlib/Vein.app.vein`. Totals:
+  **24 shapes · 25 events · 6 builders**, in **19 publicators**.
+- **Bundle-level shards = behaviour** (7 of them). A `shard` is *never* inside a publicator — it is the
+  bundle's logic that you get **for free by loading the bundle**; you don't reference or manipulate it,
+  and it is not part of the cross-bundle API. (The compiler enforces this: a shard in a publicator is an
+  error, VS0108.)
+
+**Every shared event carries a payload** — an occurrence about an identity carries the `Entity` it
+concerns (`entity`/`target`/`a,b`), so events move real data across a program. `folds sum` is used only
+where genuinely multi-contributor (`$Pool`, `$Counter`, `$Velocity`).
 
 **Provenance is not declared here — it's a language guarantee.** On top of the declared payload, the
 runtime auto-attaches a provenance envelope (`from`, `origin`, `id`, `cause`, `trail`, `source`,
@@ -91,24 +98,24 @@ runtime auto-attaches a provenance envelope (`from`, `origin`, `id`, `cause`, `t
 (`d.from.kind`, …). It is a core feature of the language, not a stdlib member, so it is documented in
 [LANGUAGE.md §3.7](LANGUAGE.md) and printed by `veinc events` — not re-declared in any bundle.
 
-| Bundle | Publicators · members |
-|---|---|
-| **Core** | `Lifecycle` (`@Spawned`/`@Destroyed`/`@Enabled`/`@Disabled {entity}`, shard `Reaper`) · `Meta` (`$Name` `$Tag` `$Layer`) · `Quantity` (`$Pool{current folds sum, max}` `$Counter{value folds sum}`) · `Relations` (`$Parent{of:Entity}` `$Owner{by:Entity}`) |
-| **Math** | `Values` (`$Vec2` `$Vec3` `$Vec4` `$Color` `$Rect`) |
-| **Transform** | `Spatial` (`$Position` `$Rotation` `$Scale` `$Velocity{x,y,z folds sum}`) · `Motion` (`@Moved{entity,x,y,z}`, shard `Integrator`) |
-| **Input** | `Mouse` (`@MouseDown`/`@MouseUp{x,y,button}` `@MouseMove{x,y}`) · `Keyboard` (`@KeyDown`/`@KeyUp{key}` `@TextInput{text}`) |
-| **UI** | `Widgets` (`$Text` `$Button` `$Field` `$Image`) · `Interaction` (`@Clicked`/`@Focused`/`@Blurred`/`@Hovered {target:Entity}`) |
-| **Time** | `Clock` (`$Clock{now,delta}` `@Ticked{frame,delta}`) |
-| **Game** | `Collision` (`$Collider` `@Collided{a,b:Entity}` shard `CollisionDetection`) · `Bodies` (`$Body` shard `GravitySystem`) · `Combat` (`@Damaged{target,amount}` shard `DamageSystem`) |
-| **Web** | `Http` (`@Request` `@Html` `@Style` `@Script` `@Render` `@Response`) · `Elements` (builders `Heading` `Paragraph` `Button` `Link` `Image` `ListItem`) · `Server` (shard `Router`) — renders standalone |
-| **Diagnostics** | `Report` (`$Diagnostic` `@DiagnosticRaised` shard `Collector`) |
+| Bundle | Publicators · shared members (API) | Bundle shards (behaviour) |
+|---|---|---|
+| **Core** | `Lifecycle` (`@Spawned`/`@Destroyed`/`@Enabled`/`@Disabled {entity}`) · `Meta` (`$Name` `$Tag` `$Layer`) · `Quantity` (`$Pool{current folds sum, max}` `$Counter{value folds sum}`) · `Relations` (`$Parent{of:Entity}` `$Owner{by:Entity}`) | `Reaper` |
+| **Math** | `Values` (`$Vec2` `$Vec3` `$Vec4` `$Color` `$Rect`) | — |
+| **Transform** | `Spatial` (`$Position` `$Rotation` `$Scale` `$Velocity{x,y,z folds sum}`) · `Motion` (`@Moved{entity,x,y,z}`) | `Integrator` |
+| **Input** | `Mouse` (`@MouseDown`/`@MouseUp{x,y,button}` `@MouseMove{x,y}`) · `Keyboard` (`@KeyDown`/`@KeyUp{key}` `@TextInput{text}`) | — |
+| **UI** | `Widgets` (`$Text` `$Button` `$Field` `$Image`) · `Interaction` (`@Clicked`/`@Focused`/`@Blurred`/`@Hovered {target:Entity}`) | — |
+| **Time** | `Clock` (`$Clock{now,delta}` `@Ticked{frame,delta}`) | — |
+| **Game** | `Collision` (`$Collider` `@Collided{a,b:Entity}`) · `Bodies` (`$Body`) · `Combat` (`@Damaged{target,amount}`) | `CollisionDetection` `GravitySystem` `DamageSystem` |
+| **Web** | `Http` (`@Request` `@Html` `@Style` `@Script` `@Render` `@Response`) · `Elements` (builders `Heading` `Paragraph` `Button` `Link` `Image` `ListItem`) | `Router` `Demo` + `Page` view — renders standalone |
+| **Diagnostics** | `Report` (`$Diagnostic` `@DiagnosticRaised`) | `Collector` |
 
 Notes: game-specific capabilities live in their own **Game** bundle (non-game apps don't pull it in);
 Transform is general (spatial is used by apps + games). Input positions are `x,y: float`, not `$Vec2` —
 a cross-bundle field-type dependency can't resolve until link+run; UI layout reuses `*Vein.Math.Values.$Rect`
-rather than a redundant `$Bounds`. Stdlib shards use only **local** events + `target`/marks (no
-cross-bundle qualified refs), so each file's `veinc symbols` stays clean; cross-bundle wiring is the
-consumer's job.
+rather than a redundant `$Bounds`. Bundle shards use only **local** events (publicator members of their
+own bundle) + `target`/marks — never cross-bundle qualified refs — so each file's `veinc symbols` stays
+clean; cross-bundle wiring is the consumer's job.
 
 **Standard marks (conventions).** Capability marks have no declaration form, so they are shared *naming
 conventions*, applied with `mark self #X` and matched by `target … #X` / `audience #X`:

@@ -51,8 +51,9 @@ bundle Web by Vein {
         builder ListItem { text: string   markup = "<li>" + text + "</li>" }
     }
 
-    // --- render demo (non-shared) — proves the builders assemble end to end -------------------------
-    // Declared before the Server router so its @Html fragments are queued before @Render.
+    // --- behaviour (bundle-level shards) — come with the bundle; not part of the shared API ----------
+    // The render demo proves the builders assemble end to end. Demo is declared before Router so its
+    // @Html fragments are queued before @Render.
     shard Demo {
         hear @Request as req {
             bring Heading("VeinScript Vein.Web")
@@ -67,11 +68,8 @@ bundle Web by Vein {
         hear @Render as r { emit @Response { status: 200, body: "<html><body>" + html + "</body></html>" } }
     }
 
-    // Server — the routing capability (shared): turn a request into a render for its path.
-    publicator Server {
-        shared("Routes an inbound @Request to a page @Render for its path.")
-        shard Router {
-            hear @Request as req { emit @Render { path: req.path } }
-        }
+    // Router — turns an inbound @Request into a page @Render for its path.
+    shard Router {
+        hear @Request as req { emit @Render { path: req.path } }
     }
 }

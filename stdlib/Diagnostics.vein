@@ -17,10 +17,10 @@ bundle Diagnostics by Vein {
 
         shared("A diagnostic was produced by some tool/shard.")
         event @DiagnosticRaised { severity: int, message: string }
+    }
 
-        shared("Collects raised diagnostics for a tool/IDE to display.")
-        shard Collector {
-            hear @DiagnosticRaised as d { }
-        }
+    // Behaviour (bundle-level) — collects raised diagnostics for a tool/IDE to display.
+    shard Collector {
+        hear @DiagnosticRaised as d { }
     }
 }

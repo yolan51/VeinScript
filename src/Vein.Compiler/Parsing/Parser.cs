@@ -137,7 +137,14 @@ public sealed class Parser
                     _diag.Error("VS0107", "`shared(\"…\")` is only valid inside a `publicator`.", docStart);
                 var d = ParseDecl(exported);
                 if (d is not null)
+                {
+                    // A `shard` is bundle BEHAVIOUR — it comes with the bundle and runs when the bundle is
+                    // loaded; it is never part of a publicator's cross-bundle API (which holds shared
+                    // shapes/events/builders). So a shard belongs at the bundle level, not in a publicator.
+                    if (d is ShardDecl && exported)
+                        _diag.Error("VS0108", "a `shard` is bundle behaviour — declare it at the bundle level, not inside a `publicator`.", d.Span);
                     members.Add(d with { Doc = doc ?? d.Doc, Exported = exported || d.Exported, Shared = (doc is not null && exported) || d.Shared });
+                }
             }
             catch (ParseError) { Synchronize(); }
             if (_i == before && !AtEnd) Advance();          // guarantee progress; never hang on bad input

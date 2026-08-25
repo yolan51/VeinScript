@@ -23,11 +23,6 @@ bundle Core by Vein {
 
         shared("An identity was deactivated (without being destroyed).")
         event @Disabled { entity: Entity }
-
-        shared("Reacts to @Destroyed to run teardown for the identity.")
-        shard Reaper {
-            hear @Destroyed as e { }
-        }
     }
 
     // Meta — universal identity metadata carried as Shapes (state, not messages).
@@ -60,5 +55,11 @@ bundle Core by Vein {
 
         shared("Ownership link: the Entity that owns this identity.")
         shape $Owner { by: Entity }
+    }
+
+    // Behaviour — bundle-level shards. Loading Core gives you this logic for free; you don't reference
+    // or manipulate them, and they are not part of the cross-bundle API (that's the publicators above).
+    shard Reaper {
+        hear @Destroyed as e { }   // runs teardown for a destroyed identity
     }
 }

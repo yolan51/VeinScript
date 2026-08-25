@@ -1,49 +1,48 @@
 // stdlib/Game.vein — VeinScript Standard Library : Vein.Game
 // The game-specific capabilities, kept in their OWN bundle so non-game apps don't pull them in:
-// collision, rigid bodies, and combat. Capabilities are Shapes + Events + Shards (systems) — a
-// consumer targets #Collidable identities and reacts to @Collided / @Damaged.
+// collision, rigid bodies, and combat. The publicators expose the shared DATA/API (shapes + events);
+// the bundle-level SHARDS are the behaviour you get for free by loading the bundle.
 // Discover:  veinc symbols stdlib/Game.vein
 
 bundle Game by Vein {
 
+    // --- shared API (cross-bundle) --------------------------------------------------------------------
     publicator Collision {
         shared("A collision box (half-extents in world units).")
         shape $Collider { width: float, height: float }
 
         shared("Two identities overlapped this step.")
         event @Collided { a: Entity, b: Entity }
-
-        shared("Detects overlaps between #Collidable identities and emits @Collided.")
-        shard CollisionDetection {
-            target $Collider #Collidable as self {
-                each tick {
-                    emit @Collided { a: self, b: self }
-                }
-            }
-        }
     }
 
     publicator Bodies {
         shared("A rigid body: mass and bounciness.")
         shape $Body { mass: float, restitution: float }
-
-        shared("Applies gravity/integration to rigid bodies each step.")
-        shard GravitySystem {
-            target $Body as self {
-                each tick { }
-            }
-        }
     }
 
     publicator Combat {
         shared("An identity took damage — carries the target and the amount.")
         event @Damaged { target: Entity, amount: int }
+    }
 
-        shared("Applies queued damage to bodies each step.")
-        shard DamageSystem {
-            target $Body as self {
-                each tick { }
+    // --- behaviour (bundle-level shards) — comes with the bundle; not part of the shared API ----------
+    shard CollisionDetection {
+        target $Collider #Collidable as self {
+            each tick {
+                emit @Collided { a: self, b: self }
             }
+        }
+    }
+
+    shard GravitySystem {
+        target $Body as self {
+            each tick { }
+        }
+    }
+
+    shard DamageSystem {
+        target $Body as self {
+            each tick { }
         }
     }
 }

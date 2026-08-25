@@ -51,6 +51,12 @@ a declaration) marks that one member **public across all bundles** — only `sha
 `veinc symbols` and are reachable from another bundle via a `*Author.Bundle.Publicator.@…` reference.
 `shared` outside a publicator is an error. `use N as M` aliases an import (planned).
 
+**Data vs behaviour.** A publicator holds the shared **data/API** — `shape`s, `event`s, `builder`s. A
+`shard` is the bundle's **behaviour**: it runs when the bundle is loaded and is *not* part of the
+cross-bundle API, so a shard is declared at the **bundle level, never inside a publicator** (that is an
+error, VS0108). You consume another bundle's *data* by referencing its `shared` members; you get its
+*behaviour* for free by loading the bundle.
+
 ```
 bundle Web by studio {
     publicator PageApi {
@@ -59,6 +65,7 @@ bundle Web by studio {
         event @Internal { … }             // bundle-wide only (no `shared`)
     }
     event @Local { … }                    // private to the bundle
+    shard Router { hear @Request as r { … } }   // behaviour — bundle level, comes with the bundle
 }
 ```
 

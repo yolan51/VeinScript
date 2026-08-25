@@ -66,6 +66,8 @@ public class StdlibTests
     [Fact]
     public void Stdlib_meets_target_counts()
     {
+        // The shared API = publicator members (shapes/events/builders). Shards are bundle-level
+        // behaviour, NOT shared, so they do not appear here.
         var diag = new DiagnosticBag();
         var model = ProjectLoader.Load(StdFile("Vein.app.vein"), diag);
         Assert.False(diag.HasErrors);
@@ -73,7 +75,15 @@ public class StdlibTests
         Assert.InRange(byKind[SymbolKind.Shape], 10, 30);
         Assert.InRange(byKind[SymbolKind.Event], 5, 30);
         Assert.InRange(byKind[SymbolKind.Builder], 5, 30);
-        Assert.InRange(byKind[SymbolKind.Shard], 5, 30);
+        Assert.False(byKind.ContainsKey(SymbolKind.Shard));   // shards are never in the shared API
+    }
+
+    [Fact]
+    public void Shard_in_a_publicator_is_an_error()
+    {
+        // A shard is bundle behaviour — it belongs at the bundle level, not in a publicator.
+        Assert.False(CompileSrc("bundle B { publicator P { shard S { } } }").Success);
+        Assert.True(CompileSrc("bundle B { shard S { } }").Success);   // bundle level is fine
     }
 
     [Fact]
