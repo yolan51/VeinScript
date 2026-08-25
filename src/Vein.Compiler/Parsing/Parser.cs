@@ -129,10 +129,15 @@ public sealed class Parser
             int before = _i;
             try
             {
-                string? doc = TryParseDoc();
+                var docStart = Here;
+                string? doc = TryParseDoc();   // non-null ⟺ a `shared("…")` annotation ⇒ cross-bundle public
+                // `shared` is only meaningful inside a publicator (a bundle's public grouping); reject it
+                // elsewhere so "what's shared across bundles" is always chosen there.
+                if (doc is not null && !exported)
+                    _diag.Error("VS0107", "`shared(\"…\")` is only valid inside a `publicator`.", docStart);
                 var d = ParseDecl(exported);
                 if (d is not null)
-                    members.Add(d with { Doc = doc ?? d.Doc, Exported = exported || d.Exported });
+                    members.Add(d with { Doc = doc ?? d.Doc, Exported = exported || d.Exported, Shared = (doc is not null && exported) || d.Shared });
             }
             catch (ParseError) { Synchronize(); }
             if (_i == before && !AtEnd) Advance();          // guarantee progress; never hang on bad input

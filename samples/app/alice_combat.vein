@@ -2,8 +2,13 @@
 // author. Qualified as *alice.Combat.@Request. This is the collision the discovery tool flags.
 
 bundle Combat by alice {
-    event @Request { path: string }
-    event @Loot    { gold: int }
+    publicator Api {
+        shared("an inbound request")
+        event @Request { path: string }              // collides by NAME with yolan's; *alice / *yolan disambiguates
+
+        shared("loot dropped by a defeated enemy")
+        event @Loot { gold: int }                    // yolan emits *alice.Combat.Api.@Loot
+    }
 
     shard Kernel {
         hear @Request as req { emit @Loot { gold: 10 } }

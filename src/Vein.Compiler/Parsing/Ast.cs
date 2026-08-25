@@ -22,8 +22,11 @@ public abstract record Decl(SourceSpan Span) : Node(Span)
 {
     /// Doc text from a preceding `shared("…")`; null if none.
     public string? Doc { get; init; }
-    /// True when the decl sits inside a `publicator` block.
+    /// True when the decl sits inside a `publicator` block — visible to the shards of THIS bundle.
     public bool Exported { get; init; }
+    /// True when marked `shared("…")` — visible across ALL bundles (the cross-bundle public API; only
+    /// these are listed by `veinc symbols` and reachable via a `*Author.Bundle.@…` qualified reference).
+    public bool Shared { get; init; }
 }
 
 public sealed record BundleDecl(string Name, IReadOnlyList<Decl> Members, SourceSpan Span) : Decl(Span)

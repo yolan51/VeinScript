@@ -60,7 +60,7 @@ public static class ProjectLoader
         {
             var res = model.Resolve(path, "@" + name);
             if (res.Status == ResolveStatus.Unresolved)
-                diag.Error("VS0305", $"qualified event *{string.Join(".", path)}.@{name} resolves to no event in app '{appName}'.", refSpan);
+                diag.Error("VS0305", $"qualified event *{string.Join(".", path)}.@{name} resolves to no shared event in app '{appName}' (is it declared and marked `shared(\"…\")`?).", refSpan);
             else if (res.Status == ResolveStatus.Ambiguous)
                 diag.Error("VS0306", $"qualified event *{string.Join(".", path)}.@{name} is ambiguous; qualify further (add the author).", refSpan);
         }
@@ -171,12 +171,14 @@ public static class ProjectLoader
 
     private static void Member(Decl d, string author, string bundle, string? pub, List<QualifiedSymbol> into)
     {
+        // A `publicator` is a namespace grouping (visible to this bundle's shards). Recurse into it, but
+        // it is not itself a cross-bundle symbol.
+        if (d is PublicatorDecl p) { foreach (var m in p.Members) Member(m, author, bundle, p.Name, into); return; }
+
+        // Only `shared("…")` declarations are part of the cross-bundle public API.
+        if (!d.Shared) return;
         switch (d)
         {
-            case PublicatorDecl p:
-                into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Publicator, p.Name, Doc: p.Doc));
-                foreach (var m in p.Members) Member(m, author, bundle, p.Name, into);
-                break;
             case ShapeDecl s: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Shape, s.Name, Doc: s.Doc)); break;
             case EventDecl e: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Event, e.Name, Doc: e.Doc)); break;
             case BuilderDecl bl: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Builder, bl.Name, Doc: bl.Doc)); break;

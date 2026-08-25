@@ -44,8 +44,23 @@ bundle Demo {
 }
 ```
 
-`shared("…")` is a doc/attribute attached to the following declaration; it is preserved into the HIR
-and emitted as a doc comment. `use N as M` aliases an import (planned).
+**Visibility is two-tier.** A bundle's declarations are **private** by default (local to the bundle). A
+`publicator N { … }` is the bundle's **public grouping** — its members are visible to all of this
+bundle's shards (bundle-wide). Inside a publicator, a `shared("doc")` annotation (on its own line above
+a declaration) marks that one member **public across all bundles** — only `shared` members appear in
+`veinc symbols` and are reachable from another bundle via a `*Author.Bundle.Publicator.@…` reference.
+`shared` outside a publicator is an error. `use N as M` aliases an import (planned).
+
+```
+bundle Web by studio {
+    publicator PageApi {
+        shared("the inbound request")     // ← public across all bundles
+        event @Request { path: string }
+        event @Internal { … }             // bundle-wide only (no `shared`)
+    }
+    event @Local { … }                    // private to the bundle
+}
+```
 
 ### 2.1 Author & cross-bundle references (`by`, `app`, `*`)
 
@@ -72,9 +87,10 @@ resolution only; linking loaded bundles into one running program is a follow-on.
 
 **Events have one owner.** An event is declared in one bundle; its payload types live in that single
 declaration. `emit` / `hear` / `start` take a **bare `@Event`** (this bundle's own/local event) or a
-**qualified `*Author.Bundle.@Event`** when the event is owned by another bundle — so the origin and the
-payload types are unambiguous. `veinc symbols` validates every qualified event reference resolves to
-exactly one owner (unknown or ambiguous → error).
+**qualified `*Author.Bundle.Publicator.@Event`** when the event is owned by another bundle — so the
+origin and payload types are unambiguous. A cross-bundle event must be `shared` (in the owner's
+publicator); `veinc symbols` validates every qualified reference resolves to exactly one shared owner
+(unknown or ambiguous → error).
 
 **Booting — `start`.** A bundle has **at most one entry point**: `start @Event { payload }` names the
 boot event the runtime fires first (instead of the default `@Request { path }`). A bundle with **no**

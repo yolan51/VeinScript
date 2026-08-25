@@ -31,7 +31,7 @@ public static class EventCatalog
                             .Where(f => !Auto.Contains(f.Name))
                             .Select(f => new EventField(f.Name, f.Type, f.Required, f.Default))
                             .ToList();
-                        list.Add(new EventEntry(e.Name, e.Exported, fields));
+                        list.Add(new EventEntry(e.Name, e.Shared, fields));   // [shared] = cross-bundle
                         break;
                 }
         }

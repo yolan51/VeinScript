@@ -193,6 +193,13 @@ public class ServiceTests
     }
 
     [Fact]
+    public void Shared_is_only_valid_inside_a_publicator()
+    {
+        Assert.False(Compile("bundle B { shared(\"x\") event @E { } }").Success);          // bundle-level: error
+        Assert.True(Compile("bundle B { publicator P { shared(\"x\") event @E { } } }").Success);   // in publicator: ok
+    }
+
+    [Fact]
     public void Qualified_event_refs_parse_in_emit_hear_start()
     {
         var r = Compile("bundle B { start *core.Sys.@Boot { } " +

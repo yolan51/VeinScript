@@ -4,17 +4,23 @@
 bundle Combat by yolan {
     start @Request { path: "/" }        // this bundle's own boot event + default payload
 
-    event @Request { path: string }
-    event @Damage  { amount: int }
+    // `shared` lives inside a publicator (annotation-style, above the decl) — that's how a dev chooses
+    // what is public ACROSS bundles. A publicator member without `shared` is only bundle-wide.
+    publicator Api {
+        shared("an inbound request")
+        event @Request { path: string }
+    }
+
+    event @Damage { amount: int }       // bundle-level -> private to this bundle
 
     shape $Health { hp: int folds sum }
 
     shard Kernel {
         hear @Request as req {
             emit @Damage { amount: 5 }
-            // Cross-bundle emit: `*alice.Combat.@Loot` names WHO owns @Loot, so its payload types are
-            // unambiguous. `veinc symbols` validates it resolves. (Not linked/run yet — surface + tooling.)
-            emit *alice.Combat.@Loot { gold: 5 }
+            // Cross-bundle emit: `*alice.Combat.Api.@Loot` names WHO owns @Loot (and which publicator),
+            // so its payload types are unambiguous. `veinc symbols` validates it resolves to a shared event.
+            emit *alice.Combat.Api.@Loot { gold: 5 }
         }
     }
 }

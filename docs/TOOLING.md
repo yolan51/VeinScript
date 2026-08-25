@@ -104,9 +104,10 @@ app MyGame {
 }
 ```
 
-`veinc symbols` loads the app + every bundle it `load`s and prints every member as a **fully-qualified**
-name `*Author.Bundle[.Publicator].member`, flagging `[COLLISION]` where a simple name is defined under
-more than one author/bundle. That is the collision-avoidance mechanism: reference a symbol in code with
+`veinc symbols` loads the app + every bundle it `load`s and prints every **`shared`** member (the
+cross-bundle public API — declarations marked `shared("…")` inside a publicator; private and bundle-wide
+members are hidden) as a **fully-qualified** name `*Author.Bundle.Publicator.member`, flagging
+`[COLLISION]` where a simple name is defined under more than one author/bundle. That is the collision-avoidance mechanism: reference a symbol in code with
 a `*` path, qualified with as many leading segments (up to the author) as needed to be unique —
 `*alice.Combat.@Request` vs `*yolan.Combat.@Request`.
 

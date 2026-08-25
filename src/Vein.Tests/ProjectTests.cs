@@ -34,9 +34,9 @@ public class ProjectTests
         try
         {
             File.WriteAllText(Path.Combine(dir.FullName, "yolan.vein"),
-                "bundle Combat by yolan { event @Request { path: string } shape $Health { hp: int } }");
+                "bundle Combat by yolan { publicator Api { shared(\"r\") event @Request { path: string } } shape $Health { hp: int } }");
             File.WriteAllText(Path.Combine(dir.FullName, "alice.vein"),
-                "bundle Combat by alice { event @Request { path: string } }");
+                "bundle Combat by alice { publicator Api { shared(\"r\") event @Request { path: string } } }");
             var appPath = Path.Combine(dir.FullName, "app.vein");
             File.WriteAllText(appPath, "app T { load \"yolan.vein\"  load \"alice.vein\" }");
 
@@ -44,10 +44,11 @@ public class ProjectTests
             var m = ProjectLoader.Load(appPath, diag);
 
             Assert.False(diag.HasErrors);
-            Assert.Contains(m.Symbols, s => s.QualifiedName == "*yolan.Combat.@Request");
-            Assert.Contains(m.Symbols, s => s.QualifiedName == "*alice.Combat.@Request");
+            Assert.Contains(m.Symbols, s => s.QualifiedName == "*yolan.Combat.Api.@Request");
+            Assert.Contains(m.Symbols, s => s.QualifiedName == "*alice.Combat.Api.@Request");
             Assert.Contains("@Request", m.Collisions);
-            Assert.Equal(ResolveStatus.Resolved, m.Resolve(new[] { "yolan", "Combat" }, "@Request").Status);
+            Assert.Equal(ResolveStatus.Resolved, m.Resolve(new[] { "yolan", "Combat", "Api" }, "@Request").Status);
+            Assert.Equal(ResolveStatus.Ambiguous, m.Resolve(new[] { "Api" }, "@Request").Status);   // both authors
         }
         finally { dir.Delete(recursive: true); }
     }
@@ -115,15 +116,15 @@ public class ProjectTests
         try
         {
             File.WriteAllText(Path.Combine(dir.FullName, "core.vein"),
-                "bundle Core by studio { event @Boot { seed: int } }");
+                "bundle Core by studio { publicator Api { shared(\"boot\") event @Boot { seed: int } } }");
             File.WriteAllText(Path.Combine(dir.FullName, "world.vein"),
-                "bundle World by studio { shard S { hear @Go as g { emit *studio.Core.@Boot { seed: 1 } } } }");
+                "bundle World by studio { shard S { hear @Go as g { emit *studio.Core.Api.@Boot { seed: 1 } } } }");
             var appPath = Path.Combine(dir.FullName, "app.vein");
             File.WriteAllText(appPath, "app T { load \"core.vein\"  load \"world.vein\" }");
 
             var diag = new DiagnosticBag();
             ProjectLoader.Load(appPath, diag);
-            Assert.False(diag.HasErrors);   // *studio.Core.@Boot resolves to Core's event
+            Assert.False(diag.HasErrors);   // *studio.Core.Api.@Boot resolves to Core's shared event
         }
         finally { dir.Delete(recursive: true); }
     }
@@ -135,9 +136,9 @@ public class ProjectTests
         try
         {
             File.WriteAllText(Path.Combine(dir.FullName, "core.vein"),
-                "bundle Core by studio { event @Boot { seed: int } }");
+                "bundle Core by studio { publicator Api { shared(\"boot\") event @Boot { seed: int } } }");
             File.WriteAllText(Path.Combine(dir.FullName, "world.vein"),
-                "bundle World by studio { shard S { hear @Go as g { emit *studio.Core.@Nope { } } } }");
+                "bundle World by studio { shard S { hear @Go as g { emit *studio.Core.Api.@Nope { } } } }");
             var appPath = Path.Combine(dir.FullName, "app.vein");
             File.WriteAllText(appPath, "app T { load \"core.vein\"  load \"world.vein\" }");
 

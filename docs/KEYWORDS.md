@@ -24,8 +24,8 @@ dialect. There is no general `class`.
 | `by` | `bundle N by author` | author/pseudo of a bundle (collision root) | |
 | `start` | `start @E { … }` (bundle entry — at most one; none = reactive) · `load "f" start { … }` (override) · `start { … }` (shard) | a bundle's boot event; a load-site payload override; or shard once-on-create | see RUNTIME.md |
 | `use` | `use N [as M]` | import | |
-| `publicator` | `publicator N { … }` | export group | |
-| `shared` | `shared("doc")` | doc attribute on next decl | → HIR metadata |
+| `publicator` | `publicator N { … }` | a bundle's public grouping — members are visible to this bundle's shards (bundle-wide) | namespace segment in `*` paths |
+| `shared` | `shared("doc")` **above a decl, inside a publicator** | marks that decl public **across all bundles** (+ doc) — only `shared` members appear in `veinc symbols` and are reachable via `*Author.Bundle.Publicator.@…` | error outside a publicator |
 | `let` / `var` | `let x [:T] = e` / `var x …` | immutable / mutable binding | |
 | `SF` | `SF f(p: T) -> R { … }` | pure function (verified) | `fn` + purity flag |
 | `return` | `return [e]` | return | |
