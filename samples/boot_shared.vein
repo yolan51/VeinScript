@@ -1,8 +1,11 @@
 // boot_shared.vein — the "same entry everywhere" pattern: a shared @Boot event + payload shape.
 // Each bundle has ONE entry (`start @Boot`) with the same payload, so every bundle boots the same way.
 //
-// NOTE (honest state): cross-bundle @event sharing (one @Boot owned by a common bundle, referenced as
-// *studio.Core.@Boot) lands with app link+run. Until then each bundle names @Boot with the same shape.
+// CAVEAT: the two @Boot below are SEPARATE events that share a name — nothing forces their payloads to
+// match, and a reader can't tell whose types they are. The collision-safe fix is to let ONE bundle own
+// @Boot and reference it qualified: `start *studio.Core.@Boot { … }` (parses + `veinc symbols` validates
+// it today; full cross-bundle type resolution at runtime lands with app link+run). This file keeps the
+// naive duplicated form so it renders standalone.
 //
 // Run:  veinc render samples/boot_shared.vein
 //       veinc render samples/boot_shared.vein --set seed=7     (override every bundle's boot seed)

@@ -46,7 +46,11 @@ public sealed record AppLoad(string Path, IReadOnlyList<FieldInit> Overrides, bo
 
 /// `start @Event { payload }` — the boot event fired first when the program runs (an emit-style body,
 /// so `?` fill-the-rest applies). Allowed at bundle level (run a single file) and app level (§RUNTIME).
-public sealed record StartDecl(string Event, IReadOnlyList<FieldInit> Fields, bool FillRest, SourceSpan Span) : Decl(Span);
+public sealed record StartDecl(string Event, IReadOnlyList<FieldInit> Fields, bool FillRest, SourceSpan Span) : Decl(Span)
+{
+    /// A `*Author.Bundle` qualifier on the boot event; empty = bare local event.
+    public IReadOnlyList<string> EventPath { get; init; } = Array.Empty<string>();
+}
 
 /// A `publicator N { … }` group. Retained in the AST (name + members) for tooling/printing;
 /// lowering flattens it (its members are already tagged Exported), so the HIR is unchanged.
@@ -122,7 +126,11 @@ public sealed record LifecycleBlock(LifecyclePhase Phase, Block Body, SourceSpan
 public sealed record HearBlock(
     string Event, string Bind,
     IReadOnlyList<string> AudienceShapes, IReadOnlyList<string> AudienceMarks,
-    Block Body, SourceSpan Span) : Node(Span);
+    Block Body, SourceSpan Span) : Node(Span)
+{
+    /// A `*Author.Bundle` qualifier on the event (`hear *studio.Core.@Boot`); empty = bare local event.
+    public IReadOnlyList<string> EventPath { get; init; } = Array.Empty<string>();
+}
 
 // ---- types --------------------------------------------------------------
 
@@ -153,7 +161,11 @@ public sealed record ExprStmt(Expr Expr, SourceSpan Span) : Stmt(Span);
 public sealed record MarkStmt(bool Remove, Expr Target, string Mark, SourceSpan Span) : Stmt(Span);
 // FillRest (`?`) means: fill every field not listed here — default if it has one, else a typed zero
 // placeholder for required fields — so it compiles/runs for testing.
-public sealed record EmitStmt(string Event, IReadOnlyList<FieldInit> Fields, bool FillRest, SourceSpan Span) : Stmt(Span);
+public sealed record EmitStmt(string Event, IReadOnlyList<FieldInit> Fields, bool FillRest, SourceSpan Span) : Stmt(Span)
+{
+    /// A `*Author.Bundle` qualifier on the event (`emit *studio.Core.@Boot`); empty = bare local event.
+    public IReadOnlyList<string> EventPath { get; init; } = Array.Empty<string>();
+}
 public sealed record DestroyStmt(Expr Target, SourceSpan Span) : Stmt(Span);
 public sealed record AttachStmt(bool Remove, string Shape, Expr Target, IReadOnlyList<FieldInit>? Init, SourceSpan Span) : Stmt(Span);
 public sealed record ChanceStmt(double Probability, Block Body, SourceSpan Span) : Stmt(Span);

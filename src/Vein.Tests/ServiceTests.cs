@@ -193,6 +193,17 @@ public class ServiceTests
     }
 
     [Fact]
+    public void Qualified_event_refs_parse_in_emit_hear_start()
+    {
+        var r = Compile("bundle B { start *core.Sys.@Boot { } " +
+                        "shard S { hear *core.Sys.@Tick as t { emit *core.Sys.@Done { } } } }");
+        Assert.True(r.Success);
+        Assert.Contains("*core.Sys.@Boot", r.IrText);
+        Assert.Contains("*core.Sys.@Tick", r.IrText);
+        Assert.Contains("*core.Sys.@Done", r.IrText);
+    }
+
+    [Fact]
     public void App_load_start_override_parses()
     {
         var r = Compile("app A { load \"x.vein\" start { seed: 9 } }");

@@ -70,6 +70,12 @@ with only as many as needed to be unique; if two authors clash, add the author. 
 every qualified name and flags collisions ([TOOLING.md](TOOLING.md)). *This pass is discovery +
 resolution only; linking loaded bundles into one running program is a follow-on.*
 
+**Events have one owner.** An event is declared in one bundle; its payload types live in that single
+declaration. `emit` / `hear` / `start` take a **bare `@Event`** (this bundle's own/local event) or a
+**qualified `*Author.Bundle.@Event`** when the event is owned by another bundle — so the origin and the
+payload types are unambiguous. `veinc symbols` validates every qualified event reference resolves to
+exactly one owner (unknown or ambiguous → error).
+
 **Booting — `start`.** A bundle has **at most one entry point**: `start @Event { payload }` names the
 boot event the runtime fires first (instead of the default `@Request { path }`). A bundle with **no**
 `start` is purely reactive — it only `hear`s events others emit. An app has no boot event of its own — it

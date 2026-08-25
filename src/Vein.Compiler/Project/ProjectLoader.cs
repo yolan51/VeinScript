@@ -26,7 +26,8 @@ public static class ProjectLoader
         string appName = app?.Name ?? Path.GetFileNameWithoutExtension(appFilePath);
 
         var starts = new List<BundleStart>();
-        if (appUnit is not null) Collect(appUnit, symbols);   // index inline bundles too
+        var refs = new List<(IReadOnlyList<string> Path, string Name, SourceSpan Span)>();
+        if (appUnit is not null) { Collect(appUnit, symbols); CollectEventRefs(appUnit, refs); }
 
         var baseDir = Path.GetDirectoryName(Path.GetFullPath(appFilePath)) ?? ".";
         if (app is not null)
@@ -36,6 +37,7 @@ public static class ProjectLoader
                 if (!File.Exists(full)) { diag.Error("VS0301", $"app '{appName}' load target not found: {load.Path}", app.Span); continue; }
                 var lu = Parse(File.ReadAllText(full), Path.GetFileName(full), diag);
                 Collect(lu, symbols);
+                CollectEventRefs(lu, refs);
 
                 // Record each loaded bundle's boot signature, then validate this load's start override.
                 var withStart = new List<(BundleDecl B, StartDecl S, List<Sig.Field> Fields)>();
@@ -50,7 +52,71 @@ public static class ProjectLoader
                 if (load.HasStart) ValidateOverride(load, withStart, diag);
             }
 
-        return new ProjectModel { AppName = appName, Symbols = symbols, Starts = starts };
+        var model = new ProjectModel { AppName = appName, Symbols = symbols, Starts = starts };
+
+        // Validate every `*`-qualified event reference (emit/hear/start) against the app's events, so an
+        // origin/type mismatch is caught: unknown → error; matches >1 owner → ambiguous.
+        foreach (var (path, name, refSpan) in refs)
+        {
+            var res = model.Resolve(path, "@" + name);
+            if (res.Status == ResolveStatus.Unresolved)
+                diag.Error("VS0305", $"qualified event *{string.Join(".", path)}.@{name} resolves to no event in app '{appName}'.", refSpan);
+            else if (res.Status == ResolveStatus.Ambiguous)
+                diag.Error("VS0306", $"qualified event *{string.Join(".", path)}.@{name} is ambiguous; qualify further (add the author).", refSpan);
+        }
+
+        return model;
+    }
+
+    // Collect every `*`-qualified event reference (emit / hear / start) in a unit for validation.
+    private static void CollectEventRefs(CompilationUnit unit, List<(IReadOnlyList<string> Path, string Name, SourceSpan Span)> into)
+    {
+        void Stmt(Stmt s)
+        {
+            switch (s)
+            {
+                case EmitStmt em when em.EventPath.Count > 0: into.Add((em.EventPath, em.Event, em.Span)); break;
+                case Block b: foreach (var x in b.Statements) Stmt(x); break;
+                case IfStmt i:
+                    foreach (var x in i.Then.Statements) Stmt(x);
+                    if (i.Else is Block eb) foreach (var x in eb.Statements) Stmt(x); else if (i.Else is IfStmt ei) Stmt(ei);
+                    break;
+                case WhileStmt w: foreach (var x in w.Body.Statements) Stmt(x); break;
+                case TargetStmt t: foreach (var x in t.Body.Statements) Stmt(x); break;
+                case RepeatStmt r: foreach (var x in r.Body.Statements) Stmt(x); break;
+                case MatchStmt m:
+                    foreach (var a in m.Arms) foreach (var x in a.Body.Statements) Stmt(x);
+                    if (m.Else is not null) foreach (var x in m.Else.Statements) Stmt(x);
+                    break;
+                case ChanceStmt c: foreach (var x in c.Body.Statements) Stmt(x); break;
+            }
+        }
+        void Member(Node n)
+        {
+            switch (n)
+            {
+                case HearBlock hb:
+                    if (hb.EventPath.Count > 0) into.Add((hb.EventPath, hb.Event, hb.Span));
+                    foreach (var x in hb.Body.Statements) Stmt(x);
+                    break;
+                case LifecycleBlock lc: foreach (var x in lc.Body.Statements) Stmt(x); break;
+                case TargetBlock tb: foreach (var it in tb.Body) Member(it); break;
+                case FuncDecl f: foreach (var x in f.Body.Statements) Stmt(x); break;
+                case Stmt s: Stmt(s); break;
+            }
+        }
+        void Decl(Decl d)
+        {
+            switch (d)
+            {
+                case StartDecl st when st.EventPath.Count > 0: into.Add((st.EventPath, st.Event, st.Span)); break;
+                case ShardDecl sh: foreach (var m in sh.Members) Member(m); break;
+                case ViewDecl vw: foreach (var m in vw.Members) Member(m); break;
+                case BridgeDecl br: foreach (var m in br.Members) Member(m); break;
+                case PublicatorDecl p: foreach (var m in p.Members) Decl(m); break;
+            }
+        }
+        foreach (var b in unit.Bundles) foreach (var m in b.Members) Decl(m);
     }
 
     // A load-site `start { … }` may fill only fields that exist in the (single) loaded bundle's start.

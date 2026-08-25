@@ -11,10 +11,10 @@ bundle Combat by yolan {
 
     shard Kernel {
         hear @Request as req {
-            // A collision-safe cross-bundle reference: even though both bundles are named Combat and
-            // both define @Request, the author root picks the right one. (Not linked/run yet.)
-            let other = *alice.Combat.@Request
             emit @Damage { amount: 5 }
+            // Cross-bundle emit: `*alice.Combat.@Loot` names WHO owns @Loot, so its payload types are
+            // unambiguous. `veinc symbols` validates it resolves. (Not linked/run yet — surface + tooling.)
+            emit *alice.Combat.@Loot { gold: 5 }
         }
     }
 }

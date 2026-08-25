@@ -139,9 +139,13 @@ the override — an unknown field, or overriding a bundle that has no `start`, i
     …
 ```
 
-This is **discovery + resolution only** (surface + tooling): the override is parsed, shown, and checked.
-Linking the loaded bundles into one running program and actually firing the (overridden) starts
-(`veinc render app.vein`) is a follow-on.
+`veinc symbols` also **validates every `*`-qualified event reference** (`emit`/`hear`/`start
+*Author.Bundle.@Event`) against the app's events — it must resolve to exactly one owner, else it's an
+unknown/ambiguous error. That's how origin + payload types stay unambiguous across bundles.
+
+This is **discovery + resolution only** (surface + tooling): references and overrides are parsed, shown,
+and checked. Linking the loaded bundles into one running program and actually firing the (overridden)
+starts (`veinc render app.vein`) is a follow-on.
 
 ## Scope / follow-on
 

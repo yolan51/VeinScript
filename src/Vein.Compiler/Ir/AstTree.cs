@@ -39,7 +39,7 @@ public sealed class AstTree
     {
         BundleDecl b => WithAttrs(Node("Bundle", b.Name, b.Span, b.Members.Select(Decl)), b.Author is null ? null : ("author", b.Author)),
         AppDecl app => Node("App", app.Name, app.Span, app.Loads.Select(LoadNode)),
-        StartDecl st => Node("Start", "@" + st.Event, st.Span, st.Fields.Select(ArgField).Concat(st.FillRest ? new[] { Leaf("Fill", "?", st.Span) } : Enumerable.Empty<IrNode>())),
+        StartDecl st => Node("Start", AstPrinter.EventText(st.EventPath, st.Event), st.Span, st.Fields.Select(ArgField).Concat(st.FillRest ? new[] { Leaf("Fill", "?", st.Span) } : Enumerable.Empty<IrNode>())),
         PublicatorDecl p => Node("Publicator", p.Name, p.Span, p.Members.Select(Decl)),
         UseDecl u => Leaf("Use", u.Alias is null ? u.Name : $"{u.Name} as {u.Alias}", u.Span),
         ShapeDecl s => WithAttrs(Node("Shape", "$" + s.Name, s.Span, s.Members.Select(ShapeMember)), Doc(s.Doc)),
@@ -110,7 +110,7 @@ public sealed class AstTree
     {
         TargetBlock tb => Node("Target", TargetHead(tb), tb.Span, tb.Body.Select(Member)),
         LifecycleBlock lc => Node(Phase(lc.Phase), "", lc.Span, Block(lc.Body)),
-        HearBlock hb => WithAttrs(Node("Hear", $"@{hb.Event} as {hb.Bind}", hb.Span, Block(hb.Body)),
+        HearBlock hb => WithAttrs(Node("Hear", $"{AstPrinter.EventText(hb.EventPath, hb.Event)} as {hb.Bind}", hb.Span, Block(hb.Body)),
                                   Audience(hb.AudienceShapes, hb.AudienceMarks)),
         Decl d => Decl(d),
         Stmt s => Stmt(s),
@@ -147,8 +147,8 @@ public sealed class AstTree
         AssignStmt a => Node("Assign", $"{AssignOp(a.Op)} {Path(a.Target)}", a.Span, new[] { Expr(a.Value) }),
         MarkStmt mk => Leaf(mk.Remove ? "Unmark" : "Mark", $"{Path(mk.Target)} #{mk.Mark}", mk.Span),
         EmitStmt em => em.FillRest
-            ? WithAttrs(Node("Emit", "@" + em.Event, em.Span, em.Fields.Select(ArgField)), ("fill", "?"))
-            : Node("Emit", "@" + em.Event, em.Span, em.Fields.Select(ArgField)),
+            ? WithAttrs(Node("Emit", AstPrinter.EventText(em.EventPath, em.Event), em.Span, em.Fields.Select(ArgField)), ("fill", "?"))
+            : Node("Emit", AstPrinter.EventText(em.EventPath, em.Event), em.Span, em.Fields.Select(ArgField)),
         DestroyStmt d => Leaf("Destroy", Path(d.Target), d.Span),
         AttachStmt at => AttachNode(at),
         ChanceStmt c => Node("Chance", Pct(c.Probability), c.Span, Block(c.Body)),

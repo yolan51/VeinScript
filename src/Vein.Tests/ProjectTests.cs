@@ -109,6 +109,46 @@ public class ProjectTests
     }
 
     [Fact]
+    public void Loader_validates_qualified_event_references()
+    {
+        var dir = Directory.CreateTempSubdirectory("veinapp");
+        try
+        {
+            File.WriteAllText(Path.Combine(dir.FullName, "core.vein"),
+                "bundle Core by studio { event @Boot { seed: int } }");
+            File.WriteAllText(Path.Combine(dir.FullName, "world.vein"),
+                "bundle World by studio { shard S { hear @Go as g { emit *studio.Core.@Boot { seed: 1 } } } }");
+            var appPath = Path.Combine(dir.FullName, "app.vein");
+            File.WriteAllText(appPath, "app T { load \"core.vein\"  load \"world.vein\" }");
+
+            var diag = new DiagnosticBag();
+            ProjectLoader.Load(appPath, diag);
+            Assert.False(diag.HasErrors);   // *studio.Core.@Boot resolves to Core's event
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
+    [Fact]
+    public void Loader_rejects_unknown_qualified_event()
+    {
+        var dir = Directory.CreateTempSubdirectory("veinapp");
+        try
+        {
+            File.WriteAllText(Path.Combine(dir.FullName, "core.vein"),
+                "bundle Core by studio { event @Boot { seed: int } }");
+            File.WriteAllText(Path.Combine(dir.FullName, "world.vein"),
+                "bundle World by studio { shard S { hear @Go as g { emit *studio.Core.@Nope { } } } }");
+            var appPath = Path.Combine(dir.FullName, "app.vein");
+            File.WriteAllText(appPath, "app T { load \"core.vein\"  load \"world.vein\" }");
+
+            var diag = new DiagnosticBag();
+            ProjectLoader.Load(appPath, diag);
+            Assert.True(diag.HasErrors);   // @Nope is owned by no one
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
+    [Fact]
     public void Loader_reports_missing_load_target()
     {
         var dir = Directory.CreateTempSubdirectory("veinapp");

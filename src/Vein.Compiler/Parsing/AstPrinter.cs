@@ -84,7 +84,7 @@ public static class AstPrinter
                 PrintBlock(sb, lc.Body, ind + 1);
                 break;
             case HearBlock hb:
-                Line(sb, ind, $"hear @{hb.Event} as {hb.Bind}"
+                Line(sb, ind, $"hear {EventText(hb.EventPath, hb.Event)} as {hb.Bind}"
                     + (hb.AudienceShapes.Count + hb.AudienceMarks.Count > 0
                         ? " audience " + string.Join(" ", hb.AudienceShapes.Select(x => "$" + x).Concat(hb.AudienceMarks.Select(x => "#" + x)))
                         : ""));
@@ -124,7 +124,7 @@ public static class AstPrinter
             case ContinueStmt: Line(sb, ind, "continue"); break;
             case AssignStmt a: Line(sb, ind, $"{Ex(a.Target)} {AsgOp(a.Op)} {Ex(a.Value)}"); break;
             case MarkStmt mk: Line(sb, ind, $"{(mk.Remove ? "unmark" : "mark")} {Ex(mk.Target)} #{mk.Mark}"); break;
-            case EmitStmt em: Line(sb, ind, $"emit @{em.Event} {{ {string.Join(", ", em.Fields.Select(f => f.Name + ": " + Ex(f.Value)).Append(em.FillRest ? "?" : null).Where(x => x is not null))} }}"); break;
+            case EmitStmt em: Line(sb, ind, $"emit {EventText(em.EventPath, em.Event)} {{ {string.Join(", ", em.Fields.Select(f => f.Name + ": " + Ex(f.Value)).Append(em.FillRest ? "?" : null).Where(x => x is not null))} }}"); break;
             case DestroyStmt d: Line(sb, ind, $"destroy {Ex(d.Target)}"); break;
             case AttachStmt at: Line(sb, ind, $"{(at.Remove ? "unattach" : "attach")} ${at.Shape}"); break;
             case ChanceStmt c: Line(sb, ind, $"chance {c.Probability:P0}"); PrintBlock(sb, c.Body, ind + 1); break;
@@ -150,7 +150,11 @@ public static class AstPrinter
     }
 
     private static string StartText(StartDecl st) =>
-        $"start @{st.Event} {{ {string.Join(", ", st.Fields.Select(f => f.Name + ": " + Ex(f.Value)).Append(st.FillRest ? "?" : null).Where(x => x is not null))} }}";
+        $"start {EventText(st.EventPath, st.Event)} {{ {string.Join(", ", st.Fields.Select(f => f.Name + ": " + Ex(f.Value)).Append(st.FillRest ? "?" : null).Where(x => x is not null))} }}";
+
+    /// `@Event` (bare) or `*Author.Bundle.@Event` (qualified).
+    public static string EventText(IReadOnlyList<string> path, string name) =>
+        path.Count == 0 ? "@" + name : "*" + string.Join(".", path) + ".@" + name;
 
     /// `*Author.Bundle.Publicator.@Event` canonical text.
     public static string StarText(StarRefExpr sr)

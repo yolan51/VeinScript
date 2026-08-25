@@ -489,7 +489,7 @@ public sealed class Parser
     private HearBlock ParseHear()
     {
         var s = Here; Advance();
-        string ev = Expect(TokenKind.EventRef, "@EventName").Text;
+        var (evPath, ev) = ParseEventRef("@EventName");
         Expect(TokenKind.KwAs, "'as'");
         string bind = Expect(TokenKind.Ident, "binding").Text;
         // Optional audience barrier: only react to emitters carrying these shapes/marks.
@@ -501,7 +501,7 @@ public sealed class Parser
                 if (Check(TokenKind.ShapeRef)) audShapes.Add(Advance().Text);
                 else audMarks.Add(Advance().Text);
             }
-        return new HearBlock(ev, bind, audShapes, audMarks, ParseBlock(), s);
+        return new HearBlock(ev, bind, audShapes, audMarks, ParseBlock(), s) { EventPath = evPath };
     }
 
     // ---- statements -----------------------------------------------------
@@ -622,9 +622,9 @@ public sealed class Parser
     private EmitStmt ParseEmit()
     {
         var s = Here; Advance();
-        string ev = Expect(TokenKind.EventRef, "@EventName").Text;
+        var (path, ev) = ParseEventRef("@EventName");
         var (fields, fill) = ParseEmitBody();
-        return new EmitStmt(ev, fields, fill, s);
+        return new EmitStmt(ev, fields, fill, s) { EventPath = path };
     }
 
     /// The tail shared by `emit`/`start`: `?` (fill-the-rest), `{ a: 1, ? }`, or nothing (`@E` alone —
@@ -656,14 +656,31 @@ public sealed class Parser
         return (fields, fill);
     }
 
-    /// `start @Event { payload }` — the boot event (bundle- or app-level). Reuses the emit body.
+    /// `start @Event { payload }` — the bundle's entry point. Reuses the emit body.
     private StartDecl ParseStart()
     {
         var s = Here;
         Expect(TokenKind.KwStart, "'start'");
-        string ev = Expect(TokenKind.EventRef, "@EventName after 'start'").Text;
+        var (path, ev) = ParseEventRef("@EventName after 'start'");
         var (fields, fill) = ParseEmitBody();
-        return new StartDecl(ev, fields, fill, s);
+        return new StartDecl(ev, fields, fill, s) { EventPath = path };
+    }
+
+    /// An event reference: bare `@Event` (local) OR `*Author.Bundle.@Event` (a collision-safe reference
+    /// to an event another bundle OWNS — so its payload types are unambiguous). Returns (path, name);
+    /// path is empty for the bare form. Used by emit/hear/start.
+    private (IReadOnlyList<string> Path, string Name) ParseEventRef(string what)
+    {
+        if (!Check(TokenKind.Star))
+            return (Array.Empty<string>(), Expect(TokenKind.EventRef, what).Text);
+        Advance();   // '*'
+        var path = new List<string> { ExpectName("qualified path after '*'").Text };
+        while (true)
+        {
+            Expect(TokenKind.Dot, "'.'");
+            if (Check(TokenKind.EventRef)) return (path, Advance().Text);
+            path.Add(ExpectName("path segment or @Event").Text);
+        }
     }
 
     private AttachStmt ParseAttach(bool remove)
