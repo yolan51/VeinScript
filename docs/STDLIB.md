@@ -85,6 +85,12 @@ publicators, reachable as `*Vein.Bundle.Publicator.member` and listed by
 `Entity` it concerns (`entity`/`target`/`a,b`), so events move real data across a program. `folds sum`
 is used only where genuinely multi-contributor (`$Pool`, `$Counter`, `$Velocity`).
 
+**Provenance is not declared here — it's a language guarantee.** On top of the declared payload, the
+runtime auto-attaches a provenance envelope (`from`, `origin`, `id`, `cause`, `trail`, `source`,
+`bundle`) to **every** event in **every** bundle/app, always readable on a `hear` binding
+(`d.from.kind`, …). It is a core feature of the language, not a stdlib member, so it is documented in
+[LANGUAGE.md §3.7](LANGUAGE.md) and printed by `veinc events` — not re-declared in any bundle.
+
 | Bundle | Publicators · members |
 |---|---|
 | **Core** | `Lifecycle` (`@Spawned`/`@Destroyed`/`@Enabled`/`@Disabled {entity}`, shard `Reaper`) · `Meta` (`$Name` `$Tag` `$Layer`) · `Quantity` (`$Pool{current folds sum, max}` `$Counter{value folds sum}`) · `Relations` (`$Parent{of:Entity}` `$Owner{by:Entity}`) |

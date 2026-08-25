@@ -207,6 +207,24 @@ members separated by whitespace, newline, or optional comma. Each member is one 
 and the `?` fill-the-rest sigil report and satisfy exactly the members listed here (with `$Shape`
 includes expanded to their fields).
 
+**Provenance — always present.** Beyond the fields you declare, the runtime auto-attaches a **provenance
+envelope** to **every event, in every bundle and every app** — you never declare it, and it is always
+readable on a `hear` binding (`d.from.kind`, `d.cause`, …):
+
+| field | meaning |
+|-------|---------|
+| `id` | this event's own id |
+| `from` | the emitter (a First-Class object): `from.name` · `from.kind` · `from.identity` · `from.shapes` · `from.marks` |
+| `origin` | the ECS **entity** that emitted, when in an entity context (`null` until the entity runtime lands) |
+| `source` | the originating entity/context |
+| `bundle` | the emitting bundle |
+| `cause` | the id of the event that caused this one |
+| `trail` | `id[]` — the full causation chain that led here |
+
+`from` is the answer to "who emitted this?" and is always populated; `origin` is the entity id (live
+once the ECS runtime executes `target`/tick). `veinc events` prints this envelope so it's visible. The
+`audience` barrier (§4) filters on the emitter's `from.shapes` / `from.marks`.
+
 ### 3.8 References & collections
 
 - Non-nullable by default; nullable is `T?`.

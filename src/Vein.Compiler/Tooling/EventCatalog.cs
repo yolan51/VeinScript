@@ -15,6 +15,20 @@ public static class EventCatalog
     // origin/source are added by the runtime at emit; never scaffolded.
     private static readonly HashSet<string> Auto = new(StringComparer.Ordinal) { "origin", "source" };
 
+    /// The provenance envelope the runtime auto-attaches to EVERY event — in every bundle and every app,
+    /// always present, never declared. Always readable on a `hear` binding (`d.from.kind`, `d.cause`, …).
+    /// See docs/LANGUAGE.md §3.8.
+    public static readonly IReadOnlyList<(string Name, string Meaning)> Provenance = new[]
+    {
+        ("id", "this event's own id"),
+        ("from", "the emitter (First-Class): from.name / from.kind / from.identity / from.shapes / from.marks"),
+        ("origin", "the ECS entity that emitted, when in an entity context (null until the entity runtime)"),
+        ("source", "the originating entity/context"),
+        ("bundle", "the emitting bundle"),
+        ("cause", "the id of the event that caused this one"),
+        ("trail", "id[] — the full causation chain that led here"),
+    };
+
     public static List<EventEntry> Catalog(CompilationUnit unit)
     {
         var shapes = Sig.Shapes(unit);
@@ -52,6 +66,10 @@ public static class EventCatalog
                 sb.Append("    ").Append(f.Name).Append(": ").Append(f.Type)
                   .Append("  ").Append(f.Required ? "required" : $"default = {f.Default}").Append('\n');
         }
+        // Every event also carries the provenance envelope — always present, on any bundle/app.
+        sb.Append("\nprovenance (auto — always present on every event, readable in `hear`):\n");
+        foreach (var (name, meaning) in Provenance)
+            sb.Append("    ").Append(name).Append("  — ").Append(meaning).Append('\n');
         return sb.ToString();
     }
 
