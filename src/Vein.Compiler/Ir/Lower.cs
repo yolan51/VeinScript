@@ -19,7 +19,7 @@ public sealed class Lower
 
     public Lower(DiagnosticBag diagnostics) => _diag = diagnostics;
 
-    private static readonly string[] OutputFields = { "markup", "code", "css" };
+    private static readonly string[] OutputFields = { "markup", "code", "css", "line" };
 
     public IrModule LowerBundle(BundleDecl bundle)
     {
@@ -357,13 +357,14 @@ public sealed class Lower
         var output = b.Members.OfType<FieldDecl>().FirstOrDefault(f => OutputFields.Contains(f.Name));
         if (output?.Default is null)
         {
-            _diag.Error("VS0205", $"Builder '{b.Name}' needs an output field (markup/code/css) with a value.", br.Span);
+            _diag.Error("VS0205", $"Builder '{b.Name}' needs an output field (markup/code/css/line) with a value.", br.Span);
             return new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
         }
         (string ev, string field) = output.Name switch
         {
             "code" => ("Script", "code"),
             "css" => ("Style", "css"),
+            "line" => ("Print", "text"),   // console output — bridged to stdout by the interpreter
             _ => ("Html", "markup")
         };
 

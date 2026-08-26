@@ -7,7 +7,10 @@
   <DockPanel>
     <Menu DockPanel.Dock="Top">
       <MenuItem Header="_File">
-        <MenuItem Header="_New" Click="OnNew" InputGesture="Ctrl+N" />
+        <MenuItem Header="_New File" Click="OnNew" InputGesture="Ctrl+N" />
+        <MenuItem Header="New _Bundle…" Click="OnNewBundle" />
+        <MenuItem Header="New _App…" Click="OnNewApp" />
+        <Separator />
         <MenuItem Header="_Open File…" Click="OnOpen" InputGesture="Ctrl+O" />
         <MenuItem Header="Open _Folder…" Click="OnOpenFolder" InputGesture="Ctrl+K" />
         <Separator />

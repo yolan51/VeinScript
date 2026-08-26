@@ -56,6 +56,7 @@ public class StdlibTests
     [InlineData("Web.vein", "*Vein.Web.Elements.Button")]
     [InlineData("Diagnostics.vein", "*Vein.Diagnostics.Report.$Diagnostic")]
     [InlineData("Console.vein", "*Vein.Console.Io.@Print")]
+    [InlineData("Console.vein", "*Vein.Console.Io.Line")]
     public void Stdlib_bundle_exposes_shared_symbol(string file, string qualified)
     {
         var diag = new DiagnosticBag();

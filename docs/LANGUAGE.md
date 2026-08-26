@@ -246,9 +246,10 @@ decides the kind:
 
 | output field | kind   | emitted event |
 |--------------|--------|---------------|
-| `markup`     | html   | `@Html`       |
-| `code`       | script | `@Script`     |
-| `css`        | style  | `@Style`      |
+| `markup`     | html    | `@Html`       |
+| `code`       | script  | `@Script`     |
+| `css`        | style   | `@Style`      |
+| `line`       | console | `@Print`      |
 
 ```
 builder Button {

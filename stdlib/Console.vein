@@ -12,5 +12,8 @@ bundle Console by Vein {
 
         shared("A line of text the user typed at the console (stdin).")
         event @Input { text: string }
+
+        shared("Write a line to the console — `bring Line(\"…\")` emits @Print { text }.")
+        builder Line { text: string   line = text }
     }
 }

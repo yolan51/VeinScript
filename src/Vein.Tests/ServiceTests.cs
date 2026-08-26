@@ -220,6 +220,20 @@ public class ServiceTests
     }
 
     [Fact]
+    public void Console_Line_builder_prints_via_line_channel()
+    {
+        // A `line = expr` builder desugars to emit @Print { text: expr }; `bring Line(...)` prints it.
+        var r = Compile("bundle B { start @Boot { } event @Boot { } " +
+                        "builder Line { text: string   line = text } " +
+                        "shard M { hear @Boot as b { bring Line(\"hello builder\") } } }");
+        Assert.True(r.Success);
+        Assert.Empty(r.Diagnostics);
+        var outw = new System.IO.StringWriter();
+        new Interp().Run(r.Modules[0], new System.IO.StringReader(""), outw);
+        Assert.Contains("hello builder", outw.ToString());
+    }
+
+    [Fact]
     public void Bundle_declares_author()
     {
         var r = Compile("bundle Combat by yolan { event @Request { path: string } }");

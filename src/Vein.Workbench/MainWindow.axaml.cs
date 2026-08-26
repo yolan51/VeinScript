@@ -15,6 +15,7 @@ using System.Text.RegularExpressions;
 using Vein.Compiler.Diagnostics;
 using Vein.Compiler.Ir;
 using Vein.Compiler.Parsing;
+using Vein.Compiler.Project;
 using Vein.Compiler.Service;
 using Vein.Compiler.Tooling;
 
@@ -139,6 +140,8 @@ public partial class MainWindow : Window
 
     // File
     private void OnNew(object? sender, RoutedEventArgs e) { _currentPath = null; _editor.Text = ""; Build(); }
+    private void OnNewBundle(object? sender, RoutedEventArgs e) => _ = NewProjectAsync(app: false);
+    private void OnNewApp(object? sender, RoutedEventArgs e) => _ = NewProjectAsync(app: true);
     private void OnBuild(object? sender, RoutedEventArgs e) => Build();
     private void OnBuildInspect(object? sender, RoutedEventArgs e) { Build(); _bottomPanel.SelectedIndex = 1; }
     private void OnOpen(object? sender, RoutedEventArgs e) => _ = OpenAsync();
@@ -196,6 +199,44 @@ public partial class MainWindow : Window
         Build();
     }
 
+    /// Scaffold a new bundle or app: pick where to create it, name it, lay down the skeleton, then show
+    /// it in the explorer and open its main file. Reuses ProjectScaffold (shared with `veinc new`).
+    private async Task NewProjectAsync(bool app)
+    {
+        var top = TopLevel.GetTopLevel(this);
+        if (top is null) return;
+
+        string? parentDir = _rootFolder;
+        if (parentDir is null)
+        {
+            var dirs = await top.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                AllowMultiple = false,
+                Title = app ? "Choose where to create the app" : "Choose where to create the bundle"
+            });
+            if (dirs.Count == 0) return;
+            parentDir = dirs[0].Path.LocalPath;
+        }
+
+        string? name = await PromptDialog.ShowAsync(this, app ? "New App" : "New Bundle", "Name:");
+        if (string.IsNullOrWhiteSpace(name)) return;
+
+        try
+        {
+            string mainFile = app
+                ? ProjectScaffold.NewApp(parentDir, name.Trim(), "you").AppFile
+                : ProjectScaffold.NewBundle(parentDir, name.Trim(), "you").MainFile;
+            _rootFolder = Path.Combine(parentDir, name.Trim());
+            PopulateProjectTree(_rootFolder);
+            await OpenPathAsync(mainFile);
+            SetStatus($"Created {(app ? "app" : "bundle")} {name.Trim()} at {_rootFolder}");
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"New {(app ? "app" : "bundle")} failed: {ex.Message}");
+        }
+    }
+
     private async Task OpenFolderAsync()
     {
         var top = TopLevel.GetTopLevel(this);
@@ -248,21 +289,18 @@ public partial class MainWindow : Window
     private static TreeViewItem FolderNode(DirectoryInfo dir)
     {
         var item = new TreeViewItem { Header = dir.Name };
+        // Show ALL project folders (including empty skeleton folders like shapes/ events/), except the
+        // build/VCS blocklist — so a freshly scaffolded bundle/app shows its full structure.
         foreach (var sub in dir.GetDirectories().OrderBy(d => d.Name))
-            if (ContainsVein(sub)) item.Items.Add(FolderNode(sub));
+            if (ShowFolder(sub)) item.Items.Add(FolderNode(sub));
         foreach (var f in dir.GetFiles("*.vein").OrderBy(f => f.Name))
             item.Items.Add(new TreeViewItem { Header = f.Name, Tag = f.FullName });
         return item;
     }
 
-    private static bool ContainsVein(DirectoryInfo dir)
+    private static bool ShowFolder(DirectoryInfo dir)
     {
-        try
-        {
-            if (dir.Name is "bin" or "obj" or ".git" or ".vs") return false;
-            if (dir.GetFiles("*.vein").Length > 0) return true;
-            return dir.GetDirectories().Any(ContainsVein);
-        }
+        try { return dir.Name is not ("bin" or "obj" or ".git" or ".vs"); }
         catch { return false; }
     }
 

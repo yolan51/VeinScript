@@ -8,9 +8,13 @@ using Vein.Compiler.Tooling;
 
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("usage: veinc <tokens|ast|ir|render|run|build|graph|events|scaffold|symbols> <file.vein> [arg]");
+    Console.Error.WriteLine("usage: veinc <new|tokens|ast|ir|render|run|build|graph|events|scaffold|symbols> <file.vein> [arg]");
     return 2;
 }
+
+// `new` scaffolds a project — its second arg is `bundle|app`, not a file, so handle it before the
+// file-reading path below.
+if (args[0] == "new") return NewCommand.Run(args);
 
 string command = args[0];
 string path = args[1];
