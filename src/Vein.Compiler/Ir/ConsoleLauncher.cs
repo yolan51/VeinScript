@@ -30,13 +30,16 @@ public static class ConsoleLauncher
 
         if (OperatingSystem.IsWindows())
         {
-            // `cmd /c start "<title>" <self> <args…>` opens a NEW console window titled <name>.
-            var psi = new ProcessStartInfo("cmd.exe") { UseShellExecute = false };
-            psi.ArgumentList.Add("/c");
-            psi.ArgumentList.Add("start");
-            psi.ArgumentList.Add(name);                       // window title
-            psi.ArgumentList.Add(self);
-            foreach (var a in passthrough) psi.ArgumentList.Add(a);
+            // `cmd /c start "" "<self>" <args…>` opens a NEW console window. The title MUST be an empty
+            // quoted string — otherwise `start` treats the (unquoted) name as the command to run and
+            // fails ("Windows cannot find 'Server'"). The spawned process titles its own window
+            // (Console.Title = name) once it starts.
+            string args = string.Join(" ", passthrough.Select(Quote));
+            var psi = new ProcessStartInfo("cmd.exe")
+            {
+                UseShellExecute = false,
+                Arguments = $"/c start \"\" {Quote(self)}{(args.Length > 0 ? " " + args : "")}"
+            };
             psi.Environment[NameVar] = name;
             psi.Environment[FirstVar] = firstText;
             TryStart(psi);
@@ -51,6 +54,8 @@ public static class ConsoleLauncher
             TryStart(psi);
         }
     }
+
+    private static string Quote(string s) => s.Length == 0 || s.Contains(' ') ? $"\"{s}\"" : s;
 
     private static void TryStart(ProcessStartInfo psi)
     {

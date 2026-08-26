@@ -43,6 +43,7 @@ public partial class MainWindow : Window
     // Resolved from the XAML name scope after load (robust regardless of generated fields).
     private TextEditor _editor = null!;
     private TextEditor _rawIr = null!;
+    private TextEditor _runOutput = null!;
     private TreeView _irTree = null!;
     private ListBox _diagBox = null!;
     private TreeView _projectTree = null!;
@@ -56,6 +57,7 @@ public partial class MainWindow : Window
         AvaloniaXamlLoader.Load(this);
         _editor = this.FindControl<TextEditor>("Editor")!;
         _rawIr = this.FindControl<TextEditor>("RawIr")!;
+        _runOutput = this.FindControl<TextEditor>("RunOutput")!;
         _irTree = this.FindControl<TreeView>("IrTree")!;
         _diagBox = this.FindControl<ListBox>("Diagnostics")!;
         _projectTree = this.FindControl<TreeView>("ProjectTree")!;
@@ -164,8 +166,36 @@ public partial class MainWindow : Window
     private void OnSelectAll(object? sender, RoutedEventArgs e) => _editor.SelectAll();
 
     // Run — the reactive runtime isn't wired into the Workbench yet (Phase 2); present for layout.
-    private void OnRun(object? sender, RoutedEventArgs e) =>
-        SetStatus("Run: the reactive runtime isn't wired into the Workbench yet (Phase 2). Use the CLI: veinc render <file>.");
+    // Run the current program in-process and stream its console output to the Output tab. Console
+    // *spawns* (`bring Console`) can't open real OS windows from inside the GUI, so they're shown inline
+    // as `[console: name] firsttext` (build a standalone .exe with Build ▸, or `veinc build`, for real
+    // windows). Non-interactive: stdin is empty (EOF), so the program boots, drains once, and stops.
+    private void OnRun(object? sender, RoutedEventArgs e)
+    {
+        string name = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
+        var result = _service.Compile(new CompileRequest(name, _editor.Text));
+        if (!result.Success)
+        {
+            _bottomPanel.SelectedIndex = 0;   // Diagnostics
+            SetStatus($"Run: fix {result.Diagnostics.Count} error(s) first.");
+            return;
+        }
+
+        var sb = new System.Text.StringBuilder();
+        var prevHook = ConsoleLauncher.Hook;
+        ConsoleLauncher.Hook = (cname, first) => sb.AppendLine($"[console: {cname}] {first}");
+        try
+        {
+            foreach (var m in result.Modules)
+                new Interp().Run(m, new StringReader(""), new StringWriter(sb));
+        }
+        catch (Exception ex) { sb.AppendLine($"runtime error: {ex.Message}"); }
+        finally { ConsoleLauncher.Hook = prevHook; }
+
+        _runOutput.Text = sb.ToString();
+        _bottomPanel.SelectedIndex = 2;   // Output
+        SetStatus($"Ran {name} — {result.Modules.Count} module(s)");
+    }
 
     // View
     private void OnToggleExplorer(object? sender, RoutedEventArgs e) => SetColumn(0, 1, ref _explorerVisible, 230);

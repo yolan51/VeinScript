@@ -78,6 +78,10 @@
           <ae:TextEditor Name="RawIr" IsReadOnly="True" ShowLineNumbers="False"
                          FontFamily="Cascadia Code,Consolas,monospace" FontSize="13" />
         </TabItem>
+        <TabItem Header="Output">
+          <ae:TextEditor Name="RunOutput" IsReadOnly="True" ShowLineNumbers="False"
+                         FontFamily="Cascadia Code,Consolas,monospace" FontSize="13" />
+        </TabItem>
       </TabControl>
     </Grid>
   </DockPanel>
