@@ -60,6 +60,8 @@
 
         <GridSplitter Grid.Column="3" Width="4" Background="#333" />
         <DockPanel Grid.Column="4">
+          <Border DockPanel.Dock="Top" Name="BundleInspector" IsVisible="False"
+                  Background="#1E1E1E" BorderBrush="#333" BorderThickness="0,0,0,1" Padding="12" />
           <TextBlock DockPanel.Dock="Top" Text="Inspector — IR Tree" Margin="8,6" FontWeight="Bold" />
           <TreeView Name="IrTree" />
         </DockPanel>

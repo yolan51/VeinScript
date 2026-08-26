@@ -220,6 +220,30 @@ public class ServiceTests
     }
 
     [Fact]
+    public void BundleInfo_counts_declarations_and_marks()
+    {
+        var unit = Compile(
+            "bundle B by me { " +
+            "  publicator P { shared(\"d\") event @E1 { } shared(\"d\") shape $S1 { x: int } builder Bld { t: string   markup = t } } " +
+            "  shape $S2 { y: int } " +
+            "  event @E2 { } " +
+            "  shard Sh #Live { hear @E1 as e { } } " +
+            "  ShardView V { hear @E2 as e { } } " +
+            "}").Ast;
+
+        var info = Vein.Compiler.Tooling.BundleInfo.Analyze(unit);
+        Assert.NotNull(info);
+        Assert.Equal("B", info!.Name);
+        Assert.Equal("me", info.Author);
+        Assert.Equal(2, info.Shapes);     // $S1 (in publicator) + $S2
+        Assert.Equal(2, info.Events);     // @E1 (in publicator) + @E2
+        Assert.Equal(1, info.Builders);   // Bld
+        Assert.Equal(1, info.Shards);     // Sh
+        Assert.Equal(1, info.Views);      // V
+        Assert.Equal(1, info.Marks);      // #Live
+    }
+
+    [Fact]
     public void Console_Line_builder_prints_via_line_channel()
     {
         // A `line = expr` builder desugars to emit @Print { text: expr }; `bring Line(...)` prints it.

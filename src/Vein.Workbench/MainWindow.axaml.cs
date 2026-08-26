@@ -5,7 +5,9 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
 using Avalonia.Markup.Xaml;
+using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using AvaloniaEdit;
 using AvaloniaEdit.CodeCompletion;
@@ -47,6 +49,7 @@ public partial class MainWindow : Window
     private Grid _topCols = null!;
     private TabControl _bottomPanel = null!;
     private TextBlock _statusBar = null!;
+    private Border _bundleInspector = null!;
 
     public MainWindow()
     {
@@ -59,6 +62,7 @@ public partial class MainWindow : Window
         _topCols = this.FindControl<Grid>("TopCols")!;
         _bottomPanel = this.FindControl<TabControl>("BottomPanel")!;
         _statusBar = this.FindControl<TextBlock>("StatusBar")!;
+        _bundleInspector = this.FindControl<Border>("BundleInspector")!;
 
         LoadHighlighting();
         _editor.TextArea.TextView.BackgroundRenderers.Add(_marker);
@@ -193,6 +197,7 @@ public partial class MainWindow : Window
     private async Task OpenPathAsync(string path)
     {
         _currentPath = path;
+        _bundleInspector.IsVisible = false;   // editing a file → show the IR inspector, not the bundle card
         _editor.Text = await File.ReadAllTextAsync(path);
         _rootFolder ??= Path.GetDirectoryName(path);
         if (_rootFolder is not null) PopulateProjectTree(_rootFolder);
@@ -275,15 +280,86 @@ public partial class MainWindow : Window
 
     // ---- project explorer ----------------------------------------------
 
+    // A selectable bundle node in the semantic explorer (drives the bundle inspector).
+    private sealed record BundleRef(string MainFile, string Name, bool IsPrincipal);
+
     private void PopulateProjectTree(string root)
     {
         _projectTree.ItemsSource = null;
         _projectTree.Items.Clear();
         var dir = new DirectoryInfo(root);
         if (!dir.Exists) return;
+
+        // A project with an app.vein gets the semantic view (★ principal + 📦 dependencies); anything
+        // else falls back to the plain folder tree.
+        string appFile = Path.Combine(root, "app.vein");
+        if (File.Exists(appFile) && TryBuildSemanticTree(root, appFile)) return;
+
         var node = FolderNode(dir);
         node.IsExpanded = true;
         _projectTree.Items.Add(node);
+    }
+
+    private bool TryBuildSemanticTree(string root, string appFile)
+    {
+        try
+        {
+            var ast = _service.Compile(new CompileRequest("app.vein", File.ReadAllText(appFile))).Ast;
+            var app = ast?.Apps.FirstOrDefault();
+            if (app is null) return false;
+
+            var loaded = new List<(string File, string Name)>();
+            foreach (var load in app.Loads)
+            {
+                string f = Path.GetFullPath(Path.Combine(root, load.Path));
+                if (File.Exists(f)) loaded.Add((f, BundleNameOf(f) ?? Path.GetFileNameWithoutExtension(f)));
+            }
+
+            var appNode = new TreeViewItem { Header = $"📱 {app.Name}", IsExpanded = true };
+
+            // Principal = the loaded bundle whose name matches the app (scaffold convention); else the first.
+            var principal = loaded.FirstOrDefault(b => b.Name == app.Name);
+            if (principal.File is null && loaded.Count > 0) principal = loaded[0];
+            if (principal.File is not null)
+            {
+                var pNode = new TreeViewItem
+                {
+                    Header = $"★ {principal.Name}",
+                    IsExpanded = true,
+                    Tag = new BundleRef(principal.File, principal.Name, true)
+                };
+                foreach (var vf in Directory.EnumerateFiles(Path.GetDirectoryName(principal.File)!, "*.vein")
+                                            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+                    pNode.Items.Add(new TreeViewItem { Header = Path.GetFileName(vf), Tag = vf });
+                appNode.Items.Add(pNode);
+            }
+
+            // Dependencies = other loads + any bundle under bundles/.
+            var deps = loaded.Where(b => b.File != principal.File).ToList();
+            string bundlesDir = Path.Combine(root, "bundles");
+            if (Directory.Exists(bundlesDir))
+                foreach (var vf in Directory.EnumerateFiles(bundlesDir, "*.vein", SearchOption.AllDirectories))
+                {
+                    string full = Path.GetFullPath(vf);
+                    if (deps.All(d => d.File != full))
+                        deps.Add((full, BundleNameOf(full) ?? Path.GetFileNameWithoutExtension(full)));
+                }
+
+            var depHeader = new TreeViewItem { Header = "DEPENDENCIES", IsExpanded = true };
+            foreach (var d in deps)
+                depHeader.Items.Add(new TreeViewItem { Header = $"📦 {d.Name}   —", Tag = new BundleRef(d.File, d.Name, false) });
+            appNode.Items.Add(depHeader);
+
+            _projectTree.Items.Add(appNode);
+            return true;
+        }
+        catch { return false; }
+    }
+
+    private string? BundleNameOf(string file)
+    {
+        try { return _service.Compile(new CompileRequest(Path.GetFileName(file), File.ReadAllText(file))).Ast?.Bundles.FirstOrDefault()?.Name; }
+        catch { return null; }
     }
 
     private static TreeViewItem FolderNode(DirectoryInfo dir)
@@ -306,8 +382,63 @@ public partial class MainWindow : Window
 
     private async void OnProjectItemActivated(object? sender, TappedEventArgs e)
     {
-        if (_projectTree.SelectedItem is TreeViewItem { Tag: string path } && File.Exists(path))
-            await OpenPathAsync(path);
+        switch (_projectTree.SelectedItem)
+        {
+            case TreeViewItem { Tag: BundleRef bundle }:
+                ShowBundleInspector(bundle);
+                break;
+            case TreeViewItem { Tag: string path } when File.Exists(path):
+                await OpenPathAsync(path);
+                break;
+        }
+    }
+
+    // Fill + reveal the bundle inspector: real declaration counts from the compiler; version/publisher and
+    // Update/Fork are honest placeholders until ShardStore + versioning exist.
+    private void ShowBundleInspector(BundleRef bundle)
+    {
+        BundleInfo? info = null;
+        try
+        {
+            var ast = _service.Compile(new CompileRequest(Path.GetFileName(bundle.MainFile), File.ReadAllText(bundle.MainFile))).Ast;
+            if (ast is not null) info = BundleInfo.Analyze(ast);
+        }
+        catch { /* leave info null → counts hidden */ }
+
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(new TextBlock
+        {
+            Text = (bundle.IsPrincipal ? "★ " : "📦 ") + bundle.Name,
+            FontWeight = FontWeight.Bold, FontSize = 16
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = $"Source: local   ·   Version: —{(info?.Author is { } a ? $"   ·   by {a}" : "")}",
+            Foreground = Brushes.Gray
+        });
+        if (info is not null)
+            panel.Children.Add(new TextBlock
+            {
+                Text = $"{info.Shards} Shards    {info.Shapes} Shapes    {info.Events} Events\n" +
+                       $"{info.Builders} Builders    {info.Views} Views    {info.Marks} Marks"
+            });
+
+        var open = new Button { Content = "Open" };
+        open.Click += async (_, _) => await OpenPathAsync(bundle.MainFile);
+        var graph = new Button { Content = "View Graph" };
+        graph.Click += async (_, _) => { await OpenPathAsync(bundle.MainFile); _bottomPanel.SelectedIndex = 1; };
+        var deps = new Button { Content = "View Dependencies" };
+        deps.Click += (_, _) => SetStatus("Dependencies are listed under DEPENDENCIES in the explorer.");
+        var update = new Button { Content = "Update", IsEnabled = false };
+        ToolTip.SetTip(update, "requires ShardStore");
+        var fork = new Button { Content = "Create Fork", IsEnabled = false };
+        ToolTip.SetTip(fork, "requires ShardStore");
+
+        panel.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { open, graph, deps } });
+        panel.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { update, fork } });
+
+        _bundleInspector.Child = panel;
+        _bundleInspector.IsVisible = true;
     }
 
     // ---- compile + present ---------------------------------------------
