@@ -82,7 +82,7 @@ Nine platform-independent bundles authored `by Vein`. A bundle has two layers:
 
 - **Publicators = the shared API** (`shared` shapes/events/builders), reachable across bundles as
   `*Vein.Bundle.Publicator.member` and listed by `veinc symbols stdlib/Vein.app.vein`. Totals:
-  **24 shapes · 28 events · 8 builders**, in **20 publicators**.
+  **24 shapes · 30 events · 8 builders**, in **20 publicators**.
 - **Bundle-level shards = behaviour** (7 of them). A `shard` is *never* inside a publicator — it is the
   bundle's logic that you get **for free by loading the bundle**; you don't reference or manipulate it,
   and it is not part of the cross-bundle API. (The compiler enforces this: a shard in a publicator is an
@@ -109,7 +109,7 @@ runtime auto-attaches a provenance envelope (`from`, `origin`, `id`, `cause`, `t
 | **Game** | `Collision` (`$Collider` `@Collided{a,b:Entity}`) · `Bodies` (`$Body`) · `Combat` (`@Damaged{target,amount}`) | `CollisionDetection` `GravitySystem` `DamageSystem` |
 | **Web** | `Http` (`@Request` `@Html` `@Style` `@Script` `@Render` `@Response`) · `Elements` (builders `Heading` `Paragraph` `Button` `Link` `Image` `ListItem`) | `Router` `Demo` + `Page` view — renders standalone |
 | **Diagnostics** | `Report` (`$Diagnostic` `@DiagnosticRaised`) | `Collector` |
-| **Console** | `Io` (`@Print{text}` `@Input{text}` `@Console{name,firsttext}` + builders `Line{text}`→`@Print`, `Console{name,firsttext}`→`@Console`) — console I/O + spawning named console apps; the runtime bridges `@Print`/`@Input` to stdout/stdin and `@Console` to a new console window | — |
+| **Console** | `Io` (`@Print{text}` `@Input{text}` `@Console{name,firsttext}` `@Send{to,text}` `@Message{from,text}` + builders `Line{text}`→`@Print`, `Console{name,firsttext}`→`@Console`) — console I/O, spawning named console apps, and messaging between them; the runtime bridges `@Print`/`@Input`↔stdout/stdin, `@Console`→a new console window, and `@Send`→another console (delivered as `@Message` over a local named pipe) | — |
 
 Notes: game-specific capabilities live in their own **Game** bundle (non-game apps don't pull it in);
 Transform is general (spatial is used by apps + games). Input positions are `x,y: float`, not `$Vec2` —

@@ -113,7 +113,7 @@ switch (command)
         {
             var lower = new Lower(diagnostics);
             foreach (var bundle in unit.Bundles)
-                new Interp().Run(lower.LowerBundle(bundle), Console.In, Console.Out);
+                new Interp().Run(lower.LowerBundle(bundle), Console.In, Console.Out, messaging: true);
         }
         break;
     }

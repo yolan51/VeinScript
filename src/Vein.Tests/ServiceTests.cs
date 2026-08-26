@@ -237,6 +237,37 @@ public class ServiceTests
     }
 
     [Fact]
+    public void ConsoleBus_delivers_message_to_named_console()
+    {
+        (string From, string Text)? got = null;
+        using var arrived = new System.Threading.ManualResetEventSlim();
+        using var bus = ConsoleBus.Start("VeinTestA", (from, text) => { got = (from, text); arrived.Set(); });
+        System.Threading.Thread.Sleep(150);   // let the pipe server arm
+
+        Assert.True(ConsoleBus.Send("VeinTestA", "VeinTestB", "hello"));
+        Assert.True(arrived.Wait(3000), "message not received");
+        Assert.Equal(("VeinTestB", "hello"), got);
+    }
+
+    [Fact]
+    public void Send_event_routes_through_the_bus()
+    {
+        (string From, string Text)? got = null;
+        using var arrived = new System.Threading.ManualResetEventSlim();
+        using var bus = ConsoleBus.Start("VeinTarget", (from, text) => { got = (from, text); arrived.Set(); });
+        System.Threading.Thread.Sleep(150);
+
+        // The @Send bridge fires in Drain (even in the simple non-messaging run): self is "main" here.
+        var r = Compile("bundle B { start @Boot { } event @Boot { } event @Send { to: string, text: string } " +
+                        "shard M { hear @Boot as b { emit @Send { to: \"VeinTarget\", text: \"ping\" } } } }");
+        Assert.True(r.Success);
+        new Interp().Run(r.Modules[0], new System.IO.StringReader(""), new System.IO.StringWriter());
+
+        Assert.True(arrived.Wait(3000), "send did not route through the bus");
+        Assert.Equal(("main", "ping"), got);
+    }
+
+    [Fact]
     public void BundleInfo_counts_declarations_and_marks()
     {
         var unit = Compile(

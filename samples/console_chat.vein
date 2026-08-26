@@ -1,0 +1,36 @@
+// samples/console_chat.vein — messaging BETWEEN spawned console applications.
+//
+//   veinc build samples/console_chat.vein     →  console_chat.exe   (double-click)
+//
+// The main window spawns Server, Client1, Client2. Type a line in ANY window → it's sent to the Server
+// window, which prints "<who> says: <line>". That's an event crossing process boundaries: `emit @Send`
+// in one console is delivered as `@Message` in another (over a local named pipe, addressed by name).
+//
+// Every console runs the same program, so the routing is uniform: everyone sends to "Server", everyone
+// prints what they receive. (bring/events are defined locally — cross-bundle `use Console` is a follow-on.)
+
+bundle ConsoleChat by you {
+
+    start @Boot { }
+    event @Boot { }
+
+    event @Print { text: string }                        // print a line in THIS console
+    event @Send { to: string, text: string }             // send a line to console `to`
+    event @Message { from: string, text: string }        // a line received from console `from`
+
+    builder Console { name: string, firsttext: string }  // bring Console(a,b) → @Console { name:a, firsttext:b }
+
+    shard Launcher {
+        hear @Boot as b {
+            emit @Print { text: "main — type here; it goes to Server." }
+            bring Console("Server",  "Server ready — messages from others appear here.")
+            bring Console("Client1", "Client1 ready — type to message Server.")
+            bring Console("Client2", "Client2 ready — type to message Server.")
+        }
+    }
+
+    shard Chat {
+        hear @Input as i { emit @Send { to: "Server", text: i.text } }       // I typed → send to Server
+        hear @Message as m { emit @Print { text: m.from + " says: " + m.text } }   // received → print
+    }
+}

@@ -19,6 +19,12 @@ bundle Console by Vein {
         shared("A named console application to spawn (name identifies it; firsttext is printed on start).")
         event @Console { name: string, firsttext: string }
 
+        shared("Send a line to another console — emit @Send { to, text } delivers it to console `to`.")
+        event @Send { to: string, text: string }
+
+        shared("A message received from another console — hear @Message { from, text }.")
+        event @Message { from: string, text: string }
+
         shared("Build a named console application — `bring Console(\"Server\", \"ready\")` spawns its own window.")
         builder Console { name: string, firsttext: string }
     }

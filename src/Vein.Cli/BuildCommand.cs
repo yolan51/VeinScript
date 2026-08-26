@@ -96,7 +96,7 @@ internal static class BuildCommand
         if (diag.HasErrors) { foreach (var d in diag.Items) Console.Error.WriteLine(d); return 1; }
 
         var lower = new Lower(diag);
-        foreach (var b in unit.Bundles) new Interp().Run(lower.LowerBundle(b), Console.In, Console.Out);
+        foreach (var b in unit.Bundles) new Interp().Run(lower.LowerBundle(b), Console.In, Console.Out, messaging: true);
         return 0;
         """;
 }

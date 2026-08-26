@@ -85,6 +85,32 @@ Requires the .NET SDK (for `dotnet publish`) and targets **console** programs �
 (`@Response`) prints nothing through the exe (that's `veinc render`). Emitting real C#/SECS from the IR
 (a true transpiler backend) is the larger follow-on; this ships a runnable app on today's interpreter.
 
+### 2.3 Spawning + messaging between console apps
+
+A running program can spawn **named console applications** and pass events between them:
+
+- **`bring Console(name, firsttext)`** → emits `@Console { name, firsttext }`; the runtime
+  ([ConsoleLauncher](../src/Vein.Compiler/Ir/ConsoleLauncher.cs)) relaunches the program in a new console
+  window marked as that named console (`VEIN_CONSOLE` env), which titles its window and prints `firsttext`.
+  A spawned console never spawns again (no runaway tree).
+- **`emit @Send { to, text }`** → delivered to console `to` as **`@Message { from, text }`**, over a local
+  **named pipe** `vein.console.<to>` ([ConsoleBus](../src/Vein.Compiler/Ir/ConsoleBus.cs)). Directed,
+  real-time, same machine.
+
+Under messaging mode ([Interp.Run](../src/Vein.Compiler/Ir/Interp.cs) with `messaging: true`, used by
+`veinc run` and built exes) the event loop accepts input from **both** stdin and the bus on one thread
+(a `BlockingCollection` inbox), so the interpreter stays single-threaded while messages arrive
+asynchronously. A spawned console stays alive to receive; a piped `veinc run < file` still exits on EOF.
+
+```
+shard Chat {
+    hear @Input   as i { emit @Send  { to: "Server", text: i.text } }        // I type → Server
+    hear @Message as m { emit @Print { text: m.from + " says: " + m.text } } // I receive → I print
+}
+```
+Try it: `veinc build samples/console_chat.vein` → run it → type in one window, watch it appear in Server's.
+Cross-machine transport (TCP) and cross-bundle `use Console` import are follow-ons.
+
 ---
 
 ## 3. Booting with `start` (implemented — bundle level)

@@ -36,6 +36,7 @@ public sealed class Interp
     private string? _responseBody;
     private long _responseStatus = 200;
     private TextWriter? _out;   // console stdout sink (set in Run); @Print writes here. Null in Render.
+    private string _self = "main";   // this console's name (for @Send routing); "main" if not spawned.
 
     public sealed record GraphEdge(string FromName, string FromKind, string Event);
     public sealed record RenderResult(
@@ -53,9 +54,10 @@ public sealed class Interp
 
     /// Console mode (interactive): boot the program, then pump stdin↔stdout — each line from `input`
     /// becomes an @Input event, each @Print event is written to `output`. Runs until EOF on `input`.
-    public void Run(IrModule module, TextReader input, TextWriter output)
+    public void Run(IrModule module, TextReader input, TextWriter output, bool messaging = false)
     {
         _out = output;
+        _self = ConsoleLauncher.CurrentName ?? "main";
 
         // If this process was spawned as a named console (`bring Console`), announce itself: title the
         // window and print its first line before booting.
@@ -69,12 +71,34 @@ public sealed class Interp
         Setup(module);
         FireBoot(module, "/", null);
         Drain();
-        string? line;
-        while ((line = input.ReadLine()) is not null)
+
+        if (!messaging)
         {
-            FireInput(line);
-            Drain();
+            // Simple synchronous loop: stdin line → @Input → drain, until EOF.
+            string? line;
+            while ((line = input.ReadLine()) is not null) { FireInput(line); Drain(); }
+            return;
         }
+
+        // Messaging mode: accept input from stdin AND the console bus concurrently. ALL event-loop work
+        // runs on this thread via the inbox (the interpreter stays logically single-threaded); the
+        // background threads only post actions.
+        using var inbox = new System.Collections.Concurrent.BlockingCollection<Action>();
+        using var bus = ConsoleBus.Start(_self, (from, text) =>
+        { try { inbox.Add(() => { FireMessage(from, text); Drain(); }); } catch { /* inbox closed */ } });
+
+        var reader = new Thread(() =>
+        {
+            try { string? l; while ((l = input.ReadLine()) is not null) { var line = l; inbox.Add(() => { FireInput(line); Drain(); }); } }
+            catch { /* input closed */ }
+            // A root run (piped stdin) ends when stdin ends; a spawned console stays alive for messages.
+            if (ConsoleLauncher.CurrentName is null) { try { inbox.CompleteAdding(); } catch { } }
+        }) { IsBackground = true, Name = "vein-stdin" };
+        reader.Start();
+
+        try { foreach (var action in inbox.GetConsumingEnumerable()) action(); }
+        catch { /* completed */ }
+        bus.Stop();
     }
 
     /// Register every First-Class object (shard/view/bridge) and wire its `hear` handlers.
@@ -145,6 +169,16 @@ public sealed class Interp
         });
     }
 
+    /// A message that arrived from another console (via the bus) becomes an @Message event: `from` is the
+    /// sending console's name, `text` the body.
+    private void FireMessage(string from, string text)
+    {
+        Emit("Message", new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["from"] = from, ["text"] = text, ["origin"] = null, ["bundle"] = _bundle
+        });
+    }
+
     /// Process the event queue until empty. @Response is captured; @Print (console mode) is written to
     /// the output sink; anything else dispatches to its `hear` handlers (subject to the audience barrier).
     private void Drain()
@@ -157,6 +191,7 @@ public sealed class Interp
             if (name == "Response") { _responseBody = Str(payload.GetValueOrDefault("body")); _responseStatus = AsLong(payload.GetValueOrDefault("status")); continue; }
             if (name == "Print") { _out?.WriteLine(Str(payload.GetValueOrDefault("text"))); continue; }
             if (name == "Console") { ConsoleLauncher.Spawn(Str(payload.GetValueOrDefault("name")), Str(payload.GetValueOrDefault("firsttext"))); continue; }
+            if (name == "Send") { ConsoleBus.Send(Str(payload.GetValueOrDefault("to")), _self, Str(payload.GetValueOrDefault("text"))); continue; }
             if (!_handlers.TryGetValue(name, out var hs)) continue;
             foreach (var h in hs)
             {
