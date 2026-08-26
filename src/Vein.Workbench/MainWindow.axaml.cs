@@ -691,8 +691,9 @@ public partial class MainWindow : Window
         return null;
     }
 
-    // A builder's parameters = its members minus the output field (markup/code/css), $Shape expanded.
-    private static readonly string[] BuilderOutputs = { "markup", "code", "css" };
+    // A builder's parameters = its members minus the output-channel field, $Shape expanded. Keep in sync
+    // with Lower.OutputFields (a channel-less builder has no output field → all members are params).
+    private static readonly string[] BuilderOutputs = { "markup", "code", "css", "line" };
     private static List<Sig.Field> BuilderParams(CompilationUnit ast, BuilderDecl b)
     {
         var output = b.Members.OfType<FieldDecl>().FirstOrDefault(f => BuilderOutputs.Contains(f.Name));
@@ -701,7 +702,7 @@ public partial class MainWindow : Window
     }
     private static string BuilderKind(BuilderDecl b) =>
         b.Members.OfType<FieldDecl>().FirstOrDefault(f => BuilderOutputs.Contains(f.Name))?.Name switch
-        { "code" => "script", "css" => "style", _ => "html" };
+        { "code" => "script", "css" => "style", "line" => "console", "markup" => "html", _ => "event" };
 
     private static (string?, int) WordAt(string text, int offset)
     {
