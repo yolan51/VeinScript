@@ -52,6 +52,14 @@ public static class ProjectLoader
                 if (load.HasStart) ValidateOverride(load, withStart, diag);
             }
 
+        // Auto-load the stdlib's shared symbols so `*Vein.*` references resolve even when a file doesn't
+        // explicitly `load` the stdlib. Dedup: skip any bundle the app already loaded (by author+name), so
+        // an app that DOES load the stdlib isn't double-counted (which would look like a collision).
+        var loaded = symbols.Where(s => s.Kind == SymbolKind.Bundle).Select(s => (s.Author, s.Bundle)).ToHashSet();
+        foreach (var s in StdlibIndex.Symbols(baseDir))
+            if (!loaded.Contains((s.Author, s.Bundle)))
+                symbols.Add(s);
+
         var model = new ProjectModel { AppName = appName, Symbols = symbols, Starts = starts };
 
         // Validate every `*`-qualified event reference (emit/hear/start) against the app's events, so an

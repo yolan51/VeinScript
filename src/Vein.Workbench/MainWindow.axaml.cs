@@ -613,6 +613,7 @@ public partial class MainWindow : Window
     {
         if (e.Text == "?") { TryExpandOnQuestion(); return; }
         if (e.Text == ".") { ShowMemberCompletion(); return; }
+        if (e.Text == "*") { ShowStarCompletion(); return; }   // qualified stdlib refs: *Vein.Console.Io.@Print
         if (e.Text is not ("$" or "#" or "@")) return;
 
         // Recompile lazily so completion reflects the current text (not just the last Build).
@@ -813,6 +814,19 @@ public partial class MainWindow : Window
             return null;
         }
         return Search(ast.Bundles);
+    }
+
+    // Typing `*` offers the stdlib's cross-bundle symbols as full qualified paths (e.g.
+    // `Vein.Console.Io.@Print`); selecting one completes `*Vein.Console.Io.@Print`.
+    private void ShowStarCompletion()
+    {
+        string? dir = _currentPath is not null ? Path.GetDirectoryName(_currentPath) : _rootFolder;
+        var names = StdlibIndex.Symbols(dir)
+            .Select(s => string.Join(".", s.PathSegments) + "." + s.Sigil + s.Name)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToList();
+        ShowCompletion(names, "stdlib");
     }
 
     private void ShowMemberCompletion()

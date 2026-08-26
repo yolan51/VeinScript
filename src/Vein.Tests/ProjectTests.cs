@@ -163,4 +163,26 @@ public class ProjectTests
         }
         finally { dir.Delete(recursive: true); }
     }
+
+    [Fact]
+    public void StdlibIndex_loads_console_shared_symbols()
+    {
+        var syms = StdlibIndex.Symbols(AppContext.BaseDirectory);
+        Assert.Contains(syms, s => s.Bundle == "Console" && s.Kind == SymbolKind.Event && s.Name == "Print");
+        Assert.Contains(syms, s => s.Bundle == "Console" && s.Kind == SymbolKind.Event && s.Name == "Console");
+    }
+
+    [Fact]
+    public void ProjectLoader_resolves_stdlib_qualified_refs_no_VS0305()
+    {
+        // A standalone bundle that uses *Vein.Console.Io.@X should resolve against the auto-loaded stdlib.
+        var stdlib = StdlibIndex.Locate(AppContext.BaseDirectory);
+        Assert.NotNull(stdlib);
+        var sample = Path.Combine(Directory.GetParent(stdlib!)!.FullName, "samples", "three_consoles.vein");
+        Assert.True(File.Exists(sample));
+
+        var diag = new DiagnosticBag();
+        ProjectLoader.Load(sample, diag);
+        Assert.DoesNotContain(diag.Items, d => d.ToString().Contains("VS0305"));
+    }
 }
