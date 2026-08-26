@@ -871,7 +871,9 @@ public partial class MainWindow : Window
     private void ShowStarCompletion()
     {
         string? dir = _currentPath is not null ? Path.GetDirectoryName(_currentPath) : _rootFolder;
-        var names = StdlibIndex.Symbols(dir)
+        // Discovery policy (vein.discovery) filters what `*` enumerates; `shared` still governs consumption.
+        var policy = DiscoveryPolicy.Load(dir);
+        var names = policy.Filter(StdlibIndex.Symbols(dir))
             .Select(s => string.Join(".", s.PathSegments) + "." + s.Sigil + s.Name)
             .Distinct(StringComparer.Ordinal)
             .OrderBy(x => x, StringComparer.Ordinal)

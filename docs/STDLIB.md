@@ -123,6 +123,18 @@ conventions*, applied with `mark self #X` and matched by `target … #X` / `audi
 `#Enabled #Visible #Focusable #Interactive #Selectable #Movable #Collidable #Destroyable #Renderable`.
 A first-class mark declaration (so these become validated shared symbols) is a follow-on (§6.4).
 
+**Discovery vs consumption.** Two independent axes: **`shared`** controls **consumption** (what other
+bundles may reference at all), while a **discovery policy** controls **discovery** (what `*` wildcard
+enumeration surfaces — autocomplete/browsing). With thousands of bundles, `*` must not list the universe,
+so a project drops a plain-text [`vein.discovery`](../samples/vein.discovery) file:
+```
+silent all              # nothing shows in * unless exposed
+expose Vein.Console     # Author | Author.Bundle | Author.Bundle.Publicator (most-specific wins)
+```
+Silencing only hides an identity from `*`; an explicit `*Vein.Silent.@X` still resolves and runs (that's
+`shared`'s job). Today the policy filters the Workbench's `*` completion ([DiscoveryPolicy](../src/Vein.Compiler/Project/DiscoveryPolicy.cs));
+applying it to the Dependencies view and `veinc symbols` is a follow-on.
+
 ## 6. Missing capabilities for full consumption (isolated, general-purpose follow-ons)
 
 Each is a general language/runtime capability, **not** a stdlib-specific hack:

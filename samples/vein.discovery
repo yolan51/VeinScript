@@ -1,0 +1,19 @@
+# vein.discovery — controls what `*` wildcard discovery ENUMERATES (autocomplete / browsing).
+#
+#   silent  = hidden from `*` discovery      expose = shown in `*` discovery
+#   `silent` controls DISCOVERY; `shared` still controls CONSUMPTION — an explicit
+#   *Author.Bundle.Publicator.@member always resolves and runs even if silenced here.
+#
+# Most-specific path wins; a path is Author | Author.Bundle | Author.Bundle.Publicator.
+# `silent all` / `expose all` set the default (no file, or neither line → everything is discoverable).
+
+silent all                    # nuclear: nothing shows in `*` unless exposed below
+
+expose Vein.Console           # this whole bundle is discoverable
+expose Vein.Math
+
+# expose a specific publicator only:
+# expose acme.Combat.Damage
+
+# re-silence a child under an exposed parent:
+# silent acme.Combat.Internal

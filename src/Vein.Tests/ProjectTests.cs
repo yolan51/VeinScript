@@ -173,6 +173,36 @@ public class ProjectTests
     }
 
     [Fact]
+    public void DiscoveryPolicy_silent_all_then_expose_with_inheritance()
+    {
+        var p = DiscoveryPolicy.Parse(new[]
+        {
+            "# discovery",
+            "silent all",
+            "expose Vein.Console",
+            "silent acme.Combat.Internal",
+            "expose acme.Combat",
+        });
+
+        Assert.True(p.IsDiscoverable("Vein", "Console", "Io"));      // exposed bundle
+        Assert.False(p.IsDiscoverable("Vein", "Math", "Values"));    // silent-all default
+        Assert.True(p.IsDiscoverable("acme", "Combat", "Public"));   // inherits exposed parent
+        Assert.False(p.IsDiscoverable("acme", "Combat", "Internal")); // most-specific silent wins
+    }
+
+    [Fact]
+    public void DiscoveryPolicy_no_file_is_permissive_and_filters_symbols()
+    {
+        Assert.True(DiscoveryPolicy.Permissive.IsDiscoverable("anyone", "AnyBundle", "AnyPub"));
+
+        var syms = StdlibIndex.Symbols(AppContext.BaseDirectory);
+        var policy = DiscoveryPolicy.Parse(new[] { "silent all", "expose Vein.Console" });
+        var kept = policy.Filter(syms).ToList();
+        Assert.NotEmpty(kept);
+        Assert.All(kept, s => Assert.Equal("Console", s.Bundle));    // only Vein.Console survives
+    }
+
+    [Fact]
     public void ProjectLoader_resolves_stdlib_qualified_refs_no_VS0305()
     {
         // A standalone bundle that uses *Vein.Console.Io.@X should resolve against the auto-loaded stdlib.
