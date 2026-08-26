@@ -48,6 +48,7 @@ public partial class MainWindow : Window
     private TreeView _irTree = null!;
     private ListBox _diagBox = null!;
     private TreeView _projectTree = null!;
+    private TreeView _depsTree = null!;
     private Grid _topCols = null!;
     private TabControl _bottomPanel = null!;
     private TextBlock _statusBar = null!;
@@ -62,6 +63,7 @@ public partial class MainWindow : Window
         _irTree = this.FindControl<TreeView>("IrTree")!;
         _diagBox = this.FindControl<ListBox>("Diagnostics")!;
         _projectTree = this.FindControl<TreeView>("ProjectTree")!;
+        _depsTree = this.FindControl<TreeView>("DepsTree")!;
         _topCols = this.FindControl<Grid>("TopCols")!;
         _bottomPanel = this.FindControl<TabControl>("BottomPanel")!;
         _statusBar = this.FindControl<TextBlock>("StatusBar")!;
@@ -550,6 +552,7 @@ public partial class MainWindow : Window
         _diagBox.ItemsSource = _diags.Select(d => d.ToString()).ToList();
         _rawIr.Text = result.IrText;
         PopulateTree(result.IrTree);
+        PopulateDependencies(result.Ast);
         UpdateMarks();
         if (result.Ast is not null) _symbols = SymbolIndex.Collect(result.Ast);
 
@@ -564,6 +567,52 @@ public partial class MainWindow : Window
         _irTree.ItemsSource = null;
         _irTree.Items.Clear();
         foreach (var r in roots) _irTree.Items.Add(MakeItem(r));
+    }
+
+    // The Dependencies tab: what this bundle CONSUMES — external *Author.Bundle.Publicator.@member refs,
+    // grouped Author → Bundle → Publicator → member (used by which local shards). ⚠ = external but not
+    // found in the known (stdlib) symbols.
+    private void PopulateDependencies(CompilationUnit? ast)
+    {
+        _depsTree.ItemsSource = null;
+        _depsTree.Items.Clear();
+        if (ast is null || ast.Bundles.Count == 0) return;
+
+        string? dir = _currentPath is not null ? Path.GetDirectoryName(_currentPath) : _rootFolder;
+        var model = DependencyModel.Analyze(ast, StdlibIndex.Symbols(dir));
+        if (model is null || model.IsEmpty)
+        {
+            _depsTree.Items.Add(new TreeViewItem { Header = "No external dependencies (uses only local primitives).", Foreground = Brushes.Gray });
+            return;
+        }
+
+        foreach (var byAuthor in model.Dependencies.GroupBy(d => d.Author).OrderBy(g => g.Key, StringComparer.Ordinal))
+        {
+            var authorNode = new TreeViewItem { Header = byAuthor.Key, IsExpanded = true };
+            foreach (var byBundle in byAuthor.GroupBy(d => d.Bundle).OrderBy(g => g.Key, StringComparer.Ordinal))
+            {
+                var bundleNode = new TreeViewItem { Header = byBundle.Key, IsExpanded = true };
+                foreach (var dep in byBundle.OrderBy(d => d.Publicator, StringComparer.Ordinal))
+                {
+                    TreeViewItem parent = bundleNode;
+                    if (dep.Publicator is not null)
+                    {
+                        var pubNode = new TreeViewItem { Header = dep.Publicator, IsExpanded = true };
+                        bundleNode.Items.Add(pubNode);
+                        parent = pubNode;
+                    }
+                    foreach (var mref in dep.Members)
+                    {
+                        string used = mref.UsedBy.Count > 0 ? "    used by: " + string.Join(", ", mref.UsedBy) : "";
+                        var leaf = new TreeViewItem { Header = $"{(mref.Resolved ? "" : "⚠ ")}{mref.Sigil}{mref.Name}{used}" };
+                        if (!mref.Resolved) leaf.Foreground = Brushes.Goldenrod;
+                        parent.Items.Add(leaf);
+                    }
+                }
+                authorNode.Items.Add(bundleNode);
+            }
+            _depsTree.Items.Add(authorNode);
+        }
     }
 
     private static TreeViewItem MakeItem(IrNode n)

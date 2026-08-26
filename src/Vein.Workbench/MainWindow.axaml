@@ -82,6 +82,9 @@
           <ae:TextEditor Name="RunOutput" IsReadOnly="True" ShowLineNumbers="False"
                          FontFamily="Cascadia Code,Consolas,monospace" FontSize="13" />
         </TabItem>
+        <TabItem Header="Dependencies">
+          <TreeView Name="DepsTree" />
+        </TabItem>
       </TabControl>
     </Grid>
   </DockPanel>

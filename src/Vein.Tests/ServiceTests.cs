@@ -268,6 +268,33 @@ public class ServiceTests
     }
 
     [Fact]
+    public void DependencyModel_groups_external_refs_with_used_by()
+    {
+        var unit = Compile(
+            "bundle App by me { " +
+            "  start @Boot { } event @Boot { } " +
+            "  shard Launcher { hear @Boot as b { emit *Vein.Console.Io.@Console { name: \"S\", firsttext: \"x\" } } } " +
+            "  shard Chat { hear *Vein.Console.Io.@Input as i { emit *Vein.Console.Io.@Send { to: \"S\", text: i.text } } } " +
+            "}").Ast;
+        Assert.NotNull(unit);
+
+        var known = Vein.Compiler.Project.StdlibIndex.Symbols(AppContext.BaseDirectory);
+        var m = Vein.Compiler.Tooling.DependencyModel.Analyze(unit!, known);
+        Assert.NotNull(m);
+
+        var io = m!.Dependencies.FirstOrDefault(d => d.Author == "Vein" && d.Bundle == "Console" && d.Publicator == "Io");
+        Assert.NotNull(io);
+        var names = io!.Members.Select(x => x.Name).ToList();
+        Assert.Contains("Console", names);
+        Assert.Contains("Input", names);
+        Assert.Contains("Send", names);
+
+        Assert.Contains("Launcher", io.Members.First(x => x.Name == "Console").UsedBy);
+        Assert.Contains("Chat", io.Members.First(x => x.Name == "Send").UsedBy);
+        Assert.All(io.Members, x => Assert.True(x.Resolved));   // all resolve against the stdlib
+    }
+
+    [Fact]
     public void BundleModel_groups_by_kind_visibility_and_relationships()
     {
         var unit = Compile(
