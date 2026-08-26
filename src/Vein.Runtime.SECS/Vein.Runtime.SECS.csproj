@@ -11,8 +11,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Vein.Compiler\Vein.Compiler.csproj" />
-    <!-- The external ShardECS entity/component runtime (referenced by relative path). -->
-    <ProjectReference Include="..\..\..\VeinEngine\ShardECS\SECS\SECS.csproj" />
+    <!-- The ShardECS entity/component runtime, vendored in-tree (src/ShardECS.SECS). -->
+    <ProjectReference Include="..\ShardECS.SECS\SECS.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>ShardECS.SECS</RootNamespace>
+    <AssemblyName>ShardECS.SECS</AssemblyName>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+
+    <!-- NuGet package metadata (vendored in-tree; not packed on build) -->
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <PackageId>ShardECS.SECS</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>ShardECS</Authors>
+    <Description>
+      ShardECS (SECS) — a lightweight Entity-Component-System runtime.
+      Includes standard components, default drawers, entity factories,
+      and full ShardStore integration for sharing reusable game logic.
+    </Description>
+    <PackageTags>ecs;gamedev;entity-component-system;shardecs</PackageTags>
+    <RepositoryType>git</RepositoryType>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ShardECS.Contracts\Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>SECS.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+</Project>
