@@ -2,35 +2,39 @@
 //
 //   veinc build samples/console_chat.vein     →  console_chat.exe   (double-click)
 //
-// The main window spawns Server, Client1, Client2. Type a line in ANY window → it's sent to the Server
-// window, which prints "<who> says: <line>". That's an event crossing process boundaries: `emit @Send`
-// in one console is delivered as `@Message` in another (over a local named pipe, addressed by name).
+// Everything stdlib is FULLY qualified, so origin is obvious (*Vein.Console.Io.* = stdlib; bare = local):
+//   *Vein.Console.Io.@Console  → spawn a named console          (stdlib)
+//   *Vein.Console.Io.@Input    → a line typed in THIS console   (stdlib)
+//   *Vein.Console.Io.@Send     → send a line to console `to`     (stdlib)
+//   *Vein.Console.Io.@Message  → a line received from `from`     (stdlib)
+//   *Vein.Console.Io.@Print    → write a line to this console    (stdlib)
 //
-// Every console runs the same program, so the routing is uniform: everyone sends to "Server", everyone
-// prints what they receive. (bring/events are defined locally — cross-bundle `use Console` is a follow-on.)
+// The main window spawns Server + Client1..4. Type in ANY window → the line is sent to Server (and
+// Client4), which prints "<who> says: <line>". That's an event crossing process boundaries (named pipe).
 
 bundle ConsoleChat by you {
 
     start @Boot { }
-    event @Boot { }
-
-    event @Print { text: string }                        // print a line in THIS console
-    event @Send { to: string, text: string }             // send a line to console `to`
-    event @Message { from: string, text: string }        // a line received from console `from`
-
-    builder Console { name: string, firsttext: string }  // bring Console(a,b) → @Console { name:a, firsttext:b }
+    event @Boot { }                                    // the only local event — this bundle's entry
 
     shard Launcher {
         hear @Boot as b {
-            emit @Print { text: "main — type here; it goes to Server." }
-            bring Console("Server",  "Server ready — messages from others appear here.")
-            bring Console("Client1", "Client1 ready — type to message Server.")
-            bring Console("Client2", "Client2 ready — type to message Server.")
+            emit *Vein.Console.Io.@Print   { text: "main — type here; it goes to Server." }
+            emit *Vein.Console.Io.@Console { name: "Server",  firsttext: "Server ready — messages appear here." }
+            emit *Vein.Console.Io.@Console { name: "Client1", firsttext: "Client1 ready — type to message Server." }
+            emit *Vein.Console.Io.@Console { name: "Client2", firsttext: "Client2 ready — type to message Server." }
+            emit *Vein.Console.Io.@Console { name: "Client3", firsttext: "Client3 ready — type to message Server." }
+            emit *Vein.Console.Io.@Console { name: "Client4", firsttext: "Client4 ready — type to message Server." }
         }
     }
 
     shard Chat {
-        hear @Input as i { emit @Send { to: "Server", text: i.text } }       // I typed → send to Server
-        hear @Message as m { emit @Print { text: m.from + " says: " + m.text } }   // received → print
+        hear *Vein.Console.Io.@Input as i {
+            emit *Vein.Console.Io.@Send { to: "Server",  text: i.text }        // I typed → send to Server
+            emit *Vein.Console.Io.@Send { to: "Client4", text: i.text }        //          … and to Client4
+        }
+        hear *Vein.Console.Io.@Message as m {
+            emit *Vein.Console.Io.@Print { text: m.from + " says: " + m.text }   // received → print
+        }
     }
 }

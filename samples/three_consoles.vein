@@ -1,33 +1,27 @@
 // samples/three_consoles.vein — spawn THREE named console applications from one program.
 //
-// Build a standalone exe and run it:
-//     veinc build samples/three_consoles.vein      →  three_consoles.exe
-//     (double-click it)  → the main window opens, then THREE more console windows appear —
-//                          Server, Client1, Client2 — each printing its first line.
+//   veinc build samples/three_consoles.vein     →  three_consoles.exe   (double-click)
 //
-// `bring Console(name, firsttext)` emits @Console { name, firsttext }, which the runtime bridges to
-// spawning a named console window. A spawned console never spawns more (no runaway tree), so each of the
-// three just prints its first line and waits.
+// Everything from the standard library is written with its FULL qualified path, so you can see exactly
+// what comes from where:
+//   *Vein.Console.Io.@Print     → write a line to this console         (stdlib)
+//   *Vein.Console.Io.@Console   → spawn a named console window         (stdlib)
+// Bare names (@Boot, Launcher) are declared HERE, by this bundle.
 //
-// (bring is bundle-local today, so the Console builder is defined here rather than imported from
-//  *Vein.Console — cross-bundle `use Console; bring Console` is the next step.)
+// Spawning is just emitting the stdlib @Console event — no local builder, no `bring`. A spawned console
+// never spawns again (its firsttext prints and it waits).
 
 bundle ThreeConsoles by you {
 
     start @Boot { }
-    event @Boot { }
-
-    event @Print { text: string }                        // console output — bridged to stdout
-
-    // Channel-less builder: bring Console(a, b) emits @Console { name: a, firsttext: b }.
-    builder Console { name: string, firsttext: string }
+    event @Boot { }                                    // the only local event — this bundle's entry
 
     shard Launcher {
         hear @Boot as b {
-            emit @Print { text: "Launcher — opening three consoles…" }
-            bring Console("Server",  "Server console — ready.")
-            bring Console("Client1", "Client 1 console — ready.")
-            bring Console("Client2", "Client 2 console — ready.")
+            emit *Vein.Console.Io.@Print   { text: "main — opening three consoles." }
+            emit *Vein.Console.Io.@Console { name: "Server",  firsttext: "Server console — ready." }
+            emit *Vein.Console.Io.@Console { name: "Client1", firsttext: "Client 1 console — ready." }
+            emit *Vein.Console.Io.@Console { name: "Client2", firsttext: "Client 2 console — ready." }
         }
     }
 }
