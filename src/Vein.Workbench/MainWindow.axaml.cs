@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using System.Xml;
 using Avalonia;
@@ -165,12 +166,11 @@ public partial class MainWindow : Window
     private void OnPaste(object? sender, RoutedEventArgs e) => _editor.Paste();
     private void OnSelectAll(object? sender, RoutedEventArgs e) => _editor.SelectAll();
 
-    // Run — the reactive runtime isn't wired into the Workbench yet (Phase 2); present for layout.
-    // Run the current program in-process and stream its console output to the Output tab. Console
-    // *spawns* (`bring Console`) can't open real OS windows from inside the GUI, so they're shown inline
-    // as `[console: name] firsttext` (build a standalone .exe with Build ▸, or `veinc build`, for real
-    // windows). Non-interactive: stdin is empty (EOF), so the program boots, drains once, and stops.
-    private void OnRun(object? sender, RoutedEventArgs e)
+    // Run the current program. If the file is saved and the repo `veinc` wrapper is found, launch it as a
+    // REAL external console (`veinc run <file>`) so `bring Console` opens real OS windows — same as the
+    // built exe. Otherwise (untitled/unsaved) fall back to an in-process run whose output goes to the
+    // Output tab, with console spawns shown inline as `[console: name] firsttext`.
+    private async void OnRun(object? sender, RoutedEventArgs e)
     {
         string name = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
         var result = _service.Compile(new CompileRequest(name, _editor.Text));
@@ -181,20 +181,45 @@ public partial class MainWindow : Window
             return;
         }
 
-        var sb = new System.Text.StringBuilder();
+        string? veinc = FindRepoTool("veinc.cmd");
+        if (_currentPath is not null && veinc is not null)
+        {
+            try
+            {
+                await File.WriteAllTextAsync(_currentPath, _editor.Text);   // run the current content
+                Process.Start(new ProcessStartInfo(veinc, $"run \"{_currentPath}\"")
+                {
+                    UseShellExecute = true,                                 // opens its own console window
+                    WorkingDirectory = Path.GetDirectoryName(veinc)!
+                });
+                SetStatus($"Running {name} in a new console window…");
+                return;
+            }
+            catch (Exception ex) { SetStatus($"External run failed ({ex.Message}); running in-process."); }
+        }
+
+        // Fallback: in-process. Console spawns are shown inline (a GUI process can't open windows for itself).
+        var sb = new StringBuilder();
         var prevHook = ConsoleLauncher.Hook;
         ConsoleLauncher.Hook = (cname, first) => sb.AppendLine($"[console: {cname}] {first}");
-        try
-        {
-            foreach (var m in result.Modules)
-                new Interp().Run(m, new StringReader(""), new StringWriter(sb));
-        }
+        try { foreach (var m in result.Modules) new Interp().Run(m, new StringReader(""), new StringWriter(sb)); }
         catch (Exception ex) { sb.AppendLine($"runtime error: {ex.Message}"); }
         finally { ConsoleLauncher.Hook = prevHook; }
 
         _runOutput.Text = sb.ToString();
         _bottomPanel.SelectedIndex = 2;   // Output
-        SetStatus($"Ran {name} — {result.Modules.Count} module(s)");
+        SetStatus($"Ran {name} in-process (save it to open real console windows).");
+    }
+
+    /// Walk up from the app's base directory to find a repo file (e.g. veinc.cmd). Null if not found.
+    private static string? FindRepoTool(string fileName)
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            string candidate = Path.Combine(dir.FullName, fileName);
+            if (File.Exists(candidate)) return candidate;
+        }
+        return null;
     }
 
     // View
