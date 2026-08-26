@@ -8,7 +8,7 @@ using Vein.Compiler.Tooling;
 
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("usage: veinc <tokens|ast|ir|render|run|graph|events|scaffold|symbols> <file.vein> [arg]");
+    Console.Error.WriteLine("usage: veinc <tokens|ast|ir|render|run|build|graph|events|scaffold|symbols> <file.vein> [arg]");
     return 2;
 }
 
@@ -112,6 +112,21 @@ switch (command)
                 new Interp().Run(lower.LowerBundle(bundle), Console.In, Console.Out);
         }
         break;
+    }
+
+    case "build":
+    {
+        // Compile the program to a standalone console .exe (embeds the interpreter + source, then
+        // `dotnet publish` self-contained). Returns the build's own exit code directly.
+        string? outPath = null, rid = null;
+        bool selfContained = true;
+        for (int i = 2; i < args.Length; i++)
+        {
+            if (args[i] == "-o" && i + 1 < args.Length) outPath = args[++i];
+            else if (args[i] == "--rid" && i + 1 < args.Length) rid = args[++i];
+            else if (args[i] == "--framework-dependent") selfContained = false;
+        }
+        return BuildCommand.Build(path, source, outPath, rid, selfContained);
     }
 
     case "graph":

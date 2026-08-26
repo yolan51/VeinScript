@@ -62,6 +62,29 @@ you said hi
 Runs on today's net8 interpreter. (A console over the SECS/net9 runtime is a follow-on — see
 BACKEND-CONTRACT.md.)
 
+### 2.2 Standalone app (`veinc build`)
+
+`veinc build <file>` compiles a program to a **standalone console executable** you can double-click or
+ship — it opens its own console window and runs the program, no terminal or install needed:
+
+```
+$ veinc build samples/console.vein          # → samples/console.exe (self-contained, ~65 MB)
+$ echo hi | ./samples/console.exe
+Type something (Ctrl+Z / Ctrl+D to end):
+you said hi
+```
+
+The exe embeds the `.vein` source **plus the net8 interpreter**: on launch it lexes→parses→lowers→runs
+[Interp.Run](../src/Vein.Compiler/Ir/Interp.cs) — the same console loop as §2.1, so `@Print`/`@Input`
+bridge to its own window. Under the hood [BuildCommand](../src/Vein.Cli/BuildCommand.cs) generates a
+throwaway net8 console project (referencing the already-built `Vein.Compiler.dll`, source as an embedded
+resource) and `dotnet publish`es it self-contained/single-file for the current RID. Flags:
+`-o <out.exe>`, `--rid <rid>`, `--framework-dependent` (small exe, needs .NET 8 installed).
+
+Requires the .NET SDK (for `dotnet publish`) and targets **console** programs — a web-style program
+(`@Response`) prints nothing through the exe (that's `veinc render`). Emitting real C#/SECS from the IR
+(a true transpiler backend) is the larger follow-on; this ships a runnable app on today's interpreter.
+
 ---
 
 ## 3. Booting with `start` (implemented — bundle level)

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# veinc — convenience wrapper for the VeinScript CLI. Forwards to Vein.Cli.
+#   ./veinc run samples/console.vein   /   ./veinc build samples/console.vein
+here="$(cd "$(dirname "$0")" && pwd)"
+exec dotnet run --project "$here/src/Vein.Cli" --verbosity quiet -- "$@"
