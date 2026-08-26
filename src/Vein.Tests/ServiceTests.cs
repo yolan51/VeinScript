@@ -43,12 +43,31 @@ public class ServiceTests
     }
 
     [Fact]
-    public void Shard_with_target_has_query()
+    public void Shard_schedule_wraps_a_target_query()
     {
-        var r = Compile("bundle B { shape $H { hp: int } shard S { target $H #E as self { each tick { } } } }");
+        // Schedule outer, `target` query inner: `each tick { target … }` lowers to a schedule method
+        // whose body contains a target IrLoop.
+        var r = Compile("bundle B { shape $H { hp: int } shard S { each tick { target $H #E as self { } } } }");
         Assert.True(r.Success);
         var shard = r.Modules[0].Shards.Single(s => s.Name == "S");
-        Assert.Contains(shard.Attrs, a => a.Name == "query");
+        var tick = shard.Methods.Single(m => m.Attrs.Any(a => a.Name == "schedule"));
+        Assert.Contains(tick.Body.Statements, st => st is IrLoop { Kind: IrLoopKind.Target });
+    }
+
+    [Fact]
+    public void All_shard_schedules_parse()
+    {
+        Assert.True(Compile("bundle B { shard S { run once { } each tick { } each frame { } every 1.0 { } settled { } } }").Success);
+    }
+
+    [Fact]
+    public void Every_records_its_interval_in_seconds()
+    {
+        var r = Compile("bundle B { shard S { every 0.5 { } } }");
+        Assert.True(r.Success);
+        var attr = r.Modules[0].Shards.Single().Methods.Single().Attrs.Single(a => a.Name == "schedule");
+        Assert.Equal("every", attr.Args[0]);
+        Assert.Equal(0.5, (double)attr.Args[1]!);
     }
 
     [Fact]
@@ -64,7 +83,7 @@ public class ServiceTests
     public void SymbolIndex_collects_shapes_marks_events()
     {
         var r = Compile("bundle B { shape $Health { hp: int } event @Damaged { amount: int } " +
-                        "shard S { target $Health #Enemy as self { each tick { mark self #Dead } } } }");
+                        "shard S { each tick { target $Health #Enemy as self { mark self #Dead } } } }");
         var sym = SymbolIndex.Collect(r.Ast!);
         Assert.Contains("Health", sym.Shapes);
         Assert.Contains("Damaged", sym.Events);
@@ -75,7 +94,7 @@ public class ServiceTests
     [Fact]
     public void Members_of_self_scope_are_shape_fields()
     {
-        var r = Compile("bundle B { shape $Health { hp: int, mp: int } shard S { target $Health as self { each tick { } } } }");
+        var r = Compile("bundle B { shape $Health { hp: int, mp: int } shard S { each tick { target $Health as self { } } } }");
         var m = MemberIndex.Build(r.Ast!).Resolve(new[] { "::Health" });
         Assert.Contains("hp", m);
         Assert.Contains("mp", m);
@@ -93,7 +112,7 @@ public class ServiceTests
     [Fact]
     public void Members_of_target_binding_are_shape_names()
     {
-        var r = Compile("bundle B { shape $Health { hp: int } shard S { target $Health as self { each tick { } } } }");
+        var r = Compile("bundle B { shape $Health { hp: int } shard S { each tick { target $Health as self { } } } }");
         var m = MemberIndex.Build(r.Ast!).Resolve(new[] { "self" });
         Assert.Contains("Health", m);
     }

@@ -108,8 +108,7 @@ public sealed class AstTree
 
     private IrNode Member(Node m) => m switch
     {
-        TargetBlock tb => Node("Target", TargetHead(tb), tb.Span, tb.Body.Select(Member)),
-        LifecycleBlock lc => Node(Phase(lc.Phase), "", lc.Span, Block(lc.Body)),
+        ScheduleBlock sb => Node(ScheduleName(sb.Kind), ScheduleArg(sb), sb.Span, Block(sb.Body)),
         HearBlock hb => WithAttrs(Node("Hear", $"{AstPrinter.EventText(hb.EventPath, hb.Event)} as {hb.Bind}", hb.Span, Block(hb.Body)),
                                   Audience(hb.AudienceShapes, hb.AudienceMarks)),
         Decl d => Decl(d),
@@ -117,17 +116,22 @@ public sealed class AstTree
         _ => Leaf(m.GetType().Name, "", m.Span)
     };
 
-    private static string Phase(LifecyclePhase p) => p switch
+    private static string ScheduleName(ScheduleKind k) => k switch
     {
-        LifecyclePhase.Tick => "EachTick",
-        LifecyclePhase.Settled => "Settled",
-        _ => "Start"
+        ScheduleKind.Tick => "EachTick",
+        ScheduleKind.Frame => "EachFrame",
+        ScheduleKind.Once => "RunOnce",
+        ScheduleKind.Every => "Every",
+        _ => "Settled"
     };
 
-    private string TargetHead(TargetBlock tb)
+    private static string ScheduleArg(ScheduleBlock sb) =>
+        sb.Kind == ScheduleKind.Every ? (sb.IntervalSeconds ?? 0).ToString(CultureInfo.InvariantCulture) + "s" : "";
+
+    private static string QueryHead(QueryStmt q)
     {
-        var refs = tb.Components.Select(c => "$" + c).Concat(tb.Tags.Select(t => "#" + t));
-        return $"{string.Join(" ", refs)} as {tb.Bind}";
+        var refs = q.Components.Select(c => "$" + c).Concat(q.Tags.Select(t => "#" + t));
+        return $"{string.Join(" ", refs)} as {q.Bind}";
     }
 
     // ---- statements -----------------------------------------------------
@@ -140,6 +144,7 @@ public sealed class AstTree
         IfStmt i => IfNode(i),
         WhileStmt w => Node("While", "", w.Span, new[] { Wrapper("Cond", "", w.Cond) }.Concat(new[] { Node("Do", "", w.Span, Block(w.Body)) })),
         TargetStmt t => Node("Target", $"{Path(t.Source)} as {t.Bind}", t.Span, Block(t.Body)),
+        QueryStmt q => Node("Target", QueryHead(q), q.Span, Block(q.Body)),
         RepeatStmt r => Node("Repeat", r.Var is null ? Count(r.Count) : $"{Count(r.Count)} as {r.Var}", r.Span, Block(r.Body)),
         MatchStmt m => MatchNode(m),
         BreakStmt => Leaf("Break", "", s.Span),

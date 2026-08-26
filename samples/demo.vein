@@ -32,8 +32,9 @@ bundle Demo {
     }
 
     shard Drain {
-        target $Health #Enemy as self {
-            each tick {
+        // The SCHEDULE is outer, the entity `target` query is inner.
+        each tick {
+            target $Health #Enemy as self {
                 ::Health.hp -= 1
 
                 chance 30% {
@@ -45,9 +46,12 @@ bundle Demo {
             }
         }
 
+        // settled runs once after the tick's fold contributions reconcile.
         settled {
-            if ::Health.hp <= 0 {
-                mark self #Dead
+            target $Health #Enemy as self {
+                if ::Health.hp <= 0 {
+                    mark self #Dead
+                }
             }
         }
     }

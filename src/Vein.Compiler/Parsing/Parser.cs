@@ -444,10 +444,8 @@ public sealed class Parser
     {
         switch (Cur.Kind)
         {
-            case TokenKind.KwTarget: return ParseTargetBlock();
             case TokenKind.KwEach:
-            case TokenKind.KwSettled:
-            case TokenKind.KwStart: return ParseLifecycle();
+            case TokenKind.KwSettled: return ParseSchedule();
             case TokenKind.KwHear: return ParseHear();
             case TokenKind.KwSf: return ParseFunc();
             case TokenKind.KwFn:
@@ -456,46 +454,48 @@ public sealed class Parser
             case TokenKind.KwLet: return ParseVar(mutable: false);
             case TokenKind.KwVar: return ParseVar(mutable: true);
             default:
+                // `run once` / `every N` use contextual words (so `frame`/`every` stay valid field names).
+                if (Check(TokenKind.Ident) && (Cur.Text == "run" || Cur.Text == "every")) return ParseSchedule();
                 _diag.Error("VS0103", $"Unexpected '{Cur.Text}' in shard body.", Here);
                 throw new ParseError();
         }
     }
 
-    private TargetBlock ParseTargetBlock()
-    {
-        var s = Here; Advance();
-        var comps = new List<string>();
-        var tags = new List<string>();
-        while (Check(TokenKind.ShapeRef) || Check(TokenKind.MarkRef))
-        {
-            if (Check(TokenKind.ShapeRef)) comps.Add(Advance().Text);
-            else tags.Add(Advance().Text);
-        }
-        Expect(TokenKind.KwAs, "'as'");
-        string bind = Expect(TokenKind.Ident, "binding name").Text;
-        Expect(TokenKind.LBrace, "'{'");
-        var body = new List<Node>();
-        SkipTerms();
-        while (!Check(TokenKind.RBrace) && !AtEnd)
-        {
-            if (Check(TokenKind.KwEach) || Check(TokenKind.KwSettled) || Check(TokenKind.KwStart))
-                body.Add(ParseLifecycle());
-            else if (Check(TokenKind.KwHear)) body.Add(ParseHear());
-            else body.Add(ParseStmt());
-            SkipTerms();
-        }
-        Expect(TokenKind.RBrace, "'}'");
-        return new TargetBlock(comps, tags, bind, body, s);
-    }
-
-    private LifecycleBlock ParseLifecycle()
+    /// A shard behaviour block: WHEN it runs (the schedule) wraps a body. The entity `target` query
+    /// nests INSIDE, as a statement. `run once`, `each tick`, `each frame`, `every N`, `settled`.
+    private ScheduleBlock ParseSchedule()
     {
         var s = Here;
-        LifecyclePhase phase;
-        if (Match(TokenKind.KwEach)) { Expect(TokenKind.KwTick, "'tick'"); phase = LifecyclePhase.Tick; }
-        else if (Match(TokenKind.KwSettled)) phase = LifecyclePhase.Settled;
-        else { Expect(TokenKind.KwStart, "'start'"); phase = LifecyclePhase.Start; }
-        return new LifecycleBlock(phase, ParseBlock(), s);
+        ScheduleKind kind;
+        double? interval = null;
+        if (Match(TokenKind.KwEach))
+        {
+            if (Match(TokenKind.KwTick)) kind = ScheduleKind.Tick;
+            else if (Check(TokenKind.Ident) && Cur.Text == "frame") { Advance(); kind = ScheduleKind.Frame; }
+            else { _diag.Error("VS0109", "expected `tick` or `frame` after `each`.", Here); throw new ParseError(); }
+        }
+        else if (Match(TokenKind.KwSettled)) kind = ScheduleKind.Settled;
+        else if (Check(TokenKind.Ident) && Cur.Text == "run") { Advance(); ExpectContextual("once"); kind = ScheduleKind.Once; }
+        else if (Check(TokenKind.Ident) && Cur.Text == "every") { Advance(); kind = ScheduleKind.Every; interval = ParseSeconds(); }
+        else { _diag.Error("VS0109", "expected a schedule (`run once`, `each tick`, `each frame`, `every N`, `settled`).", Here); throw new ParseError(); }
+        return new ScheduleBlock(kind, interval, ParseBlock(), s);
+    }
+
+    /// Consume a contextual word (ident spelled `word`, e.g. `once`).
+    private void ExpectContextual(string word)
+    {
+        if ((Check(TokenKind.Ident) || IsKeyword(Cur.Kind)) && Cur.Text == word) { Advance(); return; }
+        _diag.Error("VS0100", $"Expected `{word}`, found {Cur.Kind} '{Cur.Text}'.", Here);
+        throw new ParseError();
+    }
+
+    /// A number of seconds after `every` (int or float): `every 1.0`, `every 0.5`.
+    private double ParseSeconds()
+    {
+        if (Check(TokenKind.Int) || Check(TokenKind.Float))
+            return Advance().Value switch { long l => l, int i => i, double d => d, _ => 0.0 };
+        _diag.Error("VS0110", "expected a number of seconds after `every` (e.g. `every 1.0`).", Here);
+        throw new ParseError();
     }
 
     private HearBlock ParseHear()
@@ -544,7 +544,7 @@ public sealed class Parser
             case TokenKind.KwVar: { var v = ParseVar(mutable: true); return new LocalVarStmt(v, v.Span); }
             case TokenKind.KwIf: return ParseIf();
             case TokenKind.KwWhile: return ParseWhile();
-            case TokenKind.KwTarget: return ParseTargetStmt();
+            case TokenKind.KwTarget: return ParseTargetOrQuery();
             case TokenKind.KwRepeat: return ParseRepeat();
             case TokenKind.KwMatch: return ParseMatch();
             case TokenKind.KwReturn:
@@ -582,13 +582,28 @@ public sealed class Parser
         return new WhileStmt(cond, ParseBlock(), s);
     }
 
-    private TargetStmt ParseTargetStmt()
+    /// `target $Shape #Mark as self { … }` (a typed identity query → QueryStmt) or `target <expr> as x
+    /// { … }` (iterate an expression → TargetStmt). Distinguished by a leading `$`/`#`.
+    private Stmt ParseTargetOrQuery()
     {
-        var s = Here; Advance();
+        var s = Here; Advance();   // 'target'
+        if (Check(TokenKind.ShapeRef) || Check(TokenKind.MarkRef))
+        {
+            var comps = new List<string>();
+            var tags = new List<string>();
+            while (Check(TokenKind.ShapeRef) || Check(TokenKind.MarkRef))
+            {
+                if (Check(TokenKind.ShapeRef)) comps.Add(Advance().Text);
+                else tags.Add(Advance().Text);
+            }
+            Expect(TokenKind.KwAs, "'as'");
+            string bind = Expect(TokenKind.Ident, "binding name").Text;
+            return new QueryStmt(comps, tags, bind, ParseBlock(), s);
+        }
         var src = ParseExpr();
         Expect(TokenKind.KwAs, "'as'");
-        string bind = Expect(TokenKind.Ident, "binding").Text;
-        return new TargetStmt(src, bind, ParseBlock(), s);
+        string b = Expect(TokenKind.Ident, "binding").Text;
+        return new TargetStmt(src, b, ParseBlock(), s);
     }
 
     private RepeatStmt ParseRepeat()

@@ -115,14 +115,12 @@ public sealed record BridgeDecl(string Name, IReadOnlyList<Node> Members, Source
 
 // shard members ----------------------------------------------------------
 
-public enum LifecyclePhase { Start, Tick, Settled }
+/// When a shard's behaviour block runs. The schedule is the OUTER structure; an entity `target` query
+/// nests inside (see `QueryStmt`). `run once`, `each tick`, `each frame`, `every N`, `settled`.
+public enum ScheduleKind { Once, Tick, Frame, Every, Settled }
 
-/// `target C… #T… as self { … }` — the typed identity query. Body holds lifecycle/hear/statements.
-public sealed record TargetBlock(
-    IReadOnlyList<string> Components, IReadOnlyList<string> Tags, string Bind,
-    IReadOnlyList<Node> Body, SourceSpan Span) : Node(Span);
-
-public sealed record LifecycleBlock(LifecyclePhase Phase, Block Body, SourceSpan Span) : Node(Span);
+/// A shard behaviour block: a schedule + body. `IntervalSeconds` is set only for `Every` (`every 1.0`).
+public sealed record ScheduleBlock(ScheduleKind Kind, double? IntervalSeconds, Block Body, SourceSpan Span) : Node(Span);
 
 /// `hear @Event as bind [audience $Shape #Mark …] { … }`. The audience barrier restricts which
 /// emitters this handler will react to (by the emitter's shapes/marks) — see docs.
@@ -149,6 +147,9 @@ public sealed record LocalVarStmt(VarDecl Decl, SourceSpan Span) : Stmt(Span);  
 public sealed record IfStmt(Expr Cond, Block Then, Node? Else, SourceSpan Span) : Stmt(Span); // Else: IfStmt | Block
 public sealed record WhileStmt(Expr Cond, Block Body, SourceSpan Span) : Stmt(Span);
 public sealed record TargetStmt(Expr Source, string Bind, Block Body, SourceSpan Span) : Stmt(Span);
+/// `target $Shape #Mark as self { … }` — the typed identity query, nested inside a schedule. Binds
+/// `self` to each matching entity; `::Shape.field` reads that entity's component.
+public sealed record QueryStmt(IReadOnlyList<string> Components, IReadOnlyList<string> Tags, string Bind, Block Body, SourceSpan Span) : Stmt(Span);
 public sealed record RepeatStmt(Expr Count, string? Var, Block Body, SourceSpan Span) : Stmt(Span);
 public sealed record MatchStmt(Expr Subject, IReadOnlyList<MatchArm> Arms, Block? Else, SourceSpan Span) : Stmt(Span);
 public sealed record MatchArm(string CaseName, Block Body, SourceSpan Span) : Node(Span);

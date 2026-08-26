@@ -30,8 +30,8 @@ bundle Transform by Vein {
 
     // Behaviour (bundle-level) — advances $Position from $Velocity each step. Comes with the bundle.
     shard Integrator {
-        target $Velocity as self {
-            each tick { }
+        each tick {
+            target $Velocity as self { }
         }
     }
 }

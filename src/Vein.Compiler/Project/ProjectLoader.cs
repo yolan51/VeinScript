@@ -83,6 +83,7 @@ public static class ProjectLoader
                     break;
                 case WhileStmt w: foreach (var x in w.Body.Statements) Stmt(x); break;
                 case TargetStmt t: foreach (var x in t.Body.Statements) Stmt(x); break;
+                case QueryStmt q: foreach (var x in q.Body.Statements) Stmt(x); break;
                 case RepeatStmt r: foreach (var x in r.Body.Statements) Stmt(x); break;
                 case MatchStmt m:
                     foreach (var a in m.Arms) foreach (var x in a.Body.Statements) Stmt(x);
@@ -99,8 +100,7 @@ public static class ProjectLoader
                     if (hb.EventPath.Count > 0) into.Add((hb.EventPath, hb.Event, hb.Span));
                     foreach (var x in hb.Body.Statements) Stmt(x);
                     break;
-                case LifecycleBlock lc: foreach (var x in lc.Body.Statements) Stmt(x); break;
-                case TargetBlock tb: foreach (var it in tb.Body) Member(it); break;
+                case ScheduleBlock sc: foreach (var x in sc.Body.Statements) Stmt(x); break;
                 case FuncDecl f: foreach (var x in f.Body.Statements) Stmt(x); break;
                 case Stmt s: Stmt(s); break;
             }

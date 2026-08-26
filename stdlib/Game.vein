@@ -26,23 +26,24 @@ bundle Game by Vein {
     }
 
     // --- behaviour (bundle-level shards) — comes with the bundle; not part of the shared API ----------
+    // The schedule is outer, the entity `target` query is inner.
     shard CollisionDetection {
-        target $Collider #Collidable as self {
-            each tick {
+        each tick {
+            target $Collider #Collidable as self {
                 emit @Collided { a: self, b: self }
             }
         }
     }
 
     shard GravitySystem {
-        target $Body as self {
-            each tick { }
+        each tick {
+            target $Body as self { }
         }
     }
 
     shard DamageSystem {
-        target $Body as self {
-            each tick { }
+        each tick {
+            target $Body as self { }
         }
     }
 }

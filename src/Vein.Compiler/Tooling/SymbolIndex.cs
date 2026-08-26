@@ -34,8 +34,7 @@ public static class SymbolIndex
         {
             switch (n)
             {
-                case TargetBlock tb: AddMarks(tb.Tags); foreach (var it in tb.Body) Member(it); break;
-                case LifecycleBlock lc: Block(lc.Body); break;
+                case ScheduleBlock sc: Block(sc.Body); break;
                 case HearBlock hb: AddMarks(hb.AudienceMarks); Block(hb.Body); break;
                 case FuncDecl f: Block(f.Body); break;
                 case Stmt s: Stmt(s); break;
@@ -56,6 +55,7 @@ public static class SymbolIndex
                     break;
                 case WhileStmt w: Expr(w.Cond); Block(w.Body); break;
                 case TargetStmt t: Expr(t.Source); Block(t.Body); break;
+                case QueryStmt q: AddMarks(q.Tags); Block(q.Body); break;
                 case RepeatStmt r: Expr(r.Count); Block(r.Body); break;
                 case MatchStmt m:
                     Expr(m.Subject); foreach (var a in m.Arms) Block(a.Body);

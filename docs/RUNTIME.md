@@ -106,15 +106,17 @@ start       = "start" "@" IDENT emitBody ;
 
 ## 4. The ECS tick loop (designed, deferred) — and why `settled` exists
 
-For games, the intended per-frame loop over each targeted entity:
+A shard is a set of **scheduled** behaviour blocks — `run once` · `each tick` · `each frame` ·
+`every N` (seconds) · `settled` — with an entity `target` query nested inside each (schedule outer, query
+inner). The intended per-frame loop over each targeted entity:
 
 ```
 shard Drain {
-    target $Health #Enemy as self {
-        each tick { ::Health.hp -= 1 }        // MANY shards may write hp this frame
+    each tick {
+        target $Health #Enemy as self { ::Health.hp -= 1 }   // MANY shards may write hp this frame
     }
-    settled {                                  // AFTER the frame's writes are reconciled
-        if ::Health.hp <= 0 { mark self #Dead }
+    settled {                                                 // AFTER the frame's writes are reconciled
+        target $Health #Enemy as self { if ::Health.hp <= 0 { mark self #Dead } }
     }
 }
 ```

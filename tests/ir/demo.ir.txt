@@ -15,8 +15,8 @@ Bundle Demo
 |         |--- Arg amount = Ref amount
 |         `--- Arg victim = Ref victim
 `--- Shard Drain
-     |--- Target $Health #Enemy as self
-     |    `--- EachTick
+     |--- EachTick
+     |    `--- Target $Health #Enemy as self
      |         |--- Assign -= ::Health.hp
      |         |    `--- Int 1
      |         `--- Chance 30%
@@ -24,9 +24,10 @@ Bundle Demo
      |                   |--- Arg amount = Int 5
      |                   `--- Arg victim = Ref self
      `--- Settled
-          `--- If
-               |--- Cond = Binary <=
-               |    |--- Path ::Health.hp
-               |    `--- Int 0
-               `--- Then
-                    `--- Mark self #Dead
+          `--- Target $Health #Enemy as self
+               `--- If
+                    |--- Cond = Binary <=
+                    |    |--- Path ::Health.hp
+                    |    `--- Int 0
+                    `--- Then
+                         `--- Mark self #Dead

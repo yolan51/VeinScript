@@ -267,30 +267,39 @@ includes expanded), fills defaults, and emits the output event. `bring N Name(�
 
 ## 4. Behavior: `shard`
 
-All behavior lives in shards. A shard **targets** identities and runs lifecycle phases over them.
+All behavior lives in shards. A shard is a set of **scheduled behaviour blocks**: the **schedule** (when
+it runs) is the outer structure, and an entity **`target` query** nests inside it.
 
 ```
 shard Drain {
-    target $Health #Enemy as self {      // cycle identities with Health, tagged Enemy
-        each tick {                      // every frame
-            ::Health.hp -= 1             // a fold contribution (§3.5)
-            chance 30% {                 // probabilistic branch
-                emit @Damaged { amount: 5, victim: self }
-            }
+    each tick {                              // the schedule (when) is outer …
+        target $Health #Enemy as self {      // … the entity query (what) is inner
+            ::Health.hp -= 1                 // a fold contribution (§3.5)
+            chance 30% { emit @Damaged { amount: 5, victim: self } }
         }
     }
-    settled {                            // after all ticks resolve
-        if ::Health.hp <= 0 { mark self #Dead }
+    settled {                                // after this tick's folds reconcile
+        target $Health #Enemy as self { if ::Health.hp <= 0 { mark self #Dead } }
     }
 }
 ```
 
+**Schedules** (a shard's top-level blocks):
+
+| Schedule | Runs |
+|----------|------|
+| `run once { … }` | once, when the shard/bundle starts (`start` is reserved for the bundle boot event, §2.1) |
+| `each tick { … }` | every simulation tick |
+| `each frame { … }` | once per render frame |
+| `every N { … }` | on a timer — `N` is **seconds** (a plain number: `every 1.0`, `every 0.5`) |
+| `settled { … }` | once, **after** a tick's `folds` contributions reconcile — the correct place to read final values (e.g. death checks) |
+
+`run`, `once`, `frame`, `every` are **contextual words**, not reserved keywords. Inside a schedule:
+
 | Construct | Meaning |
 |-----------|---------|
-| `target C… #T… as self { … }` | bind `self` to each identity matching the shapes/marks named; the general iteration form (§5.3) |
-| `Entity` | keyword; as a type an entity id (`int`), as an expression the **nearest** entity's id — the enclosing `target` binding (same value as a bare `self`), or `0` when no entity is in scope. Distinct from the First-Class identity layer (Shard/ShardView/…). *Runtime note:* the interpreter does not yet execute `target`/tick loops, so today `Entity` reads `0` outside a materialized entity; the id becomes live with the ECS runtime. |
-| `each tick { … }` | per-frame phase, run over the target set |
-| `settled { … }` | post-update phase (cleanup/resolution) |
+| `target C… #T… as self { … }` | bind `self` to each identity matching the shapes/marks named — the entity query (§5.3) |
+| `Entity` | keyword; as a type an entity id (`int`), as an expression the **nearest** entity's id — the enclosing `target` binding (same value as a bare `self`), or `0` when no entity is in scope. Distinct from the First-Class identity layer (Shard/ShardView/…). *Runtime note:* the interpreter does not yet execute schedules/`target` loops, so today `Entity` reads `0` outside a materialized entity; the id becomes live with the ECS runtime. |
 | `::Shape.field` | the current identity's component field (`self`-scope) |
 | `mark self #T` / `unmark self #T` | add / remove a tag |
 | `attach $C to self { … }` / `unattach $C from self` | add / remove a component |
@@ -417,9 +426,9 @@ eventDecl   = "event" EVENTREF "{" fieldList "}" ;
 fieldList   = field { ("," | TERM) field } ;
 
 shardDecl   = "shard" IDENT "{" { TERM } { shardMember { TERM } } "}" ;
-shardMember = varDecl | funcDecl | targetBlock | lifecycle | hearBlock ;
-targetBlock = "target" { SHAPEREF | MARKREF } "as" IDENT block ;
-lifecycle   = ("each" "tick" | "settled" | "start") block ;
+shardMember = varDecl | funcDecl | schedule | hearBlock ;
+schedule    = ("run" "once" | "each" ("tick" | "frame") | "every" NUMBER | "settled") block ;
+queryStmt   = "target" { SHAPEREF | MARKREF } "as" IDENT block ;   (* a statement, inside a schedule *)
 hearBlock   = "hear" EVENTREF "as" IDENT block ;
 
 funcDecl    = ("fn" | "SF") IDENT "(" [ params ] ")" [ "->" type ] block ;

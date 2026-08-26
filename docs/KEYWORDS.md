@@ -22,7 +22,7 @@ dialect. There is no general `class`.
 | `bundle` | `bundle N [by author] { … }` | module; optional author/pseudo roots its qualified name | |
 | `app` | `app N { load "f.vein" … }` | project manifest: the set of bundles that compose a program | multi-file |
 | `by` | `bundle N by author` | author/pseudo of a bundle (collision root) | |
-| `start` | `start @E { … }` (bundle entry — at most one; none = reactive) · `load "f" start { … }` (override) · `start { … }` (shard) | a bundle's boot event; a load-site payload override; or shard once-on-create | see RUNTIME.md |
+| `start` | `start @E { … }` (bundle entry — at most one; none = reactive) · `load "f" start { … }` (override) | a bundle's boot event; a load-site payload override (**no longer** a shard schedule — that's `run once`) | see RUNTIME.md |
 | `use` | `use N [as M]` | import | |
 | `publicator` | `publicator N { … }` | a bundle's public grouping — members are visible to this bundle's shards (bundle-wide) | namespace segment in `*` paths |
 | `shared` | `shared("doc")` **above a decl, inside a publicator** | marks that decl public **across all bundles** (+ doc) — only `shared` members appear in `veinc symbols` and are reachable via `*Author.Bundle.Publicator.@…` | error outside a publicator |
@@ -45,8 +45,9 @@ dialect. There is no general `class`.
 | `event` | `event @N { fields }` | message | `type N { … }` `@message` |
 | `shard` | `shard N { … }` | behavior over identities | `IrShard` |
 | `target` | `target C… #T… as self { … }` · `target coll as x { … }` | cycle identities / iterate data | query descriptor + loop |
-| `each` `tick` | `each tick { … }` | per-frame lifecycle | shard `tick()` |
-| `settled` | `settled { … }` | post-update lifecycle | shard `settled()` |
+| `each` `tick` | `each tick { … }` · `each frame { … }` | a shard schedule (per tick / per frame); `frame` is a contextual word | shard `tick()`/`frame()` |
+| `settled` | `settled { … }` | shard schedule: once after a tick's folds reconcile | shard `settled()` |
+| *(contextual)* `run once`, `every N` | `run once { … }` · `every 1.0 { … }` | shard schedules: once at start; every N seconds. `run`/`once`/`every` are contextual words, not reserved | — |
 | `folds` | (in `shape`) `f: T folds sum` | concurrent-write reducer | `@fold(f, sum)` |
 | `mark` `unmark` | `mark self #T` | add / remove a tag | `AddTag` / `RemoveTag` |
 | `attach` `unattach` | `attach $C to self { … }` | add / remove a component | `AddComponent` / `RemoveComponent` |

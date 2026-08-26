@@ -192,16 +192,10 @@ public sealed class Lower
     private IrShard LowerShardLike(string name, IReadOnlyList<Node> members, string kind, string? doc,
         IReadOnlyList<string>? carriedShapes = null, IReadOnlyList<string>? carriedMarks = null)
     {
-        // The first target block defines the query; lifecycle phases iterate it.
-        IrQuery? primaryQuery = null;
-        foreach (var m in members)
-            if (m is TargetBlock tb) { primaryQuery = ToQuery(tb); break; }
-
+        // A shard is a set of scheduled behaviour blocks; each `target` query nests inside a schedule.
         var state = new List<IrField>();
         var methods = new List<IrFunction>();
         var attrs = new List<IrAttr> { IrAttr.Of(kind) };
-        if (primaryQuery is not null)
-            attrs.Add(IrAttr.Of("query", primaryQuery.Components, primaryQuery.Tags, primaryQuery.Bind));
         if ((carriedShapes?.Count ?? 0) > 0 || (carriedMarks?.Count ?? 0) > 0)
             attrs.Add(IrAttr.Of("carries",
                 carriedShapes ?? (IReadOnlyList<string>)Array.Empty<string>(),
@@ -211,21 +205,14 @@ public sealed class Lower
         {
             switch (m)
             {
-                case TargetBlock tb:
-                {
-                    var q = ToQuery(tb);
-                    foreach (var item in tb.Body)
-                        AddShardItem(item, q, methods, state);
-                    break;
-                }
-                case LifecycleBlock lc: methods.Add(LowerLifecycle(lc, primaryQuery)); break;
+                case ScheduleBlock sb: methods.Add(LowerSchedule(sb)); break;
                 case HearBlock hb: methods.Add(LowerHear(hb)); break;
                 case FuncDecl f: methods.Add(LowerFunc(f)); break;
                 case VarDecl v: state.Add(new IrField(v.Name, v.Type is null ? IrTypeRef.Of("infer") : LowerTypeRef(v.Type), null)); break;
             }
         }
 
-        return new IrShard(name, state, primaryQuery, methods, doc, attrs);
+        return new IrShard(name, state, null, methods, doc, attrs);
     }
 
     private IrShard LowerView(ViewDecl vw)
@@ -247,37 +234,24 @@ public sealed class Lower
         return new IrShard(vw.Name, state, null, methods, vw.Doc, attrs);
     }
 
-    private void AddShardItem(Node item, IrQuery? q, List<IrFunction> methods, List<IrField> state)
+    /// A schedule block becomes a shard method tagged with a `schedule` attr (once/tick/frame/every/
+    /// settled; the interval seconds for `every`). Any `target` query in the body lowers to a target
+    /// `IrLoop` (see the `QueryStmt` case in LowerStmt).
+    private IrFunction LowerSchedule(ScheduleBlock sb)
     {
-        switch (item)
+        string name = sb.Kind switch
         {
-            case LifecycleBlock lc: methods.Add(LowerLifecycle(lc, q)); break;
-            case HearBlock hb: methods.Add(LowerHear(hb)); break;
-            case FuncDecl f: methods.Add(LowerFunc(f)); break;
-            case VarDecl v: state.Add(new IrField(v.Name, v.Type is null ? IrTypeRef.Of("infer") : LowerTypeRef(v.Type), null)); break;
-            // bare statements directly under a target block are not modeled yet
-        }
-    }
-
-    private IrQuery ToQuery(TargetBlock tb) => new(tb.Components, tb.Tags, tb.Bind);
-
-    private IrFunction LowerLifecycle(LifecycleBlock lc, IrQuery? query)
-    {
-        string name = lc.Phase switch
-        {
-            LifecyclePhase.Tick => "tick",
-            LifecyclePhase.Settled => "settled",
-            _ => "start"
+            ScheduleKind.Tick => "tick",
+            ScheduleKind.Frame => "frame",
+            ScheduleKind.Once => "once",
+            ScheduleKind.Every => "every",
+            _ => "settled"
         };
-        var body = LowerBlock(lc.Body);
-        // tick/settled iterate the query; start runs once.
-        if (query is not null && lc.Phase != LifecyclePhase.Start)
-            body = new IrBlock(new IrStmt[]
-            {
-                new IrLoop(IrLoopKind.Target, null, query.Bind, null, query, null, body)
-            });
-        return new IrFunction(name, Array.Empty<IrParam>(), IrTypeRef.Of("void"), body, false, null,
-            Array.Empty<IrAttr>());
+        var attr = sb.Kind == ScheduleKind.Every
+            ? IrAttr.Of("schedule", name, sb.IntervalSeconds ?? 0.0)
+            : IrAttr.Of("schedule", name);
+        return new IrFunction(name, Array.Empty<IrParam>(), IrTypeRef.Of("void"), LowerBlock(sb.Body),
+            false, null, new[] { attr });
     }
 
     private IrFunction LowerHear(HearBlock hb)
@@ -317,6 +291,8 @@ public sealed class Lower
                 return new IrLoop(IrLoopKind.While, LowerExpr(w.Cond), null, null, null, null, LowerBlock(w.Body));
             case TargetStmt t:
                 return new IrLoop(IrLoopKind.Target, null, t.Bind, LowerExpr(t.Source), null, null, LowerBlock(t.Body));
+            case QueryStmt q:
+                return new IrLoop(IrLoopKind.Target, null, q.Bind, null, new IrQuery(q.Components, q.Tags, q.Bind), null, LowerBlock(q.Body));
             case RepeatStmt r:
                 return new IrLoop(IrLoopKind.Repeat, null, r.Var, null, null, LowerExpr(r.Count), LowerBlock(r.Body));
             case MatchStmt m:

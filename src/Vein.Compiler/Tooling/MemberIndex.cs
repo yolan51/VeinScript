@@ -101,9 +101,8 @@ public static class MemberIndex
         {
             switch (n)
             {
-                case TargetBlock tb: m.Bindings[tb.Bind] = "entity"; foreach (var it in tb.Body) Member(it); break;
                 case HearBlock hb: m.Bindings[hb.Bind] = "event:" + hb.Event; Block(hb.Body); break;
-                case LifecycleBlock lc: Block(lc.Body); break;
+                case ScheduleBlock sc: Block(sc.Body); break;
                 case FuncDecl f: Block(f.Body); break;
                 case Stmt s: Stmt(s); break;
             }
@@ -116,6 +115,7 @@ public static class MemberIndex
             switch (s)
             {
                 case TargetStmt t: m.Bindings[t.Bind] = "entity"; Block(t.Body); break;
+                case QueryStmt q: m.Bindings[q.Bind] = "entity"; Block(q.Body); break;
                 case IfStmt i: Block(i.Then); if (i.Else is Block eb) Block(eb); else if (i.Else is IfStmt ei) Stmt(ei); break;
                 case WhileStmt w: Block(w.Body); break;
                 case RepeatStmt r: Block(r.Body); break;
