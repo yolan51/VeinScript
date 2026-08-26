@@ -8,7 +8,7 @@ using Vein.Compiler.Tooling;
 
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("usage: veinc <tokens|ast|ir|render|graph|events|scaffold|symbols> <file.vein> [arg]");
+    Console.Error.WriteLine("usage: veinc <tokens|ast|ir|render|run|graph|events|scaffold|symbols> <file.vein> [arg]");
     return 2;
 }
 
@@ -95,6 +95,21 @@ switch (command)
                 else
                     Console.Error.WriteLine($"(no @Response emitted for {requestPath})");
             }
+        }
+        break;
+    }
+
+    case "run":
+    {
+        // Console mode: boot the program, then pump stdin↔stdout via @Input/@Print. Ctrl+Z (Windows) /
+        // Ctrl+D (Unix) ends input.
+        var tokens = new Lexer(source, Path.GetFileName(path), diagnostics).Tokenize();
+        var unit = new Parser(tokens, diagnostics).ParseUnit();
+        if (!diagnostics.HasErrors)
+        {
+            var lower = new Lower(diagnostics);
+            foreach (var bundle in unit.Bundles)
+                new Interp().Run(lower.LowerBundle(bundle), Console.In, Console.Out);
         }
         break;
     }

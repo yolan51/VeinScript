@@ -1,0 +1,16 @@
+// stdlib/Console.vein — VeinScript Standard Library : Vein.Console
+// Console I/O as EVENTS. A program emits *Vein.Console.Io.@Print to write a line, and hears
+// *Vein.Console.Io.@Input for each line the user types — the runtime bridges these to stdout/stdin.
+// Run a console program with:  veinc run <file>
+// Discover:  veinc symbols stdlib/Console.vein
+
+bundle Console by Vein {
+
+    publicator Io {
+        shared("Write a line of text to the console (stdout).")
+        event @Print { text: string }
+
+        shared("A line of text the user typed at the console (stdin).")
+        event @Input { text: string }
+    }
+}

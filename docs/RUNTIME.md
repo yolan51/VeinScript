@@ -36,6 +36,32 @@ mutate identities / emit more events. There is **no `main()`** — a program is 
 So "what starts the program" is currently a baked-in `@Request`. Everything else — `target`, `each tick`,
 `settled`, `folds`, `Entity`, cross-bundle `*` — is designed surface the loop does not execute yet.
 
+### 2.1 Console mode (`veinc run`)
+
+`veinc run <file>` runs the same loop **interactively**, bridging two event names to the terminal (the
+way `@Response` is bridged to the web output) — the canonical declarations live in `Vein.Console`:
+
+- **`@Print { text }`** — when the loop dequeues one, the runtime writes `text` to **stdout**.
+- **`@Input { text }`** — the runtime reads **stdin** line by line and fires one per line into the loop.
+
+So [Interp.Run](../src/Vein.Compiler/Ir/Interp.cs) boots the program, drains, then loops: read a line →
+`emit @Input { text }` → drain (writing any `@Print`s) → repeat until EOF. The runtime matches on the
+simple event **name**, so a program uses the explicit stdlib form and it still runs:
+
+```
+shard Main {
+    hear @Boot as b { emit *Vein.Console.Io.@Print { text: "hi" } }
+    hear *Vein.Console.Io.@Input as i { emit *Vein.Console.Io.@Print { text: "you said " + i.text } }
+}
+```
+```
+$ echo hi | veinc run app.vein
+hi
+you said hi
+```
+Runs on today's net8 interpreter. (A console over the SECS/net9 runtime is a follow-on — see
+BACKEND-CONTRACT.md.)
+
 ---
 
 ## 3. Booting with `start` (implemented — bundle level)

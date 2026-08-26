@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO;
 
 namespace Vein.Compiler.Ir;
 
@@ -34,17 +35,43 @@ public sealed class Interp
     private Dictionary<string, object?>? _current;   // the event currently being handled (for cause/trail)
     private string? _responseBody;
     private long _responseStatus = 200;
+    private TextWriter? _out;   // console stdout sink (set in Run); @Print writes here. Null in Render.
 
     public sealed record GraphEdge(string FromName, string FromKind, string Event);
     public sealed record RenderResult(
         string? Body, long Status, IReadOnlyList<string> Log,
         IReadOnlyList<VeinFirstClass> Nodes, IReadOnlyList<GraphEdge> Edges);
 
+    /// Web mode (one-shot): boot the program, drain the event loop, return the captured @Response.
     public RenderResult Render(IrModule module, string requestPath, IReadOnlyDictionary<string, object?>? inputs = null)
+    {
+        Setup(module);
+        FireBoot(module, requestPath, inputs);
+        Drain();
+        return new RenderResult(_responseBody, _responseStatus, _log, _registry.All, _edges);
+    }
+
+    /// Console mode (interactive): boot the program, then pump stdin↔stdout — each line from `input`
+    /// becomes an @Input event, each @Print event is written to `output`. Runs until EOF on `input`.
+    public void Run(IrModule module, TextReader input, TextWriter output)
+    {
+        _out = output;
+        Setup(module);
+        FireBoot(module, "/", null);
+        Drain();
+        string? line;
+        while ((line = input.ReadLine()) is not null)
+        {
+            FireInput(line);
+            Drain();
+        }
+    }
+
+    /// Register every First-Class object (shard/view/bridge) and wire its `hear` handlers.
+    private void Setup(IrModule module)
     {
         _bundle = module.Name;
         _types = module.Types.ToDictionary(t => t.Name, StringComparer.Ordinal);
-        // Register every First-Class object (one unified mechanism) and wire its hear handlers.
         foreach (var shard in module.Shards)
         {
             var kind = shard.Attrs.Any(a => a.Name == "view") ? VeinKind.ShardView
@@ -65,8 +92,11 @@ public sealed class Interp
                 _handlers[ev].Add(new Handler(inst, bind, m.Body, reqShapes, reqMarks));
             }
         }
+    }
 
-        // Boot: fire the declared `start` event + payload, else the default @Request { path }.
+    /// Fire the boot event: the declared `start` event + payload, else the default @Request { path }.
+    private void FireBoot(IrModule module, string requestPath, IReadOnlyDictionary<string, object?>? inputs)
+    {
         var reqFc = _registry.Register("request", VeinKind.Runtime);
         var bootInst = new Instance { Name = "boot", Fc = reqFc };
         var noLocals = new Dictionary<string, object?>();
@@ -92,13 +122,30 @@ public sealed class Interp
 
         boot["from"] = FromOf(reqFc); boot["origin"] = null; boot["bundle"] = _bundle;
         Emit(bootEvent, boot);
+    }
 
+    /// Fire an @Input event carrying a line the user typed at the console.
+    private void FireInput(string text)
+    {
+        var stdin = _registry.Register("stdin", VeinKind.Runtime);
+        Emit("Input", new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["text"] = text,
+            ["from"] = FromOf(stdin), ["origin"] = null, ["bundle"] = _bundle
+        });
+    }
+
+    /// Process the event queue until empty. @Response is captured; @Print (console mode) is written to
+    /// the output sink; anything else dispatches to its `hear` handlers (subject to the audience barrier).
+    private void Drain()
+    {
         int guard = 0;
         while (_queue.Count > 0 && guard++ < 10_000)
         {
             var (name, payload) = _queue.Dequeue();
             _current = payload;   // emits inside handlers inherit this event's id into their trail
             if (name == "Response") { _responseBody = Str(payload.GetValueOrDefault("body")); _responseStatus = AsLong(payload.GetValueOrDefault("status")); continue; }
+            if (name == "Print") { _out?.WriteLine(Str(payload.GetValueOrDefault("text"))); continue; }
             if (!_handlers.TryGetValue(name, out var hs)) continue;
             foreach (var h in hs)
             {
@@ -112,8 +159,6 @@ public sealed class Interp
                 Exec(h.Body, h.Owner, locals);
             }
         }
-
-        return new RenderResult(_responseBody, _responseStatus, _log, _registry.All, _edges);
     }
 
     /// A `from` value exposes the emitter's name/kind, its opaque identity (display only), and the

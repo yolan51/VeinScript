@@ -1,0 +1,19 @@
+// console.vein — an interactive console program. It uses the Vein.Console stdlib events explicitly:
+//   emit *Vein.Console.Io.@Print { text: … }   → writes a line to stdout
+//   hear *Vein.Console.Io.@Input as i { … }     → fires for each line typed at stdin
+// The runtime bridges these to the terminal. Run it:
+//   veinc run samples/console.vein         (type lines; Ctrl+Z on Windows / Ctrl+D on Unix to end)
+
+bundle App {
+    start @Boot { }        // this program's entry — fired once when it runs
+    event @Boot { }
+
+    shard Main {
+        hear @Boot as b {
+            emit *Vein.Console.Io.@Print { text: "Type something (Ctrl+Z / Ctrl+D to end):" }
+        }
+        hear *Vein.Console.Io.@Input as i {
+            emit *Vein.Console.Io.@Print { text: "you said " + i.text }
+        }
+    }
+}

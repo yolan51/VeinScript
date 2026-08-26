@@ -13,4 +13,5 @@ app Vein {
     load "Game.vein"
     load "Web.vein"
     load "Diagnostics.vein"
+    load "Console.vein"
 }

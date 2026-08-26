@@ -28,7 +28,7 @@ public class StdlibTests
         new VeinCompilerService().Compile(new CompileRequest("t.vein", src));
 
     public static readonly string[] Bundles =
-        { "Core.vein", "Math.vein", "Transform.vein", "Input.vein", "UI.vein", "Time.vein", "Game.vein", "Web.vein", "Diagnostics.vein" };
+        { "Core.vein", "Math.vein", "Transform.vein", "Input.vein", "UI.vein", "Time.vein", "Game.vein", "Web.vein", "Diagnostics.vein", "Console.vein" };
 
     public static IEnumerable<object[]> BundleFiles => Bundles.Select(b => new object[] { b });
 
@@ -55,6 +55,7 @@ public class StdlibTests
     [InlineData("Game.vein", "*Vein.Game.Collision.@Collided")]
     [InlineData("Web.vein", "*Vein.Web.Elements.Button")]
     [InlineData("Diagnostics.vein", "*Vein.Diagnostics.Report.$Diagnostic")]
+    [InlineData("Console.vein", "*Vein.Console.Io.@Print")]
     public void Stdlib_bundle_exposes_shared_symbol(string file, string qualified)
     {
         var diag = new DiagnosticBag();

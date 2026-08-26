@@ -194,6 +194,32 @@ public class ServiceTests
     }
 
     [Fact]
+    public void Console_print_writes_to_output()
+    {
+        var r = Compile("bundle B { start @Boot { } event @Boot { } " +
+                        "shard M { hear @Boot as b { emit *Vein.Console.Io.@Print { text: \"hi\" } } } }");
+        Assert.True(r.Success);
+        var outw = new System.IO.StringWriter();
+        new Interp().Run(r.Modules[0], new System.IO.StringReader(""), outw);
+        Assert.Contains("hi", outw.ToString());
+    }
+
+    [Fact]
+    public void Console_input_round_trips_to_print()
+    {
+        // stdin → @Input → hear → @Print → stdout (via the qualified stdlib events).
+        var r = Compile("bundle B { start @Boot { } event @Boot { } shard M { " +
+                        "hear @Boot as b { emit *Vein.Console.Io.@Print { text: \"ready\" } } " +
+                        "hear *Vein.Console.Io.@Input as i { emit *Vein.Console.Io.@Print { text: \"echo \" + i.text } } } }");
+        Assert.True(r.Success);
+        var outw = new System.IO.StringWriter();
+        new Interp().Run(r.Modules[0], new System.IO.StringReader("world\n"), outw);
+        var text = outw.ToString();
+        Assert.Contains("ready", text);
+        Assert.Contains("echo world", text);
+    }
+
+    [Fact]
     public void Bundle_declares_author()
     {
         var r = Compile("bundle Combat by yolan { event @Request { path: string } }");
