@@ -241,15 +241,17 @@ once the ECS runtime executes `target`/tick). `veinc events` prints this envelop
 ### 3.9 `builder` — a reusable element template
 
 A `builder` uses the same signature body as `event` (§3.7): parameters (fields/`var`s/`$Shape`
-includes) plus exactly one **output field** whose value is the template. The output field's name
-decides the kind:
+includes). A builder either has one **output-channel field** whose value is the template (the field's
+name decides the kind), **or no channel at all** — in which case it constructs and emits an event named
+after the builder, carrying all its params:
 
 | output field | kind   | emitted event |
 |--------------|--------|---------------|
-| `markup`     | html    | `@Html`       |
-| `code`       | script  | `@Script`     |
-| `css`        | style   | `@Style`      |
-| `line`       | console | `@Print`      |
+| `markup`     | html    | `@Html`             |
+| `code`       | script  | `@Script`           |
+| `css`        | style   | `@Style`            |
+| `line`       | console | `@Print`            |
+| *(none)*     | event   | `@<BuilderName>` with all params |
 
 ```
 builder Button {
@@ -257,6 +259,9 @@ builder Button {
     onclick = "noop"                                 // defaulted param
     markup = "<button onclick=\"" + onclick + "\">" + label + "</button>"   // output ⇒ html
 }
+
+builder Console { name: string, firsttext: string }  // no channel ⇒ bring Console("Server","hi")
+                                                     // emits @Console { name, firsttext }
 ```
 
 There is no `( )` parameter list and no trailing kind keyword. Instantiate with `bring` (§4), which

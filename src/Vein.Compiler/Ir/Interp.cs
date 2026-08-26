@@ -56,6 +56,16 @@ public sealed class Interp
     public void Run(IrModule module, TextReader input, TextWriter output)
     {
         _out = output;
+
+        // If this process was spawned as a named console (`bring Console`), announce itself: title the
+        // window and print its first line before booting.
+        if (ConsoleLauncher.CurrentName is { } consoleName)
+        {
+            if (OperatingSystem.IsWindows()) { try { Console.Title = consoleName; } catch { } }
+            if (Environment.GetEnvironmentVariable(ConsoleLauncher.FirstVar) is { Length: > 0 } first)
+                _out.WriteLine(first);
+        }
+
         Setup(module);
         FireBoot(module, "/", null);
         Drain();
@@ -146,6 +156,7 @@ public sealed class Interp
             _current = payload;   // emits inside handlers inherit this event's id into their trail
             if (name == "Response") { _responseBody = Str(payload.GetValueOrDefault("body")); _responseStatus = AsLong(payload.GetValueOrDefault("status")); continue; }
             if (name == "Print") { _out?.WriteLine(Str(payload.GetValueOrDefault("text"))); continue; }
+            if (name == "Console") { ConsoleLauncher.Spawn(Str(payload.GetValueOrDefault("name")), Str(payload.GetValueOrDefault("firsttext"))); continue; }
             if (!_handlers.TryGetValue(name, out var hs)) continue;
             foreach (var h in hs)
             {

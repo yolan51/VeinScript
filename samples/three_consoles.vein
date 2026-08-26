@@ -1,0 +1,33 @@
+// samples/three_consoles.vein — spawn THREE named console applications from one program.
+//
+// Build a standalone exe and run it:
+//     veinc build samples/three_consoles.vein      →  three_consoles.exe
+//     (double-click it)  → the main window opens, then THREE more console windows appear —
+//                          Server, Client1, Client2 — each printing its first line.
+//
+// `bring Console(name, firsttext)` emits @Console { name, firsttext }, which the runtime bridges to
+// spawning a named console window. A spawned console never spawns more (no runaway tree), so each of the
+// three just prints its first line and waits.
+//
+// (bring is bundle-local today, so the Console builder is defined here rather than imported from
+//  *Vein.Console — cross-bundle `use Console; bring Console` is the next step.)
+
+bundle ThreeConsoles by you {
+
+    start @Boot { }
+    event @Boot { }
+
+    event @Print { text: string }                        // console output — bridged to stdout
+
+    // Channel-less builder: bring Console(a, b) emits @Console { name: a, firsttext: b }.
+    builder Console { name: string, firsttext: string }
+
+    shard Launcher {
+        hear @Boot as b {
+            emit @Print { text: "Launcher — opening three consoles…" }
+            bring Console("Server",  "Server console — ready.")
+            bring Console("Client1", "Client 1 console — ready.")
+            bring Console("Client2", "Client 2 console — ready.")
+        }
+    }
+}

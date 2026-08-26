@@ -220,6 +220,23 @@ public class ServiceTests
     }
 
     [Fact]
+    public void Console_builder_spawns_with_name_and_firsttext()
+    {
+        // A channel-less builder constructs and emits @<BuilderName> with all its params.
+        var r = Compile("bundle B { start @Boot { } event @Boot { } " +
+                        "builder Console { name: string, firsttext: string } " +
+                        "shard M { hear @Boot as b { bring Console(\"Server\", \"ready\") } } }");
+        Assert.True(r.Success);
+
+        (string Name, string First)? got = null;
+        ConsoleLauncher.Hook = (n, f) => got = (n, f);
+        try { new Interp().Run(r.Modules[0], new System.IO.StringReader(""), new System.IO.StringWriter()); }
+        finally { ConsoleLauncher.Hook = null; }
+
+        Assert.Equal(("Server", "ready"), got);   // both fields reached the @Console payload
+    }
+
+    [Fact]
     public void BundleInfo_counts_declarations_and_marks()
     {
         var unit = Compile(
@@ -230,8 +247,9 @@ public class ServiceTests
             "  shard Sh #Live { hear @E1 as e { } } " +
             "  ShardView V { hear @E2 as e { } } " +
             "}").Ast;
+        Assert.NotNull(unit);
 
-        var info = Vein.Compiler.Tooling.BundleInfo.Analyze(unit);
+        var info = Vein.Compiler.Tooling.BundleInfo.Analyze(unit!);
         Assert.NotNull(info);
         Assert.Equal("B", info!.Name);
         Assert.Equal("me", info.Author);

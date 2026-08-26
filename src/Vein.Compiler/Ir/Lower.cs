@@ -354,21 +354,18 @@ public sealed class Lower
             return new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
         }
 
+        // A builder either has a fragment output channel (markup/code/css/line — emits that one field to
+        // @Html/@Script/@Style/@Print) OR no channel at all, in which case it constructs and emits an event
+        // named after the builder carrying ALL its params (`builder Console { name, firsttext }` → emit
+        // @Console { name, firsttext }).
         var output = b.Members.OfType<FieldDecl>().FirstOrDefault(f => OutputFields.Contains(f.Name));
-        if (output?.Default is null)
+        if (output is not null && output.Default is null)
         {
-            _diag.Error("VS0205", $"Builder '{b.Name}' needs an output field (markup/code/css/line) with a value.", br.Span);
+            _diag.Error("VS0205", $"Builder '{b.Name}' output field '{output.Name}' needs a value.", br.Span);
             return new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
         }
-        (string ev, string field) = output.Name switch
-        {
-            "code" => ("Script", "code"),
-            "css" => ("Style", "css"),
-            "line" => ("Print", "text"),   // console output — bridged to stdout by the interpreter
-            _ => ("Html", "markup")
-        };
 
-        // Parameters = every member except the output field, with $Shape includes expanded.
+        // Parameters = every member except the (optional) output channel field, with $Shape includes expanded.
         var prms = ExpandMembers(b.Members.Where(m => !ReferenceEquals(m, output)));
         if (!br.FillRest && br.Args.Count > prms.Count)
             _diag.Error("VS0204", $"Builder '{b.Name}' takes {prms.Count} param(s), got {br.Args.Count}.", br.Span);
@@ -383,8 +380,12 @@ public sealed class Lower
                          : new IrLiteral(null, IrLiteralKind.Int);
             stmts.Add(new IrLet(name, null, value, false));
         }
-        stmts.Add(new IrExprStmt(new IrRuntimeCall("Emit",
-            new IrExpr[] { new IrStructInit(ev, new[] { (field, LowerExpr(output.Default)) }) })));
+
+        (string ev, (string, IrExpr)[] fields) = output is null
+            ? (b.Name, prms.Select(p => (p.Name, (IrExpr)new IrLocalRef(p.Name))).ToArray())   // construct @<Builder> from params
+            : (output.Name switch { "code" => "Script", "css" => "Style", "line" => "Print", _ => "Html" },
+               new[] { (output.Name switch { "code" => "code", "css" => "css", "line" => "text", _ => "markup" }, LowerExpr(output.Default!)) });
+        stmts.Add(new IrExprStmt(new IrRuntimeCall("Emit", new IrExpr[] { new IrStructInit(ev, fields) })));
         var body = new IrBlock(stmts);
 
         return br.Count is null
