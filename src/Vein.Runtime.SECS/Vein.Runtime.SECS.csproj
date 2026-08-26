@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- net9.0 so it can reference the ShardECS SECS core (net9) AND the net8 Vein.Compiler. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Vein.Runtime.SECS</RootNamespace>
+    <AssemblyName>Vein.Runtime.SECS</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Vein.Compiler\Vein.Compiler.csproj" />
+    <!-- The external ShardECS entity/component runtime (referenced by relative path). -->
+    <ProjectReference Include="..\..\..\VeinEngine\ShardECS\SECS\SECS.csproj" />
+  </ItemGroup>
+
+</Project>

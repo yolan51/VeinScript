@@ -125,6 +125,38 @@ exposes `CreateEntity`/`AddComponent` directly), the adapter is defined once in 
 not per generated file. Nailing that adapter down is the first task of M5 (see
 [ROADMAP.md](ROADMAP.md)).
 
+### 2.3.1 Concrete SECS binding — the real target
+
+The abstract surface above (`World.Query().With()`, `Contribute()`, `SystemBase`) was **aspirational**.
+The concrete C# runtime is **ShardECS SECS** (`ShardECS.SECS.Secs`), referenced from the new
+`src/Vein.Runtime.SECS/` project (net9.0, a relative `ProjectReference` to
+`VeinEngine/ShardECS/SECS/SECS.csproj`). SECS is a pure-C# entity/component runtime — no file / network /
+console / UI / serialization yet. Its real API is the **SECS** column each HIR node binds to:
+
+| HIR node | Emitted C# (abstract, §2.1) | **SECS** (concrete `Secs` API) |
+|----------|-----------------------------|--------------------------------|
+| `IrType Component` `Name` | `struct Name : IComponent` | a component type; `secs.Add(e, new Name{ … })`, `secs.Get<Name>(e)` |
+| `IrType Message` `Name` | `struct Name : IEvent` | a POCO event; `secs.Publish(new Name(…))` / `secs.Subscribe<Name>(m => …)` |
+| `IrType Tag` `Name` | `struct Name : ITag` | a fieldless marker component (`secs.Add(e, new Name())`) |
+| entity / `self` / `IrSelfRef` | entity handle | `int` id from `secs.CreateEntity()` |
+| `IrShard` | `class : SystemBase` | a Dresser composed of Drawers, run by `secs.Run(ct)` |
+| shard schedule `tick`/`frame`/`every`/`settled` | `override Tick()/…` | a Drawer's per-step callback in the `Run` loop (`every N` = a timer-gated drawer) |
+| `IrLoop Target` (query) | `foreach World.Query<…>().With<…>()` | iterate entities having the queried components (SECS component buckets) |
+| `emit @E { … }` | `World.Emit(new E{ … })` | `secs.Publish(new E(…))` |
+| `hear @E as e { … }` | (registration) | `secs.Subscribe<E>(e => { … })` |
+| `IrAssign` to a folded field | `self.Contribute<C>(h => h.f += Δ)` | a per-tick contribution buffer, reconciled by the reducer (fold plumbing, §2.4) |
+
+The `src/Vein.Runtime.SECS/SecsRuntime.cs` skeleton establishes this build linkage today (a net9 library
+that references both `Vein.Compiler` and `ShardECS.SECS`); the actual **IrModule → live `Secs`** lowering
+(components, events, queries, schedules, folds) is the next task.
+
+> **net8 ↔ net9:** SECS targets net9, the rest of the toolchain net8. A net8 project can't reference a
+> net9 one, so `Vein.Runtime.SECS` is net9 (it *can* reference the net8 `Vein.Compiler`). The net8
+> `veinc` CLI therefore can't invoke this runtime directly — *running* on SECS needs a net9 host (a small
+> net9 runner, or bumping the CLI), a follow-on. Also: `dotnet build VeinScript.sln` now compiles the
+> net9 project + SECS, so the full-solution build requires the ShardECS repo at the sibling path;
+> `dotnet test src/Vein.Tests` is unaffected (net8 only).
+
 ### 2.4 Fold reconciliation (`@fold`)
 
 A field with `folds <reducer>` (`IrField.Fold` + `@fold(field, reducer)` metadata) is not written
