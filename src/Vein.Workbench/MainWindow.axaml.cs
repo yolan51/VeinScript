@@ -660,6 +660,7 @@ public partial class MainWindow : Window
 
     private void OnTextEntered(object? sender, Avalonia.Input.TextInputEventArgs e)
     {
+        if (_completion is not null) return;                   // a completion is open → let it filter (search)
         if (e.Text == "?") { TryExpandOnQuestion(); return; }
         if (e.Text == ".") { ShowMemberCompletion(); return; }
         if (e.Text == "*") { ShowStarCompletion(); return; }   // qualified stdlib refs: *Vein.Console.Io.@Print
@@ -895,6 +896,7 @@ public partial class MainWindow : Window
     {
         if (names.Count == 0) return;
         _completion = new CompletionWindow(_editor.TextArea);
+        _completion.CompletionList.IsFiltering = true;   // search-first: typing any segment narrows the list
         foreach (var n in names) _completion.CompletionList.CompletionData.Add(new VeinCompletion(n, kind));
         _completion.Closed += (_, _) => _completion = null;
         _completion.Show();
