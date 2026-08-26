@@ -448,52 +448,95 @@ public partial class MainWindow : Window
         }
     }
 
-    // Fill + reveal the bundle inspector: real declaration counts from the compiler; version/publisher and
-    // Update/Fork are honest placeholders until ShardStore + versioning exist.
+    // Bundle Explorer: the bundle's IOP manifest — every primitive grouped by Type → Visibility, with a
+    // detail pane (payload/params, who emits/hears it). Built from BundleModel (compiler analysis).
     private void ShowBundleInspector(BundleRef bundle)
     {
-        BundleInfo? info = null;
+        BundleModel? model = null;
         try
         {
             var ast = _service.Compile(new CompileRequest(Path.GetFileName(bundle.MainFile), File.ReadAllText(bundle.MainFile))).Ast;
-            if (ast is not null) info = BundleInfo.Analyze(ast);
+            if (ast is not null) model = BundleModel.Analyze(ast);
         }
-        catch { /* leave info null → counts hidden */ }
+        catch { /* leave model null → header only */ }
 
-        var panel = new StackPanel { Spacing = 8 };
-        panel.Children.Add(new TextBlock
-        {
-            Text = (bundle.IsPrincipal ? "★ " : "📦 ") + bundle.Name,
-            FontWeight = FontWeight.Bold, FontSize = 16
-        });
-        panel.Children.Add(new TextBlock
-        {
-            Text = $"Source: local   ·   Version: —{(info?.Author is { } a ? $"   ·   by {a}" : "")}",
-            Foreground = Brushes.Gray
-        });
-        if (info is not null)
-            panel.Children.Add(new TextBlock
-            {
-                Text = $"{info.Shards} Shards    {info.Shapes} Shapes    {info.Events} Events\n" +
-                       $"{info.Builders} Builders    {info.Views} Views    {info.Marks} Marks"
-            });
+        var root = new DockPanel { LastChildFill = true };
 
-        var open = new Button { Content = "Open" };
+        var header = new TextBlock
+        {
+            Text = (bundle.IsPrincipal ? "★ " : "📦 ") + bundle.Name + (model?.Author is { } a ? $"   by {a}" : ""),
+            FontWeight = FontWeight.Bold, FontSize = 15, Margin = new Thickness(0, 0, 0, 6)
+        };
+        DockPanel.SetDock(header, Dock.Top);
+        root.Children.Add(header);
+
+        var detail = new TextBlock { Foreground = Brushes.Gainsboro, TextWrapping = TextWrapping.Wrap, FontSize = 12 };
+        var open = new Button { Content = "Open Definition", Margin = new Thickness(0, 6, 0, 0) };
         open.Click += async (_, _) => await OpenPathAsync(bundle.MainFile);
-        var graph = new Button { Content = "View Graph" };
-        graph.Click += async (_, _) => { await OpenPathAsync(bundle.MainFile); _bottomPanel.SelectedIndex = 1; };
-        var deps = new Button { Content = "View Dependencies" };
-        deps.Click += (_, _) => SetStatus("Dependencies are listed under DEPENDENCIES in the explorer.");
-        var update = new Button { Content = "Update", IsEnabled = false };
-        ToolTip.SetTip(update, "requires ShardStore");
-        var fork = new Button { Content = "Create Fork", IsEnabled = false };
-        ToolTip.SetTip(fork, "requires ShardStore");
+        var detailBox = new StackPanel { Spacing = 4, Margin = new Thickness(0, 6, 0, 0), Children = { detail, open } };
+        DockPanel.SetDock(detailBox, Dock.Bottom);
+        root.Children.Add(detailBox);
 
-        panel.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { open, graph, deps } });
-        panel.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { update, fork } });
+        var tree = new TreeView { MaxHeight = 460 };
+        if (model is not null)
+        {
+            foreach (PrimitiveKind kind in Enum.GetValues<PrimitiveKind>())
+            {
+                var all = model.ByKind(kind).OrderBy(p => p.Name, StringComparer.Ordinal).ToList();
+                var kindNode = new TreeViewItem { Header = $"{PluralKind(kind)} ({all.Count})", IsExpanded = all.Count > 0 };
+                if (all.Count == 0) kindNode.Foreground = Brushes.Gray;
+                foreach (var vis in new[] { Visibility.Public, Visibility.Shared })
+                {
+                    var items = all.Where(p => p.Visibility == vis).ToList();
+                    if (items.Count == 0) continue;
+                    var visNode = new TreeViewItem { Header = $"{vis} ({items.Count})", IsExpanded = true };
+                    foreach (var p in items)
+                        visNode.Items.Add(new TreeViewItem { Header = KindSigil(kind) + p.Name, Tag = p });
+                    kindNode.Items.Add(visNode);
+                }
+                tree.Items.Add(kindNode);
+            }
+            tree.SelectionChanged += (_, _) =>
+            {
+                if (tree.SelectedItem is TreeViewItem { Tag: PrimitiveInfo p })
+                    detail.Text = DescribePrimitive(model.Name, p);
+            };
+        }
+        root.Children.Add(tree);
 
-        _bundleInspector.Child = panel;
+        _bundleInspector.Child = root;
         _bundleInspector.IsVisible = true;
+    }
+
+    private static string PluralKind(PrimitiveKind k) => k switch
+    {
+        PrimitiveKind.Event => "Events", PrimitiveKind.Builder => "Builders", PrimitiveKind.Shard => "Shards",
+        PrimitiveKind.Shape => "Shapes", PrimitiveKind.Mark => "Marks", PrimitiveKind.Bridge => "Bridges",
+        PrimitiveKind.Publicator => "Publicators", PrimitiveKind.ShardView => "ShardViews", _ => k.ToString()
+    };
+
+    private static string KindSigil(PrimitiveKind k) => k switch
+    {
+        PrimitiveKind.Event => "@", PrimitiveKind.Shape => "$", PrimitiveKind.Mark => "#", _ => ""
+    };
+
+    private static string DescribePrimitive(string bundle, PrimitiveInfo p)
+    {
+        var lines = new List<string>
+        {
+            $"{KindSigil(p.Kind)}{p.Name}",
+            $"{p.Kind} · {p.Visibility}",
+            $"Identity: {bundle}.{KindSigil(p.Kind)}{p.Name}",
+        };
+        if (p.Payload.Count > 0)
+            lines.Add("Payload: " + string.Join(", ", p.Payload.Select(f => $"{f.Name}: {f.Type}")));
+        if (p.Generates is not null) lines.Add($"Generates: {p.Generates}");
+        if (p.EmittedBy.Count > 0) lines.Add("Emitted by: " + string.Join(", ", p.EmittedBy));
+        if (p.HeardBy.Count > 0) lines.Add("Heard by: " + string.Join(", ", p.HeardBy));
+        if (p.Hears.Count > 0) lines.Add("Hears: " + string.Join(", ", p.Hears.Select(h => "@" + h)));
+        if (p.Emits.Count > 0) lines.Add("Emits: " + string.Join(", ", p.Emits.Select(em => "@" + em)));
+        if (p.Brings.Count > 0) lines.Add("Brings: " + string.Join(", ", p.Brings));
+        return string.Join("\n", lines);
     }
 
     // ---- compile + present ---------------------------------------------

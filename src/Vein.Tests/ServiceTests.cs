@@ -268,6 +268,44 @@ public class ServiceTests
     }
 
     [Fact]
+    public void BundleModel_groups_by_kind_visibility_and_relationships()
+    {
+        var unit = Compile(
+            "bundle B by me { " +
+            "  publicator Api { shared(\"d\") event @Public { x: int } } " +   // shared → Shared
+            "  event @Local { } " +                                            // bundle-level → Public
+            "  builder Line { text: string   line = text } " +                 // channel → @Print
+            "  builder Make { a: string } " +                                  // channel-less → @Make
+            "  shard Worker { hear @Local as e { emit @Public { x: 1 } bring Line(\"hi\") } } " +
+            "}").Ast;
+
+        var m = Vein.Compiler.Tooling.BundleModel.Analyze(unit);
+        Assert.NotNull(m);
+
+        // By kind.
+        Assert.Equal(2, m!.Count(Vein.Compiler.Tooling.PrimitiveKind.Event));
+        Assert.Equal(2, m.Count(Vein.Compiler.Tooling.PrimitiveKind.Builder));
+        Assert.Equal(1, m.Count(Vein.Compiler.Tooling.PrimitiveKind.Shard));
+        Assert.Equal(1, m.Count(Vein.Compiler.Tooling.PrimitiveKind.Publicator));
+
+        // Visibility: @Public is shared, @Local is public.
+        Assert.Equal(Vein.Compiler.Tooling.Visibility.Shared, m.Find(Vein.Compiler.Tooling.PrimitiveKind.Event, "Public")!.Visibility);
+        Assert.Equal(Vein.Compiler.Tooling.Visibility.Public, m.Find(Vein.Compiler.Tooling.PrimitiveKind.Event, "Local")!.Visibility);
+
+        // Relationships: Worker hears @Local and emits @Public.
+        var worker = m.Find(Vein.Compiler.Tooling.PrimitiveKind.Shard, "Worker")!;
+        Assert.Contains("Local", worker.Hears);
+        Assert.Contains("Public", worker.Emits);
+        Assert.Contains("Line", worker.Brings);
+        Assert.Contains("Worker", m.Find(Vein.Compiler.Tooling.PrimitiveKind.Event, "Public")!.EmittedBy);
+        Assert.Contains("Worker", m.Find(Vein.Compiler.Tooling.PrimitiveKind.Event, "Local")!.HeardBy);
+
+        // Builder generated events.
+        Assert.Equal("@Print", m.Find(Vein.Compiler.Tooling.PrimitiveKind.Builder, "Line")!.Generates);
+        Assert.Equal("@Make", m.Find(Vein.Compiler.Tooling.PrimitiveKind.Builder, "Make")!.Generates);
+    }
+
+    [Fact]
     public void BundleInfo_counts_declarations_and_marks()
     {
         var unit = Compile(
