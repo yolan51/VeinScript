@@ -450,8 +450,9 @@ public partial class MainWindow : Window
         }
     }
 
-    // Bundle Explorer: the bundle's IOP manifest — every primitive grouped by Type → Visibility, with a
-    // detail pane (payload/params, who emits/hears it). Built from BundleModel (compiler analysis).
+    // Bundle Explorer: the bundle's IOP manifest — every primitive, with Search + Type/Visibility filters,
+    // a Type/Visibility grouping toggle, a detail pane, and a PUBLIC/SHARED/PRIVATE status bar. Built from
+    // BundleModel (compiler analysis).
     private void ShowBundleInspector(BundleRef bundle)
     {
         BundleModel? model = null;
@@ -472,39 +473,100 @@ public partial class MainWindow : Window
         DockPanel.SetDock(header, Dock.Top);
         root.Children.Add(header);
 
-        var detail = new TextBlock { Foreground = Brushes.Gainsboro, TextWrapping = TextWrapping.Wrap, FontSize = 12 };
+        // --- filter row: search + type + visibility + group-by ---
+        var search = new TextBox { Watermark = "Search primitives…", Width = 150 };
+        var typeFilter = new ComboBox { SelectedIndex = 0, MinWidth = 90,
+            ItemsSource = new[] { "All types", "Event", "Builder", "Shard", "Shape", "Mark", "Bridge", "Publicator", "ShardView" } };
+        var visFilter = new ComboBox { SelectedIndex = 0, MinWidth = 80,
+            ItemsSource = new[] { "All", "Public", "Shared", "Private" } };
+        var groupBy = new ComboBox { SelectedIndex = 0, MinWidth = 110,
+            ItemsSource = new[] { "By Type", "By Visibility" } };
+        var filterRow = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6),
+            Children = { search, typeFilter, visFilter, groupBy } };
+        foreach (var c in filterRow.Children) if (c is Control ctl) ctl.Margin = new Thickness(0, 0, 6, 4);
+        DockPanel.SetDock(filterRow, Dock.Top);
+        root.Children.Add(filterRow);
+
+        // --- bottom: status bar + detail + open ---
+        var status = new TextBlock { Foreground = Brushes.Gray, FontSize = 11 };
+        if (model is not null)
+            status.Text = $"PUBLIC {model.Primitives.Count(p => p.Visibility == Visibility.Public)}    " +
+                          $"SHARED {model.Primitives.Count(p => p.Visibility == Visibility.Shared)}    " +
+                          $"PRIVATE {model.Primitives.Count(p => p.Visibility == Visibility.Private)}";
+        var detail = new TextBlock { Foreground = Brushes.Gainsboro, TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 6, 0, 0) };
         var open = new Button { Content = "Open Definition", Margin = new Thickness(0, 6, 0, 0) };
         open.Click += async (_, _) => await OpenPathAsync(bundle.MainFile);
-        var detailBox = new StackPanel { Spacing = 4, Margin = new Thickness(0, 6, 0, 0), Children = { detail, open } };
-        DockPanel.SetDock(detailBox, Dock.Bottom);
-        root.Children.Add(detailBox);
+        var bottom = new StackPanel { Spacing = 2, Children = { status, detail, open } };
+        DockPanel.SetDock(bottom, Dock.Bottom);
+        root.Children.Add(bottom);
 
-        var tree = new TreeView { MaxHeight = 460 };
-        if (model is not null)
+        // --- tree (fill), rebuilt on filter/toggle change ---
+        var tree = new TreeView { MaxHeight = 420 };
+        tree.SelectionChanged += (_, _) =>
         {
-            foreach (PrimitiveKind kind in Enum.GetValues<PrimitiveKind>())
-            {
-                var all = model.ByKind(kind).OrderBy(p => p.Name, StringComparer.Ordinal).ToList();
-                var kindNode = new TreeViewItem { Header = $"{PluralKind(kind)} ({all.Count})", IsExpanded = all.Count > 0 };
-                if (all.Count == 0) kindNode.Foreground = Brushes.Gray;
-                foreach (var vis in new[] { Visibility.Public, Visibility.Shared })
-                {
-                    var items = all.Where(p => p.Visibility == vis).ToList();
-                    if (items.Count == 0) continue;
-                    var visNode = new TreeViewItem { Header = $"{vis} ({items.Count})", IsExpanded = true };
-                    foreach (var p in items)
-                        visNode.Items.Add(new TreeViewItem { Header = KindSigil(kind) + p.Name, Tag = p });
-                    kindNode.Items.Add(visNode);
-                }
-                tree.Items.Add(kindNode);
-            }
-            tree.SelectionChanged += (_, _) =>
-            {
-                if (tree.SelectedItem is TreeViewItem { Tag: PrimitiveInfo p })
-                    detail.Text = DescribePrimitive(model.Name, p);
-            };
-        }
+            if (model is not null && tree.SelectedItem is TreeViewItem { Tag: PrimitiveInfo p })
+                detail.Text = DescribePrimitive(model.Name, p);
+        };
         root.Children.Add(tree);
+
+        TreeViewItem Leaf(PrimitiveInfo p) => new() { Header = KindSigil(p.Kind) + p.Name, Tag = p };
+
+        void Rebuild()
+        {
+            tree.Items.Clear();
+            if (model is null) return;
+
+            string q = (search.Text ?? "").Trim();
+            string typeSel = typeFilter.SelectedItem as string ?? "All types";
+            string visSel = visFilter.SelectedItem as string ?? "All";
+
+            var items = model.Primitives.AsEnumerable();
+            if (typeSel != "All types") items = items.Where(p => p.Kind.ToString() == typeSel);
+            if (visSel != "All") items = items.Where(p => p.Visibility.ToString() == visSel);
+            if (q.Length > 0) items = items.Where(p => p.Name.Contains(q, StringComparison.OrdinalIgnoreCase));
+            var list = items.OrderBy(p => p.Name, StringComparer.Ordinal).ToList();
+
+            if (groupBy.SelectedIndex == 1)   // By Visibility → Kind → primitive
+            {
+                foreach (var vis in new[] { Visibility.Public, Visibility.Shared, Visibility.Private })
+                {
+                    var inVis = list.Where(p => p.Visibility == vis).ToList();
+                    if (inVis.Count == 0) continue;
+                    var visNode = new TreeViewItem { Header = $"{vis} ({inVis.Count})", IsExpanded = true };
+                    foreach (var kind in inVis.Select(p => p.Kind).Distinct().OrderBy(k => (int)k))
+                    {
+                        var kindNode = new TreeViewItem { Header = $"{PluralKind(kind)} ({inVis.Count(p => p.Kind == kind)})", IsExpanded = true };
+                        foreach (var p in inVis.Where(p => p.Kind == kind)) kindNode.Items.Add(Leaf(p));
+                        visNode.Items.Add(kindNode);
+                    }
+                    tree.Items.Add(visNode);
+                }
+            }
+            else   // By Type → Visibility → primitive
+            {
+                foreach (PrimitiveKind kind in Enum.GetValues<PrimitiveKind>())
+                {
+                    var inKind = list.Where(p => p.Kind == kind).ToList();
+                    var kindNode = new TreeViewItem { Header = $"{PluralKind(kind)} ({inKind.Count})", IsExpanded = inKind.Count > 0 };
+                    if (inKind.Count == 0) { kindNode.Foreground = Brushes.Gray; tree.Items.Add(kindNode); continue; }
+                    foreach (var vis in new[] { Visibility.Public, Visibility.Shared, Visibility.Private })
+                    {
+                        var inVis = inKind.Where(p => p.Visibility == vis).ToList();
+                        if (inVis.Count == 0) continue;
+                        var visNode = new TreeViewItem { Header = $"{vis} ({inVis.Count})", IsExpanded = true };
+                        foreach (var p in inVis) visNode.Items.Add(Leaf(p));
+                        kindNode.Items.Add(visNode);
+                    }
+                    tree.Items.Add(kindNode);
+                }
+            }
+        }
+
+        search.TextChanged += (_, _) => Rebuild();
+        typeFilter.SelectionChanged += (_, _) => Rebuild();
+        visFilter.SelectionChanged += (_, _) => Rebuild();
+        groupBy.SelectionChanged += (_, _) => Rebuild();
+        Rebuild();
 
         _bundleInspector.Child = root;
         _bundleInspector.IsVisible = true;
