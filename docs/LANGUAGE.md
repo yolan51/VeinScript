@@ -396,11 +396,13 @@ Precedence, lowest → highest (one parser method per level):
 |-------|-----------|-------|
 | Or | `or` | left |
 | And | `and` | left |
-| Cmp | `== != < > <= >=` | left |
+| Cmp | `== < > <= >=` | left |
 | Add | `+ -` | left |
 | Mul | `* / %` | left |
 | Unary | `not  -` | prefix |
 | Primary | literals, names, `( )`, call `f(…)`, member `a.b`, scope `M::x`, index `a[i]`, sigil refs, struct/shape/event literal | — |
+
+There is no `!=` operator — inequality is written `not (a == b)` (`!` is reserved/free for a future sigil).
 
 `and`/`or` short-circuit. Struct/shape literals: `Vec2 { x: 1.0, y: 2.0 }`; event literals appear in
 `emit @E { … }`. Indexing `a[i]` needs `[` `]` tokens ([D9](SYNTAX-DECISIONS.md#d9)).
@@ -464,7 +466,7 @@ exprStmt    = expr ;
 expr        = orExpr ;
 orExpr      = andExpr  { "or"  andExpr } ;
 andExpr     = cmpExpr  { "and" cmpExpr } ;
-cmpExpr     = addExpr  { ("==" | "!=" | "<" | ">" | "<=" | ">=") addExpr } ;
+cmpExpr     = addExpr  { ("==" | "<" | ">" | "<=" | ">=") addExpr } ;   (* no "!="; use `not (a == b)` *)
 addExpr     = mulExpr  { ("+" | "-") mulExpr } ;
 mulExpr     = unary    { ("*" | "/" | "%") unary } ;
 unary       = ("not" | "-") unary | postfix ;

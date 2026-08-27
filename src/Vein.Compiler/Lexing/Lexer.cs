@@ -295,11 +295,8 @@ public sealed class Lexer
                 else kind = TokenKind.Minus;
                 break;
 
-            case '!':
-                if (Match('=')) { kind = TokenKind.Ne; break; }
-                _diagnostics.Error("VS0004", "Expected '=' after '!'.",
-                    SpanFrom(startPos, startLine, startCol));
-                return;
+            // `!` is intentionally NOT a token — inequality is written `not (a == b)` (the `not` keyword),
+            // which frees `!` for a future sigil.
 
             default:
                 _diagnostics.Error("VS0005", $"Unexpected character '{c}'.",

@@ -268,6 +268,19 @@ public class ServiceTests
     }
 
     [Fact]
+    public void Not_keyword_replaces_bang_and_frees_it()
+    {
+        // Inequality/negation is `not (…)`; `!` is no longer a token (free for a future sigil).
+        var ok = Compile("bundle B { event @X { a: int, b: int } " +
+                         "shard M { hear @X as e { if not (e.a == e.b) { emit @X { a: 0, b: 0 } } } } }");
+        Assert.True(ok.Success);
+        Assert.Empty(ok.Diagnostics);
+
+        var bang = Compile("bundle B { event @X { a: int } shard M { hear @X as e { if e.a ! 3 { } } } }");
+        Assert.False(bang.Success);   // `!` → unknown character
+    }
+
+    [Fact]
     public void DependencyModel_groups_external_refs_with_used_by()
     {
         var unit = Compile(
