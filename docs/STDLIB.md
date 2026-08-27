@@ -136,16 +136,16 @@ Silencing only hides an identity from `*`; an explicit `*Vein.Silent.@X` still r
 applying it to the Dependencies view and `veinc symbols` is a follow-on.
 
 **Transitive dependencies.** Importing a large dependency must not dump its whole tree into `*`. Because
-the most-specific rule wins, you silence an imported app/author and re-expose only its front door +
-what you use:
+the most-specific rule wins. Name the front door with `silent transitive <Principal>` — that one line
+silences the whole tree *and* keeps the principal visible — then expose what you consume:
 ```
-silent transitive                    # synonym of `silent all`: transitive bundles silent by default
-expose *MegaApp.PrincipalBundle      # keep the app's principal (front door) discoverable
-expose *MegaApp.Physics              # + a dependency you actually consume
+silent transitive *MegaApp.PrincipalBundle   # principal visible; everything else silent
+expose *MegaApp.Physics                       # + a dependency you actually consume
 ```
 `MegaApp.Networking`/`Audio`/… stay silent (still *resolvable* if referenced explicitly — silent ≠
-inaccessible). **Auto-principal** (the front door discoverable without an explicit `expose`) needs the
-import/dependency-graph model and is a follow-on.
+inaccessible). (`silent transitive` with no target = silent-by-default root, like `silent all`.)
+Fully **automatic** principals (inferred from the import graph, no directive) need the
+import/dependency-graph model and are a follow-on.
 
 ## 6. Missing capabilities for full consumption (isolated, general-purpose follow-ons)
 

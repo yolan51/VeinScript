@@ -19,11 +19,11 @@ expose Vein.Math
 # silent acme.Combat.Internal
 
 # --- transitive dependencies ---------------------------------------------------
-# Importing a big dependency should NOT dump its whole tree into `*`. `silent transitive`
-# (a synonym of `silent all`) silences imported/transitive bundles by default; then expose
-# just the front door + what you actually consume. A leading `*` on the path is allowed.
+# Importing a big dependency should NOT dump its whole tree into `*`. Name the front door and its
+# transitive tree is silenced in ONE line; the principal stays visible. Then expose what you consume.
 #
-#   silent transitive
-#   expose *MegaApp.PrincipalBundle    # keep the app's front door visible
-#   expose *MegaApp.Physics            # + one dependency you actually use
+#   silent transitive *MegaApp.PrincipalBundle   # principal visible; everything else silent
+#   expose *MegaApp.Physics                       # + one dependency you actually use
 #   # MegaApp.Networking / Audio / Rendering stay silent (still resolvable if referenced explicitly)
+#
+# (`silent transitive` with no target = silent-by-default root, like `silent all`.)

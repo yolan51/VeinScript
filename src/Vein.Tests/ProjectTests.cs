@@ -193,11 +193,11 @@ public class ProjectTests
     [Fact]
     public void DiscoveryPolicy_transitive_silence_with_explicit_exposure()
     {
-        // Import MegaApp: its whole tree is silent (transitive), except the principal + one exposed dep.
+        // `silent transitive <Principal>` keeps the named front door visible + silences the rest; one
+        // more `expose` reveals a specific dependency.
         var p = DiscoveryPolicy.Parse(new[]
         {
-            "silent transitive",
-            "expose *MegaApp.PrincipalBundle",
+            "silent transitive *MegaApp.PrincipalBundle",   // principal exposed by this directive
             "expose *MegaApp.Physics",
         });
 

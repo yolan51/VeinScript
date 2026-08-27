@@ -48,11 +48,21 @@ public sealed class DiscoveryPolicy
             if (line.Length == 0) continue;
 
             var parts = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length != 2 || parts[0] is not ("expose" or "silent")) continue;
+            if (parts.Length < 2 || parts[0] is not ("expose" or "silent")) continue;
             bool expose = parts[0] == "expose";
 
-            // Accept a leading `*` on paths (`expose *MegaApp.Physics`); `all`/`transitive` set the root
-            // default (`silent transitive` = imported/transitive bundles are silent unless exposed).
+            // `silent transitive <Principal>` — silence the whole transitive tree by default, but keep the
+            // named bundle/app (the front door) discoverable. One line = principal visible + rest silent.
+            if (parts.Length == 3 && parts[0] == "silent" && parts[1] == "transitive")
+            {
+                rootExpose = false;
+                rules[parts[2].TrimStart('*')] = true;   // expose the principal
+                continue;
+            }
+            if (parts.Length != 2) continue;
+
+            // Accept a leading `*` on paths (`expose *MegaApp.Physics`); `all`/`transitive` (no target)
+            // set the root default (`silent transitive` = imported/transitive bundles are silent).
             string target = parts[1].TrimStart('*');
             if (target is "all" or "transitive") rootExpose = expose;
             else rules[target] = expose;
