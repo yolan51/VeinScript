@@ -191,6 +191,23 @@ public class ProjectTests
     }
 
     [Fact]
+    public void DiscoveryPolicy_transitive_silence_with_explicit_exposure()
+    {
+        // Import MegaApp: its whole tree is silent (transitive), except the principal + one exposed dep.
+        var p = DiscoveryPolicy.Parse(new[]
+        {
+            "silent transitive",
+            "expose *MegaApp.PrincipalBundle",
+            "expose *MegaApp.Physics",
+        });
+
+        Assert.True(p.IsDiscoverable("MegaApp", "PrincipalBundle", "Api"));  // principal (front door)
+        Assert.True(p.IsDiscoverable("MegaApp", "Physics", "Bodies"));       // explicitly exposed
+        Assert.False(p.IsDiscoverable("MegaApp", "Networking", "Tcp"));      // transitive → silent
+        Assert.False(p.IsDiscoverable("MegaApp", "Audio", null));            // transitive → silent
+    }
+
+    [Fact]
     public void DiscoveryPolicy_no_file_is_permissive_and_filters_symbols()
     {
         Assert.True(DiscoveryPolicy.Permissive.IsDiscoverable("anyone", "AnyBundle", "AnyPub"));

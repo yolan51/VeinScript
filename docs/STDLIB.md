@@ -135,6 +135,18 @@ Silencing only hides an identity from `*`; an explicit `*Vein.Silent.@X` still r
 `shared`'s job). Today the policy filters the Workbench's `*` completion ([DiscoveryPolicy](../src/Vein.Compiler/Project/DiscoveryPolicy.cs));
 applying it to the Dependencies view and `veinc symbols` is a follow-on.
 
+**Transitive dependencies.** Importing a large dependency must not dump its whole tree into `*`. Because
+the most-specific rule wins, you silence an imported app/author and re-expose only its front door +
+what you use:
+```
+silent transitive                    # synonym of `silent all`: transitive bundles silent by default
+expose *MegaApp.PrincipalBundle      # keep the app's principal (front door) discoverable
+expose *MegaApp.Physics              # + a dependency you actually consume
+```
+`MegaApp.Networking`/`Audio`/… stay silent (still *resolvable* if referenced explicitly — silent ≠
+inaccessible). **Auto-principal** (the front door discoverable without an explicit `expose`) needs the
+import/dependency-graph model and is a follow-on.
+
 ## 6. Missing capabilities for full consumption (isolated, general-purpose follow-ons)
 
 Each is a general language/runtime capability, **not** a stdlib-specific hack:

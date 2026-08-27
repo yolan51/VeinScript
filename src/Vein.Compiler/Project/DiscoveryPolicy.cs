@@ -51,8 +51,10 @@ public sealed class DiscoveryPolicy
             if (parts.Length != 2 || parts[0] is not ("expose" or "silent")) continue;
             bool expose = parts[0] == "expose";
 
-            string target = parts[1];
-            if (target == "all") rootExpose = expose;
+            // Accept a leading `*` on paths (`expose *MegaApp.Physics`); `all`/`transitive` set the root
+            // default (`silent transitive` = imported/transitive bundles are silent unless exposed).
+            string target = parts[1].TrimStart('*');
+            if (target is "all" or "transitive") rootExpose = expose;
             else rules[target] = expose;
         }
         return new DiscoveryPolicy(rootExpose, rules);
