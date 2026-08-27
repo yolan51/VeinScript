@@ -98,7 +98,7 @@ public sealed class Lexer
 
             int startPos = _pos, startLine = _line, startCol = _col;
 
-            if (c == '$' || c == '@' || c == '#') { ScanSigilRef(startPos, startLine, startCol); continue; }
+            if (c == '$' || c == '@' || c == '#' || c == '&') { ScanSigilRef(startPos, startLine, startCol); continue; }
             if (char.IsDigit(c)) { ScanNumber(startPos, startLine, startCol); continue; }
             if (c == '"') { ScanString(startPos, startLine, startCol); continue; }
             if (char.IsLetter(c) || c == '_') { ScanIdentifier(startPos, startLine, startCol); continue; }
@@ -119,7 +119,7 @@ public sealed class Lexer
         {
             TokenKind.Int or TokenKind.Float or TokenKind.Percent or TokenKind.String
                 or TokenKind.Ident or TokenKind.RParen or TokenKind.RBrace or TokenKind.RBracket
-                or TokenKind.ShapeRef or TokenKind.EventRef or TokenKind.MarkRef
+                or TokenKind.ShapeRef or TokenKind.EventRef or TokenKind.MarkRef or TokenKind.BuilderRef
                 or TokenKind.KwTrue or TokenKind.KwFalse or TokenKind.KwReturn
                 or TokenKind.KwSync or TokenKind.KwBreak or TokenKind.KwContinue => true,
             _ => false
@@ -166,6 +166,7 @@ public sealed class Lexer
         {
             '$' => TokenKind.ShapeRef,
             '@' => TokenKind.EventRef,
+            '&' => TokenKind.BuilderRef,
             _   => TokenKind.MarkRef
         };
 

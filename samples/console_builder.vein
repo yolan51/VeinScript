@@ -1,0 +1,24 @@
+// samples/console_builder.vein — use a stdlib BUILDER cross-bundle via the `&` sigil.
+//
+//   veinc run samples/console_builder.vein
+//
+// `bring *Vein.Console.Io.&Console(name, firsttext)` resolves the stdlib Console builder (the `&` is the
+// builder sigil, like @ for events / $ for shapes / # for marks) and desugars to emit @Console { … },
+// spawning a named console window. This is the builder equivalent of `emit *Vein.Console.Io.@Console`.
+//
+// NOTE: qualified `bring` resolves the stdlib builder at lower-time, so it works under `veinc run` /
+// the Workbench (where stdlib/ is locatable). A `veinc build` standalone .exe can't locate stdlib to
+// re-lower, so prefer the event form (emit *Vein.Console.Io.@Console) for shipped exes.
+
+bundle ConsoleBuilderDemo by you {
+
+    start @Boot { }
+    event @Boot { }
+
+    shard Launcher {
+        hear @Boot as b {
+            bring *Vein.Console.Io.&Console("Server",  "Server ready.")
+            bring *Vein.Console.Io.&Console("Client1", "Client 1 ready.")
+        }
+    }
+}

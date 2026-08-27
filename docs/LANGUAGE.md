@@ -19,8 +19,9 @@ is no general `class`. Domains (game/web/desktop) are libraries written in this 
 Fully implemented in [Lexer.cs](../src/Vein.Compiler/Lexing/Lexer.cs). Three rules are load-bearing:
 
 - **Sigils fold into the token.** `$Health` → one `ShapeRef(Text="Health")`, `@Damaged` →
-  `EventRef`, `#Enemy` → `MarkRef`. The sigil is never a standalone token. Sigils are **core IOP
-  syntax**: they mark the three kinds of identity reference (shape / event / mark).
+  `EventRef`, `#Enemy` → `MarkRef`, `&Console` → `BuilderRef`. The sigil is never a standalone token.
+  Sigils are **core IOP syntax**: they mark the four kinds of identity reference (shape / event / mark /
+  builder). `&Builder` is used by `bring` — including cross-bundle: `bring *Vein.Console.Io.&Console(…)`.
 - **`30%` is one token** (`Percent`), scanned before an `Int` can be emitted, so it never collides
   with modulo. Its value is the fraction `0.30` (a `double`).
 - **Newline is a virtual terminator.** A `Term` is emitted at `\n` only when the previous token can

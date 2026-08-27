@@ -738,7 +738,25 @@ public sealed class Parser
         if (Check(TokenKind.Int) || Check(TokenKind.Float) ||
             (Check(TokenKind.Ident) && Peek(1).Kind != TokenKind.LParen))
             count = ParsePrimary();
-        string name = Expect(TokenKind.Ident, "builder name").Text;
+
+        // The builder: bare `Name` (local, back-compat), `&Name` (local, sigil'd), or a qualified
+        // `*Author.Bundle.Publicator.&Name` (cross-bundle), ending at the `&Builder` ref.
+        string name;
+        IReadOnlyList<string> path = Array.Empty<string>();
+        if (Check(TokenKind.Star))
+        {
+            Advance();   // '*'
+            var p = new List<string> { ExpectName("qualified path after '*'").Text };
+            while (true)
+            {
+                Expect(TokenKind.Dot, "'.'");
+                if (Check(TokenKind.BuilderRef)) { name = Advance().Text; break; }
+                p.Add(ExpectName("path segment or &Builder").Text);
+            }
+            path = p;
+        }
+        else if (Check(TokenKind.BuilderRef)) name = Advance().Text;
+        else name = Expect(TokenKind.Ident, "builder name").Text;
 
         var args = new List<Expr>();
         bool fill = false;
@@ -756,7 +774,7 @@ public sealed class Parser
                 }
             Expect(TokenKind.RParen, "')'");
         }
-        return new BringStmt(count, name, args, fill, s);
+        return new BringStmt(count, name, args, fill, s) { BuilderPath = path };
     }
 
     private Stmt ParseAssignOrExpr()

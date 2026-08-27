@@ -220,6 +220,23 @@ public class ServiceTests
     }
 
     [Fact]
+    public void Qualified_bring_resolves_stdlib_builder()
+    {
+        // `bring *Vein.Console.Io.&Console(...)` resolves the stdlib builder (via StdlibIndex.Builders),
+        // desugars to emit @Console { name, firsttext }, and runs — proving cross-bundle bring end to end.
+        var r = Compile("bundle B { start @Boot { } event @Boot { } " +
+                        "shard M { hear @Boot as b { bring *Vein.Console.Io.&Console(\"Server\", \"ready\") } } }");
+        Assert.True(r.Success);
+        Assert.Empty(r.Diagnostics);
+
+        (string Name, string First)? got = null;
+        ConsoleLauncher.Hook = (n, f) => got = (n, f);
+        try { new Interp().Run(r.Modules[0], new System.IO.StringReader(""), new System.IO.StringWriter()); }
+        finally { ConsoleLauncher.Hook = null; }
+        Assert.Equal(("Server", "ready"), got);
+    }
+
+    [Fact]
     public void Console_builder_spawns_with_name_and_firsttext()
     {
         // A channel-less builder constructs and emits @<BuilderName> with all its params.

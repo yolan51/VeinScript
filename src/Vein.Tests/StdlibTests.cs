@@ -53,10 +53,10 @@ public class StdlibTests
     [InlineData("UI.vein", "*Vein.UI.Widgets.$Button")]
     [InlineData("Time.vein", "*Vein.Time.Clock.$Clock")]
     [InlineData("Game.vein", "*Vein.Game.Collision.@Collided")]
-    [InlineData("Web.vein", "*Vein.Web.Elements.Button")]
+    [InlineData("Web.vein", "*Vein.Web.Elements.&Button")]
     [InlineData("Diagnostics.vein", "*Vein.Diagnostics.Report.$Diagnostic")]
     [InlineData("Console.vein", "*Vein.Console.Io.@Print")]
-    [InlineData("Console.vein", "*Vein.Console.Io.Line")]
+    [InlineData("Console.vein", "*Vein.Console.Io.&Line")]
     public void Stdlib_bundle_exposes_shared_symbol(string file, string qualified)
     {
         var diag = new DiagnosticBag();

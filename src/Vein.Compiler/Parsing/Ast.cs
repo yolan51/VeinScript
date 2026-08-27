@@ -175,7 +175,12 @@ public sealed record AttachStmt(bool Remove, string Shape, Expr Target, IReadOnl
 public sealed record ChanceStmt(double Probability, Block Body, SourceSpan Span) : Stmt(Span);
 /// `bring [Count] Builder(args)` — instantiate a builder (optionally Count times). FillRest (`?`)
 /// fills any params not supplied with typed zero placeholders.
-public sealed record BringStmt(Expr? Count, string Builder, IReadOnlyList<Expr> Args, bool FillRest, SourceSpan Span) : Stmt(Span);
+public sealed record BringStmt(Expr? Count, string Builder, IReadOnlyList<Expr> Args, bool FillRest, SourceSpan Span) : Stmt(Span)
+{
+    /// A `*Author.Bundle.Publicator` qualifier on the builder (`bring *Vein.Console.Io.&Console(…)`);
+    /// empty ⇒ a bare/local `&`-builder resolved in this bundle.
+    public IReadOnlyList<string> BuilderPath { get; init; } = Array.Empty<string>();
+}
 
 // ---- expressions --------------------------------------------------------
 

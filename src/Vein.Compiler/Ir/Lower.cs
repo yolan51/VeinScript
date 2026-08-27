@@ -1,6 +1,7 @@
 using Vein.Compiler.Diagnostics;
 using Vein.Compiler.Lexing;
 using Vein.Compiler.Parsing;
+using Vein.Compiler.Project;
 
 namespace Vein.Compiler.Ir;
 
@@ -346,11 +347,31 @@ public sealed class Lower
     /// `bring [N] Builder(args)` desugars to: bind params, then emit the builder's output fragment
     /// event — repeated N times. Params are the builder's members minus its output field (markup/
     /// code/css); that output field's `=` value is the template. No new IR node.
+    // Resolve a qualified `*Author.Bundle.Publicator.&Builder` against the stdlib builders, matching by
+    // trailing segments (so a shorter qualifier still resolves, like the qualified event refs).
+    private static BuilderDecl? ResolveExternalBuilder(IReadOnlyList<string> path, string name)
+    {
+        string refKey = string.Join(".", path) + "." + name;
+        foreach (var kv in StdlibIndex.Builders())
+            if (kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal)) return kv.Value;
+        return null;
+    }
+
     private IrStmt LowerBring(BringStmt br)
     {
-        if (!_builders.TryGetValue(br.Builder, out var b))
+        // Qualified `bring *Author.Bundle.Publicator.&Builder(…)` resolves against the stdlib's builders;
+        // a bare/local `bring Builder(…)` resolves against this bundle. Either way we get a BuilderDecl and
+        // desugar it identically (the qualifier is dropped — like emit — since the runtime keys on the name).
+        BuilderDecl? b;
+        if (br.BuilderPath.Count > 0)
+            b = ResolveExternalBuilder(br.BuilderPath, br.Builder);
+        else
+            _builders.TryGetValue(br.Builder, out b);
+
+        if (b is null)
         {
-            _diag.Error("VS0203", $"Unknown builder '{br.Builder}'.", br.Span);
+            string reff = br.BuilderPath.Count > 0 ? "*" + string.Join(".", br.BuilderPath) + ".&" + br.Builder : br.Builder;
+            _diag.Error("VS0203", $"Unknown builder '{reff}'.", br.Span);
             return new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
         }
 

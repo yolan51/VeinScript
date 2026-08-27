@@ -13,6 +13,7 @@ public enum TokenKind
     ShapeRef,       // $Health
     EventRef,       // @Damaged
     MarkRef,        // #Enemy
+    BuilderRef,     // &Console
 
     // keywords
     KwAnd, KwAs, KwAttach, KwAudience, KwBuilder, KwBridge, KwBring, KwBundle,

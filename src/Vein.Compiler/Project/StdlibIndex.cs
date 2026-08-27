@@ -36,6 +36,46 @@ public static class StdlibIndex
         return syms;
     }
 
+    private static readonly Dictionary<string, Dictionary<string, BuilderDecl>> _builderCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, BuilderDecl> _noBuilders = new(StringComparer.Ordinal);
+
+    /// The stdlib's shared builders, keyed by qualified name `Author.Bundle.Publicator.Name` — used to
+    /// resolve a cross-bundle `bring *Author.Bundle.Publicator.&Builder(…)`.
+    public static IReadOnlyDictionary<string, BuilderDecl> Builders(string? startDir = null)
+    {
+        var dir = Locate(startDir);
+        if (dir is null) return _noBuilders;
+        if (_builderCache.TryGetValue(dir, out var cached)) return cached;
+
+        var map = new Dictionary<string, BuilderDecl>(StringComparer.Ordinal);
+        foreach (var file in Directory.EnumerateFiles(dir, "*.vein"))
+        {
+            if (Path.GetFileName(file).EndsWith(".app.vein", StringComparison.OrdinalIgnoreCase)) continue;
+            try
+            {
+                var diag = new DiagnosticBag();
+                var unit = new Parser(new Lexer(File.ReadAllText(file), Path.GetFileName(file), diag).Tokenize(), diag).ParseUnit();
+                foreach (var b in unit.Bundles)
+                    CollectBuilders(b.Members, b.Author ?? "local", b.Name, null, map);
+            }
+            catch { }
+        }
+        _builderCache[dir] = map;
+        return map;
+    }
+
+    private static void CollectBuilders(IEnumerable<Decl> members, string author, string bundle, string? pub, Dictionary<string, BuilderDecl> into)
+    {
+        foreach (var m in members)
+            switch (m)
+            {
+                case PublicatorDecl p: CollectBuilders(p.Members, author, bundle, p.Name, into); break;
+                case BuilderDecl bl when bl.Shared:
+                    into[pub is null ? $"{author}.{bundle}.{bl.Name}" : $"{author}.{bundle}.{pub}.{bl.Name}"] = bl;
+                    break;
+            }
+    }
+
     /// Find a `stdlib` folder containing bundle files, searching upward from startDir, the CWD, and the
     /// running app's base directory. Null if none is found.
     public static string? Locate(string? startDir)

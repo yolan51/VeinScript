@@ -16,7 +16,7 @@ public sealed record QualifiedSymbol(
     string Author, string Bundle, string? Publicator,
     SymbolKind Kind, string Name, string? Type = null, string? Doc = null)
 {
-    public string Sigil => Kind switch { SymbolKind.Event => "@", SymbolKind.Shape => "$", _ => "" };
+    public string Sigil => Kind switch { SymbolKind.Event => "@", SymbolKind.Shape => "$", SymbolKind.Builder => "&", _ => "" };
 
     /// The owner path (author → bundle → publicator). The member is NOT part of it.
     public IReadOnlyList<string> PathSegments =>
