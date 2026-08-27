@@ -305,8 +305,9 @@ public class ServiceTests
             "  builder Make { a: string } " +                                  // channel-less → @Make
             "  shard Worker { hear @Local as e { emit @Public { x: 1 } bring Line(\"hi\") } } " +
             "}").Ast;
+        Assert.NotNull(unit);
 
-        var m = Vein.Compiler.Tooling.BundleModel.Analyze(unit);
+        var m = Vein.Compiler.Tooling.BundleModel.Analyze(unit!);
         Assert.NotNull(m);
 
         // By kind.
