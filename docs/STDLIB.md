@@ -19,6 +19,10 @@ bundle Name by author {                 // author roots the qualified name (*aut
         event @Event { $Shape, field: T = default }   //   across ALL bundles (`veinc symbols`)
         shared("doc")
         builder Name { param: T   markup = expr }     // markup→@Html, code→@Script, css→@Style
+        shared("doc")
+        fn compute(v: T) -> T { return v }            // computation — callable in any expression
+        shared("doc")
+        SF announce(v: T) { emit @Event { … } }       // behaviour — a named emit sequence
     }
     shard Name { hear @E as e { emit @E2 { … } } }
     ShardView Name { var s: string   hear @E as e { … } }
@@ -43,8 +47,9 @@ Prefer reusing an existing shared shape over re-declaring the same fields — `V
 reuse `Vein.Math.Values.$Vec2` rather than each hand-rolling `x: float, y: float`.
 
 Cross-bundle references (surface + validated today): `emit`/`hear`/`start *Author.Bundle.Publicator.@Event`,
-`bring *Author.Bundle.Publicator.&Builder(…)`, and `*Author.Bundle.Publicator.$Shape` includes in an
-event/builder signature. `start` is a bundle's single entry.
+`bring *Author.Bundle.Publicator.&Builder(…)`, `*Author.Bundle.Publicator.$Shape` includes in an
+event/builder signature, and `*Author.Bundle.Publicator.name(…)` calls to a shared `fn`/`SF`.
+`start` is a bundle's single entry.
 
 ## 2. Current capabilities vs. what the stdlib needs
 
@@ -99,13 +104,15 @@ its native input into that identity. No `Web.MouseDown` / `Desktop.MouseDown` du
 
 Nine platform-independent bundles authored `by Vein`. A bundle has two layers:
 
-- **Publicators = the shared API** (`shared` shapes/events/builders), reachable across bundles as
-  `*Vein.Bundle.Publicator.member` and listed by `veinc symbols stdlib/Vein.app.vein`. Totals:
-  **24 shapes · 30 events · 8 builders**, in **20 publicators**.
-- **Bundle-level shards = behaviour** (7 of them). A `shard` is *never* inside a publicator — it is the
-  bundle's logic that you get **for free by loading the bundle**; you don't reference or manipulate it,
-  and it is not part of the cross-bundle API. (The compiler enforces this: a shard in a publicator is an
-  error, VS0108.)
+- **Publicators = the shared API** (`shared` shapes/events/builders/functions), reachable across bundles
+  as `*Vein.Bundle.Publicator.member` and listed by `veinc symbols stdlib/Vein.app.vein`. Totals:
+  **25 shapes · 30 events · 8 builders · 6 fn · 6 SF**, in **20 publicators**.
+- **No shards.** The library is vocabulary; behaviour is the application's. A `shard` can never be
+  `shared` — it is not allowed inside a publicator at all (VS0108) — so one declared in a library would
+  not be API: it would be invisible behaviour installed in every consumer merely because they imported
+  the vocabulary, e.g. an `each tick` system in their frame loop. `Stdlib_declares_no_behaviour` enforces
+  this. Reusable *logic* ships as a `shared` `fn` (computation) or `SF` (a named emit sequence) instead,
+  which the consumer calls explicitly.
 
 **Every shared event carries a payload** — an occurrence about an identity carries the `Entity` it
 concerns (`entity`/`target`/`a,b`), so events move real data across a program. `folds sum` is used only

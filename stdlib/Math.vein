@@ -21,4 +21,32 @@ bundle Math by Vein {
         shared("An axis-aligned rectangle (position + extent).")
         shape $Rect { x: float, y: float, width: float, height: float }
     }
+
+    // Scalar helpers. An `fn` COMPUTES and returns; it emits nothing and touches no identity — which is
+    // exactly what makes these safe to call from anywhere, including inside a `target` loop.
+    publicator Scalars {
+        shared("Clamp v into [lo, hi].")
+        fn clamp(v: float, lo: float, hi: float) -> float {
+            if v < lo { return lo }
+            if v > hi { return hi }
+            return v
+        }
+
+        shared("Linear interpolation from a to b at t (t in 0..1; not clamped).")
+        fn lerp(a: float, b: float, t: float) -> float { return a + (b - a) * t }
+
+        shared("The smaller of a and b.")
+        fn min(a: float, b: float) -> float { if a < b { return a } return b }
+
+        shared("The larger of a and b.")
+        fn max(a: float, b: float) -> float { if a > b { return a } return b }
+
+        shared("Absolute value of v.")
+        fn abs(v: float) -> float { if v < 0.0 { return -v } return v }
+
+        shared("Squared distance between two points — no square root, so it is cheap to compare.")
+        fn distance2(x1: float, y1: float, x2: float, y2: float) -> float {
+            return (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1)
+        }
+    }
 }

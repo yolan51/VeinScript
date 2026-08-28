@@ -105,6 +105,46 @@ public static class StdlibIndex
             }
     }
 
+    private static readonly Dictionary<string, Dictionary<string, FuncDecl>> _funcCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, FuncDecl> _noFuncs = new(StringComparer.Ordinal);
+
+    /// The stdlib's shared `fn`/`SF` declarations, keyed by qualified name — used to resolve a
+    /// cross-bundle call `*Author.Bundle.Publicator.name(…)`. Only `shared` ones are here.
+    public static IReadOnlyDictionary<string, FuncDecl> Functions(string? startDir = null)
+    {
+        var dir = Locate(startDir);
+        if (dir is null) return _noFuncs;
+        if (_funcCache.TryGetValue(dir, out var cached)) return cached;
+
+        var map = new Dictionary<string, FuncDecl>(StringComparer.Ordinal);
+        foreach (var file in Directory.EnumerateFiles(dir, "*.vein"))
+        {
+            if (Path.GetFileName(file).EndsWith(".app.vein", StringComparison.OrdinalIgnoreCase)) continue;
+            try
+            {
+                var diag = new DiagnosticBag();
+                var unit = new Parser(new Lexer(File.ReadAllText(file), Path.GetFileName(file), diag).Tokenize(), diag).ParseUnit();
+                foreach (var b in unit.Bundles)
+                    CollectFuncs(b.Members, b.Author ?? "local", b.Name, null, map);
+            }
+            catch { }
+        }
+        _funcCache[dir] = map;
+        return map;
+    }
+
+    private static void CollectFuncs(IEnumerable<Decl> members, string author, string bundle, string? pub, Dictionary<string, FuncDecl> into)
+    {
+        foreach (var m in members)
+            switch (m)
+            {
+                case PublicatorDecl p: CollectFuncs(p.Members, author, bundle, p.Name, into); break;
+                case FuncDecl f when f.Shared:
+                    into[pub is null ? $"{author}.{bundle}.{f.Name}" : $"{author}.{bundle}.{pub}.{f.Name}"] = f;
+                    break;
+            }
+    }
+
     private static void CollectBuilders(IEnumerable<Decl> members, string author, string bundle, string? pub, Dictionary<string, BuilderDecl> into)
     {
         foreach (var m in members)
@@ -147,7 +187,7 @@ public static class StdlibIndex
             case ShardDecl sh: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Shard, sh.Name, Doc: sh.Doc)); break;
             case ViewDecl vw: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.ShardView, vw.Name, Doc: vw.Doc)); break;
             case BridgeDecl br: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Bridge, br.Name, Doc: br.Doc)); break;
-            case FuncDecl f: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.SF, f.Name, Doc: f.Doc)); break;
+            case FuncDecl f: into.Add(new QualifiedSymbol(author, bundle, pub, f.IsPure ? SymbolKind.SF : SymbolKind.Fn, f.Name, Doc: f.Doc)); break;
         }
     }
 }

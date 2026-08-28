@@ -18,6 +18,10 @@ public sealed class Lower
     private readonly Dictionary<string, BuilderDecl> _builders = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<FieldDecl>> _shapeFields = new(StringComparer.Ordinal);
 
+    // Shared functions pulled in from another bundle by a qualified call, keyed by their mangled name.
+    // Appended to the module so the interpreter can dispatch them like any local function.
+    private readonly Dictionary<string, IrFunction> _imported = new(StringComparer.Ordinal);
+
     // The `target … as <bind>` names currently in scope. A reference to one of these is the identity
     // (`IrSelfRef`), not a local — see the NameExpr cases in LowerExpr. A stack, because targets nest.
     private readonly List<string> _targetBinds = new();
@@ -100,6 +104,9 @@ public sealed class Lower
                     new[] { IrAttr.Of("tag") }));
 
         CheckConsoleAddresses(bundle);
+
+        // Cross-bundle functions reached by a qualified call, resolved while lowering the bodies above.
+        funcs.AddRange(_imported.Values.Where(f => f is not null));
 
         return new IrModule(bundle.Name, types, funcs, shards) { Start = start };
     }
@@ -186,6 +193,29 @@ public sealed class Lower
             if (kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal))
                 return kv.Value.Members.OfType<FieldDecl>().ToList();
         return null;
+    }
+
+    /// Resolve a shared cross-bundle `fn`/`SF` and lower it into THIS module under a collision-proof name,
+    /// returning that name (null when it doesn't resolve). Matched on a path suffix like every other
+    /// qualified reference. Recursive: an imported function may itself call another.
+    private string? ImportExternalFunction(IReadOnlyList<string> path, string name, SourceSpan span)
+    {
+        string refKey = string.Join(".", path) + "." + name;
+        var hit = StdlibIndex.Functions()
+            .FirstOrDefault(kv => kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal));
+        if (hit.Value is null)
+        {
+            _diag.Warning("VS0213", $"Unknown function '*{refKey}' — the call will do nothing.", span);
+            return null;
+        }
+
+        string mangled = hit.Key.Replace('.', '_');
+        if (_imported.ContainsKey(mangled)) return mangled;
+
+        _imported[mangled] = null!;                       // reserve first: the body may recurse into itself
+        var lowered = LowerFunc(hit.Value) with { Name = mangled };
+        _imported[mangled] = lowered;
+        return mangled;
     }
 
     private static string RefText(ShapeInclude si) =>
@@ -534,6 +564,18 @@ public sealed class Lower
             case MarkRefExpr mr: _tags.Add(mr.Name); return new IrTypeNameExpr(mr.Name);
             case MemberExpr me: return new IrFieldAccess(LowerExpr(me.Receiver), me.Name);
             case IndexExpr ix: return new IrIndex(LowerExpr(ix.Receiver), LowerExpr(ix.Index));
+            // `*Author.Bundle.Publicator.name(…)` — a cross-bundle call. The callee resolves to a shared
+            // `fn`/`SF`, which is IMPORTED into this module under a mangled name so the runtime can find
+            // it, exactly as a qualified `bring` pulls in a builder. Without this the call would lower to
+            // an IrScopeRef, which the interpreter cannot evaluate, and silently do nothing.
+            case CallExpr { Callee: StarRefExpr star } c when star.Sigil == MemberSigil.None:
+            {
+                string? imported = ImportExternalFunction(star.Path, star.Member, c.Span);
+                var args = c.Args.Select(LowerExpr).ToList();
+                return imported is null
+                    ? new IrCall(new IrScopeRef(string.Join(".", star.Path), star.Member), args)
+                    : new IrCall(new IrLocalRef(imported), args);
+            }
             case CallExpr c: return new IrCall(LowerExpr(c.Callee), c.Args.Select(LowerExpr).ToList());
             case BinaryExpr b: return new IrBinary(MapBin(b.Op), LowerExpr(b.Left), LowerExpr(b.Right));
             case UnaryExpr u: return new IrUnary(u.Op == UnOp.Neg ? IrUnOp.Neg : IrUnOp.Not, LowerExpr(u.Operand));

@@ -27,8 +27,9 @@ dialect. There is no general `class`.
 | `publicator` | `publicator N { … }` | a bundle's public grouping — members are visible to this bundle's shards (bundle-wide) | namespace segment in `*` paths |
 | `shared` | `shared("doc")` **above a decl, inside a publicator** | marks that decl public **across all bundles** (+ doc) — only `shared` members appear in `veinc symbols` and are reachable via `*Author.Bundle.Publicator.@…` | error outside a publicator |
 | `let` / `var` | `let x [:T] = e` / `var x …` | immutable / mutable binding | |
-| `SF` | `SF f(p: T) -> R { … }` | pure function (verified) | `fn` + purity flag |
-| `return` | `return [e]` | return | |
+| `SF` | `SF f(p: T) { … }` | shard function — emits events, returns nothing (`-> R` is VS0105) | |
+| `fn` | `fn f(p: T) -> R { … return e }` | function — computes and returns a value; callable in any expression | |
+| `return` | `return [e]` | return a value from an `fn`; outside one it is VS0107 | |
 | `if`* / `else` | `if c { … } else { … }` | conditional | *`if` is an **add** |
 | `when` | `when Pat { … }` (in `match`) | match arm | D2 |
 | `while`* | `while c { … }` | conditional loop | *`while` is an **add** |

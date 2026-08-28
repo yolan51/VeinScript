@@ -99,9 +99,28 @@ parallelism possible. Web/desktop are modeled as identities + shards too (see
 
 ## D6 — `fn` for general functions; `SF` stays the pure-function marker
 
-**DECIDED (`fn` to add).** Add `fn` for effectful functions; keep `SF` as an `fn` the semantics pass
-verifies pure. Shards and functions coexist: shards own behavior over identities, functions are
-reusable computation.
+**DECIDED — implemented, with the split inverted.** Shards and functions coexist: shards own behaviour
+over identities, functions are reusable computation. Both `fn` and `SF` exist.
+
+D6 originally framed the pair as *`fn` effectful / `SF` verified-pure*, and the docs long showed
+`SF clamp(…) -> int`. The implementation had gone the other way — rejecting `fn` outright
+(`VS0106: VeinScript has no fn`) and making `SF` emit-only — so the docs and the compiler contradicted
+each other for as long as both existed. Resolved in favour of a split by **what a function produces**,
+which is the distinction that actually earns two keywords:
+
+| | produces | may `return` | `-> T` |
+|---|---|---|---|
+| `SF` | events (`emit`) | no — VS0107 | no — VS0105 |
+| `fn` | a value | yes | yes |
+
+*Rationale:* purity is not checkable today (there is no semantics pass, and `IrExpr.ResolvedType` is
+never assigned), so "verified pure" could not have been honoured. But *returns a value* vs *emits events*
+is decidable from the declaration alone, needs no analysis, and matches how the language already reads —
+a shard's behaviour is expressed by emitting, so an `SF` is a named emit sequence. `fn` fills the gap
+that left: computation reusable inside a condition, a field value, or a `target` loop.
+
+Both are cross-bundle when `shared`; a qualified call is resolved and imported at compile time, so an
+`fn` in the stdlib is genuinely callable rather than merely discoverable.
 
 ---
 

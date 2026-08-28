@@ -8,7 +8,7 @@ namespace Vein.Compiler.Project;
 // discovery/reference mechanism can list them and disambiguate name collisions between authors.
 // This is the surface + tooling layer: it does NOT link or run the bundles.
 
-public enum SymbolKind { Bundle, Publicator, Shape, Event, Builder, Shard, ShardView, Bridge, SF, Var }
+public enum SymbolKind { Bundle, Publicator, Shape, Event, Builder, Shard, ShardView, Bridge, SF, Fn, Var }
 
 /// One discoverable member, fully qualified. The canonical name is `*Author.Bundle[.Publicator].member`
 /// with the member carrying its sigil (`@`/`$`) where it has one.

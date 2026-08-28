@@ -30,5 +30,15 @@ bundle Console by Vein {
 
         shared("Build a named console application — `bring Console(#Server, \"ready\")` spawns its own window.")
         builder Console { name: Mark, firsttext: string }
+
+        // Emit-only helpers — the same events, named as actions.
+        shared("Write a line to this console.")
+        SF print(text: string) { emit @Print { text: text } }
+
+        shared("Send a line to another console by address.")
+        SF send(dest: Mark, text: string) { emit @Send { to: dest, text: text } }
+
+        shared("Spawn a named console window.")
+        SF spawn(name: Mark, firsttext: string) { emit @Console { name: name, firsttext: firsttext } }
     }
 }

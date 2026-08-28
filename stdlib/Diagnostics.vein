@@ -17,6 +17,16 @@ bundle Diagnostics by Vein {
 
         shared("A diagnostic was produced by some tool/shard.")
         event @DiagnosticRaised { severity: int, message: string }
+
+        // Emit-only helpers. An `SF` names the intent so callers don't hand-roll the severity codes.
+        shared("Raise an informational diagnostic (severity 0).")
+        SF info(message: string) { emit @DiagnosticRaised { severity: 0, message: message } }
+
+        shared("Raise a warning diagnostic (severity 1).")
+        SF warn(message: string) { emit @DiagnosticRaised { severity: 1, message: message } }
+
+        shared("Raise an error diagnostic (severity 2).")
+        SF error(message: string) { emit @DiagnosticRaised { severity: 2, message: message } }
     }
 
     // No behaviour here — collecting raised diagnostics is the tool's or IDE's job, not the library's.

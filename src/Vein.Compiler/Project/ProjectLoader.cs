@@ -193,7 +193,7 @@ public static class ProjectLoader
             case ShardDecl sh: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Shard, sh.Name, Doc: sh.Doc)); break;
             case ViewDecl vw: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.ShardView, vw.Name, Doc: vw.Doc)); break;
             case BridgeDecl br: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Bridge, br.Name, Doc: br.Doc)); break;
-            case FuncDecl f: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.SF, f.Name, Doc: f.Doc)); break;
+            case FuncDecl f: into.Add(new QualifiedSymbol(author, bundle, pub, f.IsPure ? SymbolKind.SF : SymbolKind.Fn, f.Name, Doc: f.Doc)); break;
             case VarDecl v: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Var, v.Name)); break;
         }
     }

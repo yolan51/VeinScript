@@ -23,6 +23,18 @@ public sealed class Interp
         IReadOnlyList<string> ReqShapes, IReadOnlyList<string> ReqMarks);
 
     private readonly Dictionary<string, List<Handler>> _handlers = new(StringComparer.Ordinal);
+
+    /// User `fn`/`SF` declarations by name. An `fn` returns a value; an `SF` emits and returns null.
+    private readonly Dictionary<string, IrFunction> _functions = new(StringComparer.Ordinal);
+
+    /// Unwinds an `fn` body to its call site. Control flow, not an error — caught only in CallUser.
+    private sealed class ReturnSignal : Exception
+    {
+        public readonly object? Value;
+        public ReturnSignal(object? value) => Value = value;
+    }
+
+    private int _callDepth;
     private readonly Queue<(string Name, Dictionary<string, object?> Payload)> _queue = new();
     private readonly List<string> _log = new();
     private readonly VeinIdentityRegistry _registry = new();   // the Vein First-Class graph (nodes)
@@ -110,6 +122,13 @@ public sealed class Interp
     {
         _bundle = module.Name;
         _types = module.Types.ToDictionary(t => t.Name, StringComparer.Ordinal);
+
+        // Module-level `fn`/`SF` declarations, callable by name from any body. Shard-local ones are
+        // registered too — VeinScript has no nested scope for them, so one flat table matches lookup.
+        foreach (var f in module.Functions) _functions[f.Name] = f;
+        foreach (var shard in module.Shards)
+            foreach (var m in shard.Methods)
+                if (m.Attrs.Any(a => a.Name == "sf") || m.Return.Name != "void") _functions[m.Name] = m;
         foreach (var shard in module.Shards)
         {
             var kind = shard.Attrs.Any(a => a.Name == "view") ? VeinKind.ShardView
@@ -275,7 +294,10 @@ public sealed class Interp
                 break;
             case IrLoop lp: ExecLoop(lp, self, locals); break;
             case IrExprStmt e: Eval(e.Expr, self, locals); break;
-            // return/break/continue/match/target not exercised by the render path yet
+            // Unwinds to the enclosing CallUser. The parser only admits `return` inside an `fn`, so a
+            // stray signal cannot escape into the event loop.
+            case IrReturn r: throw new ReturnSignal(r.Value is null ? null : Eval(r.Value, self, locals));
+            // break/continue/match/target not exercised by the render path yet
             default: break;
         }
     }
@@ -337,7 +359,13 @@ public sealed class Interp
             case IrList li: return li.Items.Select(i => Eval(i, self, locals)).ToList();
             case IrCall call:
                 if (call.Callee is IrLocalRef fn)
-                    return Prebuilt(fn.Name, call.Args.Select(a => Eval(a, self, locals)).ToList());
+                {
+                    var args = call.Args.Select(a => Eval(a, self, locals)).ToList();
+                    // A user `fn`/`SF` shadows nothing built-in: look it up first, then the prebuilts.
+                    return _functions.TryGetValue(fn.Name, out var decl)
+                        ? CallUser(decl, args, self)
+                        : Prebuilt(fn.Name, args);
+                }
                 return null;
             case IrStructInit si:
             {
@@ -348,6 +376,25 @@ public sealed class Interp
             case IrTypeNameExpr t: return t.Name;
             default: return null;
         }
+    }
+
+    /// Invoke a user `fn` (returns its value) or `SF` (emits; yields null). Params bind positionally into
+    /// a fresh local scope — a function never sees its caller's locals.
+    private object? CallUser(IrFunction f, List<object?> args, Instance self)
+    {
+        if (_callDepth >= 256) return null;   // runaway recursion: stop rather than blow the stack
+        _callDepth++;
+        try
+        {
+            var scope = new Dictionary<string, object?>(StringComparer.Ordinal);
+            for (int i = 0; i < f.Params.Count; i++)
+                scope[f.Params[i].Name] = i < args.Count ? args[i] : null;
+
+            try { Exec(f.Body, self, scope); }
+            catch (ReturnSignal r) { return r.Value; }
+            return null;                       // fell off the end (an SF, or an fn with no return)
+        }
+        finally { _callDepth--; }
     }
 
     /// Prebuilt (built-in) functions that DO return a value — the only functions that return.

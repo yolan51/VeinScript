@@ -177,10 +177,8 @@ public sealed class Parser
             case TokenKind.KwShardView: return ParseView();
             case TokenKind.KwBridge: return ParseBridge();
             case TokenKind.KwSf: return ParseFunc();
+            case TokenKind.KwFn: return ParseFunc();
             case TokenKind.KwBuilder: return ParseBuilder();
-            case TokenKind.KwFn:
-                _diag.Error("VS0106", "VeinScript has no `fn`; every function is an SF.", Here);
-                throw new ParseError();
             case TokenKind.KwLet: return ParseVar(mutable: false);
             case TokenKind.KwVar: return ParseVar(mutable: true);
             case TokenKind.KwStart: return ParseStart();   // bundle-level boot event
@@ -333,10 +331,15 @@ public sealed class Parser
     }
 
     /// SF is the only function kind. It never returns a value — it emits events (auto origin/source).
+    /// `SF name(params) { … }` — a shard function: emits events, returns nothing.
+    /// `fn name(params) -> T { … return e }` — a function: computes and returns a value.
+    /// The two are deliberately distinct (see SYNTAX-DECISIONS D6): behaviour vs computation.
     private FuncDecl ParseFunc()
     {
-        var s = Here; Advance();
-        string name = Expect(TokenKind.Ident, "SF name").Text;
+        var s = Here;
+        bool isSf = Check(TokenKind.KwSf);
+        Advance();
+        string name = Expect(TokenKind.Ident, isSf ? "SF name" : "fn name").Text;
         Expect(TokenKind.LParen, "'('");
         var ps = new List<Param>();
         if (!Check(TokenKind.RParen))
@@ -345,15 +348,32 @@ public sealed class Parser
             while (Match(TokenKind.Comma)) ps.Add(ParseParam());
         }
         Expect(TokenKind.RParen, "')'");
+
+        TypeRef? ret = null;
         if (Check(TokenKind.Arrow))
-            _diag.Error("VS0105", "SF has no return type; it emits events instead of returning.", Here);
+        {
+            if (isSf) _diag.Error("VS0105", "SF has no return type; it emits events instead of returning.", Here);
+            else { Advance(); ret = ParseTypeRef(); }
+        }
+
+        // `return` is legal only inside an `fn`; an SF emits instead (VS0107).
+        bool wasInFn = _inFn;
+        _inFn = !isSf;
         var body = ParseBlock();
-        return new FuncDecl(true, name, ps, null, body, s);
+        _inFn = wasInFn;
+
+        return new FuncDecl(isSf, name, ps, ret, body, s);
     }
+
+    /// True while parsing an `fn` body, where `return` is allowed.
+    private bool _inFn;
 
     private Param ParseParam()
     {
         var s = Here;
+        // Expect(Ident), NOT ExpectName: unlike a field name (which is only ever read as `x.to`), a
+        // parameter must be referenceable as a BARE name, and a keyword cannot be one in expression
+        // position. Admitting `to`/`by` here would let you declare a parameter you could never use.
         string name = Expect(TokenKind.Ident, "parameter name").Text;
         Expect(TokenKind.Colon, "':'");
         return new Param(name, ParseTypeRef(), s);
@@ -427,8 +447,8 @@ public sealed class Parser
             if (Check(TokenKind.KwHear)) members.Add(ParseHear());
             else if (Check(TokenKind.KwVar)) members.Add(ParseVar(mutable: true));
             else if (Check(TokenKind.KwLet)) members.Add(ParseVar(mutable: false));
-            else if (Check(TokenKind.KwSf)) members.Add(ParseFunc());
-            else { _diag.Error("VS0108", $"Unexpected '{Cur.Text}' in ShardView body (expected hear/var/let/SF).", Here); throw new ParseError(); }
+            else if (Check(TokenKind.KwSf) || Check(TokenKind.KwFn)) members.Add(ParseFunc());
+            else { _diag.Error("VS0108", $"Unexpected '{Cur.Text}' in ShardView body (expected hear/var/let/SF/fn).", Here); throw new ParseError(); }
             SkipTerms();
         }
         Expect(TokenKind.RBrace, "'}'");
@@ -451,9 +471,7 @@ public sealed class Parser
             case TokenKind.KwSettled: return ParseSchedule();
             case TokenKind.KwHear: return ParseHear();
             case TokenKind.KwSf: return ParseFunc();
-            case TokenKind.KwFn:
-                _diag.Error("VS0106", "VeinScript has no `fn`; every function is an SF.", Here);
-                throw new ParseError();
+            case TokenKind.KwFn: return ParseFunc();     // a shard-local computation helper
             case TokenKind.KwLet: return ParseVar(mutable: false);
             case TokenKind.KwVar: return ParseVar(mutable: true);
             default:
@@ -551,8 +569,17 @@ public sealed class Parser
             case TokenKind.KwRepeat: return ParseRepeat();
             case TokenKind.KwMatch: return ParseMatch();
             case TokenKind.KwReturn:
-                _diag.Error("VS0107", "VeinScript has no `return`; an SF emits events instead of returning.", Here);
-                throw new ParseError();
+            {
+                if (!_inFn)
+                {
+                    _diag.Error("VS0107", "`return` is only valid inside an `fn`; an SF emits events instead of returning.", Here);
+                    throw new ParseError();
+                }
+                var rs = Here; Advance();
+                // `return` alone (void) vs `return expr` — a terminator or `}` means no value.
+                Expr? val = Check(TokenKind.Term) || Check(TokenKind.RBrace) ? null : ParseExpr();
+                return new ReturnStmt(val, rs);
+            }
             case TokenKind.KwBreak: { var s = Here; Advance(); return new BreakStmt(s); }
             case TokenKind.KwContinue: { var s = Here; Advance(); return new ContinueStmt(s); }
             case TokenKind.KwMark: return ParseMark(remove: false);

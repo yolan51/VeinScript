@@ -352,17 +352,30 @@ A shard may also hold private state fields (`var`/`let`) and call functions.
 
 ### 5.1 Functions — `fn` and `SF`
 
+Two kinds, split by what they produce. An **`fn` computes and returns a value**; an **`SF` emits events
+and returns nothing**.
+
 ```
-fn move(target: Vec2, speed: float) -> Vec2 { … }   // general; may have effects
-SF clamp(v: int, lo: int, hi: int) -> int {         // pure: verified side-effect-free
+fn clamp(v: int, lo: int, hi: int) -> int {         // computation — usable in any expression
     if v < lo { return lo }
     if v > hi { return hi }
     return v
 }
+
+SF hurt(victim: Entity, amount: int) {              // behaviour — emits, never returns
+    emit @Damaged { amount: amount, victim: victim }
+}
 ```
 
-Params are `name: Type`; return type follows `->` (omit for `void`). `SF` is an `fn` the semantics
-pass verifies pure (no state mutation, emit, or I/O), enabling reuse and folding.
+Params are `name: Type`. An `fn` declares its result after `->` and uses `return`; an `SF` does neither —
+`SF f() -> T` is `VS0105` and `return` outside an `fn` is `VS0107`. That split is the point: a shard's
+behaviour is expressed by emitting, so an SF is a *named emit sequence*, while an `fn` is reusable
+computation you can call inside a condition, a field value, or a `target` loop.
+
+Both may be declared at bundle level, inside a `publicator`, or inside a shard/view. Both are callable
+across bundles when `shared` — `*Vein.Math.Scalars.clamp(99.0, 0.0, 10.0)` resolves against the shared
+API and is imported at compile time, so no linking step is required. An unresolved qualified call is
+`VS0213` rather than a silent no-op.
 
 ### 5.2 Conditionals — `if` / `else`
 
@@ -475,7 +488,9 @@ schedule    = ("run" "once" | "each" ("tick" | "frame") | "every" NUMBER | "sett
 queryStmt   = "target" { SHAPEREF | MARKREF } "as" IDENT block ;   (* a statement, inside a schedule *)
 hearBlock   = "hear" EVENTREF "as" IDENT block ;
 
-funcDecl    = ("fn" | "SF") IDENT "(" [ params ] ")" [ "->" type ] block ;
+funcDecl    = sfDecl | fnDecl ;
+sfDecl      = "SF" IDENT "(" [ params ] ")" block ;              (* emits; no `->`, no `return` *)
+fnDecl      = "fn" IDENT "(" [ params ] ")" [ "->" type ] block ; (* returns a value *)
 params      = param { "," param } ;  param = IDENT ":" type ;
 varDecl     = ("let" | "var") IDENT [ ":" type ] [ "=" expr ] ;
 type        = IDENT [ "<" type { "," type } ">" ] [ "?" ] ;
