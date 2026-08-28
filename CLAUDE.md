@@ -30,6 +30,6 @@ ask the user first.** Losing a useful file is far worse than leaving a temp fold
 - **Build:** `dotnet build VeinScript.sln`
 - **Tests:** `dotnet test src/Vein.Tests`   ·   **Golden IR:** `bash tools/check-ir.sh`
 - **CLI (`veinc`):** `src/Vein.Cli` — run via `dotnet run --project src/Vein.Cli -- <cmd>` or the wrapper
-  `.\veinc.cmd <cmd>`. Commands: `new tokens ast ir render run build graph events scaffold symbols`.
+  `.\veinc.cmd <cmd>`. Commands: `new tokens ast ir render run build graph events scaffold symbols exec`.
 - **Commits:** work on `master` (the session's established flow); end commit messages with the
   `Co-Authored-By: Claude Opus 4.8` trailer.

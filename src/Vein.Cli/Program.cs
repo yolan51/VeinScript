@@ -8,7 +8,7 @@ using Vein.Compiler.Tooling;
 
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("usage: veinc <new|tokens|ast|ir|render|run|build|graph|events|scaffold|symbols> <file.vein> [arg]");
+    Console.Error.WriteLine("usage: veinc <new|tokens|ast|ir|render|run|build|graph|events|scaffold|symbols|exec> <file.vein> [arg]");
     return 2;
 }
 
@@ -217,6 +217,25 @@ switch (command)
             Console.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
         }
         else Console.Write(model.Render());
+        break;
+    }
+
+    case "exec":
+    {
+        // The derived execution model: when each trigger block runs, what identity state it touches, and
+        // which blocks may run concurrently. Static analysis only — nothing is executed.
+        var tokens = new Lexer(source, Path.GetFileName(path), diagnostics).Tokenize();
+        var unit = new Parser(tokens, diagnostics).ParseUnit();
+        if (!diagnostics.HasErrors)
+        {
+            var model = ExecutionModel.Analyze(unit);
+            if (model is null) Console.Error.WriteLine("no bundle in file");
+            else if (args.Contains("--json"))
+                Console.WriteLine(JsonSerializer.Serialize(ExecutionReport.Json(model),
+                    new JsonSerializerOptions { WriteIndented = true }));
+            else
+                Console.Write(ExecutionReport.Render(model, ascii: args.Contains("--ascii")));
+        }
         break;
     }
 

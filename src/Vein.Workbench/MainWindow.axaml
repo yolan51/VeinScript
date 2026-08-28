@@ -85,6 +85,9 @@
         <TabItem Header="Dependencies">
           <TreeView Name="DepsTree" />
         </TabItem>
+        <TabItem Header="Execution">
+          <ScrollViewer Name="ExecPanel" Padding="12,8" />
+        </TabItem>
       </TabControl>
     </Grid>
   </DockPanel>

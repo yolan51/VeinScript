@@ -148,8 +148,114 @@ This is **discovery + resolution only** (surface + tooling): references and over
 and checked. Linking the loaded bundles into one running program and actually firing the (overridden)
 starts (`veinc render app.vein`) is a follow-on.
 
+## `veinc exec <file.vein> [--json] [--ascii]` — the derived execution model
+
+A `.vein` file says **what** a shard does. It never says when it runs, what identity state it touches, or
+whether two shards may run at the same time — yet all three are already in the source. `veinc exec` derives
+them. Nothing is executed; this is static analysis over the AST.
+
+**The rule everything turns on is `folds`.** A field declared `hp: int folds sum` may be written concurrently
+by any number of shards, because *the fold is the reconciliation*. A field without one may not. That single
+fact is what separates ⚡ from 🔒.
+
+### Execution classes and modifiers
+
+The unit of analysis is the **trigger block**, not the shard: `shard Drain { each tick {…} settled {…} }` is
+two units with different cadences, and one shard-level answer would lose exactly the interesting part. A
+shard's own badge is its *fastest* block, with `+` when it mixes classes (`▣+`).
+
+| Class | Unicode | ASCII | Derived from |
+|---|---|---|---|
+| Event | ◆ | `<>` | a `hear` block |
+| Reactive | ◉ | `()` | `settled` |
+| Scheduled | ◷ | `/\` | `every N`, `run once` |
+| Frame | ▣ | `[]` | `each tick`, `each frame` |
+| Continuous | ∞ | `oo` | a statically-true `while` in the body (overrides the class) |
+
+| Modifier | Unicode | ASCII | Meaning |
+|---|---|---|---|
+| Parallelizable | ⚡ | `\|\|` | in zero conflicts — safe to run alongside its peers |
+| Ordered | → | `->` | an endpoint of a dependency edge (emit→hear, or write→read across a phase) |
+| Synchronized | 🔒 | `%%` | write/write collision, but a total order exists — serializing fixes it |
+| Conflict | ! | `!` | write/write collision with **no** derivable order |
+| Deferred | ~ | `~` | `settled` or `every N` |
+
+Unicode is the default; `--ascii` swaps the whole table (separators included, so the output is pure ASCII).
+
+### Worked example — `samples/demo.vein`
+
+```
+$ veinc exec samples/demo.vein
+Execution model — bundle Demo
+  2 unit(s) · 2 wave(s)
+
+  ◆  Event         0
+  ◉  Reactive      1  ████████████
+  ◷  Scheduled     0
+  ▣  Frame         1  ████████████
+  ∞  Continuous    0
+
+  parallel opportunities    2       dependency barriers    1
+  units in conflict         0       always running         0
+  ordered edges             1       cycles                 0
+
+shard Drain                                                 ▣+
+  ▣ ⚡ →          each tick                                wave 0
+      match    #Enemy  $Health
+      reads    $Health.hp
+      writes   $Health.hp  folds sum
+      emits    @Damaged
+  ◉ ⚡ → ~        settled                                  wave 1
+      match    #Enemy  $Health
+      reads    $Health.hp
+      writes   #Dead
+
+waves
+  0   Drain·each tick
+  1   Drain·settled
+```
+
+`Drain` is `▣+` — Frame, mixed. `self.Health.hp -= 1` is both a read and a write. `each tick` writes
+`$Health.hp` and `settled` reads it back one phase later, which is the ordering edge that puts them in
+different waves. Both are ⚡ because `hp` folds.
+
+### 🔒 vs `!`
+
+Both are write/write collisions between concurrently-eligible units. The difference is whether an order
+exists to serialize into:
+
+- **🔒 Synchronized** — the two units share an owner (source order decides), or a dependency path already
+  relates them. Serializing is a correct fix.
+- **`!` Conflict** — different owners, same trigger, no path between them. The outcome depends on shard
+  scheduling order, which the language does not specify. This is a bug to fix in the source, usually by
+  declaring a `folds` reducer on the field.
+
+### Where the analysis is deliberately conservative
+
+A false "safe to parallelise" is the one wrong answer this tool must never give, so two approximations both
+err toward reporting *more* interaction than may really occur:
+
+- **Entity match-sets are assumed to overlap.** Two units writing `$Health.hp` collide on field identity
+  alone, even if one targets `#Enemy` and the other `#Ally`. VeinScript has no negative mark constraint, so
+  no two match-sets are *provably* disjoint.
+- **Every `every N` shares one concurrency class.** `every 0.5` and `every 2.0` co-fire at their common
+  multiples and nothing here can prove they don't.
+
+Two further notes: `settled` is the only phase boundary the language actually declares, so no tick-vs-hear
+ordering is invented; and an SF's effects are attributed to whoever calls it, since an SF has no trigger of
+its own but its `emit`s are real.
+
+Emit cycles are legal in VeinScript and are **reported, not treated as errors** — units in a cycle are
+marked and still land in a wave.
+
+`--json` emits the whole model (`units`, `edges`, `conflicts`, `owners`, `waves`, `cycles`, `totals`) — the
+contract a scheduler or an external tool would consume.
+
 ## Scope / follow-on
 
 - Single-file discovery (`veinc events`) is **within the file**; `veinc symbols` spans the app's loaded
   bundles. Editor `@`/`*` completion across the workspace, and actually linking + running an app, are
   follow-ons.
+- `veinc exec` is **analysis only**. It describes what a scheduler *could* do; the runtime does not yet
+  consume it, and `Interp` still drops every `@schedule` block. Wiring the model into a real ready-queue
+  scheduler is the follow-on.

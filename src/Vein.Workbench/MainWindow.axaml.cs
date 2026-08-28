@@ -49,6 +49,7 @@ public partial class MainWindow : Window
     private ListBox _diagBox = null!;
     private TreeView _projectTree = null!;
     private TreeView _depsTree = null!;
+    private ScrollViewer _execPanel = null!;
     private Grid _topCols = null!;
     private TabControl _bottomPanel = null!;
     private TextBlock _statusBar = null!;
@@ -64,6 +65,7 @@ public partial class MainWindow : Window
         _diagBox = this.FindControl<ListBox>("Diagnostics")!;
         _projectTree = this.FindControl<TreeView>("ProjectTree")!;
         _depsTree = this.FindControl<TreeView>("DepsTree")!;
+        _execPanel = this.FindControl<ScrollViewer>("ExecPanel")!;
         _topCols = this.FindControl<Grid>("TopCols")!;
         _bottomPanel = this.FindControl<TabControl>("BottomPanel")!;
         _statusBar = this.FindControl<TextBlock>("StatusBar")!;
@@ -456,10 +458,15 @@ public partial class MainWindow : Window
     private void ShowBundleInspector(BundleRef bundle)
     {
         BundleModel? model = null;
+        ExecutionModel? exec = null;
         try
         {
             var ast = _service.Compile(new CompileRequest(Path.GetFileName(bundle.MainFile), File.ReadAllText(bundle.MainFile))).Ast;
-            if (ast is not null) model = BundleModel.Analyze(ast);
+            if (ast is not null)
+            {
+                model = BundleModel.Analyze(ast);
+                exec = ExecutionModel.Analyze(ast);   // one parse, two analyses
+            }
         }
         catch { /* leave model null → header only */ }
 
@@ -505,11 +512,11 @@ public partial class MainWindow : Window
         tree.SelectionChanged += (_, _) =>
         {
             if (model is not null && tree.SelectedItem is TreeViewItem { Tag: PrimitiveInfo p })
-                detail.Text = DescribePrimitive(model.Name, p);
+                detail.Text = DescribePrimitive(model.Name, p, exec);
         };
         root.Children.Add(tree);
 
-        TreeViewItem Leaf(PrimitiveInfo p) => new() { Header = KindSigil(p.Kind) + p.Name, Tag = p };
+        TreeViewItem Leaf(PrimitiveInfo p) => new() { Header = ExecBadge(exec, p) + KindSigil(p.Kind) + p.Name, Tag = p };
 
         void Rebuild()
         {
@@ -584,7 +591,16 @@ public partial class MainWindow : Window
         PrimitiveKind.Event => "@", PrimitiveKind.Shape => "$", PrimitiveKind.Mark => "#", _ => ""
     };
 
-    private static string DescribePrimitive(string bundle, PrimitiveInfo p)
+    /// The derived execution glyph for a behavioural primitive ("▣+ "), or "" for everything else.
+    private static string ExecBadge(ExecutionModel? m, PrimitiveInfo p)
+    {
+        if (m is null || p.Kind is not (PrimitiveKind.Shard or PrimitiveKind.ShardView or PrimitiveKind.Bridge))
+            return "";
+        if (m.ForOwner(p.Name) is not { } o) return "";
+        return ExecutionReport.ClassGlyph(o.Class, ExecutionReport.Unicode) + (o.Mixed ? "+" : "") + " ";
+    }
+
+    private static string DescribePrimitive(string bundle, PrimitiveInfo p, ExecutionModel? exec)
     {
         var lines = new List<string>
         {
@@ -600,6 +616,31 @@ public partial class MainWindow : Window
         if (p.Hears.Count > 0) lines.Add("Hears: " + string.Join(", ", p.Hears.Select(h => "@" + h)));
         if (p.Emits.Count > 0) lines.Add("Emits: " + string.Join(", ", p.Emits.Select(em => "@" + em)));
         if (p.Brings.Count > 0) lines.Add("Brings: " + string.Join(", ", p.Brings));
+
+        // Derived execution: when it runs, what identity state it touches, who it races.
+        if (exec?.ForOwner(p.Name) is { } o)
+        {
+            var g = ExecutionReport.Unicode;
+            var units = exec.UnitsOf(p.Name).ToList();
+            string waves = o.FirstWave == o.LastWave ? $"wave {o.FirstWave}" : $"waves {o.FirstWave}–{o.LastWave}";
+            lines.Add($"Execution: {ExecutionReport.ClassGlyph(o.Class, g)} {o.Class}{(o.Mixed ? " (mixed)" : "")} · {waves}");
+            lines.Add("Units: " + string.Join(" · ", units.Select(u => $"{u.Trigger} {ExecutionReport.Badge(u, g)}")));
+
+            var reads = units.SelectMany(u => u.Reads).Select(r => r.Resource).Distinct().OrderBy(x => x, StringComparer.Ordinal);
+            var writes = units.SelectMany(u => u.Writes).Select(r => r.Display).Distinct().OrderBy(x => x, StringComparer.Ordinal);
+            var touches = new List<string>();
+            if (reads.Any()) touches.Add("reads " + string.Join(", ", reads));
+            if (writes.Any()) touches.Add("writes " + string.Join(", ", writes));
+            if (touches.Count > 0) lines.Add("Touches: " + string.Join(" · ", touches));
+
+            var mine = new HashSet<string>(units.Select(u => u.Id), StringComparer.Ordinal);
+            var clashes = exec.Conflicts
+                .Where(c => mine.Contains(c.A) || mine.Contains(c.B))
+                .Select(c => $"{(c.Resolvable ? g.Synchronized : g.Conflict)} {c.Resource.Resource} with "
+                           + (exec.Unit(mine.Contains(c.A) ? c.B : c.A)?.Label ?? "?"))
+                .Distinct().ToList();
+            if (clashes.Count > 0) lines.Add("Conflicts: " + string.Join(", ", clashes));
+        }
         return string.Join("\n", lines);
     }
 
@@ -615,6 +656,7 @@ public partial class MainWindow : Window
         _rawIr.Text = result.IrText;
         PopulateTree(result.IrTree);
         PopulateDependencies(result.Ast);
+        PopulateExecution(result.Ast);
         UpdateMarks();
         if (result.Ast is not null) _symbols = SymbolIndex.Collect(result.Ast);
 
@@ -675,6 +717,148 @@ public partial class MainWindow : Window
             }
             _depsTree.Items.Add(authorNode);
         }
+    }
+
+    // The Execution tab: the derived execution model — one badged row per trigger block, grouped by owner,
+    // with the class distribution, the scheduling totals, and any conflicts or emit cycles. Built from
+    // ExecutionModel (compiler analysis); nothing here runs the program.
+    private void PopulateExecution(CompilationUnit? ast)
+    {
+        var g = ExecutionReport.Unicode;
+        var root = new StackPanel { Spacing = 8 };
+        _execPanel.Content = root;
+
+        // The compiler service hands back the AST even when it has errors, so this runs over error-recovered
+        // trees on every build — guard it the way ShowBundleInspector does.
+        ExecutionModel? m = null;
+        try { if (ast is not null) m = ExecutionModel.Analyze(ast); }
+        catch { /* leave m null → placeholder */ }
+
+        if (m is null || m.Totals.Units == 0)
+        {
+            root.Children.Add(new TextBlock
+            {
+                Text = m is null ? "No bundle to analyse." : "No trigger blocks — nothing in this bundle runs.",
+                Foreground = Brushes.Gray
+            });
+            return;
+        }
+
+        var t = m.Totals;
+        root.Children.Add(new TextBlock
+        {
+            Text = $"{m.Bundle} — {t.Units} unit(s) · {t.WaveCount} wave(s)",
+            FontWeight = FontWeight.Bold, FontSize = 14
+        });
+
+        // --- class distribution: glyph, name, count, proportional bar ---
+        var dist = new StackPanel { Spacing = 2 };
+        int max = Math.Max(1, t.ByClass.Values.Max());
+        foreach (ExecClass cls in new[] { ExecClass.Event, ExecClass.Reactive, ExecClass.Scheduled, ExecClass.Frame, ExecClass.Continuous })
+        {
+            int n = t.ByClass[cls];
+            dist.Children.Add(new StackPanel
+            {
+                Orientation = Orientation.Horizontal, Spacing = 8,
+                Children =
+                {
+                    new TextBlock { Text = ExecutionReport.ClassGlyph(cls, g), Width = 16 },
+                    new TextBlock { Text = cls.ToString(), Width = 80, Foreground = n == 0 ? Brushes.Gray : Brushes.Gainsboro },
+                    new TextBlock { Text = n.ToString(), Width = 28, TextAlignment = TextAlignment.Right },
+                    new Border { Background = Brushes.SteelBlue, Height = 8, Width = n == 0 ? 0 : n / (double)max * 160,
+                                 HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center }
+                }
+            });
+        }
+        root.Children.Add(dist);
+
+        root.Children.Add(new TextBlock
+        {
+            Foreground = Brushes.Gray, FontSize = 12,
+            Text = $"parallel opportunities {t.ParallelOpportunities}    dependency barriers {t.DependencyBarriers}    "
+                 + $"units in conflict {t.ConflictingUnits}    always running {t.AlwaysRunning}    "
+                 + $"ordered edges {t.OrderedEdges}    cycles {t.CycleCount}"
+        });
+
+        // --- one expander per owner, its units inside ---
+        foreach (var o in m.Owners)
+        {
+            string kind = o.Kind switch { OwnerKind.Shard => "shard", OwnerKind.ShardView => "ShardView", _ => "bridge" };
+            var body = new StackPanel { Spacing = 4, Margin = new Thickness(8, 4, 0, 0) };
+
+            foreach (var u in m.UnitsOf(o.Name))
+            {
+                body.Children.Add(new TextBlock
+                {
+                    Text = $"{ExecutionReport.Badge(u, g)}   {u.Trigger}    wave {u.Wave}" + (u.InCycle ? "   (in cycle)" : ""),
+                    FontFamily = new FontFamily("Cascadia Code,Consolas,monospace")
+                });
+                Detail("match", u.Matches.Select(r => r.Resource));
+                Detail("reads", u.Reads.Select(r => r.Resource));
+                Detail("writes", u.Writes.Select(r => r.Display));
+                Detail("payload", u.PayloadReads.Select(r => r.Resource));
+                Detail("emits", u.Emits.Select(e => "@" + e));
+                Detail("brings", u.Brings);
+
+                void Detail(string label, IEnumerable<string> items)
+                {
+                    var list = items.ToList();
+                    if (list.Count == 0) return;
+                    body.Children.Add(new TextBlock
+                    {
+                        Text = $"      {label,-8} {string.Join("   ", list)}",
+                        Foreground = Brushes.Gray, FontSize = 12,
+                        FontFamily = new FontFamily("Cascadia Code,Consolas,monospace")
+                    });
+                }
+            }
+
+            root.Children.Add(new Expander
+            {
+                Header = $"{ExecutionReport.ClassGlyph(o.Class, g)}{(o.Mixed ? "+" : "")}  {kind} {o.Name}",
+                IsExpanded = true, Content = body
+            });
+        }
+
+        if (m.Conflicts.Count > 0)
+        {
+            var block = new StackPanel { Spacing = 2 };
+            block.Children.Add(new TextBlock { Text = "Conflicts", FontWeight = FontWeight.Bold });
+            foreach (var c in m.Conflicts)
+                block.Children.Add(new TextBlock
+                {
+                    Text = $"{(c.Resolvable ? g.Synchronized : g.Conflict)}  {Label(c.A)} ✕ {Label(c.B)}   "
+                         + $"{c.Resource.Resource}   ({c.Why})",
+                    Foreground = c.Resolvable ? Brushes.Goldenrod : Brushes.IndianRed, FontSize = 12
+                });
+            root.Children.Add(block);
+        }
+
+        if (m.Cycles.Count > 0)
+        {
+            var block = new StackPanel { Spacing = 2 };
+            block.Children.Add(new TextBlock { Text = "Cycles", FontWeight = FontWeight.Bold });
+            foreach (var c in m.Cycles)
+                block.Children.Add(new TextBlock
+                {
+                    Text = string.Join(" → ", c.Select(Label)) + " → …",
+                    Foreground = Brushes.IndianRed, FontSize = 12
+                });
+            root.Children.Add(block);
+        }
+
+        var waves = new StackPanel { Spacing = 2 };
+        waves.Children.Add(new TextBlock { Text = "Waves", FontWeight = FontWeight.Bold });
+        for (int w = 0; w < m.Waves.Count; w++)
+            waves.Children.Add(new TextBlock
+            {
+                Text = $"  {w}   {string.Join("   ", m.Waves[w].Select(Label))}",
+                Foreground = Brushes.Gainsboro, FontSize = 12,
+                FontFamily = new FontFamily("Cascadia Code,Consolas,monospace")
+            });
+        root.Children.Add(waves);
+
+        string Label(string id) => m.Unit(id)?.Label ?? id;
     }
 
     private static TreeViewItem MakeItem(IrNode n)
