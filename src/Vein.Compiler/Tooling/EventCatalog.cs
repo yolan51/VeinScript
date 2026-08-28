@@ -7,7 +7,7 @@ namespace Vein.Compiler.Tooling;
 // fields) and scaffold a ready-to-fill `emit` body. Grammar is unchanged — this only *reads* the AST.
 // Feeds `veinc events` / `veinc scaffold`, and (via --json) a future editor's `@` completion.
 
-public sealed record EventField(string Name, string Type, bool Required, string? Default);
+public sealed record EventField(string Name, string Type, bool Required, string? Default, string? OriginShape = null);
 public sealed record EventEntry(string Name, bool Shared, IReadOnlyList<EventField> Fields);
 
 public static class EventCatalog
@@ -43,7 +43,7 @@ public static class EventCatalog
                     case EventDecl e:
                         var fields = Sig.Expand(e.Members, shapes)
                             .Where(f => !Auto.Contains(f.Name))
-                            .Select(f => new EventField(f.Name, f.Type, f.Required, f.Default))
+                            .Select(f => new EventField(f.Name, f.Type, f.Required, f.Default, f.OriginShape))
                             .ToList();
                         list.Add(new EventEntry(e.Name, e.Shared, fields));   // [shared] = cross-bundle
                         break;

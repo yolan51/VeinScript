@@ -157,21 +157,39 @@ public sealed class Lower
             if (m is FieldDecl f) list.Add((f.Name, f.Type, f.Default));
             else if (m is ShapeInclude si)
             {
-                if (_shapeFields.TryGetValue(si.Shape, out var fs))
+                // A qualified include reaches another bundle's SHARED shapes; a bare one stays local.
+                var fs = si.Path.Count > 0 ? ResolveExternalShape(si.Path, si.Shape)
+                       : _shapeFields.TryGetValue(si.Shape, out var local) ? local : null;
+
+                if (fs is not null)
                 {
                     if (si.Field is not null)
                     {
                         var one = fs.FirstOrDefault(x => x.Name == si.Field);
                         if (one is not null) list.Add((one.Name, one.Type, si.Default ?? one.Default));
-                        else _diag.Warning("VS0211", $"Shape '${si.Shape}' has no field '{si.Field}'.", si.Span);
+                        else _diag.Warning("VS0211", $"Shape '{RefText(si)}' has no field '{si.Field}'.", si.Span);
                     }
                     else foreach (var sf in fs) list.Add((sf.Name, sf.Type, sf.Default));
                 }
-                else _diag.Warning("VS0210", $"Unknown shape '${si.Shape}' in include.", si.Span);
+                else _diag.Warning("VS0210", $"Unknown shape '{RefText(si)}' in include.", si.Span);
             }
         }
         return list;
     }
+
+    /// A qualified include's target: the stdlib's SHARED shapes, matched on a path suffix so you qualify
+    /// only as far as you need to be unique — the same rule as `bring *Author.Bundle.&Builder(…)`.
+    private static List<FieldDecl>? ResolveExternalShape(IReadOnlyList<string> path, string name)
+    {
+        string refKey = string.Join(".", path) + "." + name;
+        foreach (var kv in StdlibIndex.Shapes())
+            if (kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal))
+                return kv.Value.Members.OfType<FieldDecl>().ToList();
+        return null;
+    }
+
+    private static string RefText(ShapeInclude si) =>
+        si.Path.Count > 0 ? "*" + string.Join(".", si.Path) + ".$" + si.Shape : "$" + si.Shape;
 
     private IrType LowerEvent(EventDecl e)
     {

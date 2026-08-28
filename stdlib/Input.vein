@@ -6,25 +6,31 @@
 
 bundle Input by Vein {
 
-    // Positions are x,y floats here (not $Vec2) to keep Input self-contained — a cross-bundle field-type
-    // reference can't resolve until app link+run. Composition with Vein.Math.$Vec2 is a follow-on.
+    // Pointer position is `*Vein.Math.Values.$Vec2`, not a hand-rolled x/y pair: a `$Shape` include is a
+    // COMPILE-TIME field-group expansion, so reusing another bundle's shared shape needs no app link+run.
+    // One vocabulary for "a 2D point" across the whole library.
     publicator Mouse {
         shared("A mouse/pointer button was pressed.")
-        event @MouseDown { x: float, y: float, button: int }
+        event @MouseDown { *Vein.Math.Values.$Vec2, button: int }
 
         shared("A mouse/pointer button was released.")
-        event @MouseUp { x: float, y: float, button: int }
+        event @MouseUp { *Vein.Math.Values.$Vec2, button: int }
 
         shared("The pointer moved.")
-        event @MouseMove { x: float, y: float }
+        event @MouseMove { *Vein.Math.Values.$Vec2 }
     }
 
     publicator Keyboard {
+        // The key identity is declared once and reused by both edges, so a listener that handles either
+        // sees the same field. `$Key` is `shared`, so other bundles may include it too.
+        shared("The key a keyboard event concerns.")
+        shape $Key { key: string }
+
         shared("A key was pressed.")
-        event @KeyDown { key: string }
+        event @KeyDown { $Key }
 
         shared("A key was released.")
-        event @KeyUp { key: string }
+        event @KeyUp { $Key }
 
         shared("Text was entered (already composed — not raw key codes).")
         event @TextInput { text: string }

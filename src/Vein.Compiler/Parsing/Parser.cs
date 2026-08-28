@@ -269,6 +269,9 @@ public sealed class Parser
             Expr? sd = Match(TokenKind.Assign) ? ParseExpr() : null;
             return new ShapeInclude(shape, field, sd, s);
         }
+        // `*Author.Bundle.Publicator.$Shape[.field]` — reuse a SHARED shape from another bundle as a
+        // field group. Same qualified form as `emit`/`hear`/`bring`; only `shared` shapes resolve.
+        if (Check(TokenKind.Star)) return ParseQualifiedShapeInclude();
         bool isVar = Match(TokenKind.KwVar);                             // optional `var`
         string name = ExpectName("member name").Text;
         TypeRef? type = Match(TokenKind.Colon) ? ParseTypeRef() : null;  // type optional (inferred)
@@ -930,6 +933,31 @@ public sealed class Parser
             if (Match(TokenKind.Dot)) { path.Add(name); continue; }   // another segment follows
             return new StarRefExpr(path, name, MemberSigil.None, s);
         }
+    }
+
+    /// `*Author.Bundle.Publicator.$Shape[.field]` in an event/builder body — the qualified form of a
+    /// `$Shape` include. Mirrors ParseStarRef's suffix path, but the member must be a `$Shape`: a field
+    /// group is the only thing an include can pull in.
+    private ShapeInclude ParseQualifiedShapeInclude()
+    {
+        var s = Here;
+        Expect(TokenKind.Star, "'*'");
+        var path = new List<string> { ExpectName("qualified name after '*'").Text };
+        Expect(TokenKind.Dot, "'.'");
+        while (!Check(TokenKind.ShapeRef))
+        {
+            if (AtEnd || Check(TokenKind.RBrace))
+            {
+                _diag.Error("VS0111", "Expected a `$Shape` at the end of a qualified include.", Here);
+                throw new ParseError();
+            }
+            path.Add(ExpectName("path segment").Text);
+            Expect(TokenKind.Dot, "'.'");
+        }
+        string shape = Advance().Text;
+        string? field = Match(TokenKind.Dot) ? ExpectName("field name").Text : null;
+        Expr? def = Match(TokenKind.Assign) ? ParseExpr() : null;
+        return new ShapeInclude(shape, field, def, s) { Path = path };
     }
 
     /// A `{` begins a struct body if it is `{ ident : …`. Avoids swallowing control-flow blocks.

@@ -64,6 +64,47 @@ public static class StdlibIndex
         return map;
     }
 
+    private static readonly Dictionary<string, Dictionary<string, ShapeDecl>> _shapeCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, ShapeDecl> _noShapes = new(StringComparer.Ordinal);
+
+    /// The stdlib's shared shapes, keyed by qualified name `Author.Bundle.Publicator.Name` — used to
+    /// resolve a cross-bundle `$Shape` include (`event @MouseDown { *Vein.Math.Values.$Vec2, … }`).
+    /// Only `shared` shapes are here: that keyword is what makes a declaration cross-bundle at all.
+    public static IReadOnlyDictionary<string, ShapeDecl> Shapes(string? startDir = null)
+    {
+        var dir = Locate(startDir);
+        if (dir is null) return _noShapes;
+        if (_shapeCache.TryGetValue(dir, out var cached)) return cached;
+
+        var map = new Dictionary<string, ShapeDecl>(StringComparer.Ordinal);
+        foreach (var file in Directory.EnumerateFiles(dir, "*.vein"))
+        {
+            if (Path.GetFileName(file).EndsWith(".app.vein", StringComparison.OrdinalIgnoreCase)) continue;
+            try
+            {
+                var diag = new DiagnosticBag();
+                var unit = new Parser(new Lexer(File.ReadAllText(file), Path.GetFileName(file), diag).Tokenize(), diag).ParseUnit();
+                foreach (var b in unit.Bundles)
+                    CollectShapes(b.Members, b.Author ?? "local", b.Name, null, map);
+            }
+            catch { }
+        }
+        _shapeCache[dir] = map;
+        return map;
+    }
+
+    private static void CollectShapes(IEnumerable<Decl> members, string author, string bundle, string? pub, Dictionary<string, ShapeDecl> into)
+    {
+        foreach (var m in members)
+            switch (m)
+            {
+                case PublicatorDecl p: CollectShapes(p.Members, author, bundle, p.Name, into); break;
+                case ShapeDecl s when s.Shared:
+                    into[pub is null ? $"{author}.{bundle}.{s.Name}" : $"{author}.{bundle}.{pub}.{s.Name}"] = s;
+                    break;
+            }
+    }
+
     private static void CollectBuilders(IEnumerable<Decl> members, string author, string bundle, string? pub, Dictionary<string, BuilderDecl> into)
     {
         foreach (var m in members)

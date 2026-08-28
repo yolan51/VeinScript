@@ -223,10 +223,25 @@ members separated by whitespace, newline, or optional comma. Each member is one 
 
 - `[var] name [: type] [= default]` — a field (or `var`). No `type` ⇒ inferred.
 - `$Shape` — include every field of that shape. `$Shape.field` includes a single field.
+- `*Author.Bundle.Publicator.$Shape` — the same, reaching a shape in **another bundle**. The leading
+  segments are a suffix of the owner path, so qualify only as far as you need to be unique (§2.4).
+
+An include is a **compile-time field-group expansion**, not a component reference: the fields are copied
+into the event/builder, so nothing needs linking or loading at runtime. That makes a shape the reusable
+*field vocabulary* of the library — `Vein.Input`'s pointer events reuse `Vein.Math`'s `$Vec2` rather than
+each hand-rolling `x: float, y: float`:
+
+```
+event @MouseDown { *Vein.Math.Values.$Vec2, button: int }   // → x: float, y: float, button: int
+```
+
+> **Only `shared` shapes cross a bundle boundary.** `shared("…")` is what makes *any* declaration part of
+> the cross-bundle API; a shape without it is invisible to a qualified include from another bundle, which
+> reports `VS0210: Unknown shape`. Within the declaring file, a bare `$Shape` include needs no `shared`.
 
 `=` marks a member **defaulted** (optional, overridable); no `=` marks it **required**. `veinc events`
 and the `?` fill-the-rest sigil report and satisfy exactly the members listed here (with `$Shape`
-includes expanded to their fields).
+includes expanded to their fields); the catalog records which shape each reused field came from.
 
 **Provenance — always present.** Beyond the fields you declare, the runtime auto-attaches a **provenance
 envelope** to **every event, in every bundle and every app** — you never declare it, and it is always
@@ -444,8 +459,15 @@ shapeMember = enumDecl | field ;
 field       = IDENT ":" type [ "folds" IDENT ] ;          (* IDENT = fold reducer *)
 enumDecl    = "enum" IDENT "{" IDENT { "," IDENT } "}" ;
 typeDecl    = "type" IDENT "{" fieldList "}" ;
-eventDecl   = "event" EVENTREF "{" fieldList "}" ;
+eventDecl   = "event" EVENTREF sigBody ;
 fieldList   = field { ("," | TERM) field } ;
+
+(* The signature body shared by `event` and `builder`: fields, `var`s, and $Shape includes.
+   A qualified include reaches another bundle's SHARED shape; only `shared` decls cross a bundle. *)
+sigBody     = "{" { TERM } { sigMember [ "," ] { TERM } } "}" ;
+sigMember   = [ "var" ] IDENT [ ":" type ] [ "folds" IDENT ] [ "=" expr ]
+            | shapeInclude ;
+shapeInclude = [ "*" IDENT "." { IDENT "." } ] SHAPEREF [ "." IDENT ] [ "=" expr ] ;
 
 shardDecl   = "shard" IDENT "{" { TERM } { shardMember { TERM } } "}" ;
 shardMember = varDecl | funcDecl | schedule | hearBlock ;

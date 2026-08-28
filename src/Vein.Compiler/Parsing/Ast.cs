@@ -80,7 +80,12 @@ public sealed record FieldDecl(string Name, TypeRef? Type, string? Fold, Expr? D
 
 /// A `$Shape` include inside an event/builder body: pulls in all of the shape's fields, or one field
 /// with `$Shape.field`. `Default` (via `=`) makes it optional.
-public sealed record ShapeInclude(string Shape, string? Field, Expr? Default, SourceSpan Span) : Node(Span);
+public sealed record ShapeInclude(string Shape, string? Field, Expr? Default, SourceSpan Span) : Node(Span)
+{
+    /// A `*Author.Bundle.Publicator` qualifier (`*Vein.Math.Values.$Vec2`); empty = a shape declared in
+    /// this compilation. Shapes are the reusable field vocabulary, so they qualify like events/builders.
+    public IReadOnlyList<string> Path { get; init; } = Array.Empty<string>();
+}
 
 public sealed record FuncDecl(
     bool IsPure, string Name, IReadOnlyList<Param> Params, TypeRef? Return, Block Body, SourceSpan Span)

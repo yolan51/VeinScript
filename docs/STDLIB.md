@@ -14,18 +14,37 @@ Confirmed from the lexer/parser/tests (this is what the compiler accepts today):
 bundle Name by author {                 // author roots the qualified name (*author.Name.…)
     publicator Group {                  // a bundle's public grouping (visible to this bundle's shards)
         shared("doc")                   // annotation above a decl, ONLY inside a publicator ⇒ public
-        event @Event { field: T = default }   //   across ALL bundles (listed by `veinc symbols`)
-        shared("doc")
         shape $Shape { field: T folds sum }    // folds: sum | min | max | replace | first | all | any
+        shared("doc")
+        event @Event { $Shape, field: T = default }   //   across ALL bundles (`veinc symbols`)
+        shared("doc")
+        builder Name { param: T   markup = expr }     // markup→@Html, code→@Script, css→@Style
     }
-    builder Name { param: T   markup = expr }  // markup→@Html, code→@Script, css→@Style
     shard Name { hear @E as e { emit @E2 { … } } }
     ShardView Name { var s: string   hear @E as e { … } }
 }
 ```
 
-Cross-bundle references (surface + validated today): `emit`/`hear`/`start *Author.Bundle.Publicator.@Event`.
-`bring` is builder-name-local only (not yet qualified — see §6). `start` is a bundle's single entry.
+**`shared` is the whole gate.** Nothing is usable from another bundle or app unless it is declared
+`shared("…")` inside a `publicator`. That applies uniformly to `$Shape`, `@Event`, `&Builder`, shards,
+views, bridges and `SF`s — a decl without it is bundle-private, and a qualified reference to it does not
+resolve. Group each publicator by concept and keep that concept's shapes, events and builders together,
+so a consumer discovers the whole vocabulary in one place.
+
+**Shapes are the reusable field vocabulary.** A `$Shape` include is a compile-time field-group expansion,
+so an event can pull in a *shared* shape from another bundle and the fields land in the lowered type — no
+linking and no runtime support required:
+
+```
+event @MouseDown { *Vein.Math.Values.$Vec2, button: int }   // → x: float, y: float, button: int
+```
+
+Prefer reusing an existing shared shape over re-declaring the same fields — `Vein.Input`'s pointer events
+reuse `Vein.Math.Values.$Vec2` rather than each hand-rolling `x: float, y: float`.
+
+Cross-bundle references (surface + validated today): `emit`/`hear`/`start *Author.Bundle.Publicator.@Event`,
+`bring *Author.Bundle.Publicator.&Builder(…)`, and `*Author.Bundle.Publicator.$Shape` includes in an
+event/builder signature. `start` is a bundle's single entry.
 
 ## 2. Current capabilities vs. what the stdlib needs
 
