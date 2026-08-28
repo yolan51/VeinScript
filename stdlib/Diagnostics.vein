@@ -19,8 +19,6 @@ bundle Diagnostics by Vein {
         event @DiagnosticRaised { severity: int, message: string }
     }
 
-    // Behaviour (bundle-level) — collects raised diagnostics for a tool/IDE to display.
-    shard Collector {
-        hear @DiagnosticRaised as d { }
-    }
+    // No behaviour here — collecting raised diagnostics is the tool's or IDE's job, not the library's.
+    // It hears @DiagnosticRaised and does whatever it needs with $Diagnostic.
 }

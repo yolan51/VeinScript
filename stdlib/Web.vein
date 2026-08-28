@@ -1,11 +1,11 @@
 // stdlib/Web.vein — VeinScript Standard Library : Vein.Web
-// The web backend's domain: HTTP events + reusable html BUILDERS + a routing shard. Builders
-// (markup/code/css) are where platform-specific rendering legitimately lives — the rest of the stdlib
-// stays platform-independent, Vein.Web owns the html. Authored `by Vein`; public API `shared` in
-// publicators (reachable as *Vein.Web.<Pub>.<name>).
+// The web backend's domain: HTTP events + reusable html BUILDERS. Builders (markup/code/css) are where
+// platform-specific rendering legitimately lives — the rest of the stdlib stays platform-independent,
+// Vein.Web owns the html. Authored `by Vein`; public API `shared` in publicators (reachable as
+// *Vein.Web.<Pub>.<name>).
 //
-// This bundle also RENDERS standalone today (the non-shared Demo + Page below), proving events + shapes
-// + builders + shard + ShardView work end to end:  veinc render stdlib/Web.vein /
+// Vocabulary only — no shards. See samples/web_demo.vein for these builders assembled into a page
+// end to end:  veinc render samples/web_demo.vein /
 
 bundle Web by Vein {
 
@@ -51,25 +51,9 @@ bundle Web by Vein {
         builder ListItem { text: string   markup = "<li>" + text + "</li>" }
     }
 
-    // --- behaviour (bundle-level shards) — come with the bundle; not part of the shared API ----------
-    // The render demo proves the builders assemble end to end. Demo is declared before Router so its
-    // @Html fragments are queued before @Render.
-    shard Demo {
-        hear @Request as req {
-            bring Heading("VeinScript Vein.Web")
-            bring Paragraph("A reusable html element library, assembled reactively.")
-            bring Button("Click me")
-        }
-    }
-
-    ShardView Page {
-        var html: string
-        hear @Html as f   { html += f.markup }
-        hear @Render as r { emit @Response { status: 200, body: "<html><body>" + html + "</body></html>" } }
-    }
-
-    // Router — turns an inbound @Request into a page @Render for its path.
-    shard Router {
-        hear @Request as req { emit @Render { path: req.path } }
-    }
+    // --- no behaviour here ---------------------------------------------------------------------------
+    // A shard cannot be `shared`, so a router or page view declared here would not be API — it would be
+    // invisible behaviour handed to everyone who only wanted a `&Button`. The routing + assembly demo
+    // lives in samples/web_demo.vein, which reaches these builders by qualified path:
+    //     veinc render samples/web_demo.vein /
 }

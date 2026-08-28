@@ -1,0 +1,37 @@
+// samples/web_demo.vein — the Vein.Web builders assembled into a page, end to end.
+//     veinc render samples/web_demo.vein /
+//
+// This used to live INSIDE stdlib/Web.vein. It moved here because a shard cannot be `shared`: any shard
+// declared in a library is invisible behaviour that arrives with the import, so everyone who wanted a
+// `&Button` also got a router and a page view. The library owns the vocabulary (@Http events, &Elements
+// builders); this sample owns the behaviour that uses it.
+//
+// Everything below reaches Vein.Web by qualified path, exactly as your own app would.
+
+bundle WebDemo by you {
+
+    // Demo is declared before Router so its @Html fragments are queued before @Render.
+    shard Demo {
+        hear *Vein.Web.Http.@Request as req {
+            bring *Vein.Web.Elements.&Heading("VeinScript Vein.Web")
+            bring *Vein.Web.Elements.&Paragraph("A reusable html element library, assembled reactively.")
+            bring *Vein.Web.Elements.&Button("Click me")
+        }
+    }
+
+    // The view accumulates fragments, then emits the finished page when the render signal arrives.
+    ShardView Page {
+        var html: string
+        hear *Vein.Web.Http.@Html as f   { html += f.markup }
+        hear *Vein.Web.Http.@Render as r {
+            emit *Vein.Web.Http.@Response { status: 200, body: "<html><body>" + html + "</body></html>" }
+        }
+    }
+
+    // Router — turns an inbound @Request into a page @Render for its path.
+    shard Router {
+        hear *Vein.Web.Http.@Request as req {
+            emit *Vein.Web.Http.@Render { path: req.path }
+        }
+    }
+}

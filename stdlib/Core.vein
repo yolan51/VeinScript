@@ -57,9 +57,7 @@ bundle Core by Vein {
         shape $Owner { by: Entity }
     }
 
-    // Behaviour — bundle-level shards. Loading Core gives you this logic for free; you don't reference
-    // or manipulate them, and they are not part of the cross-bundle API (that's the publicators above).
-    shard Reaper {
-        hear @Destroyed as e { }   // runs teardown for a destroyed identity
-    }
+    // No behaviour here — the publicators above are the whole bundle. A shard cannot be `shared`, so one
+    // declared here would be invisible behaviour that arrives with the import rather than API. Teardown
+    // on @Destroyed is the application's to write.
 }

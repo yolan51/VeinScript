@@ -25,25 +25,11 @@ bundle Game by Vein {
         event @Damaged { target: Entity, amount: int }
     }
 
-    // --- behaviour (bundle-level shards) — comes with the bundle; not part of the shared API ----------
-    // The schedule is outer, the entity `target` query is inner.
-    shard CollisionDetection {
-        each tick {
-            target $Collider #Collidable as self {
-                emit @Collided { a: self, b: self }
-            }
-        }
-    }
-
-    shard GravitySystem {
-        each tick {
-            target $Body as self { }
-        }
-    }
-
-    shard DamageSystem {
-        each tick {
-            target $Body as self { }
-        }
-    }
+    // --- no behaviour here ---------------------------------------------------------------------------
+    // The library supplies the VOCABULARY; the game supplies the behaviour. A shard cannot be `shared`,
+    // so one declared here would not be part of the API — it would be an invisible `each tick` system
+    // installed in every consumer's frame loop simply because they wanted `$Collider`.
+    //
+    // A game writes its own: `each tick { target $Collider #Collidable as self { … } }`, emitting
+    // @Collided for each genuinely overlapping PAIR, and integrating $Body under its own rules.
 }

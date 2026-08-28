@@ -28,10 +28,7 @@ bundle Transform by Vein {
         event @Moved { entity: Entity, x: float, y: float, z: float }
     }
 
-    // Behaviour (bundle-level) — advances $Position from $Velocity each step. Comes with the bundle.
-    shard Integrator {
-        each tick {
-            target $Velocity as self { }
-        }
-    }
+    // No behaviour here — integrating $Position from $Velocity is the application's step, and its rules
+    // (fixed vs variable step, clamping, sub-stepping) are its own. `$Velocity` folds sum precisely so
+    // that many independent systems can contribute before that step runs.
 }

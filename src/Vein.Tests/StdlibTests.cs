@@ -1,5 +1,6 @@
 using Vein.Compiler.Diagnostics;
 using Vein.Compiler.Ir;
+using Vein.Compiler.Parsing;
 using Vein.Compiler.Project;
 using Vein.Compiler.Service;
 using Vein.Compiler.Tooling;
@@ -98,11 +99,42 @@ public class StdlibTests
     [Fact]
     public void Web_builders_render_end_to_end()
     {
-        var r = Compile(StdFile("Web.vein"));
+        // The demo moved out of stdlib/Web.vein: a shard cannot be `shared`, so shipping one in a library
+        // hands invisible behaviour to every consumer. It now reaches the builders by qualified path,
+        // which is also a stronger test — it proves cross-bundle `bring`/`hear`/`emit` assemble a page.
+        string demo = Path.Combine(RepoRoot(), "samples", "web_demo.vein");
+        var r = Compile(demo);
         Assert.True(r.Success);
         var body = new Interp().Render(r.Modules[0], "/").Body;
         Assert.Contains("<h1>VeinScript Vein.Web</h1>", body);
         Assert.Contains("<button>Click me</button>", body);
+    }
+
+    [Fact]
+    public void Stdlib_declares_no_behaviour()
+    {
+        // The library is vocabulary — $Shape, @Event, &Builder. A shard/view/bridge can never be `shared`
+        // (see Shared_api_never_contains_a_shard), so one declared here would not be API; it would be an
+        // invisible system installed in every consumer merely because they imported the vocabulary.
+        foreach (var file in Bundles)
+        {
+            var ast = Compile(StdFile(file)).Ast!;
+            var behaviour = ast.Bundles.SelectMany(b => Flatten(b.Members))
+                .Where(d => d is ShardDecl or ViewDecl or BridgeDecl)
+                .Select(d => d switch { ShardDecl s => s.Name, ViewDecl v => v.Name, BridgeDecl b => b.Name, _ => "?" })
+                .ToList();
+
+            Assert.True(behaviour.Count == 0, $"{file} declares behaviour: {string.Join(", ", behaviour)}");
+        }
+    }
+
+    private static IEnumerable<Decl> Flatten(IEnumerable<Decl> members)
+    {
+        foreach (var m in members)
+        {
+            yield return m;
+            if (m is PublicatorDecl p) foreach (var sub in Flatten(p.Members)) yield return sub;
+        }
     }
 
     [Fact]
