@@ -99,7 +99,26 @@ public sealed class Lower
                     Array.Empty<IrField>(), Array.Empty<IrEnumCase>(), null,
                     new[] { IrAttr.Of("tag") }));
 
+        CheckConsoleAddresses(bundle);
+
         return new IrModule(bundle.Name, types, funcs, shards) { Start = start };
+    }
+
+    /// A console address that no `@Console { name: … }` spawns routes to a pipe nobody listens on, and the
+    /// runtime drops it silently (ConsoleBus.Send's `false` is discarded). Catch it here instead.
+    /// A WARNING, not an error: a console may legitimately be spawned by another bundle or at runtime, and
+    /// this lowers one bundle at a time so a cross-bundle spawn is invisible to it.
+    private void CheckConsoleAddresses(BundleDecl bundle)
+    {
+        var graph = Tooling.ConsoleGraph.Analyze(bundle);
+        var unresolved = graph.Unresolved.ToList();
+        if (unresolved.Count == 0) return;
+
+        string known = string.Join(" ", graph.Known.Select(a => "#" + a));
+        foreach (var a in unresolved)
+            _diag.Warning("VS0212",
+                $"Console address #{a.Target} is never spawned (no `@Console {{ name: #{a.Target} }}` in this bundle). known: {known}",
+                a.Span);
     }
 
     // ---- data -----------------------------------------------------------
@@ -447,6 +466,7 @@ public sealed class Lower
         "float" => new IrLiteral(0.0, IrLiteralKind.Float),
         "bool" => new IrLiteral(false, IrLiteralKind.Bool),
         "percent" => new IrLiteral(0.0, IrLiteralKind.Percent),
+        "Mark" => new IrLiteral(Interp.RootConsole, IrLiteralKind.String),  // an identity ref: name the root
         _ => new IrLiteral("", IrLiteralKind.String)   // string, shapes, … → placeholder
     };
 

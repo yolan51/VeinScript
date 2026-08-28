@@ -459,13 +459,15 @@ public partial class MainWindow : Window
     {
         BundleModel? model = null;
         ExecutionModel? exec = null;
+        ConsoleGraph? consoles = null;
         try
         {
             var ast = _service.Compile(new CompileRequest(Path.GetFileName(bundle.MainFile), File.ReadAllText(bundle.MainFile))).Ast;
             if (ast is not null)
             {
                 model = BundleModel.Analyze(ast);
-                exec = ExecutionModel.Analyze(ast);   // one parse, two analyses
+                exec = ExecutionModel.Analyze(ast);      // one parse, three analyses
+                consoles = ConsoleGraph.Analyze(ast);
             }
         }
         catch { /* leave model null → header only */ }
@@ -512,7 +514,7 @@ public partial class MainWindow : Window
         tree.SelectionChanged += (_, _) =>
         {
             if (model is not null && tree.SelectedItem is TreeViewItem { Tag: PrimitiveInfo p })
-                detail.Text = DescribePrimitive(model.Name, p, exec);
+                detail.Text = DescribePrimitive(model.Name, p, exec, consoles);
         };
         root.Children.Add(tree);
 
@@ -600,7 +602,7 @@ public partial class MainWindow : Window
         return ExecutionReport.ClassGlyph(o.Class, ExecutionReport.Unicode) + (o.Mixed ? "+" : "") + " ";
     }
 
-    private static string DescribePrimitive(string bundle, PrimitiveInfo p, ExecutionModel? exec)
+    private static string DescribePrimitive(string bundle, PrimitiveInfo p, ExecutionModel? exec, ConsoleGraph? consoles)
     {
         var lines = new List<string>
         {
@@ -616,6 +618,25 @@ public partial class MainWindow : Window
         if (p.Hears.Count > 0) lines.Add("Hears: " + string.Join(", ", p.Hears.Select(h => "@" + h)));
         if (p.Emits.Count > 0) lines.Add("Emits: " + string.Join(", ", p.Emits.Select(em => "@" + em)));
         if (p.Brings.Count > 0) lines.Add("Brings: " + string.Join(", ", p.Brings));
+
+        // A mark used as a console address is an identity reference — show which console it names, where it
+        // is spawned, and who talks to it, so the target is known rather than discovered at runtime.
+        if (p.Kind == PrimitiveKind.Mark && consoles is not null)
+        {
+            var spawns = consoles.Spawns.Where(s => s.Address == p.Name).Select(s => s.Owner).Distinct().ToList();
+            var callers = consoles.Addresses.Where(a => a.Target == p.Name).Select(a => a.Owner).Distinct().ToList();
+            bool root = p.Name == ConsoleGraph.RootAddress;
+
+            if (spawns.Count > 0 || callers.Count > 0 || root)
+            {
+                var parts = new List<string>();
+                parts.Add(root ? "reserved root console" : spawns.Count > 0
+                    ? "spawned by " + string.Join(", ", spawns)
+                    : "⚠ never spawned");
+                if (callers.Count > 0) parts.Add("addressed by " + string.Join(", ", callers));
+                lines.Add("Console: " + string.Join(" · ", parts));
+            }
+        }
 
         // Derived execution: when it runs, what identity state it touches, who it races.
         if (exec?.ForOwner(p.Name) is { } o)

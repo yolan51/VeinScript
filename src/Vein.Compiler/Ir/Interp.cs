@@ -36,7 +36,11 @@ public sealed class Interp
     private string? _responseBody;
     private long _responseStatus = 200;
     private TextWriter? _out;   // console stdout sink (set in Run); @Print writes here. Null in Render.
-    private string _self = "main";   // this console's name (for @Send routing); "main" if not spawned.
+    /// The reserved address of the root console — the process you launched, which no `@Console` spawns.
+    /// Written `#Main` in source; PascalCase so a mark evaluates to it directly, with no boundary mapping.
+    public const string RootConsole = "Main";
+
+    private string _self = RootConsole;   // this console's address (for @Send routing) if not spawned.
 
     public sealed record GraphEdge(string FromName, string FromKind, string Event);
     public sealed record RenderResult(
@@ -57,7 +61,7 @@ public sealed class Interp
     public void Run(IrModule module, TextReader input, TextWriter output, bool messaging = false)
     {
         _out = output;
-        _self = ConsoleLauncher.CurrentName ?? "main";
+        _self = ConsoleLauncher.CurrentName ?? RootConsole;
 
         // If this process was spawned as a named console (`bring Console`), announce itself: title the
         // window and print its first line before booting.
@@ -431,11 +435,13 @@ public sealed class Interp
     private long EnterEntity() => _currentEntity = _entities.Allocate();
     private void LeaveEntity(long previous) => _currentEntity = previous;
 
-    private static object? Default(string typeName) => typeName switch { "string" => "", "int" => 0L, "float" => 0.0, "bool" => false, _ => null };
+    private static object? Default(string typeName) => typeName switch { "string" or "Mark" => "", "int" => 0L, "float" => 0.0, "bool" => false, _ => null };
 
-    // Typed zero used to satisfy required fields under `?` (fill-the-rest).
+    // Typed zero used to satisfy required fields under `?` (fill-the-rest). A `Mark` (an identity
+    // reference — e.g. a console address) has no meaningful zero, so it names the reserved root.
     private static object? ZeroVal(string typeName) => typeName switch
     {
-        "int" or "Entity" => 0L, "float" => 0.0, "bool" => false, "percent" => 0.0, "string" => "", _ => ""
+        "int" or "Entity" => 0L, "float" => 0.0, "bool" => false, "percent" => 0.0,
+        "Mark" => RootConsole, "string" => "", _ => ""
     };
 }

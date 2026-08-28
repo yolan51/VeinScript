@@ -19,19 +19,20 @@ bundle ConsoleChat by you {
 
     shard Launcher {
         hear @Boot as b {
-            emit *Vein.Console.Io.@Print   { text: "main — type here; it goes to Server." }
-            emit *Vein.Console.Io.@Console { name: "Server",  firsttext: "Server ready — messages appear here." }
-            emit *Vein.Console.Io.@Console { name: "Client1", firsttext: "Client1 ready — type to message Server." }
-            emit *Vein.Console.Io.@Console { name: "Client2", firsttext: "Client2 ready — type to message Server." }
-            emit *Vein.Console.Io.@Console { name: "Client3", firsttext: "Client3 ready — type to message Server." }
-            emit *Vein.Console.Io.@Console { name: "Client4", firsttext: "Client4 ready — type to message Server." }
+            emit *Vein.Console.Io.@Print   { text: "Main — type here; it goes to Server." }
+            emit *Vein.Console.Io.@Console { name: #Server,  firsttext: "Server ready — messages appear here." }
+            emit *Vein.Console.Io.@Console { name: #Client1, firsttext: "Client1 ready — type to message Server." }
+            emit *Vein.Console.Io.@Console { name: #Client2, firsttext: "Client2 ready — type to message Server." }
+            emit *Vein.Console.Io.@Console { name: #Client3, firsttext: "Client3 ready — type to message Server." }
+            emit *Vein.Console.Io.@Console { name: #Client4, firsttext: "Client4 ready — type to message Server." }
         }
     }
 
     shard Chat {
         hear *Vein.Console.Io.@Input as i {
-            emit *Vein.Console.Io.@Send { to: "Server",  text: i.text }        // I typed → send to Server
-            emit *Vein.Console.Io.@Send { to: "Client4", text: i.text }        //          … and to Client4
+            emit *Vein.Console.Io.@Send { to: #Server,  text: i.text }        // I typed → send to Server
+            emit *Vein.Console.Io.@Send { to: #Client4, text: i.text }        //          … and to Client4
+            emit *Vein.Console.Io.@Send { to: #Main,    text: i.text }        //          … and back to root
         }
         hear *Vein.Console.Io.@Message as m {
             emit *Vein.Console.Io.@Print { text: m.from + " says: " + m.text }   // received → print

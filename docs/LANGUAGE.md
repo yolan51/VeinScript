@@ -191,6 +191,19 @@ not a statement — it desugars to `@fold(field, reducer)` metadata on the shape
 A `#Mark` is boolean identity state with no fields. Referenced with `#`; added/removed by shards via
 `mark` / `unmark` (§4). A shape with no fields used purely as a tag is the same idea.
 
+A mark has a **second role**: in value position it is an *identity reference*, and evaluates to its own
+name. That is how a named thing is addressed without smuggling it through a string — the stdlib console
+API declares its addresses `Mark`, so you write `#Server`, not `"Server"`:
+
+```
+emit *Vein.Console.Io.@Console { name: #Server, firsttext: "ready" }
+emit *Vein.Console.Io.@Send    { to: #Server,   text: i.text }
+```
+
+`#Main` is the reserved address of the root console (the process you launched). Because a console address
+is a reference rather than text, the compiler can check it: an address no `@Console` ever spawns is
+reported as **VS0212**, instead of silently opening a pipe nobody is listening on.
+
 ### 3.7 `event` — a message identities send
 
 ```

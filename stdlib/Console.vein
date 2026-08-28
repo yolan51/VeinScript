@@ -16,16 +16,19 @@ bundle Console by Vein {
         shared("Write a line to the console — `bring Line(\"…\")` emits @Print { text }.")
         builder Line { text: string   line = text }
 
+        // A console address is an IDENTITY, not text — write `#Server`, not `"Server"`. The `Mark` type
+        // says so, and the compiler warns (VS0212) when an address is never spawned. `#Main` is the
+        // reserved address of the root console (the process you launched).
         shared("A named console application to spawn (name identifies it; firsttext is printed on start).")
-        event @Console { name: string, firsttext: string }
+        event @Console { name: Mark, firsttext: string }
 
         shared("Send a line to another console — emit @Send { to, text } delivers it to console `to`.")
-        event @Send { to: string, text: string }
+        event @Send { to: Mark, text: string }
 
         shared("A message received from another console — hear @Message { from, text }.")
-        event @Message { from: string, text: string }
+        event @Message { from: Mark, text: string }
 
-        shared("Build a named console application — `bring Console(\"Server\", \"ready\")` spawns its own window.")
-        builder Console { name: string, firsttext: string }
+        shared("Build a named console application — `bring Console(#Server, \"ready\")` spawns its own window.")
+        builder Console { name: Mark, firsttext: string }
     }
 }

@@ -17,8 +17,8 @@ bundle ConsoleBuilderDemo by you {
 
     shard Launcher {
         hear @Boot as b {
-            bring *Vein.Console.Io.&Console("Server",  "Server ready.")
-            bring *Vein.Console.Io.&Console("Client1", "Client 1 ready.")
+            bring *Vein.Console.Io.&Console(#Server,  "Server ready.")
+            bring *Vein.Console.Io.&Console(#Client1, "Client 1 ready.")
         }
     }
 }

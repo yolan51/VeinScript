@@ -275,14 +275,14 @@ public class ServiceTests
         using var bus = ConsoleBus.Start("VeinTarget", (from, text) => { got = (from, text); arrived.Set(); });
         System.Threading.Thread.Sleep(150);
 
-        // The @Send bridge fires in Drain (even in the simple non-messaging run): self is "main" here.
-        var r = Compile("bundle B { start @Boot { } event @Boot { } event @Send { to: string, text: string } " +
-                        "shard M { hear @Boot as b { emit @Send { to: \"VeinTarget\", text: \"ping\" } } } }");
+        // The @Send bridge fires in Drain (even in the simple non-messaging run): self is the root here.
+        var r = Compile("bundle B { start @Boot { } event @Boot { } event @Send { to: Mark, text: string } " +
+                        "shard M { hear @Boot as b { emit @Send { to: #VeinTarget, text: \"ping\" } } } }");
         Assert.True(r.Success);
         new Interp().Run(r.Modules[0], new System.IO.StringReader(""), new System.IO.StringWriter());
 
         Assert.True(arrived.Wait(3000), "send did not route through the bus");
-        Assert.Equal(("main", "ping"), got);
+        Assert.Equal(("Main", "ping"), got);   // the reserved root address, written #Main in source
     }
 
     [Fact]

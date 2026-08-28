@@ -19,9 +19,9 @@ bundle ThreeConsoles by you {
     shard Launcher {
         hear @Boot as b {
             emit *Vein.Console.Io.@Print   { text: "main — opening three consoles." }
-            emit *Vein.Console.Io.@Console { name: "Server",  firsttext: "Server console — ready." }
-            emit *Vein.Console.Io.@Console { name: "Client1", firsttext: "Client 1 console — ready." }
-            emit *Vein.Console.Io.@Console { name: "Client2", firsttext: "Client 2 console — ready." }
+            emit *Vein.Console.Io.@Console { name: #Server,  firsttext: "Server console — ready." }
+            emit *Vein.Console.Io.@Console { name: #Client1, firsttext: "Client 1 console — ready." }
+            emit *Vein.Console.Io.@Console { name: #Client2, firsttext: "Client 2 console — ready." }
         }
     }
 }
