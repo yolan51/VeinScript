@@ -34,7 +34,7 @@ Source → Lexer → Parser → Desugar → Semantics → Lower → Backend → 
 ### M3 — Desugar + Semantics
 - **Desugar** (`Semantics/Desugar.cs`): IOP surface sugar → plainer core, per the tables in
   [DIALECTS.md §1](DIALECTS.md#1-surface-sugar--core-desugaring). Pure AST→AST; preserves spans.
-- **Resolver**: bind every name; resolve `::` scope; build symbol tables per bundle.
+- **Resolver**: bind every name; resolve `*` qualified paths; build symbol tables per bundle.
 - **TypeCheck**: assign types to every expression; enforce `SF` purity; verify `target` component
   references exist (the resolution checks the README defers out of the parser).
 - **Done when:** `veinc check` reports diagnostics and exits clean on `demo.vein`.

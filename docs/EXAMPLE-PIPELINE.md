@@ -32,11 +32,11 @@ bundle Demo {
     shard Drain {
         target $Health #Enemy as self {
             each tick {
-                ::Health.hp -= 1
+                self.Health.hp -= 1
                 chance 30% { emit @Damaged { amount: 5, victim: self } }
             }
         }
-        settled { if ::Health.hp <= 0 { mark self #Dead } }
+        settled { if self.Health.hp <= 0 { mark self #Dead } }
     }
 }
 ```
@@ -60,11 +60,11 @@ BundleDecl "Demo"
   ShardDecl "Drain"
     TargetBlock components=[$Health] tags=[#Enemy] bind="self"
       EachTick
-        AssignStmt ::Health.hp -= 1
+        AssignStmt self.Health.hp -= 1
         ChanceStmt 30%
           EmitStmt @Damaged { amount: 5, victim: self }
     Settled
-      IfStmt (<= ::Health.hp 0) { MarkStmt self #Dead }
+      IfStmt (<= self.Health.hp 0) { MarkStmt self #Dead }
 ```
 
 ---
@@ -187,7 +187,7 @@ public sealed class Drain : SystemBase   // @query(components=[Health], tags=[En
 | `shard`                  | LANGUAGE §4, D5       | IR-SPEC §1.1/§3 (`IrShard`)   | BACKEND §2.1/2.3        |
 | `target … as self`       | LANGUAGE §4/§5.3      | IR-SPEC §3 (`IrLoop Target`)  | BACKEND §2.1 (foreach)  |
 | `each tick` / `settled`  | LANGUAGE §4           | IR-SPEC §3                     | BACKEND §2.1            |
-| `::Health.hp -= 1`       | LANGUAGE §3.5/§5.5    | IR-SPEC §2/§3 (fold contrib.) | BACKEND §2.4 (Contribute)|
+| `self.Health.hp -= 1`       | LANGUAGE §3.5/§5.5    | IR-SPEC §2/§3 (fold contrib.) | BACKEND §2.4 (Contribute)|
 | `chance 30%`             | LANGUAGE §4           | IR-SPEC §3                     | BACKEND §2.1            |
 | `emit` / `mark`          | LANGUAGE §4           | IR-SPEC §3 (`IrRuntimeRef`)   | BACKEND §2.3            |
 

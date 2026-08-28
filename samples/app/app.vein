@@ -10,6 +10,6 @@
 app MyGame {
     // Override yolan's Combat start payload — boot it with our own value (fills only what we change;
     // `veinc symbols` shows the bundle's start signature so you know what fields exist).
-    load "yolan_combat.vein" start { path: "/home" }
-    load "alice_combat.vein"
+    load "yolan_combat.vein" start { path: "/mygame" }
+    load "alice_combat.vein" 
 }

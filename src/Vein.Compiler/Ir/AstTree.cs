@@ -233,7 +233,7 @@ public sealed class AstTree
             case NameExpr n: return ("Ref", n.Name, New());
             case EntityExpr: return ("Ref", "Entity", New());
             case StarRefExpr sr: return ("Ref", AstPrinter.StarText(sr), New());
-            case SelfScopeExpr or ScopeExpr or MemberExpr or IndexExpr: return ("Path", Path(e), New());
+            case MemberExpr or IndexExpr: return ("Path", Path(e), New());
             case ShapeRefExpr r: return ("Ref", "$" + r.Name, New());
             case EventRefExpr r: return ("Ref", "@" + r.Name, New());
             case MarkRefExpr r: return ("Ref", "#" + r.Name, New());
@@ -261,8 +261,6 @@ public sealed class AstTree
     private string Path(Expr e) => e switch
     {
         NameExpr n => n.Name,
-        SelfScopeExpr s => "::" + s.Name,
-        ScopeExpr sc => $"{sc.Module}::{sc.Name}",
         MemberExpr m => $"{Path(m.Receiver)}.{m.Name}",
         IndexExpr i => $"{Path(i.Receiver)}[{Inline(i.Index)}]",
         ShapeRefExpr r => "$" + r.Name,

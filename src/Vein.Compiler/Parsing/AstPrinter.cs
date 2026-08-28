@@ -180,10 +180,8 @@ public static class AstPrinter
     {
         LiteralExpr l => l.Kind == LiteralKind.String ? $"\"{l.Value}\"" : $"{l.Value}",
         NameExpr n => n.Name,
-        SelfScopeExpr s => $"::{s.Name}",
         EntityExpr => "Entity",
         StarRefExpr sr => StarText(sr),
-        ScopeExpr sc => $"{sc.Module}::{sc.Name}",
         ShapeRefExpr sr => $"${sr.Name}",
         EventRefExpr er => $"@{er.Name}",
         MarkRefExpr mr => $"#{mr.Name}",

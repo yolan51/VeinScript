@@ -35,7 +35,7 @@ Comments `// line` and `/* block */`. Strings double-quoted with `\n \t \r \\ \"
 ## 2. The unit: `bundle`
 
 The top-level module. Members are **private to the bundle** unless placed in a `publicator` block.
-Cross-bundle references use scope resolution `Other::name`.
+Cross-bundle references use a `*`-qualified path: `*Author.Bundle.Publicator.@member`.
 
 ```
 bundle Demo {
@@ -181,7 +181,7 @@ shape $Health {
 }
 ```
 
-Each shard's write (`::Health.hp -= 1`) is a **contribution**; at tick resolution the runtime folds
+Each shard's write (`self.Health.hp -= 1`) is a **contribution**; at tick resolution the runtime folds
 all contributions deterministically, independent of shard order. Reducers: `sum min max replace
 first all any` (see [KEYWORDS.md §3.5](KEYWORDS.md#35-fold-reducers)). `folds` is a field modifier,
 not a statement — it desugars to `@fold(field, reducer)` metadata on the shape.
@@ -281,12 +281,12 @@ it runs) is the outer structure, and an entity **`target` query** nests inside i
 shard Drain {
     each tick {                              // the schedule (when) is outer …
         target $Health #Enemy as self {      // … the entity query (what) is inner
-            ::Health.hp -= 1                 // a fold contribution (§3.5)
+            self.Health.hp -= 1                 // a fold contribution (§3.5)
             chance 30% { emit @Damaged { amount: 5, victim: self } }
         }
     }
     settled {                                // after this tick's folds reconcile
-        target $Health #Enemy as self { if ::Health.hp <= 0 { mark self #Dead } }
+        target $Health #Enemy as self { if self.Health.hp <= 0 { mark self #Dead } }
     }
 }
 ```
@@ -307,7 +307,7 @@ shard Drain {
 |-----------|---------|
 | `target C… #T… as self { … }` | bind `self` to each identity matching the shapes/marks named — the entity query (§5.3) |
 | `Entity` | keyword; as a type an entity id (`int`), as an expression the **nearest** entity's id — the enclosing `target` binding (same value as a bare `self`), or `0` when no entity is in scope. Distinct from the First-Class identity layer (Shard/ShardView/…). *Runtime note:* the interpreter does not yet execute schedules/`target` loops, so today `Entity` reads `0` outside a materialized entity; the id becomes live with the ECS runtime. |
-| `::Shape.field` | the current identity's component field (`self`-scope) |
+| `<target-binding>.Shape.field` | the targeted identity's component field — e.g. `self.Health.hp` |
 | `mark self #T` / `unmark self #T` | add / remove a tag |
 | `attach $C to self { … }` / `unattach $C from self` | add / remove a component |
 | `emit @E { … }` | send a message |
@@ -401,7 +401,7 @@ Precedence, lowest → highest (one parser method per level):
 | Add | `+ -` | left |
 | Mul | `* / %` | left |
 | Unary | `not  -` | prefix |
-| Primary | literals, names, `( )`, call `f(…)`, member `a.b`, scope `M::x`, index `a[i]`, sigil refs, struct/shape/event literal | — |
+| Primary | literals, names, `( )`, call `f(…)`, member `a.b`, index `a[i]`, sigil refs, struct/shape/event literal | — |
 
 There is no `!=` operator — inequality is written `not (a == b)` (`!` is reserved/free for a future sigil).
 
@@ -471,11 +471,12 @@ cmpExpr     = addExpr  { ("==" | "<" | ">" | "<=" | ">=") addExpr } ;   (* no "!
 addExpr     = mulExpr  { ("+" | "-") mulExpr } ;
 mulExpr     = unary    { ("*" | "/" | "%") unary } ;
 unary       = ("not" | "-") unary | postfix ;
-postfix     = primary { "(" [ args ] ")" | "." IDENT | "::" IDENT | "[" expr "]" } ;
+postfix     = primary { "(" [ args ] ")" | "." IDENT | "[" expr "]" } ;
 primary     = INT | FLOAT | PERCENT | STRING | "true" | "false"
-            | IDENT | SHAPEREF | EVENTREF | MARKREF | scopeRef
+            | IDENT | SHAPEREF | EVENTREF | MARKREF | starRef
             | "(" expr ")" | structLit ;
-scopeRef    = "::" IDENT ;                       (* ::Health = self's component *)
+starRef     = "*" IDENT "." { IDENT "." } ( EVENTREF | SHAPEREF | MARKREF | IDENT ) ;
+                                                 (* *alice.Combat.Api.@Request — cross-bundle ref *)
 structLit   = IDENT structBody ;
 structBody  = "{" fieldInit { ("," | TERM) fieldInit } "}" ;
 fieldInit   = IDENT ":" expr ;

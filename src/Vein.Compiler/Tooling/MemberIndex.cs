@@ -4,7 +4,6 @@ namespace Vein.Compiler.Tooling;
 
 // Heuristic member completion for `.` access. VeinScript has no full type resolver, so this resolves
 // the common, unambiguous cases from the AST:
-//   ::Shape.          -> that shape's fields
 //   <hear-binding>.   -> the event's payload fields + auto metadata (from/cause/trail/…)
 //   <target-binding>. -> shape names (self.Health)
 //   <event>.from.     -> the origin object's fields (name/kind/identity/shapes/marks)
@@ -26,12 +25,7 @@ public static class MemberIndex
 
             (string k, string v) ctx;
             string first = tokens[0];
-            if (first.StartsWith("::", StringComparison.Ordinal))
-            {
-                var n = first[2..];
-                ctx = Shapes.ContainsKey(n) ? ("shape", n) : ("", "");
-            }
-            else if (Bindings.TryGetValue(first, out var b))
+            if (Bindings.TryGetValue(first, out var b))
                 ctx = b.StartsWith("event:", StringComparison.Ordinal) ? ("event", b[6..]) : ("entity", "");
             else if (Shapes.ContainsKey(first)) ctx = ("shape", first);
             else if (Events.ContainsKey(first)) ctx = ("event", first);

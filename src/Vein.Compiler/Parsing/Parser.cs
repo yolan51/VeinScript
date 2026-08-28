@@ -894,7 +894,6 @@ public sealed class Parser
             case TokenKind.ShapeRef: return new ShapeRefExpr(Advance().Text, s);
             case TokenKind.EventRef: return new EventRefExpr(Advance().Text, s);
             case TokenKind.MarkRef: return new MarkRefExpr(Advance().Text, s);
-            case TokenKind.Scope: { Advance(); return new SelfScopeExpr(Expect(TokenKind.Ident, "component name after '::'").Text, s); }
             case TokenKind.KwEntity: { Advance(); return new EntityExpr(s); }
             case TokenKind.Star: return ParseStarRef();
             case TokenKind.LParen: { Advance(); var e = ParseExpr(); Expect(TokenKind.RParen, "')'"); return e; }
@@ -902,7 +901,6 @@ public sealed class Parser
             case TokenKind.Ident:
             {
                 string name = Advance().Text;
-                if (Match(TokenKind.Scope)) return new ScopeExpr(name, Expect(TokenKind.Ident, "name after '::'").Text, s);
                 // struct literal: `Ident {` but only when it clearly starts a struct (field: value)
                 if (Check(TokenKind.LBrace) && LooksLikeStructBody()) return new StructLitExpr(name, ParseStructBody(), s);
                 return new NameExpr(name, s);

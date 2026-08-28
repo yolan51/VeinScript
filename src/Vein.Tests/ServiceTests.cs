@@ -92,10 +92,11 @@ public class ServiceTests
     }
 
     [Fact]
-    public void Members_of_self_scope_are_shape_fields()
+    public void Members_of_target_binding_shape_are_shape_fields()
     {
+        // `self.Health.` — stepping the target binding through a shape reaches that shape's fields.
         var r = Compile("bundle B { shape $Health { hp: int, mp: int } shard S { each tick { target $Health as self { } } } }");
-        var m = MemberIndex.Build(r.Ast!).Resolve(new[] { "::Health" });
+        var m = MemberIndex.Build(r.Ast!).Resolve(new[] { "self", "Health" });
         Assert.Contains("hp", m);
         Assert.Contains("mp", m);
     }

@@ -7,7 +7,6 @@
   <Color name="Number"  foreground="#B5CEA8" />
   <Color name="Keyword" foreground="#569CD6" fontWeight="bold" />
   <Color name="Sigil"   foreground="#4EC9B0" />
-  <Color name="Scope"   foreground="#4EC9B0" />
 
   <RuleSet ignoreCase="false">
     <Span color="Comment" begin="//" />
@@ -21,9 +20,8 @@
       </RuleSet>
     </Span>
 
-    <!-- $Shape / @Event / #Mark references and ::Path scope -->
+    <!-- $Shape / @Event / #Mark references -->
     <Rule color="Sigil">[$@#][A-Za-z_][A-Za-z0-9_]*</Rule>
-    <Rule color="Scope">::[A-Za-z_][A-Za-z0-9_]*</Rule>
     <!-- `?` fill-the-rest placeholder in emit/bring -->
     <Rule color="Sigil">\?</Rule>
 

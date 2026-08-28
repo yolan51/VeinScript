@@ -35,7 +35,7 @@ bundle Demo {
         // The SCHEDULE is outer, the entity `target` query is inner.
         each tick {
             target $Health #Enemy as self {
-                ::Health.hp -= 1
+                self.Health.hp -= 1
 
                 chance 30% {
                     emit @Damaged {
@@ -49,7 +49,7 @@ bundle Demo {
         // settled runs once after the tick's fold contributions reconcile.
         settled {
             target $Health #Enemy as self {
-                if ::Health.hp <= 0 {
+                if self.Health.hp <= 0 {
                     mark self #Dead
                 }
             }

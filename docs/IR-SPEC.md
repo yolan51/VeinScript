@@ -7,7 +7,7 @@ close to IOP source but is stripped of everything a backend shouldn't have to kn
 
 1. **Fully typed.** Every `IrExpr` has a resolved `IrTypeRef`. No inference remains.
 2. **Names resolved.** Every reference points to a declaration (local, param, field, function, type,
-   shard). No unresolved names; no `::` scope resolution left.
+   shard). No unresolved names left to resolve.
 3. **Surface sugar lowered.** No sigils, `chance`, `mark`, `each tick`, `folds`, `target` *syntax*.
    Data is `IrType`; behavior is `IrShard`; IOP intent survives as `IrType.Kind` + `IrAttr` + fold
    info + query descriptors (§3–4).
@@ -81,7 +81,7 @@ IrExprStmt(IrExpr Expr)
 ```
 IrLiteral(object? Value, IrTypeRef Type)          // int/float/bool/string/percent
 IrLocalRef(IrLet|IrParam Decl)
-IrSelfRef()                                        // the identity bound by target (was `self` / `::`)
+IrSelfRef()                                        // the identity bound by `target … as <bind>`
 IrFieldAccess(IrExpr Receiver, IrField Field)      // a.b, self.Health.hp
 IrCall(IrCallable Callee, IrExpr[] Args)
 IrBinary(IrBinOp Op, IrExpr L, IrExpr R)           // + - * / % == != < > <= >= and or
@@ -126,8 +126,8 @@ IOP intent that isn't a distinct node survives as attributes — see §4.
 | `match` | `IrMatch` |
 | `return` / `break` / `continue` | `IrReturn` / `IrBreak` / `IrContinue` |
 | `x = e` / `x += e` | `IrAssign` (compound normalized to `x = x + e`) |
-| literal / name / `self` / `::H.f` / `a.b` | `IrLiteral` / `IrLocalRef` / `IrSelfRef` / `IrFieldAccess` |
-| `f(a)` / `a.m(b)` / `M::x` | `IrCall` / `IrCall(method)` / resolved `IrFunctionRef` |
+| literal / name / `self` / `self.H.f` / `a.b` | `IrLiteral` / `IrLocalRef` / `IrSelfRef` / `IrFieldAccess` |
+| `f(a)` / `a.m(b)` / `*A.B.@x` | `IrCall` / `IrCall(method)` / `IrScopeRef` |
 | `T { f: e }` | `IrStructInit` |
 | binary / unary | `IrBinary` / `IrUnary` |
 
@@ -140,7 +140,7 @@ Desugaring (`Semantics/`) rewrites sugar to plain core; core lowering (§2) then
 | `shape $H { hp: int folds sum }` | `IrType(Component "H")` with `IrField("hp", int, Fold=Sum)`, `@fold(hp, sum)` |
 | `each tick { … }` | `IrShard.Methods += IrFunction "tick"` whose body is `IrLoop(Target, query)` |
 | `settled { … }` / `start { … }` | `IrFunction "settled"` / `"start"` |
-| `::Health.hp -= 1` | `IrAssign(IrFieldAccess(IrSelfRef, hp), IrBinary(Add, …, -1))` (a fold contribution) |
+| `self.Health.hp -= 1` | `IrAssign(IrFieldAccess(IrSelfRef, hp), IrBinary(Add, …, -1))` (a fold contribution) |
 | `mark self #Dead` | `IrCall(IrRuntimeRef "AddTag", IrSelfRef, Dead)` |
 | `emit @D { … }` | `IrCall(IrRuntimeRef "Emit", IrStructInit(D, …))` |
 | `hear @D as evt { … }` | `IrShard.Methods += IrFunction` registered as a handler for `D` |

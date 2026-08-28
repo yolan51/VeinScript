@@ -284,7 +284,7 @@ public sealed class Lexer
             case '/': kind = Match('=') ? TokenKind.SlashEq : TokenKind.Slash; break;
             case '%': kind = TokenKind.Mod; break;
             case '+': kind = Match('=') ? TokenKind.PlusEq : TokenKind.Plus; break;
-            case ':': kind = Match(':') ? TokenKind.Scope : TokenKind.Colon; break;
+            case ':': kind = TokenKind.Colon; break;
             case '=': kind = Match('=') ? TokenKind.Eq : TokenKind.Assign; break;
             case '<': kind = Match('=') ? TokenKind.Le : TokenKind.Lt; break;
             case '>': kind = Match('=') ? TokenKind.Ge : TokenKind.Gt; break;

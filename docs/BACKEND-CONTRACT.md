@@ -111,7 +111,7 @@ public sealed class Drain : SystemBase       // maps shard → system
     {
         foreach (var self in World.Query<Health>().With<Enemy>())
         {
-            self.Contribute<Health>(h => h.hp += -1);        // ::Health.hp -= 1 (fold contribution)
+            self.Contribute<Health>(h => h.hp += -1);        // self.Health.hp -= 1 (fold contribution)
             if (Runtime.Random() < 0.30)                     // chance 30%
                 World.Emit(new Damaged { amount = 5, victim = self });
         }

@@ -18,7 +18,23 @@ public sealed class Lower
     private readonly Dictionary<string, BuilderDecl> _builders = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<FieldDecl>> _shapeFields = new(StringComparer.Ordinal);
 
+    // The `target … as <bind>` names currently in scope. A reference to one of these is the identity
+    // (`IrSelfRef`), not a local — see the NameExpr cases in LowerExpr. A stack, because targets nest.
+    private readonly List<string> _targetBinds = new();
+
     public Lower(DiagnosticBag diagnostics) => _diag = diagnostics;
+
+    private bool IsTargetBind(string name) => _targetBinds.Contains(name, StringComparer.Ordinal);
+
+    private TargetScope BindTarget(string bind) => new(_targetBinds, bind);
+
+    /// Pops the binding when the target body is done lowering.
+    private readonly struct TargetScope : IDisposable
+    {
+        private readonly List<string> _binds;
+        public TargetScope(List<string> binds, string bind) { _binds = binds; binds.Add(bind); }
+        public void Dispose() => _binds.RemoveAt(_binds.Count - 1);
+    }
 
     private static readonly string[] OutputFields = { "markup", "code", "css", "line" };
 
@@ -291,9 +307,16 @@ public sealed class Lower
             case WhileStmt w:
                 return new IrLoop(IrLoopKind.While, LowerExpr(w.Cond), null, null, null, null, LowerBlock(w.Body));
             case TargetStmt t:
-                return new IrLoop(IrLoopKind.Target, null, t.Bind, LowerExpr(t.Source), null, null, LowerBlock(t.Body));
+            {
+                var src = LowerExpr(t.Source);          // evaluated OUTSIDE the binding
+                using var _ = BindTarget(t.Bind);
+                return new IrLoop(IrLoopKind.Target, null, t.Bind, src, null, null, LowerBlock(t.Body));
+            }
             case QueryStmt q:
+            {
+                using var _ = BindTarget(q.Bind);
                 return new IrLoop(IrLoopKind.Target, null, q.Bind, null, new IrQuery(q.Components, q.Tags, q.Bind), null, LowerBlock(q.Body));
+            }
             case RepeatStmt r:
                 return new IrLoop(IrLoopKind.Repeat, null, r.Var, null, null, LowerExpr(r.Count), LowerBlock(r.Body));
             case MatchStmt m:
@@ -459,10 +482,11 @@ public sealed class Lower
                     return new IrLiteral(frac, IrLiteralKind.Percent);
                 }
                 return new IrLiteral(l.Value, MapLit(l.Kind));
+            // The name bound by the enclosing `target … as <bind>` IS the identity, not an ordinary local —
+            // that is what makes `self.Health.hp -= 1` a fold contribution rather than a plain assignment.
+            case NameExpr n when IsTargetBind(n.Name): return new IrSelfRef();
             case NameExpr n: return new IrLocalRef(n.Name);
-            case SelfScopeExpr ss: return new IrFieldAccess(new IrSelfRef(), ss.Name);
             case EntityExpr: return new IrEntityRef();
-            case ScopeExpr sc: return new IrScopeRef(sc.Module, sc.Name);
             // `*` qualified cross-bundle ref. Not linked/resolved at runtime yet (surface + tooling
             // pass): lower to a scope ref carrying the dotted path + sigil'd member so the IR is
             // representable; project tooling does the real resolution/collision checks.

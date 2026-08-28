@@ -31,7 +31,7 @@ The root node is printed with **no prefix**.
 
 - One node per line; never wrapped, never reflowed; no blank lines; no trailing whitespace.
 - Two spaces before the attribute run; **single** space between attributes.
-- Sigils are verbatim: `$Shape`, `#Mark`, `@Event`, `::Path`.
+- Sigils are verbatim: `$Shape`, `#Mark`, `@Event`, `*Author.Bundle.@Member`.
 - **Inline leaves.** Value-wrapper kinds (`Arg`, `Cond`, `Let`, `Body`, `Var`-with-init) fold their
   value's header onto their own line as `= <Kind> <primary>` and *promote* the value's children.
   A leaf value gives `Arg amount = Int 5`; a value with children gives `Arg body = Concat` + the

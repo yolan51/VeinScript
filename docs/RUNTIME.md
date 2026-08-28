@@ -188,10 +188,10 @@ inner). The intended per-frame loop over each targeted entity:
 ```
 shard Drain {
     each tick {
-        target $Health #Enemy as self { ::Health.hp -= 1 }   // MANY shards may write hp this frame
+        target $Health #Enemy as self { self.Health.hp -= 1 }   // MANY shards may write hp this frame
     }
     settled {                                                 // AFTER the frame's writes are reconciled
-        target $Health #Enemy as self { if ::Health.hp <= 0 { mark self #Dead } }
+        target $Health #Enemy as self { if self.Health.hp <= 0 { mark self #Dead } }
     }
 }
 ```

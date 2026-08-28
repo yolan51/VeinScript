@@ -59,7 +59,7 @@ dialect. There is no general `class`.
 | `sync` | `sync` | shard scheduling hint | `@sync` metadata |
 
 > **Field mutation is not a keyword.** A shard changes a field with core compound assignment
-> (`::Health.hp -= 1` → `self.Health.hp += -1`). When several shards write one field in a tick, the
+> (`self.Health.hp -= 1` → `self.Health.hp += -1`). When several shards write one field in a tick, the
 > field's `folds` reducer reconciles them — see [LANGUAGE.md §3.5](LANGUAGE.md#35-folds--how-concurrent-writes-to-a-field-combine).
 
 ### Core-lib (name survives, not a keyword long-term)

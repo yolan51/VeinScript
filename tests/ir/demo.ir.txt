@@ -17,7 +17,7 @@ Bundle Demo
 `--- Shard Drain
      |--- EachTick
      |    `--- Target $Health #Enemy as self
-     |         |--- Assign -= ::Health.hp
+     |         |--- Assign -= self.Health.hp
      |         |    `--- Int 1
      |         `--- Chance 30%
      |              `--- Emit @Damaged
@@ -27,7 +27,7 @@ Bundle Demo
           `--- Target $Health #Enemy as self
                `--- If
                     |--- Cond = Binary <=
-                    |    |--- Path ::Health.hp
+                    |    |--- Path self.Health.hp
                     |    `--- Int 0
                     `--- Then
                          `--- Mark self #Dead

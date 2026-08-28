@@ -189,7 +189,6 @@ public abstract record Expr(SourceSpan Span) : Node(Span);
 public enum LiteralKind { Int, Float, Percent, String, Bool }
 public sealed record LiteralExpr(object? Value, LiteralKind Kind, SourceSpan Span) : Expr(Span);
 public sealed record NameExpr(string Name, SourceSpan Span) : Expr(Span);
-public sealed record SelfScopeExpr(string Name, SourceSpan Span) : Expr(Span);          // ::Health
 public sealed record EntityExpr(SourceSpan Span) : Expr(Span);                          // Entity — nearest entity's id
 
 /// The sigil of the final member of a `*` qualified path.
@@ -197,7 +196,6 @@ public enum MemberSigil { Event, Shape, Mark, None }
 /// `*Author.Bundle.Publicator.@Event` — a collision-safe cross-bundle reference. `Path` is a suffix of
 /// `Author.Bundle.Publicator` (qualify only as far as needed to be unique); `Member` is the final name.
 public sealed record StarRefExpr(IReadOnlyList<string> Path, string Member, MemberSigil Sigil, SourceSpan Span) : Expr(Span);
-public sealed record ScopeExpr(string Module, string Name, SourceSpan Span) : Expr(Span); // Math::clamp
 public sealed record ShapeRefExpr(string Name, SourceSpan Span) : Expr(Span);           // $Health
 public sealed record EventRefExpr(string Name, SourceSpan Span) : Expr(Span);           // @Damaged
 public sealed record MarkRefExpr(string Name, SourceSpan Span) : Expr(Span);            // #Enemy

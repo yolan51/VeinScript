@@ -55,7 +55,7 @@ language reads as targeting sets of identities rather than running generic C-sty
 
 **DECIDED (per author).** No `push` keyword. Two concerns are separated:
 
-1. **Mutating a field** — a shard writes with core compound assignment: `::Health.hp -= 1` →
+1. **Mutating a field** — a shard writes with core compound assignment: `self.Health.hp -= 1` →
    `self.Health.hp += -1`. No dialect keyword.
 2. **Reconciling concurrent writes** — when several shards write the *same* field in one tick, the
    field declares a fold reducer in its `shape`:
@@ -115,11 +115,25 @@ implemented (`CanEndStatement`).
 ## D8 — Sigils (`$ @ #`) are core IOP syntax
 
 **DECIDED.** `$Shape`, `@Event`, `#Mark` are the three identity-reference forms and are **core** (not
-a dialect affordance). They are folded correctly by the lexer today. `::Name` is self-scope
-resolution to the current identity's component.
+a dialect affordance). They are folded correctly by the lexer today.
 
 *Rationale:* in IOP, referencing an identity's shapes/events/marks is fundamental, so the sigils earn
 first-class status. They are resolved before the HIR, so backends never see them.
+
+**REVISED — `::` removed.** D8 originally made `::Name` a fourth form (self-scope resolution to the
+current identity's component). It is gone. `::` carried two unrelated meanings — `::Shape.field` for
+the targeted identity, and `M::x` for cross-module scope — and both had a better spelling already in
+the language:
+
+- `::Health.hp` → **`self.Health.hp`**, naming the `target … as self` binding. This was always a legal
+  second spelling (the completion index has offered `<target-binding>.Shape.field` from the start), so
+  `::` was a redundant synonym for it.
+- `M::x` → the `*Author.Bundle.Publicator.@member` star path, which is collision-safe and was the only
+  cross-bundle form anyone actually used — `M::x` had **zero** uses across `samples/` and `stdlib/`.
+
+The identity semantics are unchanged: `Lower` recognises the enclosing target binding and still emits
+`IrSelfRef`, so `self.Health.hp -= 1` lowers to exactly the same HIR `::Health.hp -= 1` did, and stays
+a fold contribution (see [IR-SPEC](IR-SPEC.md), [BACKEND-CONTRACT](BACKEND-CONTRACT.md)).
 
 ---
 

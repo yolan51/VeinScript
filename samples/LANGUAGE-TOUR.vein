@@ -6,7 +6,7 @@
 //  VeinScript is an Identity Oriented Programming (IOP) language:
 //    * DATA lives in `shape`s (identity components) and `event`s (messages).
 //    * BEHAVIOR lives in `shard`s (systems) and `SF`s (shard-functions; emit-only, never return).
-//    * There is NO general `class`. Sigils tag references:  $Shape   @Event   #Mark   ::SelfScope
+//    * There is NO general `class`. Sigils tag references:  $Shape   @Event   #Mark
 //    * Shards react to events with `hear`, mutate targeted identities, and `emit` new events.
 //    * `folds` reconciles concurrent writes to a field (sum/min/max/…).
 //    * Output (HTML/JS/CSS, etc.) is ASSEMBLED reactively: shards emit fragments, a `ShardView`
@@ -58,9 +58,10 @@ bundle Demo {
     }
 
     shard Drain {
-        target $Health #Enemy as self {
-            each tick {
-                ::Health.hp -= 1
+        // The SCHEDULE is outer, the entity `target` query is inner.
+        each tick {
+            target $Health #Enemy as self {
+                self.Health.hp -= 1
 
                 chance 30% {
                     emit @Damaged {
@@ -71,9 +72,12 @@ bundle Demo {
             }
         }
 
+        // settled runs once after the tick's fold contributions reconcile.
         settled {
-            if ::Health.hp <= 0 {
-                mark self #Dead
+            target $Health #Enemy as self {
+                if self.Health.hp <= 0 {
+                    mark self #Dead
+                }
             }
         }
     }

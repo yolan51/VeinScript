@@ -29,8 +29,8 @@ rewritten node keeps the original `SourceSpan`.
 | `target C… #T… as self { … }`              | query descriptor `@query(components,tags,bind)` + iteration     |
 | `each tick { … }`                          | shard method `tick()` iterating the target set                 |
 | `settled { … }` / `start { … }`            | shard methods `settled()` / `start()`                          |
-| `::Shape.field`                            | `self.Shape.field` (self-scope resolution)                     |
-| `::Health.hp -= 1`                         | `self.Health.hp += -1` — a fold contribution (§1.1)            |
+| `<target-binding>.Shape.field`             | `self.Shape.field` (the targeted identity's component)         |
+| `self.Health.hp -= 1`                         | `self.Health.hp += -1` — a fold contribution (§1.1)            |
 | `emit @D { … }`                            | `Emit(D { … })` runtime call                                    |
 | `hear @D as evt { … }`                     | event-handler registration; `evt` bound to the message         |
 | `attach $C to self { … }` / `unattach`     | `AddComponent(self, C{…})` / `RemoveComponent<C>(self)`         |
