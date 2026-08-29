@@ -23,7 +23,8 @@ bundle Demo {
     }
 
     // An SF never returns a value — it emits events (each auto-tagged with origin/source).
-    // A single SF can emit many times, just like a shard.
+    // A single SF can emit many times, just like a shard. Declared here to show the syntax;
+    // samples/functions.vein calls SFs and `fn`s for real.
     SF hurt(victim: Entity, amount: int) {
         emit @Damaged {
             amount: amount
@@ -37,6 +38,8 @@ bundle Demo {
             target $Health #Enemy as self {
                 self.Health.hp -= 1
 
+                // Inline on purpose: docs/EXAMPLE-PIPELINE.md traces THIS emit through every stage
+                // (AST → HIR → IR → backend). See samples/functions.vein for calling an SF.
                 chance 30% {
                     emit @Damaged {
                         amount: 5

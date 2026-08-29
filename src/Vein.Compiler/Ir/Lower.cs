@@ -116,11 +116,25 @@ public sealed class Lower
                     new[] { IrAttr.Of("tag") }));
 
         CheckConsoleAddresses(bundle);
+        CheckDuplicateBundles(bundle);
 
         // Cross-bundle functions reached by a qualified call, resolved while lowering the bodies above.
         funcs.AddRange(_imported.Values.Where(f => f is not null));
 
         return new IrModule(bundle.Name, types, funcs, shards) { Start = start };
+    }
+
+    /// The same `Author.Bundle` in two search roots — e.g. an installed `bundles/` copy alongside the
+    /// stdlib's. `*Author.Bundle` carries no version, so a qualified reference silently resolves to
+    /// whichever root wins and you get "why am I getting the old version of this function". An ERROR, not a
+    /// warning: there is no spelling that disambiguates them, so the duplicate must go.
+    private void CheckDuplicateBundles(BundleDecl bundle)
+    {
+        foreach (var (name, first, second) in Index.Duplicates)
+            _diag.Error("VS0310",
+                $"bundle '{name}' is declared in two places on the search path — "
+                + $"'{first}' and '{second}'. A `*` reference carries no version and cannot choose between them.",
+                bundle.Span);
     }
 
     /// A console address that no `@Console { name: … }` spawns routes to a pipe nobody listens on, and the

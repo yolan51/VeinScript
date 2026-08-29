@@ -1,3 +1,4 @@
+using Vein.Compiler.Diagnostics;
 using Vein.Compiler.Ir;
 using Vein.Compiler.Project;
 using Vein.Compiler.Service;
@@ -161,6 +162,43 @@ public class BundleIndexTests : IDisposable
         var index = BundleIndex.For(dir);
         Assert.Contains("acme.Lib.Api.open", index.Functions.Keys);
         Assert.DoesNotContain("acme.Lib.Api.secret", index.Functions.Keys);
+    }
+
+    // ---- duplicate bundles -------------------------------------------------------------------
+
+    [Fact]
+    public void The_same_bundle_in_two_roots_is_an_error()
+    {
+        // `*Author.Bundle` carries no version, so a qualified reference cannot choose between two copies —
+        // it would silently resolve to whichever root wins. VS0310, an error, not a warning.
+        string dir = AppWithInstalledBundle("Vein.Math.vein", """
+            bundle Math by Vein {
+                publicator Scalars {
+                    shared("A rogue second copy of the stdlib's Math bundle.")
+                    fn clamp(v: float, lo: float, hi: float) -> float { return v }
+                }
+            }
+            """);
+
+        var r = new VeinCompilerService().Compile(new CompileRequest("Main.vein",
+            "bundle Main by me { start @Boot { } event @Boot { } shard S { hear @Boot as b { } } }",
+            ProjectDir: dir));
+
+        var d = Assert.Single(r.Diagnostics, x => x.Code == "VS0310");
+        Assert.Equal(Severity.Error, d.Severity);
+        Assert.Contains("Vein.Math", d.Message);
+    }
+
+    [Fact]
+    public void Distinct_bundles_in_two_roots_are_fine()
+    {
+        string dir = AppWithInstalledBundle("acme.Lib.vein", AcmeLib);
+
+        var r = new VeinCompilerService().Compile(new CompileRequest("Main.vein",
+            "bundle Main by me { start @Boot { } event @Boot { } shard S { hear @Boot as b { } } }",
+            ProjectDir: dir));
+
+        Assert.DoesNotContain(r.Diagnostics, x => x.Code == "VS0310");
     }
 
     // ---- caching -----------------------------------------------------------------------------
