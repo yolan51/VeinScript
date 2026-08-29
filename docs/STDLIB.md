@@ -68,7 +68,7 @@ link+run exists.
 | single-bundle render (`emit`/`hear`/`bring`/`ShardView`) | **works** | a stdlib bundle can render *within itself* (proof) |
 | `use N` import resolution | **no-op** | can't `use Vein.Core` to pull symbols into scope yet |
 | `bring *Bundle.Builder` (qualified builders) | **missing** | can't consume another bundle's builders yet |
-| app **link + run** (load bundles, run together) | **missing** | can't actually *run* a program against `Vein.*` yet |
+| app **link + run** (load bundles, run together) | **works** | the principal bundle boots; every loaded bundle joins **one** runtime, so a `hear` in one sees an `emit` from another (RUNTIME.md §5.1) |
 | `target`/`each tick`/`settled`/`folds` execution | **works** (`--ticks N` drives the clock) | a stdlib shard's schedule blocks run like any other |
 | **mark declaration** (`#Mark { }`) | **does not exist** | marks are implicit names; "shared marks" can't be declared |
 
@@ -191,12 +191,16 @@ Each is a general language/runtime capability, **not** a stdlib-specific hack:
 1. **Qualified `bring`** — `bring *Vein.Web.Elements.Button(…)` (mirror of the qualified event refs).
 2. **`use` resolution** — make `use` bring another bundle's `shared` symbols into scope so bare names
    resolve (with `*` still available for disambiguation).
-3. **App link + run** — merge loaded bundles into one runnable program; route events/`*` at runtime.
+3. ~~**App link + run**~~ — **done** ([AppLinker](../src/Vein.Compiler/Ir/AppLinker.cs), RUNTIME.md §5.1):
+   loaded bundles merge into one module and run on one event queue, with the first `load` as the
+   principal that boots. Event *routing* is by bare name, which is what lets bundles react to each other;
+   `*` still resolves at compile time rather than being dispatched at runtime.
 4. (Optional, later) **mark declarations** — a first-class `#Mark` decl so capability marks can be
    shared/validated like shapes/events, instead of being conventions.
 
-Until these land, `Vein.*` is consumed by **copying the qualified identity** and validating via
-`veinc symbols`; it runs only within a single bundle.
+Until 1–2 land, `Vein.*` is consumed by **copying the qualified identity** and validating via
+`veinc symbols`. A program is no longer confined to one bundle: an app composes several, and each
+loaded bundle's shards run in the same runtime.
 
 ## 7. Naming rules
 - Identities are `PascalCase` (`@MouseDown`, `$Pool`, `Heading`). Fields are `lowerCamel` (`current`,

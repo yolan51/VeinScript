@@ -26,7 +26,17 @@ internal static class ServeCommand
         if (diagnostics.HasErrors) return 1;
 
         var bundle = unit.Bundles.FirstOrDefault();
-        if (bundle is null) { Console.Error.WriteLine("no bundle to serve"); return 1; }
+        if (bundle is null)
+        {
+            // An `app` manifest holds `load`s, not bundles, so it lands here with nothing to serve.
+            // Naming that explicitly beats "no bundle to serve", which reads like the file was empty.
+            Console.Error.WriteLine(unit.Apps.Count > 0
+                ? $"`veinc serve` cannot serve an app manifest yet — `app {unit.Apps[0].Name}` loads " +
+                  $"{unit.Apps[0].Loads.Count} bundle(s); linking them into one program is the app " +
+                  $"link+run follow-on (docs/RUNTIME.md §5). Serve a single bundle file instead."
+                : "no bundle to serve");
+            return 1;
+        }
 
         string projectDir = Path.GetDirectoryName(Path.GetFullPath(path)) ?? ".";
 

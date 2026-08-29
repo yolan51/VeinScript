@@ -1,0 +1,23 @@
+// The PRINCIPAL bundle — the one the app lists first. Its `start` is the app's single boot event, and
+// everything else in the app reacts to what it emits. This is the only bundle that begins anything.
+
+bundle Store by you {
+
+    publicator Orders {
+        shared("A customer placed an order.")
+        event @Ordered { item: string, qty: int }
+
+        shared("An order was accepted and is going out.")
+        event @Shipped { item: string }
+    }
+
+    // The app's front door. `veinc run app.vein` fires exactly this, once.
+    start @Ordered { item: "widget", qty: 3 }
+
+    shard Fulfilment {
+        hear @Ordered as o {
+            emit *Vein.Console.Io.@Print { text: "[Store] order: " + o.qty + " x " + o.item }
+            emit @Shipped { item: o.item }
+        }
+    }
+}

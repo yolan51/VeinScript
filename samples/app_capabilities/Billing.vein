@@ -1,0 +1,17 @@
+// A CAPABILITY bundle. It declares no `start` and begins nothing — it only reacts. Adding it to the app
+// adds invoicing; removing the `load` line removes invoicing, and no other bundle changes either way.
+
+bundle Billing by you {
+
+    publicator Invoices {
+        shared("An invoice was raised for a shipment.")
+        event @Invoiced { item: string, amount: int }
+    }
+
+    shard Invoicer {
+        hear *you.Store.Orders.@Shipped as s {
+            emit *Vein.Console.Io.@Print { text: "[Billing] invoicing " + s.item }
+            emit @Invoiced { item: s.item, amount: 42 }
+        }
+    }
+}

@@ -424,12 +424,79 @@ unrouted URL is.
 
 - **Load (implemented):** an `app` lists bundles across files; `veinc symbols` loads + parses them into a
   qualified symbol table for discovery and `*` resolution ([TOOLING.md](TOOLING.md)). No execution.
-- **Link (follow-on):** merge the loaded bundles into one runnable module, resolving `*` and `use`
-  references and detecting real conflicts.
-- **Run (follow-on):** `veinc render app.vein` boots each loaded bundle at its own `start` entry (with any
-  load-site overrides applied) through the linked program.
+- **Link (implemented):** [AppLinker](../src/Vein.Compiler/Ir/AppLinker.cs) merges every loaded bundle
+  into **one** `IrModule`, reporting the conflicts that merging can create.
+- **Run (implemented):** `veinc run app.vein` / `veinc render app.vein` boot the linked module in a
+  single interpreter.
 
-Each bundle's `start` entry is the piece that makes an app *runnable* rather than just *discoverable*.
+### 5.1 The principal bundle — one boot, many capabilities
+
+An app has a **principal** bundle: the **first `load`**, which `veinc new app` has always marked
+`★ your principal bundle`. The rule is one sentence:
+
+> **The principal's `start` is the app's single boot event. Every other bundle contributes its shards to
+> the same runtime and boots nothing.**
+
+A capability reacts; it does not start. So adding a bundle adds reactions, and removing its `load` line
+removes them — with no edit to any other bundle. That is what makes capabilities *incremental*:
+
+```
+app Shop {
+    load "Store.vein"      // ★ principal — the only bundle that starts anything
+    load "Billing.vein"    // capability: invoices what Store ships
+    load "Audit.vein"      // capability: watches both of the above
+}
+```
+```
+$ veinc run samples/app_capabilities/shop.app.vein
+app Shop: principal 'Store' boots; 3 bundle(s) linked into one runtime [Store, Billing, Audit]
+[Store] order: 3 x widget
+[Audit] saw order of widget
+[Billing] invoicing widget
+[Audit] saw invoice 42 for widget
+```
+
+**One runtime is the whole point.** Before linking, `veinc run` gave each bundle its own `Interp` — its
+own handler table and its own event queue — so a `hear` in one bundle could never see an `emit` from
+another, and three bundles were three programs that happened to share a file. Now there is one queue, and
+an event crosses a bundle boundary exactly as it crosses a shard boundary.
+
+**Events unify by NAME**, which is what makes that work: `emit @Shipped` in the principal reaches
+`hear *you.Store.Orders.@Shipped` in Billing because the runtime has always matched on the bare event
+name (a qualified `*A.B.@E` keeps its qualifier for tooling and resolution, not for dispatch).
+
+### 5.2 What linking reports
+
+The same name-unification is the hazard hiding inside the feature, so merging is not silent:
+
+| Code | When | Effect |
+|---|---|---|
+| `VS0331` | a **non-principal** bundle declares `start` | warning — it does not fire; its shards still run |
+| `VS0332` | two bundles declare one event/shape name with **different fields** | warning — the first is linked |
+| `VS0333` | two bundles declare one `fn`/`SF` name | warning — the first is linked |
+| `VS0334` | the manifest links no bundles | error |
+| `VS0335` | a load-site `start { … }` override is not a literal | warning — ignored |
+| `VS0301` | a `load` target does not exist | error |
+
+`VS0331` exists because the alternative is a mystery: a capability bundle's own `start` is how it runs
+standalone, and it is inert once composed. Two bundles declaring the *same* event identically stays
+quiet — that is shared vocabulary, and warning on it would train people to ignore the warning.
+
+A shard name used in two bundles is **qualified**, not rejected (`A.Boot`, `B.Boot`) — `Boot` is an
+obvious name for anyone to pick, so a collision must never drop a reaction. A unique name is left alone,
+so single-bundle provenance output is unchanged.
+
+**Load-site `start { … }` overrides** (§3) now apply, to the principal, as boot **inputs** — the same
+mechanism `--set` uses, so an explicit `--set` still wins. Literals only: a composition site has no
+shard, entity or event in scope for anything else to evaluate against (`VS0335`).
+
+### 5.3 What linking still does not do
+
+- **`use` resolution** is untouched — cross-bundle references are still written `*Author.Bundle.…`.
+- Only *leaf* primitives cross at **compile** time (shapes, builders, `fn`/`SF`). Linking merges the
+  **runtime** — shards, handlers, schedules — which is a different axis; a bundle still cannot call
+  another's private helper.
+- Boot order among bundles is not a question any more: exactly one bundle boots.
 
 ---
 
@@ -449,7 +516,7 @@ Each bundle's `start` entry is the piece that makes an app *runnable* rather tha
 | HTTP client (`Vein.Net.Http` `@Fetch`/`@Fetched`/`@Failed`) | **runs** (§4.3.3) |
 | HTTP server — real `@Request`→`@Response` over a socket | **runs** (`veinc serve <file> --port N`) |
 | transport encryption (TLS) for `Vein.Net.Peer` | **follow-on** — frames are authenticated, not secret |
-| app link + run (`veinc render app.vein`) | **follow-on** |
+| app link + run — principal boots, capabilities join one runtime | **runs** (`veinc run samples/app_capabilities/shop.app.vein`) |
 
 ## 7. Open questions
 - **Resolved:** external inputs reach the boot payload by **overriding named fields** of the `start`

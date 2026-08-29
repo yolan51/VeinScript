@@ -1,0 +1,13 @@
+// A second capability, listening to BOTH of the others. It knows nothing about how they are wired: it
+// names the events it cares about, and linking puts them all on one queue.
+
+bundle Audit by you {
+    shard Ledger {
+        hear *you.Store.Orders.@Ordered as o {
+            emit *Vein.Console.Io.@Print { text: "[Audit] saw order of " + o.item }
+        }
+        hear *you.Billing.Invoices.@Invoiced as i {
+            emit *Vein.Console.Io.@Print { text: "[Audit] saw invoice " + i.amount + " for " + i.item }
+        }
+    }
+}

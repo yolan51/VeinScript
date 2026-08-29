@@ -22,4 +22,9 @@ public sealed class DiagnosticBag
 
     public void Warning(string code, string message, SourceSpan span) =>
         _items.Add(new Diagnostic(Severity.Warning, code, message, span));
+
+    /// Move diagnostics collected in a throwaway bag into this one. Used where a file has to be parsed
+    /// SPECULATIVELY — AppLinker probes for an `app` header, and a plain bundle must not pay for that
+    /// probe with a second copy of every parse error when the caller parses it again.
+    public void AddRange(IEnumerable<Diagnostic> items) => _items.AddRange(items);
 }

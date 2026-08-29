@@ -1,0 +1,15 @@
+// samples/app_capabilities/shop.app.vein — three bundles, one runtime.
+//
+//   veinc run samples/app_capabilities/shop.app.vein
+//
+// The first `load` is the PRINCIPAL: its `start` is the app's one boot event. Every other bundle
+// contributes its shards to the same runtime and boots nothing — so an `emit` in one bundle reaches a
+// `hear` in another, and capabilities compose by being listed here.
+//
+// Comment out a `load` and that capability disappears with no other edit. That is the whole model.
+
+app Shop {
+    load "Store.vein"        // ★ principal — the only bundle that starts anything
+    load "Billing.vein"      // capability: invoices what Store ships
+    load "Audit.vein"        // capability: watches both of the above
+}

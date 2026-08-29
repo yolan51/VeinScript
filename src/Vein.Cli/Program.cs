@@ -27,6 +27,28 @@ if (!File.Exists(path))
 
 string source = File.ReadAllText(path);
 var diagnostics = new DiagnosticBag();
+int reportedDiagnostics = 0;   // link diagnostics already printed; the final sweep skips them.
+
+// An `app` manifest declares `load`s, not bundles, so `unit.Bundles` is empty for one. Rather than
+// iterating that empty list (which printed nothing and exited 0 — "it ran and produced no output", the
+// most misleading answer the CLI can give), link the app into one module and run THAT.
+static AppLinker.LinkedApp? LinkApp(string file, string src, DiagnosticBag diag, out int reported)
+{
+    reported = 0;
+    var linked = AppLinker.Link(file, src, diag);
+    if (linked is null) return null;
+
+    // Print link diagnostics NOW, not at exit. They are known before a single event fires, and
+    // `veinc run` may never return — a console app blocks on input, so "printed at the end" means
+    // "never printed" for exactly the composition mistakes this feature exists to surface.
+    foreach (var d in diag.Items) Console.Error.WriteLine(d);
+    reported = diag.Items.Count;
+
+    Console.Error.WriteLine(
+        $"app {linked.AppName}: principal '{linked.Principal}' boots; " +
+        $"{linked.Bundles.Count} bundle(s) linked into one runtime [{string.Join(", ", linked.Bundles)}]");
+    return linked;
+}
 
 // Anchor cross-bundle resolution at the file being compiled, so `<app>/bundles/` is found alongside
 // the standard library rather than only whatever sits above the current working directory.
@@ -76,7 +98,8 @@ switch (command)
 
     case "render":
     {
-        var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
+        var linkedApp = LinkApp(path, source, diagnostics, out reportedDiagnostics);
+        var unit = linkedApp is null ? BundleLoader.Load(path, diagnostics, editing: (path, source)) : null;
         if (!diagnostics.HasErrors)
         {
             // Positional arg = request path (legacy @Request); `--set k=v` overrides boot payload fields;
@@ -93,10 +116,23 @@ switch (command)
                 else if (Ticks(args, ref i) is { } t) ticks = t;
                 else if (!a.StartsWith("--")) requestPath = a;
             }
-            var lower = new Lower(diagnostics, projectDir);
-            foreach (var bundle in unit.Bundles)
+            // An app is ONE module, so it renders once; a plain file still renders each bundle it holds.
+            // A load-site `start { … }` override is laid down first, so an explicit --set still wins.
+            var modules = new List<IrModule>();
+            if (linkedApp is { } la)
             {
-                var result = new Interp { Ticks = ticks }.Render(lower.LowerBundle(bundle), requestPath, inputs);
+                foreach (var kv in la.BootOverrides) inputs.TryAdd(kv.Key, kv.Value);
+                modules.Add(la.Module);
+            }
+            else
+            {
+                var lower = new Lower(diagnostics, projectDir);
+                foreach (var bundle in unit!.Bundles) modules.Add(lower.LowerBundle(bundle));
+            }
+
+            foreach (var module in modules)
+            {
+                var result = new Interp { Ticks = ticks }.Render(module, requestPath, inputs);
                 foreach (var line in result.Log) Console.Error.WriteLine($"  · {line}");
                 if (result.Body is not null)
                     Console.WriteLine($"HTTP {result.Status}\n{result.Body}");
@@ -126,14 +162,25 @@ switch (command)
     {
         // Console mode: boot the program, then pump stdin↔stdout via @Input/@Print. Ctrl+Z (Windows) /
         // Ctrl+D (Unix) ends input.
-        var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
+        var linkedRun = LinkApp(path, source, diagnostics, out reportedDiagnostics);
+        var unit = linkedRun is null ? BundleLoader.Load(path, diagnostics, editing: (path, source)) : null;
         if (!diagnostics.HasErrors)
         {
             int ticks = 0;
             for (int i = 2; i < args.Length; i++) if (Ticks(args, ref i) is { } t) ticks = t;
-            var lower = new Lower(diagnostics, projectDir);
-            foreach (var bundle in unit.Bundles)
-                new Interp { Ticks = ticks }.Run(lower.LowerBundle(bundle), Console.In, Console.Out, messaging: true);
+
+            if (linkedRun is { } la)
+            {
+                // ONE interpreter for the whole app — one handler table and one event queue, which is
+                // exactly what lets a `hear` in a capability bundle see an `emit` from the principal.
+                new Interp { Ticks = ticks }.Run(la.Module, Console.In, Console.Out, messaging: true);
+            }
+            else
+            {
+                var lower = new Lower(diagnostics, projectDir);
+                foreach (var bundle in unit!.Bundles)
+                    new Interp { Ticks = ticks }.Run(lower.LowerBundle(bundle), Console.In, Console.Out, messaging: true);
+            }
         }
         break;
     }
@@ -260,7 +307,7 @@ switch (command)
         return 2;
 }
 
-foreach (var d in diagnostics.Items) Console.Error.WriteLine(d);
+foreach (var d in diagnostics.Items.Skip(reportedDiagnostics)) Console.Error.WriteLine(d);
 return diagnostics.HasErrors ? 1 : 0;
 
 static string Display(Token t) =>
