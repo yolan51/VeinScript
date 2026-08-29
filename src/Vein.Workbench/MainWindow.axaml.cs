@@ -464,7 +464,6 @@ public partial class MainWindow : Window
     private void ShowBundleInspector(BundleRef bundle)
     {
         BundleModel? model = null;
-        ExecutionModel? exec = null;
         ConsoleGraph? consoles = null;
         try
         {
@@ -474,8 +473,7 @@ public partial class MainWindow : Window
             if (ast is not null)
             {
                 model = BundleModel.Analyze(ast);
-                exec = ExecutionModel.Analyze(ast);      // one parse, three analyses
-                consoles = ConsoleGraph.Analyze(ast);
+                consoles = ConsoleGraph.Analyze(ast);   // marks used as console addresses
             }
         }
         catch { /* leave model null → header only */ }
@@ -490,10 +488,15 @@ public partial class MainWindow : Window
         DockPanel.SetDock(header, Dock.Top);
         root.Children.Add(header);
 
+        // The API only — shards/views/bridges are behaviour, never `shared`, and nothing another bundle
+        // can reference; they run when the bundle is loaded. The Execution tab is where they belong, and
+        // shows far more about them than a flat list could.
+        var api = model?.Primitives.Where(p => PrimitiveKinds.IsApi(p.Kind)).ToList() ?? new List<PrimitiveInfo>();
+
         // --- filter row: search + type + visibility + group-by ---
         var search = new TextBox { Watermark = "Search primitives…", Width = 150 };
         var typeFilter = new ComboBox { SelectedIndex = 0, MinWidth = 90,
-            ItemsSource = new[] { "All types", "Event", "Builder", "Shard", "Shape", "Mark", "Bridge", "Publicator", "ShardView" } };
+            ItemsSource = new[] { "All types", "Event", "Builder", "Shape", "Mark", "Publicator" } };
         var visFilter = new ComboBox { SelectedIndex = 0, MinWidth = 80,
             ItemsSource = new[] { "All", "Public", "Shared", "Private" } };
         var groupBy = new ComboBox { SelectedIndex = 0, MinWidth = 110,
@@ -507,9 +510,11 @@ public partial class MainWindow : Window
         // --- bottom: status bar + detail + open ---
         var status = new TextBlock { Foreground = Brushes.Gray, FontSize = 11 };
         if (model is not null)
-            status.Text = $"PUBLIC {model.Primitives.Count(p => p.Visibility == Visibility.Public)}    " +
-                          $"SHARED {model.Primitives.Count(p => p.Visibility == Visibility.Shared)}    " +
-                          $"PRIVATE {model.Primitives.Count(p => p.Visibility == Visibility.Private)}";
+            status.Text = $"PUBLIC {api.Count(p => p.Visibility == Visibility.Public)}    " +
+                          $"SHARED {api.Count(p => p.Visibility == Visibility.Shared)}    " +
+                          $"PRIVATE {api.Count(p => p.Visibility == Visibility.Private)}" +
+                          (model.Primitives.Count(p => PrimitiveKinds.IsBehaviour(p.Kind)) is var n && n > 0
+                              ? $"        {n} shard(s) — see the Execution tab" : "");
         var detail = new TextBlock { Foreground = Brushes.Gainsboro, TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 6, 0, 0) };
         var open = new Button { Content = "Open Definition", Margin = new Thickness(0, 6, 0, 0) };
         open.Click += async (_, _) => await OpenPathAsync(bundle.MainFile);
@@ -522,11 +527,11 @@ public partial class MainWindow : Window
         tree.SelectionChanged += (_, _) =>
         {
             if (model is not null && tree.SelectedItem is TreeViewItem { Tag: PrimitiveInfo p })
-                detail.Text = DescribePrimitive(model.Name, p, exec, consoles);
+                detail.Text = DescribePrimitive(model.Name, p, consoles);
         };
         root.Children.Add(tree);
 
-        TreeViewItem Leaf(PrimitiveInfo p) => new() { Header = ExecBadge(exec, p) + KindSigil(p.Kind) + p.Name, Tag = p };
+        TreeViewItem Leaf(PrimitiveInfo p) => new() { Header = KindSigil(p.Kind) + p.Name, Tag = p };
 
         void Rebuild()
         {
@@ -537,7 +542,7 @@ public partial class MainWindow : Window
             string typeSel = typeFilter.SelectedItem as string ?? "All types";
             string visSel = visFilter.SelectedItem as string ?? "All";
 
-            var items = model.Primitives.AsEnumerable();
+            var items = api.AsEnumerable();
             if (typeSel != "All types") items = items.Where(p => p.Kind.ToString() == typeSel);
             if (visSel != "All") items = items.Where(p => p.Visibility.ToString() == visSel);
             if (q.Length > 0) items = items.Where(p => p.Name.Contains(q, StringComparison.OrdinalIgnoreCase));
@@ -561,7 +566,7 @@ public partial class MainWindow : Window
             }
             else   // By Type → Visibility → primitive
             {
-                foreach (PrimitiveKind kind in Enum.GetValues<PrimitiveKind>())
+                foreach (PrimitiveKind kind in Enum.GetValues<PrimitiveKind>().Where(PrimitiveKinds.IsApi))
                 {
                     var inKind = list.Where(p => p.Kind == kind).ToList();
                     var kindNode = new TreeViewItem { Header = $"{PluralKind(kind)} ({inKind.Count})", IsExpanded = inKind.Count > 0 };
@@ -601,16 +606,7 @@ public partial class MainWindow : Window
         PrimitiveKind.Event => "@", PrimitiveKind.Shape => "$", PrimitiveKind.Mark => "#", _ => ""
     };
 
-    /// The derived execution glyph for a behavioural primitive ("▣+ "), or "" for everything else.
-    private static string ExecBadge(ExecutionModel? m, PrimitiveInfo p)
-    {
-        if (m is null || p.Kind is not (PrimitiveKind.Shard or PrimitiveKind.ShardView or PrimitiveKind.Bridge))
-            return "";
-        if (m.ForOwner(p.Name) is not { } o) return "";
-        return ExecutionReport.ClassGlyph(o.Class, ExecutionReport.Unicode) + (o.Mixed ? "+" : "") + " ";
-    }
-
-    private static string DescribePrimitive(string bundle, PrimitiveInfo p, ExecutionModel? exec, ConsoleGraph? consoles)
+    private static string DescribePrimitive(string bundle, PrimitiveInfo p, ConsoleGraph? consoles)
     {
         var lines = new List<string>
         {
@@ -644,31 +640,6 @@ public partial class MainWindow : Window
                 if (callers.Count > 0) parts.Add("addressed by " + string.Join(", ", callers));
                 lines.Add("Console: " + string.Join(" · ", parts));
             }
-        }
-
-        // Derived execution: when it runs, what identity state it touches, who it races.
-        if (exec?.ForOwner(p.Name) is { } o)
-        {
-            var g = ExecutionReport.Unicode;
-            var units = exec.UnitsOf(p.Name).ToList();
-            string waves = o.FirstWave == o.LastWave ? $"wave {o.FirstWave}" : $"waves {o.FirstWave}–{o.LastWave}";
-            lines.Add($"Execution: {ExecutionReport.ClassGlyph(o.Class, g)} {o.Class}{(o.Mixed ? " (mixed)" : "")} · {waves}");
-            lines.Add("Units: " + string.Join(" · ", units.Select(u => $"{u.Trigger} {ExecutionReport.Badge(u, g)}")));
-
-            var reads = units.SelectMany(u => u.Reads).Select(r => r.Resource).Distinct().OrderBy(x => x, StringComparer.Ordinal);
-            var writes = units.SelectMany(u => u.Writes).Select(r => r.Display).Distinct().OrderBy(x => x, StringComparer.Ordinal);
-            var touches = new List<string>();
-            if (reads.Any()) touches.Add("reads " + string.Join(", ", reads));
-            if (writes.Any()) touches.Add("writes " + string.Join(", ", writes));
-            if (touches.Count > 0) lines.Add("Touches: " + string.Join(" · ", touches));
-
-            var mine = new HashSet<string>(units.Select(u => u.Id), StringComparer.Ordinal);
-            var clashes = exec.Conflicts
-                .Where(c => mine.Contains(c.A) || mine.Contains(c.B))
-                .Select(c => $"{(c.Resolvable ? g.Synchronized : g.Conflict)} {c.Resource.Resource} with "
-                           + (exec.Unit(mine.Contains(c.A) ? c.B : c.A)?.Label ?? "?"))
-                .Distinct().ToList();
-            if (clashes.Count > 0) lines.Add("Conflicts: " + string.Join(", ", clashes));
         }
         return string.Join("\n", lines);
     }

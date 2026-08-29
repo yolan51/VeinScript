@@ -7,6 +7,18 @@ namespace Vein.Compiler.Tooling;
 // AST — reuses BundleInfo (counts) and SymbolIndex (marks).
 public enum PrimitiveKind { Event, Builder, Shard, Shape, Mark, Bridge, Publicator, ShardView }
 
+public static class PrimitiveKinds
+{
+    /// Behaviour, not API. A shard/view/bridge can never be `shared` — VS0108 rejects one inside a
+    /// publicator — so it is not part of what another bundle can reference; it simply runs when the
+    /// bundle is loaded. Listing them beside the API confuses "what can I use" with "what happens".
+    public static bool IsBehaviour(PrimitiveKind k) =>
+        k is PrimitiveKind.Shard or PrimitiveKind.ShardView or PrimitiveKind.Bridge;
+
+    /// The consumable surface: what another bundle can actually reference.
+    public static bool IsApi(PrimitiveKind k) => !IsBehaviour(k);
+}
+
 // VeinScript visibility: `shared("…")` decls are the cross-bundle API (Shared); everything else declared
 // is Public; Private is reserved (no language concept yet).
 public enum Visibility { Public, Shared, Private }
