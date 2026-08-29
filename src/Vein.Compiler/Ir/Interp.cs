@@ -812,8 +812,8 @@ public sealed class Interp
             case IrBinOp.Mul: return Num(AsDouble(l) * AsDouble(r), l, r);
             case IrBinOp.Div: return Num(AsDouble(l) / AsDouble(r), l, r);
             case IrBinOp.Mod: return (long)AsDouble(l) % (long)AsDouble(r);
-            case IrBinOp.Eq: return Equals(Str(l), Str(r)) || AsDouble(l) == AsDouble(r);
-            case IrBinOp.Ne: return !(Equals(Str(l), Str(r)) || AsDouble(l) == AsDouble(r));
+            case IrBinOp.Eq: return LooseEq(l, r);
+            case IrBinOp.Ne: return !LooseEq(l, r);
             case IrBinOp.Lt: return AsDouble(l) < AsDouble(r);
             case IrBinOp.Gt: return AsDouble(l) > AsDouble(r);
             case IrBinOp.Le: return AsDouble(l) <= AsDouble(r);
@@ -828,6 +828,23 @@ public sealed class Interp
     private static bool IsInt(object? o) => o is long or int;
     private static bool Truthy(object? o) => o switch { null => false, bool b => b, long n => n != 0, double d => d != 0, string s => s.Length > 0, _ => true };
     private static long AsLong(object? o) => o switch { long l => l, int i => i, double d => (long)d, _ => 0 };
+    /// Equality across loosely-typed runtime values.
+    ///
+    /// This used to read `Equals(Str(l), Str(r)) || AsDouble(l) == AsDouble(r)`. The numeric arm was
+    /// there so `1 == 1.0` holds across a long field and a double literal — but AsDouble answers 0 for
+    /// anything it cannot parse, so EVERY pair of non-numeric strings took that arm and compared 0 to 0.
+    /// `"cat" == "dog"` was true, and so was `req.path == "/"` for every path a request could name.
+    ///
+    /// So the operands decide the comparison: two numbers compare numerically, anything else compares as
+    /// text. `"5" == 5` still holds — the string arm renders both to "5" — which keeps the loose typing
+    /// the language wants without letting an unparseable string collapse into a number.
+    private static bool LooseEq(object? l, object? r) =>
+        IsNumeric(l) && IsNumeric(r)
+            ? AsDouble(l) == AsDouble(r)
+            : string.Equals(Str(l), Str(r), StringComparison.Ordinal);
+
+    private static bool IsNumeric(object? o) => o is double or long or int or bool;
+
     private static double AsDouble(object? o) => o switch { double d => d, long l => l, int i => i, bool b => b ? 1 : 0, _ => 0 };
     private static string Str(object? o) => o switch { null => "", string s => s, double d => d.ToString(CultureInfo.InvariantCulture), bool b => b ? "true" : "false", _ => o.ToString() ?? "" };
     private static object? Default(string typeName) => typeName switch { "string" or "Mark" => "", "int" => 0L, "float" => 0.0, "bool" => false, _ => null };
