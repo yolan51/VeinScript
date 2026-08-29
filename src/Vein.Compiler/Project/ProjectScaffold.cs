@@ -1,20 +1,24 @@
 namespace Vein.Compiler.Project;
 
 // Scaffolds new VeinScript projects on disk: a bundle (a package of primitives) or an app (a
-// composition root that loads bundles). Both lay down a standard folder skeleton up front — the folders
-// exist even while empty so a project always has a home for each kind of file. Reused by `veinc new`
-// (CLI) and the Workbench's New Bundle/New App actions.
+// composition root that loads bundles). Reused by `veinc new` (CLI) and the Workbench's New Bundle/New App.
 //
-// NOTE (today's language): a bundle is one `.vein` file, so the by-kind subfolders (shapes/ events/ …)
-// are organizational placeholders — a multi-file bundle merge is a follow-on.
+// The two folders are STRUCTURAL, not decorative: BundleLoader merges everything under them into the
+// bundle, so a bundle is its main `.vein` plus its fragments. They split along the divide the language
+// already enforces (VS0108) — `publicators/` is the cross-bundle API, `shards/` is behaviour.
 public static class ProjectScaffold
 {
-    /// The per-primitive-kind subfolders every bundle gets.
-    public static readonly string[] BundleFolders = { "shapes", "events", "shards", "builders", "views" };
+    /// The fragment folders every bundle gets — see BundleLoader.
+    public static readonly string[] BundleFolders = { BundleLoader.PublicatorsFolder, BundleLoader.ShardsFolder };
 
-    /// Create a bundle skeleton under <paramref name="parentDir"/>: `<name>/<name>.vein` + the by-kind
-    /// subfolders (each kept with a `.gitkeep`). Returns the bundle dir and its main file.
-    public static (string BundleDir, string MainFile) NewBundle(string parentDir, string name, string author)
+    /// Create a bundle skeleton under <paramref name="parentDir"/>: `<name>/<name>.vein` + the
+    /// `publicators/` and `shards/` fragment folders. Returns the bundle dir and its main file.
+    ///
+    /// `withDiscovery` writes a `vein.discovery` beside the bundle. NewApp passes false: DiscoveryPolicy
+    /// takes the NEAREST file walking up, so a copy inside the principal bundle would silently shadow the
+    /// app's for everything in it.
+    public static (string BundleDir, string MainFile) NewBundle(string parentDir, string name, string author,
+                                                                bool withDiscovery = true)
     {
         ValidateName(name);
         string bundleDir = Path.Combine(parentDir, name);
@@ -30,6 +34,7 @@ public static class ProjectScaffold
 
         string mainFile = Path.Combine(bundleDir, name + ".vein");
         File.WriteAllText(mainFile, BundleTemplate(name, author));
+        if (withDiscovery) File.WriteAllText(Path.Combine(bundleDir, "vein.discovery"), DiscoveryTemplate());
         return (bundleDir, mainFile);
     }
 
@@ -43,22 +48,32 @@ public static class ProjectScaffold
         RequireEmpty(appDir);
         Directory.CreateDirectory(appDir);
 
-        // Principal bundle (the developer's own code) lives at <appDir>/<name>/.
-        NewBundle(appDir, name, author);
+        // Principal bundle (the developer's own code) lives at <appDir>/<name>/. No discovery file of its
+        // own — the app root's covers it, and a nested one would shadow it.
+        NewBundle(appDir, name, author, withDiscovery: false);
 
         string bundlesDir = Path.Combine(appDir, "bundles");
         Directory.CreateDirectory(bundlesDir);
         File.WriteAllText(Path.Combine(bundlesDir, ".gitkeep"), "");
+
+        File.WriteAllText(Path.Combine(appDir, "vein.discovery"), DiscoveryTemplate());
 
         string appFile = Path.Combine(appDir, "app.vein");
         File.WriteAllText(appFile, AppTemplate(name));
         return (appDir, appFile);
     }
 
-    /// A minimal, valid starter bundle.
+    /// A minimal, valid starter bundle. Everything fits in this one file until it doesn't — the
+    /// `publicators/` and `shards/` folders are where it goes when it grows.
     public static string BundleTemplate(string name, string author) => $$"""
-        // {{name}}.vein — a bundle: a reusable package of VeinScript primitives (shapes, events, shards,
-        // builders, views). Authored `by {{author}}`, so its public API is reached as *{{author}}.{{name}}.<Pub>.member.
+        // {{name}}.vein — a bundle: a reusable package of VeinScript primitives. Authored `by {{author}}`,
+        // so its public API is reached as *{{author}}.{{name}}.<Publicator>.<member>.
+        //
+        // A bundle is THIS file plus every fragment beside it:
+        //   publicators/<Name>.vein   the API — shapes, events, builders, shared fn/SF.
+        //                             The file name is the publicator name; `shared("…")` works directly.
+        //   shards/<Name>.vein        the behaviour — shard / ShardView / bridge.
+        // Both are optional: a small bundle lives entirely in this file, exactly as below.
         bundle {{name}} by {{author}} {
 
             // publicator = this bundle's public API (visible across bundles). `shared` marks a member public.
@@ -72,6 +87,29 @@ public static class ProjectScaffold
             //     hear @Started as e { }
             // }
         }
+        """;
+
+    /// A permissive `vein.discovery` — every directive commented out, so a new project resolves exactly as
+    /// it would with no file at all (DiscoveryPolicy.Permissive). Uncomment to narrow.
+    public static string DiscoveryTemplate() => """
+        # vein.discovery — controls what `*` wildcard discovery ENUMERATES (autocomplete / browsing).
+        #
+        #   silent = hidden from `*` discovery        expose = shown in `*` discovery
+        #
+        # `silent` controls DISCOVERY; `shared` still controls CONSUMPTION — an explicit
+        # *Author.Bundle.Publicator.@member always resolves and runs even if silenced here.
+        #
+        # A path is Author | Author.Bundle | Author.Bundle.Publicator; most-specific wins.
+        # With no directives (as shipped) everything is discoverable. Uncomment to narrow:
+
+        # silent all                     # nothing in `*` unless exposed below
+        # expose Vein.Console
+        # expose Vein.Math
+
+        # Importing a large dependency should not dump its whole tree into `*`. Name the front door and
+        # its transitive tree is silenced in one line, then expose only what you actually consume:
+        # silent transitive *MegaApp.PrincipalBundle
+        # expose *MegaApp.Physics
         """;
 
     /// A minimal app manifest that composes the principal bundle.

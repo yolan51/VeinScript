@@ -74,6 +74,11 @@ public sealed class Parser
         return new CompilationUnit(bundles, start) { Apps = apps };
     }
 
+    /// A bundle FRAGMENT — the declarations in a `publicators/` or `shards/` file, with no `bundle`
+    /// wrapper. The folder it lives in says which bundle it joins and whether it is API (`exported: true`,
+    /// so `shared("…")` is meaningful) or behaviour. Merged by BundleLoader.
+    public List<Decl> ParseFragment(bool exported) => ParseDeclList(exported, TokenKind.EndOfFile);
+
     private BundleDecl ParseBundle()
     {
         var start = Here;

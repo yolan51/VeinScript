@@ -44,8 +44,7 @@ switch (command)
 
     case "ast":
     {
-        var tokens = new Lexer(source, Path.GetFileName(path), diagnostics).Tokenize();
-        var unit = new Parser(tokens, diagnostics).ParseUnit();
+        var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
         Console.WriteLine(AstPrinter.Print(unit));
         break;
     }
@@ -57,8 +56,7 @@ switch (command)
             Unicode: args.Contains("--ir-unicode"),
             Spans: args.Contains("--ir-spans"),
             FullStrings: args.Contains("--ir-full-strings"));
-        var tokens = new Lexer(source, Path.GetFileName(path), diagnostics).Tokenize();
-        var unit = new Parser(tokens, diagnostics).ParseUnit();
+        var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
         if (!diagnostics.HasErrors)
         {
             if (legacy)
@@ -78,8 +76,7 @@ switch (command)
 
     case "render":
     {
-        var tokens = new Lexer(source, Path.GetFileName(path), diagnostics).Tokenize();
-        var unit = new Parser(tokens, diagnostics).ParseUnit();
+        var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
         if (!diagnostics.HasErrors)
         {
             // Positional arg = request path (legacy @Request); `--set k=v` overrides boot payload fields.
@@ -111,8 +108,7 @@ switch (command)
     {
         // Console mode: boot the program, then pump stdin↔stdout via @Input/@Print. Ctrl+Z (Windows) /
         // Ctrl+D (Unix) ends input.
-        var tokens = new Lexer(source, Path.GetFileName(path), diagnostics).Tokenize();
-        var unit = new Parser(tokens, diagnostics).ParseUnit();
+        var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
         if (!diagnostics.HasErrors)
         {
             var lower = new Lower(diagnostics, projectDir);
@@ -139,8 +135,7 @@ switch (command)
 
     case "graph":
     {
-        var tokens = new Lexer(source, Path.GetFileName(path), diagnostics).Tokenize();
-        var unit = new Parser(tokens, diagnostics).ParseUnit();
+        var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
         if (!diagnostics.HasErrors)
         {
             string requestPath = args.Length > 2 ? args[2] : "/";
@@ -162,8 +157,7 @@ switch (command)
 
     case "events":
     {
-        var tokens = new Lexer(source, Path.GetFileName(path), diagnostics).Tokenize();
-        var unit = new Parser(tokens, diagnostics).ParseUnit();
+        var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
         if (!diagnostics.HasErrors)
         {
             var events = EventCatalog.Catalog(unit);
@@ -179,8 +173,7 @@ switch (command)
     {
         if (args.Length < 3) { Console.Error.WriteLine("usage: veinc scaffold <file.vein> <EventName>"); return 2; }
         string want = args[2].TrimStart('@');
-        var tokens = new Lexer(source, Path.GetFileName(path), diagnostics).Tokenize();
-        var unit = new Parser(tokens, diagnostics).ParseUnit();
+        var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
         if (!diagnostics.HasErrors)
         {
             var events = EventCatalog.Catalog(unit);
@@ -228,8 +221,7 @@ switch (command)
     {
         // The derived execution model: when each trigger block runs, what identity state it touches, and
         // which blocks may run concurrently. Static analysis only — nothing is executed.
-        var tokens = new Lexer(source, Path.GetFileName(path), diagnostics).Tokenize();
-        var unit = new Parser(tokens, diagnostics).ParseUnit();
+        var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
         if (!diagnostics.HasErrors)
         {
             var model = ExecutionModel.Analyze(unit);

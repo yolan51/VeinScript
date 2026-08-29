@@ -35,10 +35,14 @@ public class ScaffoldTests
 
             Assert.True(File.Exists(mainFile));
             Assert.Equal("Combat.vein", Path.GetFileName(mainFile));
-            // Every by-kind subfolder exists, even though empty.
+            // The fragment folders exist even while empty — BundleLoader merges whatever lands in them.
+            Assert.Equal(new[] { "publicators", "shards" }, ProjectScaffold.BundleFolders);
             foreach (var folder in ProjectScaffold.BundleFolders)
                 Assert.True(Directory.Exists(Path.Combine(bundleDir, folder)), $"missing folder {folder}");
             Assert.True(ParsesClean(mainFile), "scaffolded bundle should parse with no diagnostics");
+
+            // A standalone bundle is its own workspace root, so it gets a discovery policy.
+            Assert.True(File.Exists(Path.Combine(bundleDir, "vein.discovery")));
         }
         finally { Directory.Delete(root, recursive: true); }
     }
@@ -64,6 +68,33 @@ public class ScaffoldTests
             Assert.Contains(model.Symbols, s => s.Bundle == "MyGame" && s.Name == "Started");
         }
         finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public void NewApp_puts_the_discovery_policy_at_the_app_root_only()
+    {
+        string root = TempDir();
+        try
+        {
+            var (appDir, _) = ProjectScaffold.NewApp(root, "MyGame", "you");
+
+            // DiscoveryPolicy takes the NEAREST file walking up, so a copy inside the principal bundle
+            // would silently shadow the app's for everything in it.
+            Assert.True(File.Exists(Path.Combine(appDir, "vein.discovery")));
+            Assert.False(File.Exists(Path.Combine(appDir, "MyGame", "vein.discovery")));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public void The_scaffolded_discovery_policy_is_permissive()
+    {
+        // Creating a project must not change what resolves: every directive ships commented out, so the
+        // policy is identical to having no file at all.
+        var policy = DiscoveryPolicy.Parse(ProjectScaffold.DiscoveryTemplate().Split('\n'));
+
+        Assert.True(policy.IsDiscoverable("Vein", "Console", "Io"));
+        Assert.True(policy.IsDiscoverable("anyone", "Anything", "Anywhere"));
     }
 
     [Fact]

@@ -187,10 +187,16 @@ public sealed class BundleIndex
         foreach (var file in files)
         {
             if (Path.GetFileName(file).EndsWith(".app.vein", StringComparison.OrdinalIgnoreCase)) continue;   // a manifest, not a bundle
+
+            // A fragment under publicators/ or shards/ has no `bundle` header — parsing it standalone
+            // yields zero bundles and a VS0101. BundleLoader pulls it in via its OWNING main file below,
+            // so skip it here rather than indexing a phantom empty bundle.
+            if (BundleLoader.IsFragment(file)) continue;
+
             try
             {
                 var diag = new DiagnosticBag();
-                var unit = new Parser(new Lexer(File.ReadAllText(file), Path.GetFileName(file), diag).Tokenize(), diag).ParseUnit();
+                var unit = BundleLoader.Load(file, diag);
                 foreach (var b in unit.Bundles)
                 {
                     string author = b.Author ?? "local";

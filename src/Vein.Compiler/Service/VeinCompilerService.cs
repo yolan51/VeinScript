@@ -3,6 +3,7 @@ using Vein.Compiler.Diagnostics;
 using Vein.Compiler.Ir;
 using Vein.Compiler.Lexing;
 using Vein.Compiler.Parsing;
+using Vein.Compiler.Project;
 
 namespace Vein.Compiler.Service;
 
@@ -12,7 +13,13 @@ namespace Vein.Compiler.Service;
 
 /// `ProjectDir` anchors cross-bundle resolution — the standard library plus this project's installed
 /// `bundles/`. Omit it and resolution falls back to the CWD, which finds the stdlib but not a user project.
-public sealed record CompileRequest(string FileName, string Source, bool Unicode = false, bool FullStrings = false, string? ProjectDir = null);
+///
+/// `SourcePath` is where `Source` lives on disk. Supply it and the bundle's `publicators/` and `shards/`
+/// fragments are merged in (BundleLoader); `Source` still wins for that one file, so an unsaved editor
+/// buffer compiles against its saved siblings. Omit it and only `Source` is compiled, as before.
+public sealed record CompileRequest(
+    string FileName, string Source, bool Unicode = false, bool FullStrings = false,
+    string? ProjectDir = null, string? SourcePath = null);
 
 public sealed record CompilationResult(
     bool Success,
@@ -30,8 +37,19 @@ public sealed class VeinCompilerService
         var sw = Stopwatch.StartNew();
         var diag = new DiagnosticBag();
 
-        var tokens = new Lexer(request.Source, request.FileName, diag).Tokenize();
-        var unit = new Parser(tokens, diag).ParseUnit();
+        // With a path, the bundle is its main file plus its publicators/ and shards/ fragments. Editing a
+        // fragment compiles the whole bundle, so the Bundle Explorer and diagnostics stay meaningful.
+        CompilationUnit unit;
+        if (request.SourcePath is { } path)
+        {
+            string main = BundleLoader.IsFragment(path) ? BundleLoader.LocateMainFile(path) ?? path : path;
+            unit = BundleLoader.Load(main, diag, editing: (path, request.Source));
+        }
+        else
+        {
+            var tokens = new Lexer(request.Source, request.FileName, diag).Tokenize();
+            unit = new Parser(tokens, diag).ParseUnit();
+        }
 
         IReadOnlyList<IrNode> tree = Array.Empty<IrNode>();
         string irText = "";
