@@ -337,8 +337,14 @@ hear *Vein.Net.Peer.@Message as m audience #Hub { … }
 Console's `@Send`/`@Message`/`@Undelivered` because at runtime they are the *same events* — an `emit`
 lowers to its bare event name and keeps the qualifier only for tooling. So there is exactly one place a
 transport is ever chosen ([Interp.Drain](../src/Vein.Compiler/Ir/Interp.cs)): a mark that has been
-`@Link`ed goes over the wire, anything else goes over the pipe. Delete the two Boot lines from
-[samples/net_peer.vein](../samples/net_peer.vein) and it is a local console program again.
+`@Link`ed goes over the wire, anything else goes over the pipe. Delete the `@Listen`/`@Link` lines from
+[net_peer.vein](../samples/net_peer.vein) / [net_spoke.vein](../samples/net_spoke.vein) and they are
+local console programs again.
+
+**The pair is the sample.** `net_peer.vein` is the hub (`veinc run` it first); `net_spoke.vein` pings it
+every 2s. Run the spoke alone to watch `@Undelivered` report the silence, then start the hub and watch
+the same program start getting answers with no restart. For two real machines, the spoke's `at:` address
+is the only line in either program that changes.
 
 That is the console model's claim carried intact: **a mark is an identity, and where it lives is routing.**
 

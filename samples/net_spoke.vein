@@ -1,0 +1,54 @@
+// samples/net_spoke.vein — the SPOKE half. Start samples/net_peer.vein (the hub) first.
+//
+//   Terminal 1:   veinc run samples/net_peer.vein      ← the hub; listens as #Hub on 9700
+//   Terminal 2:   veinc run samples/net_spoke.vein     ← this file; pings it every 2s
+//
+// For two real machines, change only the `at:` address below to the hub's IP — "10.0.0.5:9700". That
+// address is the ONLY line in either program that knows a network exists.
+//
+// Try these, in this order, to see what the design actually buys:
+//   1. Run the spoke with the hub DOWN  → every send comes back as @Undelivered, so silence is
+//      reported rather than merely happening.
+//   2. Start the hub                    → pings are answered, and the hub replies without ever having
+//      been told where the spoke lives (it learned the route from the first signed frame).
+//   3. Change `key` here and rerun      → the hub drops every frame. The sends still "succeed" locally:
+//      authentication happens at the RECEIVER, so a bad key looks exactly like a peer that went quiet.
+
+bundle PeerSpoke by you {
+
+    shard Boot {
+        run once {
+            // This program's own network identity, and the port it accepts replies on.
+            emit *Vein.Net.Peer.@Listen { as: #Spoke, at: 9701, key: "shared-secret" }
+
+            // Where the hub LIVES. Registering a route connects nothing — linking a machine that is not
+            // up yet is ordinary, and the first send simply comes back as @Undelivered.
+            emit *Vein.Net.Peer.@Link { name: #Hub, at: "127.0.0.1:9700", key: "shared-secret" }
+
+            emit *Vein.Console.Io.@Print { text: "spoke up as #Spoke — pinging #Hub every 2s" }
+        }
+    }
+
+    shard Pinger {
+        var round: int
+
+        every 2 {
+            round += 1
+            emit *Vein.Console.Io.@Print { text: "→ Hub: ping " + round }
+            // Identical to a console @Send. The routing table, not this line, decides it goes over TCP.
+            emit *Vein.Net.Peer.@Send { to: #Hub, text: "ping " + round }
+        }
+    }
+
+    shard Replies {
+        hear *Vein.Net.Peer.@Message as m audience #Hub {
+            emit *Vein.Console.Io.@Print { text: m.from + " replied: " + m.text }
+        }
+    }
+
+    shard Reachability {
+        hear *Vein.Net.Peer.@Undelivered as u {
+            emit *Vein.Console.Io.@Print { text: "  (" + u.to + " is not up — start samples/net_peer.vein)" }
+        }
+    }
+}
