@@ -1,0 +1,72 @@
+// samples/net_peer.vein — the SAME program on two machines, talking by identity.
+//
+//   Machine A:   veinc run samples/net_peer.vein            (it is #Hub — it listens and waits)
+//   Machine B:   set VEIN_PEER=Hub@192.168.1.10:9700
+//                veinc run samples/net_peer.vein            (it is #Spoke — it pings the hub)
+//
+// The point of this sample is what ISN'T here. Compare samples/console_roles.vein: the `@Send` and the
+// `hear @Message` below are byte for byte the same as the console version. Nothing about them says
+// "network". A mark is an identity; `@Link` tells the runtime where that identity lives; and the send
+// picks the wire over the pipe on its own. Delete the two lines in Boot and this becomes a local
+// console program again, unchanged.
+//
+// The key is a SHARED SECRET and it is mandatory. Every frame is signed with it, which is what makes
+// `from` a proven identity rather than a claim — and therefore what makes the `audience #Hub` barrier
+// on Report below mean something. A port with no key would accept anyone calling themselves #Hub.
+//
+// It authenticates; it does not encrypt. The text below travels in plaintext.
+
+bundle PeerDemo by you {
+
+    shard Boot {
+        run once {
+            // Who this program IS on the network, and where it accepts peers. Without `as`, every peer
+            // in the world would answer to #Main — fine for one machine's pipes, useless across a LAN.
+            emit *Vein.Net.Peer.@Listen { as: #Hub, at: 9700, key: "shared-secret" }
+
+            // Where a peer LIVES. Registering a route connects nothing: the hub below never links the
+            // spoke at all, because a peer's return route is learned from the first signed frame it
+            // sends. Only the side that speaks first needs configuring.
+            emit *Vein.Net.Peer.@Link { name: #Spoke, at: "127.0.0.1:9701", key: "shared-secret" }
+
+            emit *Vein.Console.Io.@Print { text: "hub listening on 9700 — waiting for #Spoke" }
+        }
+    }
+
+    shard Pinger {
+        var round: int
+
+        every 3 {
+            round += 1
+            emit *Vein.Console.Io.@Print { text: "→ Spoke: ping " + round }
+            emit *Vein.Net.Peer.@Send   { to: #Spoke, text: "ping " + round }
+        }
+    }
+
+    // `audience #Hub` is the whole reason the key exists. It admits messages from the hub and refuses
+    // every other sender — and because the frame was signed, "refuses" is a real guarantee rather than
+    // a request politely honoured by well-behaved peers.
+    shard Report {
+        hear *Vein.Net.Peer.@Message as m audience #Hub {
+            emit *Vein.Console.Io.@Print { text: "trusted " + m.from + ": " + m.text }
+        }
+    }
+
+    // Anything that arrives from someone OTHER than the hub still lands here — the barrier filters one
+    // handler, it does not discard the message. Which is what you want: unexpected is not the same as
+    // unwelcome, and a program that cannot see strangers cannot report them either.
+    shard Inbox {
+        hear *Vein.Net.Peer.@Message as m {
+            emit *Vein.Console.Io.@Print { text: m.from + ": " + m.text }
+            emit *Vein.Net.Peer.@Send   { to: m.from, text: "ack " + m.text }
+        }
+    }
+
+    // A peer that is off, unreachable, or was never linked. Exactly the console model's @Undelivered:
+    // "no answer" has to be an event, or a dead machine is indistinguishable from a quiet one.
+    shard Reachability {
+        hear *Vein.Net.Peer.@Undelivered as u {
+            emit *Vein.Console.Io.@Print { text: "  (" + u.to + " unreachable)" }
+        }
+    }
+}

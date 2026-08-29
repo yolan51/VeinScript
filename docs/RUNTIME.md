@@ -142,7 +142,9 @@ shard Chat {
 }
 ```
 Try it: `veinc build samples/console_chat.vein` → run it → type in one window, watch it appear in Server's.
-Cross-machine transport (TCP) and cross-bundle `use Console` import are follow-ons.
+Cross-machine transport is no longer a follow-on: `Vein.Net.Peer` carries these same `@Send`/`@Message`
+events over authenticated TCP, with the program unchanged (§4.3). Cross-bundle `use Console` import
+remains one.
 
 ### 2.4 A console address is machine-global
 
@@ -314,6 +316,110 @@ See [samples/entities.vein](../samples/entities.vein): `veinc run samples/entiti
 
 ---
 
+## 4.3 The network (`Vein.Net`) — the same identity model, off this machine
+
+§2.4 admitted the ceiling of the console bus: a pipe name is machine-global, so two programs address each
+other by identity with no discovery — but only if they share a machine. `Vein.Net` lifts exactly that
+ceiling and nothing else. It is deliberately **two** different things, because a VeinScript peer and a
+REST endpoint are not the same shape and one vocabulary for both would lie about one of them.
+
+### 4.3.1 `Peer` — symmetric, identity-addressed
+
+```
+emit *Vein.Net.Peer.@Listen { as: #Hub, at: 9700, key: "shared-secret" }     // who I am, where I accept
+emit *Vein.Net.Peer.@Link   { name: #Spoke, at: "10.0.0.5:9701", key: "…" }  // where a peer lives
+
+emit *Vein.Net.Peer.@Send { to: #Spoke, text: "ping" }                       // …then nothing changes
+hear *Vein.Net.Peer.@Message as m audience #Hub { … }
+```
+
+**The `@Send` and the `hear` are byte for byte the console versions.** `Vein.Net.Peer` re-declares
+Console's `@Send`/`@Message`/`@Undelivered` because at runtime they are the *same events* — an `emit`
+lowers to its bare event name and keeps the qualifier only for tooling. So there is exactly one place a
+transport is ever chosen ([Interp.Drain](../src/Vein.Compiler/Ir/Interp.cs)): a mark that has been
+`@Link`ed goes over the wire, anything else goes over the pipe. Delete the two Boot lines from
+[samples/net_peer.vein](../samples/net_peer.vein) and it is a local console program again.
+
+That is the console model's claim carried intact: **a mark is an identity, and where it lives is routing.**
+
+**Only the side that speaks first needs configuring.** A verified frame carries the port its sender
+listens on, so receiving one teaches the receiver the way back ([NetBus.LearnRoute](../src/Vein.Compiler/Ir/NetBus.cs)).
+A hub never has to be told where its spokes are.
+
+### 4.3.2 The trust model — and why `audience` needed one
+
+[KEYWORDS.md](KEYWORDS.md) has always defined `audience` as "networking/replication scope". Over the pipe
+bus that was advisory: `ConsoleBus` takes the sender's name from the message body and nothing checks it.
+Machine-local, that was tolerable — "who may claim to be `#Main`" was already bounded by "who is logged
+into this machine". **A TCP port is not bounded that way**, so shipping `Peer` with the same honesty gap
+would have turned `audience #Hub` into a decoration that reads like a barrier.
+
+So every frame is HMAC-SHA256 signed with the pre-shared `key`, over the claimed mark, the advertised
+return port, a timestamp, a nonce, and the body. The receiver refuses anything outside a ±30s window,
+anything whose nonce it has already accepted (a bounded FIFO cache, so the check cannot itself be the
+denial-of-service), and anything whose MAC does not verify in constant time.
+
+| Property | Guaranteed? |
+|---|---|
+| **Authenticity** — `from` is a mark held by someone with the key, so `audience` really excludes | **yes** |
+| **Integrity** — the body cannot be altered in flight | **yes** |
+| **Freshness** — a captured frame cannot be replayed | **yes** |
+| **Secrecy** — the body is hidden from anyone sniffing the wire | **no — plaintext** |
+
+**This is authentication, not TLS.** Do not put a password in a `@Send` and assume the wire hid it.
+
+`@Listen` **refuses an empty key** rather than accepting one. It is the single hard stop in the bundle:
+a keyless listener would accept any claimed identity, and `audience` would still compile and still read
+as a barrier while guaranteeing nothing — the worst of both worlds.
+
+Still true, and worth stating: this filters at the **receiver**, so a refused frame has already crossed
+the wire.
+
+### 4.3.3 `Http` — asymmetric, URL-addressed
+
+A REST endpoint has no mark, cannot call you back, and answers once per question, so `@Fetch` is a
+request with a reply rather than an addressed send:
+
+```
+emit *Vein.Net.Http.@Fetch { url: "https://…", method: "GET", body: "" }
+hear *Vein.Net.Http.@Fetched as r { … }      // it ANSWERED — any status, 404 and 500 included
+hear *Vein.Net.Http.@Failed  as f { … }      // no answer at all — bad host, refused, timeout
+```
+
+The `@Fetched`/`@Failed` split is the same line `@Undelivered` draws for `Peer`: *no answer* and *an
+answer you dislike* are different events. Collapsing a 404 into a failure would throw away the response
+body, which for most APIs is the error explanation itself.
+
+**Where the waiting happens depends on who owns the clock.** In a live session the request runs on a
+worker and posts its result to the inbox, so a slow host cannot freeze the console — the same discipline
+`every N` follows. In one-shot `render`/`serve` there is no loop to protect and the job is to produce one
+response, so it waits inline.
+
+### 4.3.4 `veinc serve` — the web backend, actually served
+
+`stdlib/Web.vein` has always declared `@Request`/`@Response`, and `veinc render` has always fired a *fake*
+`@Request` to prove a page assembles. `veinc serve` is that same pipeline with a socket in front:
+
+```
+veinc serve samples/web_demo.vein --port 8080 [--host 0.0.0.0]
+```
+
+Nothing in the language or the interpreter changed to make this work, because **a request was already the
+boot event** — which is why it is one file and not a web framework. One request = one `Render` = one fresh
+interpreter, so a page cannot depend on the last visitor's state. A query string arrives as boot payload
+fields, exactly as `--set` does. A path that emits no `@Response` is a **404**, because that is what an
+unrouted URL is.
+
+> **Found while building this:** routing by path did not work, and the cause was not in `serve`. `==`
+> read `Equals(Str(l), Str(r)) || AsDouble(l) == AsDouble(r)`, and `AsDouble` answers `0` for anything it
+> cannot parse — so *every* pair of non-numeric strings took the numeric arm and compared `0` to `0`.
+> `"cat" == "dog"` was **true**, and so was `req.path == "/"` for every URL a browser could ask for. The
+> operands now decide the comparison: two numbers compare numerically, anything else compares as text
+> (`"5" == 5` still holds). Guarded by `EqualityTests` — the bug survived so long because the test nobody
+> writes is the one asserting that two *different* strings are unequal.
+
+---
+
 ## 5. Apps, loading, linking, running
 
 - **Load (implemented):** an `app` lists bundles across files; `veinc symbols` loads + parses them into a
@@ -339,6 +445,10 @@ Each bundle's `start` entry is the piece that makes an app *runnable* rather tha
 | load-site `start { … }` override (parsed + validated by `veinc symbols`) | fires once app link+run lands |
 | `target`/`each tick`/`folds`/`settled`, `Entity` id, `spawn()`/`attach`/`mark`/`destroy` | **runs** (`veinc run samples/entities.vein --ticks 3`) |
 | `every N` (wall-clock schedule), `here()` | **runs** in a console session (`veinc run`, built .exe) |
+| cross-machine `@Send`/`@Message` by identity (`Vein.Net.Peer`) | **runs** — HMAC-signed, so `audience` is **enforced**, not advisory (§4.3) |
+| HTTP client (`Vein.Net.Http` `@Fetch`/`@Fetched`/`@Failed`) | **runs** (§4.3.3) |
+| HTTP server — real `@Request`→`@Response` over a socket | **runs** (`veinc serve <file> --port N`) |
+| transport encryption (TLS) for `Vein.Net.Peer` | **follow-on** — frames are authenticated, not secret |
 | app link + run (`veinc render app.vein`) | **follow-on** |
 
 ## 7. Open questions

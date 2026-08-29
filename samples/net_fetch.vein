@@ -1,0 +1,48 @@
+// samples/net_fetch.vein — calling a service that has never heard of VeinScript.
+//
+//   veinc run samples/net_fetch.vein
+//
+// Vein.Net.Peer addresses an IDENTITY: symmetric, both ends are Vein programs, either may speak first.
+// HTTP is the opposite shape and the bundle does not pretend otherwise — a REST endpoint has no mark,
+// cannot call you back, and answers exactly once per question. So this is a REQUEST with a reply:
+// @Fetch goes out, @Fetched or @Failed comes back.
+//
+// The distinction worth internalising: a 404 or a 500 is @Fetched, not @Failed. The service ANSWERED,
+// and what it answered is the program's business. @Failed means no answer arrived at all — bad host,
+// refused connection, timeout. That is the same line @Undelivered draws for a peer.
+//
+// The request does not block the event loop: it runs on a worker and posts its result back, so the
+// console stays responsive and the `every 5` timer below keeps ticking while a slow host hangs.
+
+bundle FetchDemo by you {
+
+    shard Boot {
+        run once {
+            emit *Vein.Console.Io.@Print { text: "asking httpbin for an IP…" }
+            emit *Vein.Net.Http.@Fetch  { url: "https://httpbin.org/ip", method: "GET", body: "" }
+        }
+    }
+
+    // Poll something on a timer — the ordinary reason a program fetches at all.
+    shard Poller {
+        var n: int
+
+        every 5 {
+            n += 1
+            emit *Vein.Net.Http.@Fetch { url: "https://httpbin.org/uuid", method: "GET", body: "" }
+        }
+    }
+
+    shard Results {
+        hear *Vein.Net.Http.@Fetched as r {
+            emit *Vein.Console.Io.@Print { text: r.status + " " + r.url }
+            emit *Vein.Console.Io.@Print { text: r.body }
+        }
+
+        // Reached only when nothing came back. Worth handling separately: a program that treats an
+        // unreachable host as an empty body will happily parse silence as data.
+        hear *Vein.Net.Http.@Failed as f {
+            emit *Vein.Console.Io.@Print { text: "unreachable " + f.url + " — " + f.reason }
+        }
+    }
+}

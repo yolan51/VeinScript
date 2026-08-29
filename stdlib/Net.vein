@@ -1,0 +1,80 @@
+// stdlib/Net.vein — VeinScript Standard Library : Vein.Net
+// The network as EVENTS, in two shapes that are deliberately NOT the same shape:
+//
+//   Peer — symmetric, identity-addressed, VeinScript on both ends. `@Send { to: #Server }` reaches a
+//          program on another machine exactly as it reaches a console on this one. The transport is the
+//          routing table's business, not the program's.
+//   Http — asymmetric, URL-addressed, anything on the far end. A REST service has no mark and answers
+//          once per question, so `@Fetch` is a REQUEST with a reply, not an addressed send.
+//
+// Discover:  veinc symbols stdlib/Net.vein
+
+bundle Net by Vein {
+
+    // Peer — VeinScript to VeinScript, across machines.
+    //
+    // The messaging vocabulary here (@Send / @Message / @Undelivered) is the SAME vocabulary
+    // *Vein.Console.Io declares, because at runtime they are the same events. That is the point: a
+    // program written against consoles goes cross-machine by adding @Listen and @Link and changing
+    // nothing else. They are re-declared here so a headless server never has to import "Console" to
+    // talk to the network.
+    publicator Peer {
+        // A key is REQUIRED, and the runtime refuses @Listen without one. A port anyone may write to
+        // accepts any claimed identity, which would quietly turn `audience` — the language's networking
+        // barrier (KEYWORDS.md) — into decoration. Every frame is signed with this secret and carries a
+        // timestamp and a nonce, so a peer's name is proven and a captured frame cannot be replayed.
+        //
+        // What this does NOT do is hide the body: frames are authenticated, not encrypted.
+        shared("Accept peers on a port, under a network identity. `as` is who this program IS on the network; `key` is the shared secret that signs every frame.")
+        event @Listen { as: Mark, at: int, key: string }
+
+        shared("Teach this program how to reach a peer — `at` is \"host\" or \"host:port\". Registers a route; nothing connects until you send.")
+        event @Link { name: Mark, at: string, key: string }
+
+        shared("Send a line to a peer or console by address — remote when linked, local otherwise.")
+        event @Send { to: Mark, text: string }
+
+        shared("A line that arrived — `from` is the sender's proven identity, safe to use in `audience`.")
+        event @Message { from: Mark, text: string }
+
+        shared("A line that could not be delivered — the peer is unreachable, unlinked, or refused it.")
+        event @Undelivered { to: Mark, text: string }
+
+        // Emit-only helpers — the same events, named as actions.
+        shared("Accept peers on a port under a network identity.")
+        SF listen(me: Mark, port: int, key: string) { emit @Listen { as: me, at: port, key: key } }
+
+        shared("Register the route to a peer.")
+        SF link(name: Mark, at: string, key: string) { emit @Link { name: name, at: at, key: key } }
+
+        shared("Send a line to a peer by address.")
+        SF send(dest: Mark, text: string) { emit @Send { to: dest, text: text } }
+    }
+
+    // Http — reaching a service that is not a VeinScript peer.
+    publicator Http {
+        // A reply of ANY status is @Fetched, including 404 and 500: the service answered, and what it
+        // answered is the program's business. Only a request that never got a reply at all — bad host,
+        // refused connection, timeout — becomes @Failed. That is the same line @Undelivered draws for
+        // Peer: "no answer" and "an answer you dislike" are different events.
+        shared("Request a URL. `method` defaults to GET; a non-empty `body` is sent as JSON.")
+        event @Fetch { url: string, method: string, body: string }
+
+        shared("The service replied — `status` is its HTTP status, whatever it was.")
+        event @Fetched { url: string, status: int, body: string }
+
+        shared("The request never got a reply — bad host, refused connection, or timeout.")
+        event @Failed { url: string, reason: string }
+
+        shared("GET a URL.")
+        SF get(url: string) { emit @Fetch { url: url, method: "GET", body: "" } }
+
+        shared("POST a body to a URL.")
+        SF post(url: string, body: string) { emit @Fetch { url: url, method: "POST", body: body } }
+    }
+
+    // --- no behaviour here ---------------------------------------------------------------------------
+    // A shard cannot be `shared`, so any routing or retry policy declared here would be invisible
+    // behaviour handed to everyone who only wanted the vocabulary — the same line stdlib/Web.vein holds.
+    // See samples/net_peer.vein and samples/net_fetch.vein for these assembled end to end.
+}

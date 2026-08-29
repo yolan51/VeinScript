@@ -8,7 +8,7 @@ using Vein.Compiler.Tooling;
 
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("usage: veinc <new|tokens|ast|ir|render|run|build|graph|events|scaffold|symbols|exec> <file.vein> [arg]");
+    Console.Error.WriteLine("usage: veinc <new|tokens|ast|ir|render|serve|run|build|graph|events|scaffold|symbols|exec> <file.vein> [arg]");
     return 2;
 }
 
@@ -105,6 +105,21 @@ switch (command)
             }
         }
         break;
+    }
+
+    case "serve":
+    {
+        // The same @Request → @Response pipeline `render` drives, with a real socket in front of it.
+        int port = 8080;
+        string host = "localhost";
+        for (int i = 2; i < args.Length; i++)
+        {
+            if (args[i] == "--port" && i + 1 < args.Length && int.TryParse(args[i + 1], out var p)) { port = p; i++; }
+            else if (args[i].StartsWith("--port=") && int.TryParse(args[i]["--port=".Length..], out var p2)) port = p2;
+            else if (args[i] == "--host" && i + 1 < args.Length) host = args[++i];
+            else if (args[i].StartsWith("--host=")) host = args[i]["--host=".Length..];
+        }
+        return ServeCommand.Serve(path, source, port, host);
     }
 
     case "run":

@@ -77,7 +77,7 @@ Held so they aren't accidentally repurposed. Assign a meaning or cut before v1.0
 | Keyword | Leaning / candidate use |
 |---------|-------------------------|
 | `on` | event/UI handler sugar (`on click { … }`) — desktop domain |
-| `audience` | networking/replication scope (who sees an identity/event) |
+| `audience` | networking/replication scope (who sees an identity/event) — **enforced** over `Vein.Net.Peer`, where a signed frame makes the sender's mark provable ([RUNTIME.md §4.3.2](RUNTIME.md)); advisory over the local console pipe |
 | `bridge` | interop / FFI boundary |
 | `bring` | instantiate a `builder` (`bring [N] Name(args)`), binding args positionally + emitting its output event |
 | `builder` | a reusable element template: signature body (params + one `markup`/`code`/`css` output field) |

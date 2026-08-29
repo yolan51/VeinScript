@@ -90,6 +90,15 @@ public sealed class Interp
 
     private string _self = RootConsole;   // this console's address (for @Send routing) if not spawned.
 
+    /// The network listener, once `@Listen` has opened one. Null in a program that never listens — which
+    /// includes every program that only LINKS peers, since sending needs no port of its own.
+    private NetBus? _net;
+
+    /// The live session's work queue, when there is one. A background result (an HTTP reply) is posted
+    /// here rather than applied where it completed, which is what keeps the interpreter single-threaded.
+    /// Null in one-shot modes (`render`, `serve`), where the same work runs inline instead — see Fetch.
+    private System.Collections.Concurrent.BlockingCollection<Action>? _inbox;
+
     public sealed record GraphEdge(string FromName, string FromKind, string Event);
     public sealed record RenderResult(
         string? Body, long Status, IReadOnlyList<string> Log,
@@ -135,14 +144,13 @@ public sealed class Interp
                 _out.WriteLine(first);
         }
 
-        Setup(module);
-        RunOnce();
-        FireBoot(module, "/", null);
-        Drain();
-        RunFrames();
-
         if (!messaging)
         {
+            Setup(module);
+            RunOnce();
+            FireBoot(module, "/", null);
+            Drain();
+            RunFrames();
             // Simple synchronous loop: stdin line → @Input → drain, until EOF.
             string? line;
             while ((line = input.ReadLine()) is not null) { FireInput(line); Drain(); }
@@ -152,7 +160,20 @@ public sealed class Interp
         // Messaging mode: accept input from stdin AND the console bus concurrently. ALL event-loop work
         // runs on this thread via the inbox (the interpreter stays logically single-threaded); the
         // background threads only post actions.
+        //
+        // The inbox exists BEFORE the program boots, because `@Listen` almost always sits in `run once`:
+        // booting first would open the port while there was still nowhere to post to, and the first peer
+        // to connect would then be handled on the accept thread — mutating the world from outside the
+        // loop the whole design exists to keep single-threaded.
         using var inbox = new System.Collections.Concurrent.BlockingCollection<Action>();
+        _inbox = inbox;
+
+        Setup(module);
+        RunOnce();
+        FireBoot(module, "/", null);
+        Drain();
+        RunFrames();
+
         using var bus = ConsoleBus.Start(_self, (from, text) =>
         { try { inbox.Add(() => Receive(from, text)); } catch { /* inbox closed */ } });
 
@@ -186,6 +207,8 @@ public sealed class Interp
         }
         catch { /* the inbox completed — the run is over */ }
         bus.Stop();
+        _net?.Stop();   // release the port; a listener left bound outlives the run that opened it
+        _inbox = null;
     }
 
     /// Register every First-Class object (shard/view/bridge) and wire its `hear` handlers.
@@ -286,6 +309,96 @@ public sealed class Interp
         {
             ["from"] = from, ["text"] = text, ["origin"] = null, ["bundle"] = _bundle
         });
+    }
+
+    // ---- the network ----------------------------------------------------
+
+    /// `@Listen { as: #Me, at: 9700, key: "…" }` — bind a port and take a NETWORK identity.
+    ///
+    /// `as` matters more than it looks. On the pipe bus every unnamed root is `Main`, which is harmless
+    /// while the namespace is one machine. Across machines it is not: every peer would answer to the same
+    /// mark. So a listening program says who it is, and that name is what its frames are signed as.
+    private void DoListen(Dictionary<string, object?> payload)
+    {
+        string key = Str(payload.GetValueOrDefault("key"));
+        long port = AsLong(payload.GetValueOrDefault("at"));
+        string self = Str(payload.GetValueOrDefault("as"));
+
+        // Refusing an empty key is the one hard stop in the whole bundle. A listener without one accepts
+        // any frame that reaches the port, and `audience` — which the language sells as the networking
+        // barrier — would silently become decoration. Better a loud no than a quiet lie.
+        if (key.Length == 0) { Fail("Listen", "@Listen needs a key — an unauthenticated port would make `audience` meaningless"); return; }
+        if (_net is not null) { Fail("Listen", "already listening"); return; }
+
+        if (self.Length > 0) _self = self;
+        try
+        {
+            _net = NetBus.Start(_self, (int)port, key, (from, text) =>
+            {
+                // Exactly like an arriving console message: the transport only POSTS, and the event loop
+                // owns every mutation. A live session has an inbox; a one-shot run handles it inline.
+                if (_inbox is { } box) { try { box.Add(() => Receive(from, text)); } catch { } }
+                else Receive(from, text);
+            });
+            _log.Add($"listening as {_self} on port {NetBus.SelfPort}");
+        }
+        catch (Exception ex) { Fail("Listen", ex.Message); }
+    }
+
+    /// `@Link { name: #Peer, at: "host:port", key: "…" }` — teach this process how to reach a peer.
+    /// Registers a route only; nothing connects until something is actually sent, so linking a machine
+    /// that is not up yet is fine and ordinary.
+    private void DoLink(Dictionary<string, object?> payload)
+    {
+        string name = Str(payload.GetValueOrDefault("name"));
+        string at = Str(payload.GetValueOrDefault("at"));
+        string key = Str(payload.GetValueOrDefault("key"));
+        if (key.Length == 0) { Fail("Link", "@Link needs a key — the peer will refuse an unsigned frame"); return; }
+        if (!NetBus.Link(name, at, key)) { Fail("Link", $"cannot parse address \"{at}\" for {name}"); return; }
+        _log.Add($"linked {name} at {at}");
+    }
+
+    /// `@Fetch { url, method, body }` — the one asymmetric call in Vein.Net, answered by @Fetched (the
+    /// service replied, whatever the status) or @Failed (it never replied at all).
+    ///
+    /// Where the waiting happens depends on who owns the clock. A live console must not block its event
+    /// loop for 30 seconds, so the request goes to a worker that posts the result back. A one-shot
+    /// `render`/`serve` has no inbox and no loop to protect, and its whole job is to produce ONE response,
+    /// so it waits inline — which also keeps a rendered page reproducible.
+    private void DoFetch(Dictionary<string, object?> payload)
+    {
+        string url = Str(payload.GetValueOrDefault("url"));
+        string method = Str(payload.GetValueOrDefault("method"));
+        string body = Str(payload.GetValueOrDefault("body"));
+
+        if (_inbox is not { } box) { Deliver(url, NetHttp.Fetch(url, method, body)); return; }
+
+        new Thread(() =>
+        {
+            var result = NetHttp.Fetch(url, method, body);
+            try { box.Add(() => { Deliver(url, result); Drain(); }); } catch { /* the run ended */ }
+        })
+        { IsBackground = true, Name = "vein-fetch" }.Start();
+    }
+
+    /// Turn a finished request into the event the program hears.
+    private void Deliver(string url, NetHttp.Result r)
+    {
+        if (r.Error is { } err)
+            Emit("Failed", new Dictionary<string, object?>(StringComparer.Ordinal)
+            { ["url"] = url, ["reason"] = err, ["origin"] = null, ["bundle"] = _bundle });
+        else
+            Emit("Fetched", new Dictionary<string, object?>(StringComparer.Ordinal)
+            { ["url"] = url, ["status"] = r.Status, ["body"] = r.Body, ["origin"] = null, ["bundle"] = _bundle });
+    }
+
+    /// A network setup step that could not be carried out. It goes to the log AND to the console, because
+    /// a mistyped address or a missing key otherwise looks exactly like a peer that is merely quiet — the
+    /// single most confusing failure this bundle can produce.
+    private void Fail(string what, string why)
+    {
+        _log.Add($"@{what} failed: {why}");
+        _out?.WriteLine($"(@{what} failed: {why})");
     }
 
     // ---- the clock ------------------------------------------------------
@@ -394,10 +507,17 @@ public sealed class Interp
             if (name == "Send")
             {
                 string to = Str(payload.GetValueOrDefault("to")), body = Str(payload.GetValueOrDefault("text"));
+                // The ONE place a transport is chosen, and the program never sees it happen. A mark that
+                // has been `@Link`ed names a peer on another machine, so it goes over the wire; anything
+                // else is a console on this one, so it goes over the pipe. That is the whole reason
+                // console_roles.vein runs cross-machine by editing only its Boot shard: `@Send { to: #X }`
+                // addresses an IDENTITY, and where that identity lives is the routing table's business.
+                bool sent = NetBus.IsRemote(to) ? NetBus.Send(to, _self, body) : ConsoleBus.Send(to, _self, body);
+
                 // A console that was closed cannot be reached. A peer going away is NORMAL, so this is an
                 // event the program can hear rather than an error — and never a silent drop, which would
                 // leave a program unable to tell "delivered" from "shouting into a void".
-                if (!ConsoleBus.Send(to, _self, body))
+                if (!sent)
                     Emit("Undelivered", new Dictionary<string, object?>(StringComparer.Ordinal)
                     {
                         ["to"] = to, ["text"] = body,
@@ -405,6 +525,9 @@ public sealed class Interp
                     });
                 continue;
             }
+            if (name == "Listen") { DoListen(payload); continue; }
+            if (name == "Link") { DoLink(payload); continue; }
+            if (name == "Fetch") { DoFetch(payload); continue; }
 
             if (!_handlers.TryGetValue(name, out var hs)) continue;
             foreach (var h in hs)

@@ -110,11 +110,14 @@ its native input into that identity. No `Web.MouseDown` / `Desktop.MouseDown` du
 
 ## 5. The library (author `Vein`)
 
-Nine platform-independent bundles authored `by Vein`. A bundle has two layers:
+Ten platform-independent bundles authored `by Vein`. A bundle has two layers:
 
 - **Publicators = the shared API** (`shared` shapes/events/builders/functions), reachable across bundles
   as `*Vein.Bundle.Publicator.member` and listed by `veinc symbols stdlib/Vein.app.vein`. Totals:
-  **25 shapes · 30 events · 8 builders · 6 fn · 6 SF**, in **20 publicators**.
+  **25 shapes · 39 events · 8 builders · 6 fn · 11 SF**, in **22 publicators**. Four of those names are
+  declared twice on purpose — `Vein.Net.Peer` re-declares Console's `@Send`/`@Message`/`@Undelivered`/`send`
+  so a headless program need not name "Console" to reach the network. `veinc symbols` flags them as
+  collisions and says to qualify with the **bundle**, since both bundles share the author `Vein`.
 - **No shards.** The library is vocabulary; behaviour is the application's. A `shard` can never be
   `shared` — it is not allowed inside a publicator at all (VS0108) — so one declared in a library would
   not be API: it would be invisible behaviour installed in every consumer merely because they imported
@@ -144,6 +147,7 @@ runtime auto-attaches a provenance envelope (`from`, `origin`, `id`, `cause`, `t
 | **Web** | `Http` (`@Request` `@Html` `@Style` `@Script` `@Render` `@Response`) · `Elements` (builders `Heading` `Paragraph` `Button` `Link` `Image` `ListItem`) | `Router` `Demo` + `Page` view — renders standalone |
 | **Diagnostics** | `Report` (`$Diagnostic` `@DiagnosticRaised`) | `Collector` |
 | **Console** | `Io` (`@Print{text}` `@Input{text}` `@Console{name: Mark,firsttext}` `@Send{to: Mark,text}` `@Message{from: Mark,text}` + builders `Line{text}`→`@Print`, `Console{name: Mark,firsttext}`→`@Console`) — console I/O, spawning named console apps, and messaging between them; the runtime bridges `@Print`/`@Input`↔stdout/stdin, `@Console`→a new console window, and `@Send`→another console (delivered as `@Message` over a local named pipe). Addresses are identity references, not strings — write `#Server`, and `#Main` for the root console; an address nothing spawns is reported as VS0212 | — |
+| **Net** | `Peer` (`@Listen{as: Mark,at: int,key}` `@Link{name: Mark,at,key}` + `@Send`/`@Message`/`@Undelivered`) — the same messaging vocabulary Console declares, because at runtime they are the **same events**: `@Send` picks the wire when the mark is linked and the pipe when it is not, so a console program goes cross-machine by adding `@Listen`/`@Link` and changing nothing else. Frames are HMAC-signed with a pre-shared `key`, which is what makes `from` a proven identity and `audience` an enforced barrier rather than advice · `Http` (`@Fetch{url,method,body}` `@Fetched{url,status,body}` `@Failed{url,reason}`) — the asymmetric half: a URL is not an identity, so this is a request with a reply. Any status is `@Fetched`; only *no answer* is `@Failed` | — |
 
 Notes: game-specific capabilities live in their own **Game** bundle (non-game apps don't pull it in);
 Transform is general (spatial is used by apps + games). Input positions are `x,y: float`, not `$Vec2` —

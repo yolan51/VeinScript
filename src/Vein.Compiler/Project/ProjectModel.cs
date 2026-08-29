@@ -83,6 +83,13 @@ public sealed class ProjectModel
     public string Render()
     {
         var collisions = Collisions.ToHashSet(StringComparer.Ordinal);
+        // Which of those collisions are between bundles by ONE author, where naming the author changes
+        // nothing and the bundle is what tells them apart.
+        var sameAuthor = Symbols.GroupBy(s => s.SigilName)
+                                .Where(g => collisions.Contains(g.Key) &&
+                                            g.Select(s => s.Author).Distinct(StringComparer.Ordinal).Count() == 1)
+                                .Select(g => g.Key)
+                                .ToHashSet(StringComparer.Ordinal);
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"app {AppName}  ({Symbols.Count} symbols, {collisions.Count} name collision(s))");
         foreach (var g in Symbols.GroupBy(s => (s.Author, s.Bundle)).OrderBy(g => g.Key.Author).ThenBy(g => g.Key.Bundle))
@@ -92,7 +99,13 @@ public sealed class ProjectModel
             if (boot is not null) sb.AppendLine($"    {boot.Signature}   (boot — fill via `load … start {{ … }}`)");
             foreach (var s in g.OrderBy(x => x.Publicator ?? "").ThenBy(x => x.Kind).ThenBy(x => x.Name, StringComparer.Ordinal))
             {
-                string flag = collisions.Contains(s.SigilName) ? "   [COLLISION — qualify with author]" : "";
+                // "Qualify with author" is only a cure when the authors actually DIFFER. Vein.Net.Peer
+                // re-declares Vein.Console.Io's @Send deliberately (same runtime event, two vocabularies),
+                // and telling someone to add `Vein.` to a name that is already Vein's would send them in
+                // a circle. Same author → the bundle is the segment that separates them.
+                string flag = !collisions.Contains(s.SigilName) ? ""
+                    : sameAuthor.Contains(s.SigilName) ? "   [COLLISION — qualify with bundle]"
+                    : "   [COLLISION — qualify with author]";
                 sb.AppendLine($"    {s.QualifiedName}   ({s.Kind}){flag}");
             }
         }
