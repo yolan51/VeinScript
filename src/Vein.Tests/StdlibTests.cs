@@ -76,7 +76,7 @@ public class StdlibTests
         Assert.False(diag.HasErrors);
         var byKind = model.Symbols.GroupBy(s => s.Kind).ToDictionary(g => g.Key, g => g.Count());
         Assert.InRange(byKind[SymbolKind.Shape], 10, 30);
-        Assert.InRange(byKind[SymbolKind.Event], 5, 30);
+        Assert.InRange(byKind[SymbolKind.Event], 5, 40);
         Assert.InRange(byKind[SymbolKind.Builder], 5, 30);
         Assert.False(byKind.ContainsKey(SymbolKind.Shard));   // shards are never in the shared API
     }

@@ -1,0 +1,43 @@
+VeinIR v1  file=samples/entities.vein
+Bundle Entities
+|--- Use Core
+|--- Shape $Health
+|    `--- Field hp: int  folds=sum
+|--- Shard Spawner
+|    `--- RunOnce
+|         `--- Repeat 3
+|              |--- Let e = Call spawn
+|              |--- Attach $Health to e
+|              |    `--- Arg hp = Int 5
+|              `--- Mark e #Enemy
+|--- Shard Drain
+|    `--- EachTick
+|         `--- Target $Health #Enemy as self
+|              `--- Assign -= self.Health.hp
+|                   `--- Int 1
+|--- Shard Poison
+|    `--- EachTick
+|         `--- Target $Health #Enemy as self
+|              `--- Assign -= self.Health.hp
+|                   `--- Int 1
+`--- Shard Undertaker
+     `--- Settled
+          `--- Target $Health #Enemy as self
+               |--- Emit *Vein.Console.Io.@Print
+               |    `--- Arg text = Concat
+               |         |--- Str "enemy "
+               |         |--- Ref Entity
+               |         |--- Str " hp "
+               |         `--- Path self.Health.hp
+               `--- If
+                    |--- Cond = Binary <=
+                    |    |--- Path self.Health.hp
+                    |    `--- Int 0
+                    `--- Then
+                         |--- Mark self #Dead
+                         |--- Unmark self #Enemy
+                         `--- Emit *Vein.Console.Io.@Print
+                              `--- Arg text = Concat
+                                   |--- Str "enemy "
+                                   |--- Ref Entity
+                                   `--- Str " died"

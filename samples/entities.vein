@@ -1,0 +1,54 @@
+// entities.vein — the identity runtime actually RUNNING: spawn, attach, target, folds, settled.
+//
+// Two independent shards drain the same `hp` in one tick. `folds sum` is what makes that safe: each
+// contributes its DELTA, so hp falls by exactly 2 per tick rather than one shard's write winning.
+//
+//   veinc render samples/entities.vein --ticks 3
+//
+// The clock is explicit (`--ticks N`) and `random` is seeded, so the run is reproducible.
+
+bundle Entities {
+    use Core
+
+    shape $Health {
+        hp: int folds sum      // many shards may drain hp in one tick; sum the deltas
+    }
+
+    shard Spawner {
+        // `run once` builds the world before anything else happens.
+        run once {
+            repeat 3 {
+                let e = spawn()
+                attach $Health to e { hp: 5 }
+                mark e #Enemy
+            }
+        }
+    }
+
+    shard Drain {
+        each tick {
+            target $Health #Enemy as self { self.Health.hp -= 1 }
+        }
+    }
+
+    shard Poison {
+        each tick {
+            target $Health #Enemy as self { self.Health.hp -= 1 }
+        }
+    }
+
+    shard Undertaker {
+        // settled runs AFTER the tick's contributions reconcile — the only place a death check is
+        // correct, because during the tick another shard may still be subtracting.
+        settled {
+            target $Health #Enemy as self {
+                emit *Vein.Console.Io.@Print { text: "enemy " + Entity + " hp " + self.Health.hp }
+                if self.Health.hp <= 0 {
+                    mark self #Dead
+                    unmark self #Enemy
+                    emit *Vein.Console.Io.@Print { text: "enemy " + Entity + " died" }
+                }
+            }
+        }
+    }
+}

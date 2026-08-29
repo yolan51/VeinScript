@@ -128,9 +128,15 @@ public sealed class EntityStore
     private readonly List<Contribution> _contributions = new();
     private int _order;
 
+    /// How deep the current activation is nested. A `target` inside a `target` is still ONE unit of
+    /// behaviour, so the inner one joins the outer's overlay instead of clearing it — cells are keyed by
+    /// entity, so the two loops' writes stay separate anyway unless they really touch the same field.
+    private int _depth;
+
     /// Begin one unit activation — a single schedule block running over a single entity.
     public void BeginActivation()
     {
+        if (_depth++ > 0) return;
         _overlay.Clear();
         _snapshots.Clear();
     }
@@ -150,11 +156,21 @@ public sealed class EntityStore
         var cell = new Cell(entity, shape, field);
         if (!_snapshots.ContainsKey(cell)) _snapshots[cell] = Committed(cell);
         _overlay[cell] = value;
+
+        // A write with no activation around it (a hear handler touching an entity directly) is its own
+        // one-write unit. Contributing it now is what keeps it from being dropped by the next Begin.
+        if (_depth == 0) Flush();
     }
 
     /// Turn the overlay into contributions. Sum contributes the DELTA from the snapshot; everything else
     /// contributes the absolute value. See the header comment for why.
     public void EndActivation()
+    {
+        if (_depth > 0 && --_depth > 0) return;
+        Flush();
+    }
+
+    private void Flush()
     {
         foreach (var (cell, value) in _overlay)
         {

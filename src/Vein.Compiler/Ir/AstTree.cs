@@ -172,7 +172,7 @@ public sealed class AstTree
 
     private IrNode MatchNode(MatchStmt m)
     {
-        var kids = m.Arms.Select(a => Node("When", a.CaseName, a.Span, Block(a.Body))).ToList();
+        var kids = m.Arms.Select(a => Node("When", (a.IsMark ? "#" : "") + a.CaseName, a.Span, Block(a.Body))).ToList();
         if (m.Else is not null) kids.Add(Node("Else", "", m.Span, Block(m.Else)));
         return Node("Match", Inline(m.Subject), m.Span, kids);
     }

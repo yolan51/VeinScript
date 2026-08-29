@@ -22,7 +22,7 @@ public static class EventCatalog
     {
         ("id", "this event's own id"),
         ("from", "the emitter (First-Class): from.name / from.kind / from.identity / from.shapes / from.marks"),
-        ("origin", "the ECS entity that emitted, when in an entity context (null until the entity runtime)"),
+        ("origin", "the ECS entity that emitted, when inside a `target` (null outside one)"),
         ("source", "the originating entity/context"),
         ("bundle", "the emitting bundle"),
         ("cause", "the id of the event that caused this one"),

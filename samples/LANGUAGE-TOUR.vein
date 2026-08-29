@@ -20,6 +20,7 @@
 //    5. mypage    — `builder` templates + `bring` (html/script/css from output fields)
 //    6. shaped    — `$Shape` includes: a shape's fields flatten into a builder's params
 //    7. handles   — cross-linking html/js/css through shared handle values (one source of truth)
+//    8. entities  — the identity runtime RUNNING: spawn/attach, folds reconciling two shards, settled
 // ============================================================================================
 
 
@@ -397,6 +398,60 @@ bundle App {
         hear @Style as st { css += st.css }
         hear @Render as r {
             emit @Response { status: 200, body: "<!doctype html><html><head><style>" + css + "</style></head><body>" + html + "<script>" + js + "</script></body></html>" }
+        }
+    }
+}
+
+
+// ============================================================================================
+//  8. entities.vein — THE IDENTITY RUNTIME, RUNNING
+//  `run once` builds a world with spawn/attach/mark; two independent shards drain the same
+//  `folds sum` field in one tick (so hp falls by 2, not 1); `settled` reads the reconciled value.
+//  The clock is explicit:  veinc run samples/entities.vein --ticks 3
+// ============================================================================================
+
+bundle Entities {
+    use Core
+
+    shape $Health {
+        hp: int folds sum      // many shards may drain hp in one tick; sum the deltas
+    }
+
+    shard Spawner {
+        // `run once` builds the world before anything else happens.
+        run once {
+            repeat 3 {
+                let e = spawn()
+                attach $Health to e { hp: 5 }
+                mark e #Enemy
+            }
+        }
+    }
+
+    shard Drain {
+        each tick {
+            target $Health #Enemy as self { self.Health.hp -= 1 }
+        }
+    }
+
+    shard Poison {
+        each tick {
+            target $Health #Enemy as self { self.Health.hp -= 1 }
+        }
+    }
+
+    shard Undertaker {
+        // settled runs AFTER the tick's contributions reconcile — the only place a death check is
+        // correct, because during the tick another shard may still be subtracting.
+        settled {
+            target $Health #Enemy as self {
+                emit *Vein.Console.Io.@Print { text: "enemy " + Entity + " hp " + self.Health.hp }
+                if self.Health.hp <= 0 {
+                    mark self #Dead
+                    unmark self #Enemy
+                    emit *Vein.Console.Io.@Print { text: "enemy " + Entity + " died" }
+                }
+            }
         }
     }
 }

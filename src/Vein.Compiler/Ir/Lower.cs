@@ -414,7 +414,7 @@ public sealed class Lower
                 return new IrLoop(IrLoopKind.Repeat, null, r.Var, null, null, LowerExpr(r.Count), LowerBlock(r.Body));
             case MatchStmt m:
                 return new IrMatch(LowerExpr(m.Subject),
-                    m.Arms.Select(a => new IrMatchArm(a.CaseName, LowerBlock(a.Body))).ToList(),
+                    m.Arms.Select(a => { if (a.IsMark) _tags.Add(a.CaseName); return new IrMatchArm(a.CaseName, LowerBlock(a.Body)); }).ToList(),
                     m.Else is null ? null : LowerBlock(m.Else));
             case ReturnStmt r: return new IrReturn(r.Value is null ? null : LowerExpr(r.Value));
             case BreakStmt: return new IrBreak();

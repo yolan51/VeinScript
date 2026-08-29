@@ -1,0 +1,88 @@
+// samples/console_roles.vein — ONE program, four behaviours, chosen by which console it is running as.
+//
+//   veinc build samples/console_roles.vein     →  console_roles.exe   (double-click)
+//
+// A spawned console re-runs THIS SAME FILE, so every window executes every shard. What differs is
+// `here()` — this process's own console address. `match here() { when #Alpha { … } }` is therefore a
+// ROLE SWITCH: the window you launched is #Main and behaves as the launcher/driver, and each window it
+// spawned takes the role named by its own address.
+//
+//   #Main   launches the others, then every 2s pings a random one, printing what it sends,
+//           every reply it gets back, and any worker that has gone away (@Undelivered)
+//   #Alpha  echoes what it is sent back to Main
+//   #Beta   counts what it is sent and reports the running total
+//   #Gamma  relays what it is sent to Alpha (so a ping to Gamma reaches Main in two hops)
+//
+// Compare samples/console_broadcast.vein, which uses `if here() == #Main` to keep ONE behaviour on the
+// root; this is the general form of the same idea.
+
+bundle Roles by you {
+
+    shard Boot {
+        run once {
+            match here() {
+                // Only the window the user launched opens the others — and a spawned console cannot
+                // spawn further ones anyway, so the tree can never run away.
+                when #Main {
+                    emit *Vein.Console.Io.@Print   { text: "Main — launching Alpha, Beta and Gamma." }
+                    emit *Vein.Console.Io.@Console { name: #Alpha, firsttext: "Alpha — I echo." }
+                    emit *Vein.Console.Io.@Console { name: #Beta,  firsttext: "Beta — I count." }
+                    emit *Vein.Console.Io.@Console { name: #Gamma, firsttext: "Gamma — I relay to Alpha." }
+                }
+            }
+        }
+    }
+
+    shard Driver {
+        var round: int
+
+        every 2 {
+            match here() {
+                // The workers reach this block too — they simply match no arm and do nothing, which is
+                // the whole point: one timer, one program, different work per identity.
+                when #Main {
+                    round += 1
+                    let workers = [#Alpha, #Beta, #Gamma]
+                    let dest = pick(workers)
+                    emit *Vein.Console.Io.@Print { text: "→ " + dest + ": ping " + round }
+                    emit *Vein.Console.Io.@Send  { to: dest, text: "ping " + round }
+                }
+                when #Alpha {
+                    round += 1
+                    let workers = [#Alpha, #Beta, #Gamma]
+                    let dest = pick(workers)
+                    emit *Vein.Console.Io.@Print { text: "arrow → " + #Beta + " : FROM ALPHA TEST " + round }
+                    emit *Vein.Console.Io.@Send  { to: #Beta, text: " FROM ALPHA TEST " + round }
+                }
+            }
+        }
+    }
+
+    // A worker window can be CLOSED at any time — that is normal, not an error. The send then finds
+    // nothing listening and comes back as @Undelivered, which is the only way a program can tell
+    // "delivered" from "shouting into a void". Without this, closing the workers just makes Main go
+    // quiet, and a silent window is indistinguishable from a dead one.
+    shard Reachability {
+        hear *Vein.Console.Io.@Undelivered as u {
+            emit *Vein.Console.Io.@Print { text: "  (" + u.to + " is not running — closed?)" }
+        }
+    }
+
+    shard Worker {
+        var seen: int
+
+        hear *Vein.Console.Io.@Message as m {
+            match here() {
+                when #Alpha { emit *Vein.Console.Io.@Send { to: #Main,  text: "Alpha echoes: " + m.text } }
+                when #Gamma { emit *Vein.Console.Io.@Send { to: #Alpha, text: "Gamma relays: " + m.text } }
+				when #Beta {
+				    seen += 1
+				    emit *Vein.Console.Io.@Print { text: m.from + " → " + m.text }
+				    emit *Vein.Console.Io.@Send  { to: #Main, text: "Beta has now seen " + seen }
+				}
+                // #Main has no `when` arm — it is the one that reads the replies.
+                else { emit *Vein.Console.Io.@Print { text: m.from + " → " + m.text } }
+            }
+        }
+    }
+}

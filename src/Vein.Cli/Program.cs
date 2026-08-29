@@ -79,8 +79,10 @@ switch (command)
         var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
         if (!diagnostics.HasErrors)
         {
-            // Positional arg = request path (legacy @Request); `--set k=v` overrides boot payload fields.
+            // Positional arg = request path (legacy @Request); `--set k=v` overrides boot payload fields;
+            // `--ticks N` advances N frames of the ECS clock after boot.
             string requestPath = "/";
+            int ticks = 0;
             var inputs = new Dictionary<string, object?>(StringComparer.Ordinal);
             for (int i = 2; i < args.Length; i++)
             {
@@ -88,12 +90,13 @@ switch (command)
                 string? pair = a == "--set" && i + 1 < args.Length ? args[++i]
                              : a.StartsWith("--set=") ? a["--set=".Length..] : null;
                 if (pair is not null) { var kv = pair.Split('=', 2); if (kv.Length == 2) inputs[kv[0]] = Coerce(kv[1]); }
+                else if (Ticks(args, ref i) is { } t) ticks = t;
                 else if (!a.StartsWith("--")) requestPath = a;
             }
             var lower = new Lower(diagnostics, projectDir);
             foreach (var bundle in unit.Bundles)
             {
-                var result = new Interp().Render(lower.LowerBundle(bundle), requestPath, inputs);
+                var result = new Interp { Ticks = ticks }.Render(lower.LowerBundle(bundle), requestPath, inputs);
                 foreach (var line in result.Log) Console.Error.WriteLine($"  · {line}");
                 if (result.Body is not null)
                     Console.WriteLine($"HTTP {result.Status}\n{result.Body}");
@@ -111,9 +114,11 @@ switch (command)
         var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
         if (!diagnostics.HasErrors)
         {
+            int ticks = 0;
+            for (int i = 2; i < args.Length; i++) if (Ticks(args, ref i) is { } t) ticks = t;
             var lower = new Lower(diagnostics, projectDir);
             foreach (var bundle in unit.Bundles)
-                new Interp().Run(lower.LowerBundle(bundle), Console.In, Console.Out, messaging: true);
+                new Interp { Ticks = ticks }.Run(lower.LowerBundle(bundle), Console.In, Console.Out, messaging: true);
         }
         break;
     }
@@ -246,6 +251,14 @@ return diagnostics.HasErrors ? 1 : 0;
 static string Display(Token t) =>
     t.Kind == TokenKind.Term ? "" :
     t.Value is not null ? $"{t.Text}  = {t.Value}" : t.Text;
+
+// `--ticks N` / `--ticks=N`: frames of the ECS clock to advance after boot. Null when args[i] is not it.
+static int? Ticks(string[] args, ref int i)
+{
+    string? n = args[i] == "--ticks" && i + 1 < args.Length ? args[++i]
+              : args[i].StartsWith("--ticks=") ? args[i]["--ticks=".Length..] : null;
+    return n is not null && int.TryParse(n, out var v) ? v : null;
+}
 
 // Coerce a `--set k=v` value to int/bool where it parses, else keep the string.
 static object? Coerce(string v) =>

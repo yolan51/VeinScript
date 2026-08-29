@@ -69,7 +69,7 @@ link+run exists.
 | `use N` import resolution | **no-op** | can't `use Vein.Core` to pull symbols into scope yet |
 | `bring *Bundle.Builder` (qualified builders) | **missing** | can't consume another bundle's builders yet |
 | app **link + run** (load bundles, run together) | **missing** | can't actually *run* a program against `Vein.*` yet |
-| `target`/`each tick`/`settled`/`folds` execution | **not executed** | stdlib shards are surface-only at runtime |
+| `target`/`each tick`/`settled`/`folds` execution | **works** (`--ticks N` drives the clock) | a stdlib shard's schedule blocks run like any other |
 | **mark declaration** (`#Mark { }`) | **does not exist** | marks are implicit names; "shared marks" can't be declared |
 
 **Therefore, today the stdlib is:** *authored + discoverable + validated + renderable-within-a-bundle*.

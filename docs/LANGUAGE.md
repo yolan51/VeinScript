@@ -251,7 +251,7 @@ readable on a `hear` binding (`d.from.kind`, `d.cause`, …):
 |-------|---------|
 | `id` | this event's own id |
 | `from` | the emitter (a First-Class object): `from.name` · `from.kind` · `from.identity` · `from.shapes` · `from.marks` |
-| `origin` | the ECS **entity** that emitted, when in an entity context (`null` until the entity runtime lands) |
+| `origin` | the ECS **entity** that emitted, when inside a `target` (`null` outside one) |
 | `source` | the originating entity/context |
 | `bundle` | the emitting bundle |
 | `cause` | the id of the event that caused this one |
@@ -260,6 +260,12 @@ readable on a `hear` binding (`d.from.kind`, `d.cause`, …):
 `from` is the answer to "who emitted this?" and is always populated; `origin` is the entity id (live
 once the ECS runtime executes `target`/tick). `veinc events` prints this envelope so it's visible. The
 `audience` barrier (§4) filters on the emitter's `from.shapes` / `from.marks`.
+
+A message that arrived from **another console** carries a bare address as its `from` (so `m.from` is a
+value you can print and reply to). The barrier reads it the same way regardless: a console is an identity
+named by its address and carries that address as a mark, so `hear @Message as m audience #Alpha { … }`
+means "only Alpha may reach this handler" — the same rule on both sides of a process boundary. See
+[RUNTIME.md §2.3](RUNTIME.md) for what it does and does not guarantee.
 
 ### 3.8 References & collections
 
@@ -334,7 +340,7 @@ shard Drain {
 | Construct | Meaning |
 |-----------|---------|
 | `target C… #T… as self { … }` | bind `self` to each identity matching the shapes/marks named — the entity query (§5.3) |
-| `Entity` | keyword; as a type an entity id (`int`), as an expression the **nearest** entity's id — the enclosing `target` binding (same value as a bare `self`), or `0` when no entity is in scope. Distinct from the First-Class identity layer (Shard/ShardView/…). *Runtime note:* the interpreter does not yet execute schedules/`target` loops, so today `Entity` reads `0` outside a materialized entity; the id becomes live with the ECS runtime. |
+| `Entity` | keyword; as a type an entity id (`int`), as an expression the **nearest** entity's id — the enclosing `target` binding (same value as a bare `self`), or `0` when no entity is in scope. Distinct from the First-Class identity layer (Shard/ShardView/…). *Runtime note:* `Entity` reads `0` outside a `target` — there is no entity in scope to name. |
 | `<target-binding>.Shape.field` | the targeted identity's component field — e.g. `self.Health.hp` |
 | `mark self #T` / `unmark self #T` | add / remove a tag |
 | `attach $C to self { … }` / `unattach $C from self` | add / remove a component |
@@ -418,6 +424,21 @@ match facing {
     else       { }
 }
 ```
+
+An arm matches **by name**, which is what both kinds of pattern evaluate to — an enum case and a mark
+each yield their own bare name. So a `#Mark` is also a pattern, and `match here() { … }` becomes a role
+switch on which console the process is running as ([RUNTIME.md §4.2](RUNTIME.md)):
+
+```
+match here() {
+    when #Main  { … }      // the window the user launched
+    when #Alpha { … }      // a window it spawned, running this same file
+    else        { … }
+}
+```
+
+The first matching arm runs, then the match is done; `else` runs when nothing matched, and an unmatched
+subject with no `else` does nothing.
 
 ### 5.5 Bindings & assignment
 

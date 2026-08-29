@@ -157,7 +157,9 @@ public sealed record TargetStmt(Expr Source, string Bind, Block Body, SourceSpan
 public sealed record QueryStmt(IReadOnlyList<string> Components, IReadOnlyList<string> Tags, string Bind, Block Body, SourceSpan Span) : Stmt(Span);
 public sealed record RepeatStmt(Expr Count, string? Var, Block Body, SourceSpan Span) : Stmt(Span);
 public sealed record MatchStmt(Expr Subject, IReadOnlyList<MatchArm> Arms, Block? Else, SourceSpan Span) : Stmt(Span);
-public sealed record MatchArm(string CaseName, Block Body, SourceSpan Span) : Node(Span);
+/// `IsMark` — the pattern was written `#Alpha` rather than as a bare enum case. Both match by NAME
+/// (a mark evaluates to its own bare name), but only a mark declares a Tag type when lowered.
+public sealed record MatchArm(string CaseName, Block Body, SourceSpan Span, bool IsMark = false) : Node(Span);
 public sealed record ReturnStmt(Expr? Value, SourceSpan Span) : Stmt(Span);
 public sealed record BreakStmt(SourceSpan Span) : Stmt(Span);
 public sealed record ContinueStmt(SourceSpan Span) : Stmt(Span);

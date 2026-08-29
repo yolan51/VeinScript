@@ -664,8 +664,11 @@ public sealed class Parser
             {
                 var a = Here;
                 Expect(TokenKind.KwWhen, "'when'");
-                string caseName = Expect(TokenKind.Ident, "case name").Text;
-                arms.Add(new MatchArm(caseName, ParseBlock(), a));
+                // `when North` (an enum case) or `when #Alpha` (a mark) — a mark is the pattern that
+                // makes `match here() { … }` a role switch on which console this process is.
+                bool isMark = Check(TokenKind.MarkRef);
+                string caseName = isMark ? Advance().Text : Expect(TokenKind.Ident, "case name").Text;
+                arms.Add(new MatchArm(caseName, ParseBlock(), a, isMark));
             }
             SkipTerms();
         }
@@ -751,7 +754,12 @@ public sealed class Parser
         string shape = Expect(TokenKind.ShapeRef, "$Shape").Text;
         if (remove) { Expect(TokenKind.KwFrom, "'from'"); return new AttachStmt(true, shape, ParseExpr(), null, s); }
         Expect(TokenKind.KwTo, "'to'");
-        var target = ParseExpr();
+        // `attach $C to e { hp: 5 }` — the braces are the COMPONENT's field init, so the target must not
+        // absorb them as a struct literal named `e`. Nothing else in the grammar puts a struct body
+        // directly after an expression, so the suppression is scoped to exactly this parse.
+        _noStructLit = true;
+        Expr target;
+        try { target = ParseExpr(); } finally { _noStructLit = false; }
         IReadOnlyList<FieldInit>? init = Check(TokenKind.LBrace) ? ParseStructBody() : null;
         return new AttachStmt(false, shape, target, init, s);
     }
@@ -931,13 +939,24 @@ public sealed class Parser
             case TokenKind.MarkRef: return new MarkRefExpr(Advance().Text, s);
             case TokenKind.KwEntity: { Advance(); return new EntityExpr(s); }
             case TokenKind.Star: return ParseStarRef();
-            case TokenKind.LParen: { Advance(); var e = ParseExpr(); Expect(TokenKind.RParen, "')'"); return e; }
+            // Parentheses re-open struct literals: the `}` that closes one cannot be mistaken for the
+            // attach init, because the `)` has to come first.
+            case TokenKind.LParen:
+            {
+                Advance();
+                bool outer = _noStructLit; _noStructLit = false;
+                var e = ParseExpr();
+                _noStructLit = outer;
+                Expect(TokenKind.RParen, "')'");
+                return e;
+            }
             case TokenKind.LBracket: return ParseListLit();
             case TokenKind.Ident:
             {
                 string name = Advance().Text;
                 // struct literal: `Ident {` but only when it clearly starts a struct (field: value)
-                if (Check(TokenKind.LBrace) && LooksLikeStructBody()) return new StructLitExpr(name, ParseStructBody(), s);
+                if (!_noStructLit && Check(TokenKind.LBrace) && LooksLikeStructBody())
+                    return new StructLitExpr(name, ParseStructBody(), s);
                 return new NameExpr(name, s);
             }
             default:
@@ -993,6 +1012,9 @@ public sealed class Parser
     }
 
     /// A `{` begins a struct body if it is `{ ident : …`. Avoids swallowing control-flow blocks.
+    /// Set only while parsing the target of `attach $C to <target> { … }`; see ParseAttach.
+    private bool _noStructLit;
+
     private bool LooksLikeStructBody()
         => Check(TokenKind.LBrace) && Peek(1).Kind == TokenKind.Ident && Peek(2).Kind == TokenKind.Colon;
 

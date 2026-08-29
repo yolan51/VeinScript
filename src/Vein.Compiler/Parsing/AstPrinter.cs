@@ -113,7 +113,7 @@ public static class AstPrinter
             case RepeatStmt r: Line(sb, ind, $"repeat {Ex(r.Count)}{(r.Var is null ? "" : " as " + r.Var)}"); PrintBlock(sb, r.Body, ind + 1); break;
             case MatchStmt m:
                 Line(sb, ind, $"match {Ex(m.Subject)}");
-                foreach (var a in m.Arms) { Line(sb, ind + 1, $"when {a.CaseName}"); PrintBlock(sb, a.Body, ind + 2); }
+                foreach (var a in m.Arms) { Line(sb, ind + 1, $"when {(a.IsMark ? "#" : "")}{a.CaseName}"); PrintBlock(sb, a.Body, ind + 2); }
                 if (m.Else is not null) { Line(sb, ind + 1, "else"); PrintBlock(sb, m.Else, ind + 2); }
                 break;
             case ReturnStmt r: Line(sb, ind, $"return{(r.Value is null ? "" : " " + Ex(r.Value))}"); break;

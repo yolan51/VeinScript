@@ -28,6 +28,11 @@ bundle Console by Vein {
         shared("A message received from another console — hear @Message { from, text }.")
         event @Message { from: Mark, text: string }
 
+        // A console you spawned can be closed at any time; the send simply finds nothing listening. That
+        // is ordinary, so it is reported as an event you can hear, not an error that stops the program.
+        shared("A line that could not be delivered — console `to` is not running (closed, or not started yet).")
+        event @Undelivered { to: Mark, text: string }
+
         shared("Build a named console application — `bring Console(#Server, \"ready\")` spawns its own window.")
         builder Console { name: Mark, firsttext: string }
 

@@ -31,7 +31,7 @@ dialect. There is no general `class`.
 | `fn` | `fn f(p: T) -> R { … return e }` | function — computes and returns a value; callable in any expression | |
 | `return` | `return [e]` | return a value from an `fn`; outside one it is VS0107 | |
 | `if`* / `else` | `if c { … } else { … }` | conditional | *`if` is an **add** |
-| `when` | `when Pat { … }` (in `match`) | match arm | D2 |
+| `when` | `when Pat { … }` (in `match`) | match arm; `Pat` is an enum case or a `#Mark` | D2 |
 | `while`* | `while c { … }` | conditional loop | *`while` is an **add** |
 | `and` `or` `not` | `a and b`, `not a` | logic (short-circuit) | |
 | `as` | `use N as M` · `target … as x` | alias / iteration binding | |
@@ -128,8 +128,19 @@ see `DefaultProject/Scripts/SpawnerScript.cs`). Precise mapping in
 [BACKEND-CONTRACT.md](BACKEND-CONTRACT.md).
 
 ### 3.4 Built-in free functions (stdlib, provisional)
-`random() -> float` · `print(s: string)` · `abs min max sqrt` · `len(c) -> int`. A `Core`/`Std`
-bundle, not keywords.
+`random() -> float` · `print(s: string)` · `abs min max sqrt` · `len(c) -> int` · `join(list, sep)`.
+A `Core`/`Std` bundle, not keywords.
+
+`spawn() -> Entity` is here too, and deliberately **not** a keyword: `let e = spawn()` already parses
+and lowers as an ordinary call, so creating an identity costs no new syntax. It is the only way to
+make an entity, so a program with no `spawn` has an empty world and every `target` matches nothing.
+
+Two more the console runtime needs, same reasoning — ordinary calls, no new syntax:
+
+| Call | Meaning |
+|------|---------|
+| `here() -> Mark` | **this** console's own address; `#Main` in the window the user launched. A spawned console re-runs the same program, so `here() == #Main` is how a program says "only the root does this". |
+| `pick(list)` | a random element of a list — the "send it to one of them" primitive. Uses the same seeded generator as `chance`, so a run stays reproducible. |
 
 ### 3.5 Fold reducers (operands of `folds` in a `shape`) {#35-fold-reducers}
 

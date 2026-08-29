@@ -9,6 +9,7 @@ namespace Vein.Tests;
 // A console address is an identity (`#Server`), not text. The runtime never checks one — ConsoleBus
 // concatenates it into an OS pipe name and a miss is silently swallowed — so ConsoleGraph pairs every
 // `@Send { to }` with a spawn site and Lower warns (VS0212) on the ones that resolve to nothing.
+[Collection(ConsoleRuntime.Name)]
 public class ConsoleGraphTests
 {
     private static CompilationResult Compile(string src) =>

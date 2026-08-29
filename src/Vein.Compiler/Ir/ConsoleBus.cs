@@ -50,10 +50,15 @@ public sealed class ConsoleBus : IDisposable
         }
     }
 
+    /// Test/host seam: when set, receives (to, from, text) instead of touching a pipe. Mirrors
+    /// ConsoleLauncher.Hook, so a test can watch a program address its consoles without spawning any.
+    public static Func<string, string, string, bool>? Hook;
+
     /// Send one line to console <paramref name="to"/>. Best-effort: if the target isn't listening, the
     /// message is dropped (returns false) rather than throwing.
     public static bool Send(string to, string from, string text)
     {
+        if (Hook is not null) return Hook(to, from, text);
         try
         {
             using var client = new NamedPipeClientStream(".", PipeName(to), PipeDirection.Out);

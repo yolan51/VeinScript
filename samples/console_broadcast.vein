@@ -1,0 +1,59 @@
+// samples/console_broadcast.vein — spawn three console applications, then write to them on a timer.
+//
+//   veinc build samples/console_broadcast.vein     →  console_broadcast.exe   (double-click)
+//   veinc run   samples/console_broadcast.vein     →  same thing, from a terminal
+//
+// Every 2 seconds the main window sends three messages, one of each kind:
+//   * to ONE fixed console          (#Alpha)
+//   * to a RANDOM one               (pick(consoles))
+//   * to ALL of them                (target consoles as c)
+//
+// Stdlib events are fully qualified so their origin is obvious (*Vein.Console.Io.* = stdlib):
+//   @Console → spawn a named console   ·  @Send → write a line to console `to`
+//   @Message → a line that arrived     ·  @Print → write a line to THIS console
+//
+// The catch worth understanding: a spawned console re-runs THIS SAME PROGRAM, so its `every 2` block
+// fires too. `here()` is this console's own address, so `here() == #Main` means "only the window the
+// user actually launched broadcasts". #Main is the reserved address of that root console.
+
+bundle Broadcast by you {
+
+    shard Launcher {
+        // `run once` is the startup schedule — it runs before any event is heard.
+        run once {
+            emit *Vein.Console.Io.@Print   { text: "main — opening three consoles, broadcasting every 2s." }
+            emit *Vein.Console.Io.@Console { name: #Alpha, firsttext: "Alpha ready — waiting for messages." }
+            emit *Vein.Console.Io.@Console { name: #Beta,  firsttext: "Beta ready — waiting for messages." }
+            emit *Vein.Console.Io.@Console { name: #Gamma, firsttext: "Gamma ready — waiting for messages." }
+        }
+    }
+
+    shard Broadcaster {
+        var n: int                      // shard-private state: which round we are on
+
+        every 2 {
+            if here() == #Main {
+                n += 1
+                let consoles = [#Alpha, #Beta, #Gamma]
+
+                // 1. ONE fixed console.
+                emit *Vein.Console.Io.@Send { to: #Alpha, text: "round " + n + " — for Alpha only" }
+
+                // 2. A RANDOM one of them.
+                emit *Vein.Console.Io.@Send { to: pick(consoles), text: "round " + n + " — you were picked" }
+
+                // 3. ALL of them: `target` over a plain collection binds each element in turn.
+                target consoles as c {
+                    emit *Vein.Console.Io.@Send { to: c, text: "round " + n + " — broadcast to everyone" }
+                }
+            }
+        }
+    }
+
+    // Every console (including the root) prints what it receives. `from` is the sender's address.
+    shard Inbox {
+        hear *Vein.Console.Io.@Message as m {
+            emit *Vein.Console.Io.@Print { text: m.from + ": " + m.text }
+        }
+    }
+}

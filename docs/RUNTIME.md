@@ -13,7 +13,7 @@ VeinScript has two runtime shapes that share one data/identity model:
 | Model | Drives | Constructs | Status |
 |-------|--------|------------|--------|
 | **Reactive event loop** | web / request-response / message flows | `emit` / `hear` / `ShardView` | **implemented** ([Interp.cs](../src/Vein.Compiler/Ir/Interp.cs)) |
-| **ECS tick loop** | games / simulations | `target` / `each tick` / `folds` / `settled` | **designed, not executed yet** |
+| **ECS tick loop** | games / simulations | `target` / `each tick` / `folds` / `settled` | **implemented** ([EntityStore.cs](../src/Vein.Compiler/Ir/EntityStore.cs)); the clock is explicit — `--ticks N` |
 
 Both are reactive at heart: behavior lives in shards that react to something (an event, or a frame) and
 mutate identities / emit more events. There is **no `main()`** — a program is a set of reactions plus a
@@ -33,8 +33,8 @@ mutate identities / emit more events. There is **no `main()`** — a program is 
    → repeat until the queue drains (guarded against runaway loops).
 4. **Output**: when a handler emits `@Response`, its `{ status, body }` becomes the result.
 
-So "what starts the program" is currently a baked-in `@Request`. Everything else — `target`, `each tick`,
-`settled`, `folds`, `Entity`, cross-bundle `*` — is designed surface the loop does not execute yet.
+So "what starts the program" is a `start @E` declaration, else a baked-in `@Request`. The ECS side —
+`target`, `each tick`, `settled`, `folds`, `Entity` — runs too, but only when a clock drives it (§4.1).
 
 ### 2.1 Console mode (`veinc run`)
 
@@ -61,6 +61,15 @@ you said hi
 ```
 Runs on today's net8 interpreter. (A console over the SECS/net9 runtime is a follow-on — see
 BACKEND-CONTRACT.md.)
+
+**A console run switches the console to UTF-8 first.** A Windows console starts on a legacy OEM code page
+(850 here) whose encoder has no `→` and no `—`; printing one writes the correct bytes and the *console*
+substitutes them — `→` becomes byte `0x1A`, which a modern terminal draws as a stray placeholder glyph.
+So `Interp.Run` calls `ConsoleLauncher.UseUtf8()` **before** it captures the writer, then takes a fresh
+`Console.Out`: setting `Console.OutputEncoding` replaces that writer, and a `StreamWriter`'s encoder is
+fixed when it is built, so a reference grabbed beforehand would keep encoding in the old code page while
+the property reported the new one. Only when the writer really is the console — a host's own writer is
+left untouched.
 
 ### 2.2 Standalone app (`veinc build`)
 
@@ -102,6 +111,30 @@ Under messaging mode ([Interp.Run](../src/Vein.Compiler/Ir/Interp.cs) with `mess
 (a `BlockingCollection` inbox), so the interpreter stays single-threaded while messages arrive
 asynchronously. A spawned console stays alive to receive; a piped `veinc run < file` still exits on EOF.
 
+**Who may reach a handler is declared, not assumed.** The `audience` barrier (LANGUAGE.md §4) works across
+the bus as well as inside a process: a console is an identity named by its address and carries that address
+as a mark, so
+
+```
+hear *Vein.Console.Io.@Message as m audience #Alpha { … }   // only Alpha reaches this handler
+```
+
+No `audience` means anyone may reach it, exactly as before. A console carries no *shapes*, so a shape
+requirement refuses every bus message — correct rather than broken, since nothing tells the runtime what a
+console holds. Two honest limits: this filters at the **receiver**, so a refused message still crossed the
+wire; and it is **advisory** — `ConsoleBus` takes the sender's name from the message body and nothing
+authenticates it, so it guards against a mis-wired topology, not against a hostile process on the machine.
+
+**A spawned console dies with the program that spawned it.** "Stays alive to receive" holds only while
+there is someone to receive from, so `ConsoleLauncher.Spawn` passes its own pid down as `VEIN_CONSOLE_PARENT`
+and the child waits on that process; when the parent exits, the child closes its inbox and follows. Without
+this a closed window left a process with no window at all — invisible, unkillable from the UI, and still
+holding `Vein.Compiler.dll` so the next `dotnet build` failed. If a run ever does leave strays behind:
+
+```
+Get-Process veinc | Stop-Process -Force
+```
+
 ```
 shard Chat {
     hear @Input   as i { emit @Send  { to: "Server", text: i.text } }        // I type → Server
@@ -110,6 +143,29 @@ shard Chat {
 ```
 Try it: `veinc build samples/console_chat.vein` → run it → type in one window, watch it appear in Server's.
 Cross-machine transport (TCP) and cross-bundle `use Console` import are follow-ons.
+
+### 2.4 A console address is machine-global
+
+The pipe a console listens on is named from the mark and nothing else —
+`PipeName(console) => "vein.console." + console` ([ConsoleBus](../src/Vein.Compiler/Ir/ConsoleBus.cs)).
+There is no process id, run id or session in it, so **the address space is the whole machine**, not the
+run. This is deliberate: a mark is an identity, and two consoles carrying the same mark are the same
+identity even in different processes.
+
+- **Two runs of one program share their consoles.** `#Main` collides first, because `RootConsole` is the
+  constant every unnamed root falls back to (only a *spawned* console is given a name, via `VEIN_CONSOLE`);
+  the fixed worker marks then collide the same way. Run `samples/console_roles.vein` twice and the two Main
+  windows start showing each other's replies.
+- **Delivery among duplicate listeners is unspecified.** `MaxAllowedServerInstances` lets several processes
+  each add an instance of one pipe name, and the OS hands a connecting sender to one of the waiting
+  instances — which one is not defined.
+- **The gift:** two independently launched programs address each other by identity, with no discovery, no
+  ports and no handshake.
+- **The bill:** runs interfere, `from` cannot tell you *whose* Alpha replied, and any process on the machine
+  can open `vein.console.Main` and take delivery of messages meant for you.
+
+If a run ever needs isolating, `PipeName` is the single lever (a per-run prefix would separate them). The
+shared namespace stays the default.
 
 ---
 
@@ -179,7 +235,7 @@ start       = "start" "@" IDENT emitBody ;
 
 ---
 
-## 4. The ECS tick loop (designed, deferred) — and why `settled` exists
+## 4. The ECS tick loop — and why `settled` exists
 
 A shard is a set of **scheduled** behaviour blocks — `run once` · `each tick` · `each frame` ·
 `every N` (seconds) · `settled` — with an entity `target` query nested inside each (schedule outer, query
@@ -203,10 +259,58 @@ shard Drain {
   place for post-resolution decisions (like death checks): reading `hp` *during* `each tick`, while other
   shards are still subtracting, would see a half-updated value.
 
-**Status:** `target` / `each tick` / `folds` / `settled` are **not executed** by the interpreter yet
-(`ExecLoop` skips `IrLoopKind.Target`). They are validated + lowered surface awaiting the ECS runtime. If
-the fold/tick model is later dropped, `settled` is the first keyword to reconsider — nothing runs on it
-today.
+### 4.1 What actually runs it
+
+The world lives in [EntityStore.cs](../src/Vein.Compiler/Ir/EntityStore.cs) — entity ids, component
+tables, mark sets, the query, and the fold reconciliation. `Interp` drives it:
+
+| Phase | What happens |
+|-------|--------------|
+| `run once` | before the boot event, so the world exists by the time anything is heard |
+| `each tick` / `each frame` | one activation per targeted entity; writes go to that activation's overlay |
+| *commit* | the folds reduce every contribution, **then** the phase's queued mark/attach/destroy apply |
+| `settled` | reads the reconciled world (this is the whole reason it exists) |
+| *commit* | again, so a mark made in `settled` is visible to the **next** frame |
+| *drain* | events emitted by either phase are handled against a settled world |
+
+Two rules make a frame order-independent, and both are easy to get silently wrong:
+
+- a `folds sum` field contributes its **delta from the snapshot** the activation took, not the value it
+  wrote — `hp -= 1` from two shards is `hp − 2`, not `2·hp − 2`;
+- a **structural** change (`mark` / `attach` / `destroy`) is queued and applied at the commit point, so no
+  unit in the phase can observe a half-changed world.
+
+**Entities are created by `spawn()`** — an ordinary prebuilt returning the new id (`let e = spawn()`),
+so nothing in the lexer or parser had to change to make a world buildable.
+
+**The frame clock is explicit.** `veinc run <file> --ticks N` (and `veinc render`) advance exactly N
+frames, and `random` is seeded, so a run is reproducible and testable. With no `--ticks`, nothing drives
+`each tick` and the program is purely reactive — which is what every event-driven sample wants.
+
+### 4.2 `every N` — the other clock
+
+`every N` is the one schedule defined in **real seconds**, so it is driven by a wall clock rather than
+the frame count, and only in a live console session (`veinc run`, a built .exe). Each `every` block gets
+its own timer thread; the thread only POSTS the firing onto the run's inbox, so the event loop stays
+single-threaded — a timer arrives exactly like a console message does. A firing runs the block, commits
+the phase, and drains what it emitted.
+
+A spawned console **re-runs the same program**, so its timers fire too. `here()` is this console's own
+address (`#Main` in the window the user launched), which is how a program restricts work to the root:
+
+```
+every 2 {
+    if here() == #Main { emit *Vein.Console.Io.@Send { to: pick(consoles), text: "…" } }
+}
+```
+
+See [samples/console_broadcast.vein](../samples/console_broadcast.vein): spawn three consoles, then
+every 2 seconds write to one, to a random one, and to all of them. And
+[samples/console_roles.vein](../samples/console_roles.vein), which takes the same idea further: `match
+here() { when #Alpha { … } }` gives one file a different ROLE in each window it spawned — launcher,
+echo, counter, relay — with no separate programs and no configuration.
+
+See [samples/entities.vein](../samples/entities.vein): `veinc run samples/entities.vein --ticks 3`.
 
 ---
 
@@ -233,7 +337,8 @@ Each bundle's `start` entry is the piece that makes an app *runnable* rather tha
 | no `start` → default `@Request { path }` | **runs** (back-compat) |
 | at most one entry per bundle (0 = reactive, 2 = error) | **enforced** |
 | load-site `start { … }` override (parsed + validated by `veinc symbols`) | fires once app link+run lands |
-| `target`/`each tick`/`folds`/`settled`, `Entity` id | designed, **not executed** |
+| `target`/`each tick`/`folds`/`settled`, `Entity` id, `spawn()`/`attach`/`mark`/`destroy` | **runs** (`veinc run samples/entities.vein --ticks 3`) |
+| `every N` (wall-clock schedule), `here()` | **runs** in a console session (`veinc run`, built .exe) |
 | app link + run (`veinc render app.vein`) | **follow-on** |
 
 ## 7. Open questions
