@@ -1,0 +1,61 @@
+// samples/functions.vein — the two kinds of function, and calling them across a bundle boundary.
+//     veinc run samples/functions.vein
+//
+// VeinScript splits functions by WHAT THEY PRODUCE:
+//
+//     SF   a shard function — EMITS events, returns nothing.   (`-> T` and `return` are errors)
+//     fn   a function       — COMPUTES and returns a value.    (callable in any expression)
+//
+// A shard's behaviour is expressed by emitting, so an SF is a named emit sequence; `fn` is the reusable
+// computation you can call inside a condition, a field value, or a `target` loop.
+//
+// Both are callable from ANOTHER bundle when declared `shared` inside a `publicator` — see the
+// *Vein.Math / *Vein.Console calls below. `shared` is the only thing that crosses a bundle boundary.
+
+bundle Functions by you {
+
+    start @Boot { }
+    event @Boot { }
+
+    publicator Api {
+        // A `fn` returns — so it can be used wherever a value can. This one is `shared`, which means
+        // another bundle could call it as *you.Functions.Api.bonus(…).
+        shared("Score bonus for a streak, capped at 50.")
+        fn bonus(streak: int) -> int {
+            if streak <= 0 { return 0 }
+            if streak > 10 { return 50 }
+            return streak * 5
+        }
+
+        // An `SF` emits — it names an intent so callers don't hand-assemble the event every time.
+        shared("Announce a score to the console.")
+        SF announce(label: string, value: int) {
+            emit *Vein.Console.Io.@Print { text: label + ": " + value }
+        }
+    }
+
+    // A local `fn` needs no `shared` — that keyword is about crossing bundles, not about being callable
+    // here. `fn` may recurse.
+    fn fib(n: int) -> int {
+        if n <= 1 { return n }
+        return fib(n - 1) + fib(n - 2)
+    }
+
+    shard Scoreboard {
+        hear @Boot as b {
+            // 1. Call a local SF. It emits; it does not return, so it stands alone as a statement.
+            announce("streak 3 bonus", bonus(3))
+            announce("streak 99 bonus", bonus(99))
+
+            // 2. Call a local fn in expression position — including recursively.
+            announce("fib(10)", fib(10))
+
+            // 3. Call a SHARED fn from another bundle. Resolved and imported at compile time, so this
+            //    needs no link step: `clamp` is Vein.Math's, not ours.
+            emit *Vein.Console.Io.@Print { text: "clamp(99, 0, 10) = " + *Vein.Math.Scalars.clamp(99.0, 0.0, 10.0) }
+
+            // 4. Call a SHARED SF from another bundle. Same rule, but it emits instead of returning.
+            *Vein.Console.Io.print("— all of the above came from four function calls")
+        }
+    }
+}

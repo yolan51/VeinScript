@@ -51,6 +51,14 @@ Cross-bundle references (surface + validated today): `emit`/`hear`/`start *Autho
 event/builder signature, and `*Author.Bundle.Publicator.name(…)` calls to a shared `fn`/`SF`.
 `start` is a bundle's single entry.
 
+**Where those references resolve.** Two roots, searched in order: the `stdlib/` folder, then this
+project's **`<app>/bundles/`** — so a bundle someone else wrote is usable simply by dropping it there.
+stdlib is searched first, so an installed bundle can never shadow `*Vein.Console.Io.print`. Resolution
+imports the external declaration into your module **at compile time**, which is why it needs no link step;
+the consequence is that only *leaf* primitives cross today (`fn`/`SF`, builders, shapes). An installed
+bundle's own shards, views and `start` are not lowered into your module and will not run until app
+link+run exists.
+
 ## 2. Current capabilities vs. what the stdlib needs
 
 | Capability | State | Consequence for the stdlib |

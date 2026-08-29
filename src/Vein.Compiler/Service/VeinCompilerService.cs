@@ -10,7 +10,9 @@ namespace Vein.Compiler.Service;
 // reuses the existing pipeline internals only — Lexer → Parser → AstTree/IrTreeRenderer (VeinIR) →
 // Lower (IrModule). It does NOT create a second IR. The CLI and the IDE both route through here.
 
-public sealed record CompileRequest(string FileName, string Source, bool Unicode = false, bool FullStrings = false);
+/// `ProjectDir` anchors cross-bundle resolution — the standard library plus this project's installed
+/// `bundles/`. Omit it and resolution falls back to the CWD, which finds the stdlib but not a user project.
+public sealed record CompileRequest(string FileName, string Source, bool Unicode = false, bool FullStrings = false, string? ProjectDir = null);
 
 public sealed record CompilationResult(
     bool Success,
@@ -42,7 +44,7 @@ public sealed class VeinCompilerService
             tree = new AstTree(unit, request.FullStrings).Roots(unit);
             irText = IrTreeRenderer.Render(request.FileName, tree, opts);
 
-            var lower = new Lower(diag);
+            var lower = new Lower(diag, request.ProjectDir);
             foreach (var bundle in unit.Bundles)
                 modules.Add(lower.LowerBundle(bundle));
         }

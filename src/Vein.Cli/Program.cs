@@ -28,6 +28,10 @@ if (!File.Exists(path))
 string source = File.ReadAllText(path);
 var diagnostics = new DiagnosticBag();
 
+// Anchor cross-bundle resolution at the file being compiled, so `<app>/bundles/` is found alongside
+// the standard library rather than only whatever sits above the current working directory.
+string? projectDir = Path.GetDirectoryName(Path.GetFullPath(path));
+
 switch (command)
 {
     case "tokens":
@@ -59,7 +63,7 @@ switch (command)
         {
             if (legacy)
             {
-                var lower = new Lower(diagnostics);
+                var lower = new Lower(diagnostics, projectDir);
                 foreach (var bundle in unit.Bundles)
                     Console.Write(IrPrinter.Print(lower.LowerBundle(bundle)));
             }
@@ -89,7 +93,7 @@ switch (command)
                 if (pair is not null) { var kv = pair.Split('=', 2); if (kv.Length == 2) inputs[kv[0]] = Coerce(kv[1]); }
                 else if (!a.StartsWith("--")) requestPath = a;
             }
-            var lower = new Lower(diagnostics);
+            var lower = new Lower(diagnostics, projectDir);
             foreach (var bundle in unit.Bundles)
             {
                 var result = new Interp().Render(lower.LowerBundle(bundle), requestPath, inputs);
@@ -111,7 +115,7 @@ switch (command)
         var unit = new Parser(tokens, diagnostics).ParseUnit();
         if (!diagnostics.HasErrors)
         {
-            var lower = new Lower(diagnostics);
+            var lower = new Lower(diagnostics, projectDir);
             foreach (var bundle in unit.Bundles)
                 new Interp().Run(lower.LowerBundle(bundle), Console.In, Console.Out, messaging: true);
         }
@@ -140,7 +144,7 @@ switch (command)
         if (!diagnostics.HasErrors)
         {
             string requestPath = args.Length > 2 ? args[2] : "/";
-            var lower = new Lower(diagnostics);
+            var lower = new Lower(diagnostics, projectDir);
             foreach (var bundle in unit.Bundles)
             {
                 var result = new Interp().Render(lower.LowerBundle(bundle), requestPath);

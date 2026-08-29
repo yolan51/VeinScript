@@ -32,6 +32,12 @@ public partial class MainWindow : Window
     private string? _currentPath;
     private string? _rootFolder;
 
+    /// Anchors cross-bundle resolution: the open file's folder, else the project root. Without it the
+    /// compiler walks up from the Workbench's own bin/ directory and can only ever find the stdlib —
+    /// never the user's `<app>/bundles/`.
+    private string? ProjectDir =>
+        _currentPath is not null ? Path.GetDirectoryName(_currentPath) : _rootFolder;
+
     // Symbol names for sigil completion, refreshed each compile.
     private SymbolIndex.Symbols _symbols = new(Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>());
     private CompletionWindow? _completion;
@@ -177,7 +183,7 @@ public partial class MainWindow : Window
     private async void OnRun(object? sender, RoutedEventArgs e)
     {
         string name = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
-        var result = _service.Compile(new CompileRequest(name, _editor.Text));
+        var result = _service.Compile(new CompileRequest(name, _editor.Text, ProjectDir: ProjectDir));
         if (!result.Success)
         {
             _bottomPanel.SelectedIndex = 0;   // Diagnostics
@@ -363,7 +369,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            var ast = _service.Compile(new CompileRequest("app.vein", File.ReadAllText(appFile))).Ast;
+            var ast = _service.Compile(new CompileRequest("app.vein", File.ReadAllText(appFile), ProjectDir: Path.GetDirectoryName(appFile))).Ast;
             var app = ast?.Apps.FirstOrDefault();
             if (app is null) return false;
 
@@ -417,7 +423,7 @@ public partial class MainWindow : Window
 
     private string? BundleNameOf(string file)
     {
-        try { return _service.Compile(new CompileRequest(Path.GetFileName(file), File.ReadAllText(file))).Ast?.Bundles.FirstOrDefault()?.Name; }
+        try { return _service.Compile(new CompileRequest(Path.GetFileName(file), File.ReadAllText(file), ProjectDir: Path.GetDirectoryName(file))).Ast?.Bundles.FirstOrDefault()?.Name; }
         catch { return null; }
     }
 
@@ -462,7 +468,7 @@ public partial class MainWindow : Window
         ConsoleGraph? consoles = null;
         try
         {
-            var ast = _service.Compile(new CompileRequest(Path.GetFileName(bundle.MainFile), File.ReadAllText(bundle.MainFile))).Ast;
+            var ast = _service.Compile(new CompileRequest(Path.GetFileName(bundle.MainFile), File.ReadAllText(bundle.MainFile), ProjectDir: Path.GetDirectoryName(bundle.MainFile))).Ast;
             if (ast is not null)
             {
                 model = BundleModel.Analyze(ast);
@@ -669,8 +675,13 @@ public partial class MainWindow : Window
 
     private void Build()
     {
+        // The scope covers resolution sites too deep to take a parameter (Sig.Lookup, reached from
+        // ProjectLoader and BundleModel); CompileRequest.ProjectDir covers the rest. Both, deliberately:
+        // a missed scope would silently fall back to resolving against the Workbench's own bin/ folder.
+        using var _ = BundleSearch.Scope(ProjectDir);
+
         string name = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
-        var result = _service.Compile(new CompileRequest(name, _editor.Text));
+        var result = _service.Compile(new CompileRequest(name, _editor.Text, ProjectDir: ProjectDir));
         _diags = result.Diagnostics;
 
         _diagBox.ItemsSource = _diags.Select(d => d.ToString()).ToList();
@@ -934,7 +945,7 @@ public partial class MainWindow : Window
         if (e.Text is not ("$" or "#" or "@")) return;
 
         // Recompile lazily so completion reflects the current text (not just the last Build).
-        var ast = _service.Compile(new CompileRequest("untitled.vein", _editor.Text)).Ast;
+        var ast = _service.Compile(new CompileRequest("untitled.vein", _editor.Text, ProjectDir: ProjectDir)).Ast;
         if (ast is not null) _symbols = SymbolIndex.Collect(ast);
 
         (IReadOnlyList<string> names, string kind) = e.Text switch
@@ -961,7 +972,7 @@ public partial class MainWindow : Window
         var src = _editor.Text;
         if (src == _hoverSrc) return;
         _hoverSrc = src;
-        _hoverAst = _service.Compile(new CompileRequest("untitled.vein", src)).Ast;
+        _hoverAst = _service.Compile(new CompileRequest("untitled.vein", src, ProjectDir: ProjectDir)).Ast;
         _hoverModel = _hoverAst is null ? null : MemberIndex.Build(_hoverAst);
     }
 
@@ -1088,7 +1099,7 @@ public partial class MainWindow : Window
         var bring = Regex.Match(before, @"bring\s+(?:\d+\s+)?(\w+)\s*$");
         if (!emit.Success && !start.Success && !bring.Success) return;   // a plain fill-rest `?` — leave it
 
-        var ast = _service.Compile(new CompileRequest("untitled.vein", _editor.Text)).Ast;
+        var ast = _service.Compile(new CompileRequest("untitled.vein", _editor.Text, ProjectDir: ProjectDir)).Ast;
         if (ast is null) return;
 
         string? body = emit.Success ? EmitBody(ast, emit.Groups[1].Value)
@@ -1150,7 +1161,7 @@ public partial class MainWindow : Window
 
     private void ShowMemberCompletion()
     {
-        var ast = _service.Compile(new CompileRequest("untitled.vein", _editor.Text)).Ast;
+        var ast = _service.Compile(new CompileRequest("untitled.vein", _editor.Text, ProjectDir: ProjectDir)).Ast;
         if (ast is null) return;
         var model = MemberIndex.Build(ast);
 

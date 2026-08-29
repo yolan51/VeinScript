@@ -26,7 +26,19 @@ public sealed class Lower
     // (`IrSelfRef`), not a local — see the NameExpr cases in LowerExpr. A stack, because targets nest.
     private readonly List<string> _targetBinds = new();
 
-    public Lower(DiagnosticBag diagnostics) => _diag = diagnostics;
+    /// `projectDir` anchors cross-bundle resolution: the standard library plus this project's installed
+    /// `bundles/`. Null falls back to the ambient BundleSearch scope, then the CWD — which finds the
+    /// stdlib but never a user project, so pass it wherever the source file's location is known.
+    public Lower(DiagnosticBag diagnostics, string? projectDir = null)
+    {
+        _diag = diagnostics;
+        _projectDir = projectDir;
+    }
+
+    private readonly string? _projectDir;
+
+    private BundleIndex Index => _index ??= BundleIndex.For(_projectDir);
+    private BundleIndex? _index;
 
     private bool IsTargetBind(string name) => _targetBinds.Contains(name, StringComparer.Ordinal);
 
@@ -186,10 +198,10 @@ public sealed class Lower
 
     /// A qualified include's target: the stdlib's SHARED shapes, matched on a path suffix so you qualify
     /// only as far as you need to be unique — the same rule as `bring *Author.Bundle.&Builder(…)`.
-    private static List<FieldDecl>? ResolveExternalShape(IReadOnlyList<string> path, string name)
+    private List<FieldDecl>? ResolveExternalShape(IReadOnlyList<string> path, string name)
     {
         string refKey = string.Join(".", path) + "." + name;
-        foreach (var kv in StdlibIndex.Shapes())
+        foreach (var kv in Index.Shapes)
             if (kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal))
                 return kv.Value.Members.OfType<FieldDecl>().ToList();
         return null;
@@ -201,7 +213,7 @@ public sealed class Lower
     private string? ImportExternalFunction(IReadOnlyList<string> path, string name, SourceSpan span)
     {
         string refKey = string.Join(".", path) + "." + name;
-        var hit = StdlibIndex.Functions()
+        var hit = Index.Functions
             .FirstOrDefault(kv => kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal));
         if (hit.Value is null)
         {
@@ -439,10 +451,10 @@ public sealed class Lower
     /// code/css); that output field's `=` value is the template. No new IR node.
     // Resolve a qualified `*Author.Bundle.Publicator.&Builder` against the stdlib builders, matching by
     // trailing segments (so a shorter qualifier still resolves, like the qualified event refs).
-    private static BuilderDecl? ResolveExternalBuilder(IReadOnlyList<string> path, string name)
+    private BuilderDecl? ResolveExternalBuilder(IReadOnlyList<string> path, string name)
     {
         string refKey = string.Join(".", path) + "." + name;
-        foreach (var kv in StdlibIndex.Builders())
+        foreach (var kv in Index.Builders)
             if (kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal)) return kv.Value;
         return null;
     }
