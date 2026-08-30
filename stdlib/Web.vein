@@ -62,13 +62,40 @@ bundle Web by Vein {
         shared("A second-level heading.")
         builder Subheading { text: string   markup = "<h2>" + text + "</h2>" }
 
+        // Named for the pair above rather than for how it reads: Heading/Subheading/Subsubheading are
+        // h1/h2/h3, and a document deep enough to need three levels wants the ordering obvious.
+        shared("A third-level heading.")
+        builder Subsubheading { text: string   markup = "<h3>" + text + "</h3>" }
+
         shared("A list item.")
         builder ListItem { text: string   markup = "<li>" + text + "</li>" }
 
+        // The one element here that must NOT have its content touched: whitespace is significant inside
+        // <pre>, so the caller's newlines are the layout. &Code in Vein.WebTheme styles it.
+        //
+        // The parameter is `text` and not `code` for a reason worth knowing: a builder's OUTPUT FIELD is
+        // chosen by name, so `markup`, `css` and `code` are spoken for. A parameter called `code` is read
+        // as "this builder writes on the @Script channel", and the builder then has no value for it —
+        // VS0205, pointing at every call site rather than at the declaration that caused it.
+        shared("A block of preformatted code.")
+        builder CodeBlock { text: string   markup = "<pre class=\"code-block\"><code>" + text + "</code></pre>" }
+
         // A builder emits ONE fragment, so it cannot wrap other fragments — there is no way to express
-        // "open a div, then some cards, then close it" as a single builder. `Raw` is the escape hatch
-        // that makes the rest of the library able to stay small and unopinionated: anything this
-        // vocabulary does not model, you write directly.
+        // "open a div, then some cards, then close it" as a single builder. What a builder CAN do is
+        // name each half, which is the difference between these three and writing the tags by hand:
+        // `bring Open("main")` … `bring Close("main")` says what it is doing, and the fragments in
+        // between can be indented to show the nesting the events will produce.
+        shared("Opens a container element — pair it with &Close.")
+        builder Open { tag: string   markup = "<" + tag + ">" }
+
+        shared("Opens a container element carrying a class — pair it with &Close.")
+        builder OpenAs { tag: string, cls: string   markup = "<" + tag + " class=\"" + cls + "\">" }
+
+        shared("Closes a container opened with &Open or &OpenAs.")
+        builder Close { tag: string   markup = "</" + tag + ">" }
+
+        // `Raw` remains the escape hatch for everything the vocabulary above does not model, and is
+        // what lets the rest of the library stay small and unopinionated.
         shared("Markup this library does not model — passed through unchanged.")
         builder Raw { html: string   markup = html }
 

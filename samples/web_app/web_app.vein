@@ -1,0 +1,226 @@
+// samples/web_app.vein — a FULL site: five routes, a real stylesheet, working JavaScript, and a form.
+//
+//   veinc serve samples/web_app.vein --port 8080
+//   then open http://localhost:8080/
+//
+// This exists to stress the three channels together. A builder's OUTPUT FIELD decides which event it
+// emits, and that is the whole mechanism:
+//
+//     markup = …   →  @Html      (the page)
+//     css    = …   →  @Style     (the stylesheet)
+//     code   = …   →  @Script    (the behaviour)
+//
+// Three streams, three accumulators on the ShardView, one document at the end. Nothing here writes a
+// page; every shard contributes a fragment and the view decides where each kind lands — CSS in <head>,
+// scripts before </body>.
+//
+// Two things the language makes you do differently from a template engine:
+//   * a newline ends a statement, so a `+` must end the line it continues from — trailing `+` keeps
+//     the expression open, a leading `+` on the next line starts a new statement and fails;
+//   * there is no `!=`; inequality is `not (a == b)`.
+//
+// Compare samples/web_site.vein, which is the same idea with three routes and no styling.
+
+bundle WebApp by you {
+
+    // Two bundles, and the split between them is the point. Vein.Web is the machinery: the channels,
+    // and the primitives to write on them. Vein.WebTheme is the look — palettes, foundation,
+    // components — so this file selects a style instead of transcribing one.
+    use Web
+    use WebTheme
+
+    // ---- page furniture, which is this SITE and not the library ------------------------------------
+    // A hero and a card are still decisions this page makes: the theme styles `.card`, but what goes
+    // in one belongs here.
+
+    builder Nav {
+        markup = "<nav>" +
+                 "<a href='/'>home</a>" +
+                 "<a href='/docs'>docs</a>" +
+                 "<a href='/counter'>counter</a>" +
+                 "<a href='/greet'>greet</a>" +
+                 "<span class='clock' id='clk' style='margin-left:auto'></span>" +
+                 "<button onclick='theme()'>theme</button>" +
+                 "</nav>"
+    }
+
+    builder Card    { title: string, body: string   markup = "<div class='card'><h3>" + title + "</h3><p>" + body + "</p></div>" }
+    builder Hero    { title: string, sub: string    markup = "<header class='hero'><h1>" + title + "</h1><p>" + sub + "</p></header>" }
+    builder Footer  { note: string                  markup = "<footer>" + note + "</footer>" }
+
+    // ---- the stylesheet ----------------------------------------------------------------------------
+    // Emitted on EVERY request, before any page decides what it contains. A 404 still collects the CSS
+    // and still answers 404, because the view keys "is there a page" off the HTML, not off the styles.
+
+    shard Styles {
+        hear @Request as r {
+            // The palette comes first and is the only line that names a colour. Every component below
+            // reads var(--brand), var(--card), var(--line) — which is why swapping this one `bring`
+            // for `Ink()` restyles the whole site, and why the dark theme is a class swap rather than
+            // a parallel rule for each element.
+            bring Slate()
+            bring Reset()
+
+            // One `bring` per feature the site actually uses. A page with no cards would not ship the
+            // card rules.
+            bring NavBar()
+            bring HeroArea()
+            bring Cards()
+            bring Controls()
+            bring Prose()
+            bring Layout()
+
+            // Long-form document styling, for /docs. Selecting them here rather than in the Reference
+            // shard keeps every style decision in one place — and costs nothing on the other routes,
+            // since a rule whose selector matches nothing does nothing.
+            bring Article()
+            bring Code()
+            bring Callout()
+
+            bring Motion()
+
+            // &Rule stays reachable for what the theme has no opinion about — this counter's readout
+            // is particular to one page of one site.
+            bring Rule(".count", "font-size:4rem;font-weight:800;letter-spacing:-.04em;color:var(--brand);margin:1.5rem 0;font-variant-numeric:tabular-nums")
+        }
+    }
+
+    // ---- behaviour that belongs to every page --------------------------------------------------------
+    // The nav is on every page, so the theme toggle and the clock it contains have to be too. Same
+    // shape as Styles: emitted on every request, before any route decides what the page contains.
+
+    shard Behaviour {
+        hear @Request as r {
+            // The @Script half of the theme. &ThemeToggle is the other end of the palette's `.dark`
+            // contract — the CSS defines the class, this puts it on <html> and remembers it.
+            bring ThemeToggle()
+            bring Clock("clk")
+        }
+    }
+
+    // ---- pages -------------------------------------------------------------------------------------
+    // &Open and &Close cannot nest — each is its own fragment — but the indentation between them shows
+    // the nesting the fragments will produce once the view concatenates them.
+
+    shard Home {
+        hear @Request as r {
+            if r.path == "/" {
+                bring Nav()
+                bring Hero("VeinScript", "A website assembled entirely from events.")
+                bring Open("main")
+                    bring OpenAs("div", "grid")
+                        bring Card("Shapes", "Data lives in $Shape — identity components with folds.")
+                        bring Card("Shards", "Behaviour reacts: hear an event, emit more.")
+                        bring Card("Builders", "A builder's output field picks its channel: markup, css or code.")
+                        bring Card("One page", "These four cards are four separate @Html fragments.")
+                    bring Close("div")
+                bring Close("main")
+                bring Footer("Served by veinc serve")
+            }
+        }
+    }
+
+    // /docs is not here. It lives in shards/Reference.vein, which BundleLoader merges into this bundle:
+    // a bundle is its main file PLUS every fragment under `publicators/` and `shards/`. The reference it
+    // serves is ~1300 fragments, and putting them in this file would bury the five routes it documents.
+    // Nothing about the mechanism changes — `bring` still queues, @Render still fires last.
+
+    // ---- JavaScript, which is where the third channel earns its place -------------------------------
+
+    shard Counter {
+        hear @Request as r {
+            if r.path == "/counter" {
+                bring Nav()
+                bring Hero("Counter", "The page reacts in the browser, not on the server.")
+                bring Open("main")
+                    bring Raw("<div class='count' id='n'>0</div>")
+                    bring Raw("<div class='row'>" +
+                              "<button onclick='inc()'>+1</button>" +
+                              "<button onclick='dec()'>-1</button>" +
+                              "<button onclick='reset()'>reset</button>" +
+                              "</div>")
+                    bring 2 JumpLine()
+                    bring Link("/", "back home")
+                bring Close("main")
+
+                // Page behaviour, written straight onto the @Script channel — the theme has no opinion
+                // about what a counter does. Same shape as a CSS rule or a paragraph, different field.
+                bring Define("inc", "var e=document.getElementById('n');e.innerText=(+e.innerText)+1")
+                bring Define("dec", "var e=document.getElementById('n');e.innerText=(+e.innerText)-1")
+                bring Define("reset", "document.getElementById('n').innerText='0'")
+                bring Footer("Three functions, three @Script fragments")
+            }
+        }
+    }
+
+    // ---- a form: the part a path alone cannot express -----------------------------------------------
+
+    shard Greet {
+        hear @Request as r {
+            if r.path == "/greet" {
+                bring Nav()
+
+                if r.method == "GET" {
+                    bring Hero("Greet", "A form, posted back to the same path.")
+                    bring Open("main")
+                        // &Form is self-contained because one fragment cannot wrap others: it carries
+                        // its own input and submit, and &Controls styles both.
+                        bring Form("/greet", "who", "send")
+                    bring Close("main")
+                }
+
+                if r.method == "POST" {
+                    // `who` came from the form body. It is an ordinary payload field by the time it
+                    // reaches here — the same place a query string would have put it.
+                    bring Hero("Hello " + r.who, "Received by POST.")
+                    bring Open("main")
+                        bring Card("method", r.method)
+                        bring Card("raw body", r.body)
+                        bring Link("/greet", "again")
+                    bring Close("main")
+                }
+
+                bring Footer("method and body arrive on @Request")
+            }
+        }
+    }
+
+    // ---- assembly ------------------------------------------------------------------------------------
+
+    // The trigger has to be a separate event. `bring` QUEUES a fragment event rather than writing
+    // anything, and the queue does not drain until every @Request handler has finished — so a view that
+    // answered on @Request would always see an empty page.
+    //
+    // But queueing @Render during @Request is not enough either, and this is where the sample used to be
+    // quietly wrong: it worked only because Kernel was written BELOW every page shard, so its @Render
+    // landed behind their fragments. Move a route into shards/ — as /docs now is — and the fragments are
+    // queued after Kernel, so @Render arrives at an empty page and the route silently 404s.
+    //
+    // @Assembled is the fix, and it is one hop rather than one ordering rule. Everything queued during
+    // @Request drains before anything queued during @Assembled, so @Render lands after every fragment no
+    // matter which shard emitted it or what order the shards were declared in.
+    event @Assembled { path: string }
+
+    shard Kernel {
+        hear @Request as r   { emit @Assembled { path: r.path } }
+        hear @Assembled as a { emit @Render { path: a.path } }
+    }
+
+    ShardView Page {
+        var html: string
+        var css: string
+        var js: string
+
+        hear @Html as f   { html += f.markup }
+        hear @Style as s  { css += s.css }
+        hear @Script as c { js += c.code }
+
+        hear @Render as v {
+            // No HTML means no route matched, so stay silent and let serve answer 404. The stylesheet
+            // arrived regardless, which is exactly why the check is on `html` and not on the page.
+            if not (html == "") {
+                emit @Response { status: 200, body: "<!doctype html><html><head><meta charset=\"utf-8\"><title>VeinScript</title><style>" + css + "</style></head><body>" + html + "<script>" + js + "</script></body></html>" }
+            }
+        }
+    }
+}

@@ -1,0 +1,197 @@
+// stdlib/WebTheme.vein — VeinScript Standard Library : Vein.WebTheme
+// The look, kept apart from the machinery. Vein.Web ships the three channels and the primitives to
+// write on them; it deliberately has no opinion about what a page looks like. This bundle is that
+// opinion, and it is a separate `use` so taking the channels never means taking the taste.
+//
+// A theme is not a new mechanism. A builder's OUTPUT FIELD picks its channel, and nothing says a
+// `css =` field holds ONE rule — so a whole stylesheet is a single fragment, and choosing a look is
+// `bring`ing the pieces you want:
+//
+//     bring Slate()      // the palette
+//     bring Reset()      // the foundation
+//     bring Cards()      // the components you actually use
+//
+// Vocabulary only — no shards. A shard cannot be `shared`, so one declared here would be invisible
+// behaviour handed to everyone who only wanted a stylesheet.
+
+bundle WebTheme by Vein {
+
+    use Web
+
+    // Palettes — custom properties and NOTHING else. This is the whole reason the pieces below compose:
+    // every component reads var(--brand), var(--card), var(--line), so swapping the one palette line
+    // restyles the entire site without touching a component. A parallel dark rule per element would
+    // make that impossible.
+    //
+    // Each palette defines the variables twice: once on :root for light, once on `.dark` for dark.
+    // `.dark` is a CONTRACT with &ThemeToggle below, which is what puts that class on <html>. The two
+    // halves live in different publicators and nothing but this note ties them together.
+    publicator Palettes {
+
+        shared("A cool blue-grey palette. Defines :root and .dark — pair with &ThemeToggle.")
+        builder Slate {
+            css = ":root{--bg:#f6f7f9;--fg:#151a21;--muted:#5f6b7a;--card:#fff;--line:#e4e8ee;" +
+                  "--brand:#3b6ea5;--ink:#fff;" +
+                  "--shadow:0 1px 2px rgba(16,24,40,.05),0 6px 16px rgba(16,24,40,.06)}" +
+                  ".dark{--bg:#0e1218;--fg:#e7ebf0;--muted:#94a2b3;--card:#161d26;--line:#242e3a;" +
+                  "--brand:#5b9bd8;--ink:#0e1218;" +
+                  "--shadow:0 1px 2px rgba(0,0,0,.5),0 8px 24px rgba(0,0,0,.4)}"
+        }
+
+        shared("A warm paper-and-ink palette. Defines :root and .dark — pair with &ThemeToggle.")
+        builder Ink {
+            css = ":root{--bg:#faf7f2;--fg:#1c1917;--muted:#78716c;--card:#fffdfa;--line:#e7e1d8;" +
+                  "--brand:#9a5b3d;--ink:#fffdfa;" +
+                  "--shadow:0 1px 2px rgba(60,40,20,.06),0 6px 16px rgba(60,40,20,.08)}" +
+                  ".dark{--bg:#151311;--fg:#eae6e1;--muted:#a8a09a;--card:#211d1a;--line:#332e29;" +
+                  "--brand:#c98a63;--ink:#151311;" +
+                  "--shadow:0 1px 2px rgba(0,0,0,.5),0 8px 24px rgba(0,0,0,.45)}"
+        }
+    }
+
+    // Foundation — what every page wants before any component: the box model, and the body type that
+    // reads the palette. Bring &Reset first; the components below assume it.
+    publicator Foundation {
+
+        shared("Box-sizing, smooth scrolling, and body typography reading the palette variables.")
+        builder Reset {
+            css = "*{box-sizing:border-box}" +
+                  "html{scroll-behavior:smooth}" +
+                  "body{margin:0;" +
+                  "font:16px/1.65 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;" +
+                  "color:var(--fg);background:var(--bg);" +
+                  "transition:background .25s ease,color .25s ease}"
+        }
+
+        // Separate from &Reset because it is a choice, not a given: a page with no transitions has
+        // nothing to turn off, and should not ship the query.
+        shared("Honours prefers-reduced-motion by dropping every transition.")
+        builder Motion {
+            css = "@media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto}}"
+        }
+    }
+
+    // Components — one builder per feature, and none of them names a colour. Bring the ones the page
+    // actually uses; a site with no cards should not ship the card rules.
+    publicator Components {
+
+        shared("A sticky translucent nav bar, its links, and the .clock span it can carry.")
+        builder NavBar {
+            css = "nav{display:flex;align-items:center;gap:1.5rem;padding:1rem 2rem;" +
+                  "background:color-mix(in srgb,var(--bg) 80%,transparent);backdrop-filter:blur(10px);" +
+                  "border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10}" +
+                  "nav a{color:var(--muted);text-decoration:none;font-weight:550;font-size:.95rem;" +
+                  "transition:color .15s ease}" +
+                  "nav a:hover{color:var(--brand)}" +
+                  ".clock{font-variant-numeric:tabular-nums;color:var(--muted);font-size:.9rem}"
+        }
+
+        shared("A centred page header — .hero with its h1 and lead paragraph.")
+        builder HeroArea {
+            css = ".hero{padding:5rem 2rem 4rem;text-align:center;" +
+                  "background:radial-gradient(120% 100% at 50% 0%," +
+                  "color-mix(in srgb,var(--brand) 18%,transparent),transparent 70%)}" +
+                  ".hero h1{margin:0 0 .6rem;font-size:clamp(2rem,5vw,3.2rem);line-height:1.1;" +
+                  "letter-spacing:-.03em;font-weight:800}" +
+                  ".hero p{margin:0 auto;max-width:34rem;color:var(--muted);font-size:1.15rem}"
+        }
+
+        shared("A raised .card that lifts on hover, with its heading and body text.")
+        builder Cards {
+            css = ".card{background:var(--card);border:1px solid var(--line);border-radius:.85rem;" +
+                  "padding:1.4rem;box-shadow:var(--shadow);" +
+                  "transition:transform .18s ease,border-color .18s ease}" +
+                  ".card:hover{transform:translateY(-3px);border-color:var(--brand)}" +
+                  ".card h3{margin:0 0 .45rem;font-size:1rem;font-weight:700;color:var(--brand)}" +
+                  ".card p{margin:0;color:var(--muted);font-size:.94rem}"
+        }
+
+        shared("Buttons and text inputs — the styling &Button and &Form pick up for free.")
+        builder Controls {
+            css = "button{background:var(--brand);color:var(--ink);border:0;border-radius:.55rem;" +
+                  "padding:.65rem 1.2rem;font:inherit;font-weight:600;cursor:pointer;" +
+                  "transition:filter .15s ease,transform .1s ease}" +
+                  "button:hover{filter:brightness(1.12)}" +
+                  "button:active{transform:translateY(1px)}" +
+                  "input{padding:.65rem .8rem;border:1px solid var(--line);border-radius:.55rem;" +
+                  "font:inherit;background:var(--card);color:var(--fg);min-width:14rem}" +
+                  "input:focus{outline:2px solid var(--brand);outline-offset:1px}"
+        }
+
+        shared("Readable body content — a centred main column, lists, links and a footer.")
+        builder Prose {
+            css = "main{max-width:56rem;margin:0 auto;padding:3rem 2rem 4rem}" +
+                  "ul{padding-left:1.2rem;color:var(--muted)}" +
+                  "li{margin:.4rem 0}" +
+                  "a{color:var(--brand)}" +
+                  "footer{padding:2.5rem;text-align:center;color:var(--muted);font-size:.88rem;" +
+                  "border-top:1px solid var(--line)}"
+        }
+
+        shared("Long-form document structure — the h2/h3 hierarchy and emphasised runs inside prose.")
+        builder Article {
+            css = "article h2{margin:2.6rem 0 .8rem;padding-bottom:.4rem;font-size:1.35rem;" +
+                  "font-weight:750;letter-spacing:-.02em;border-bottom:1px solid var(--line)}" +
+                  "article h3{margin:1.8rem 0 .5rem;font-size:1.05rem;font-weight:700;" +
+                  "color:var(--brand)}" +
+                  "article p{margin:.7rem 0}" +
+                  "article strong{color:var(--fg);font-weight:650}"
+        }
+
+        // Two ways code appears in prose, and they need opposite treatment: a block must not wrap
+        // (it scrolls instead, or the indentation stops meaning anything), an inline run must.
+        shared("Code in prose — scrollable pre.code-block, and code.inline-code inside a sentence.")
+        builder Code {
+            css = "pre.code-block{background:color-mix(in srgb,var(--fg) 5%,var(--card));" +
+                  "border:1px solid var(--line);border-radius:.6rem;padding:.9rem 1.1rem;" +
+                  "overflow-x:auto;margin:.9rem 0}" +
+                  "pre.code-block code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;" +
+                  "font-size:.85rem;line-height:1.55;white-space:pre;color:var(--fg)}" +
+                  "code.inline-code{background:color-mix(in srgb,var(--brand) 12%,transparent);" +
+                  "font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.88em;" +
+                  "padding:.1rem .35rem;border-radius:.3rem;color:var(--brand);white-space:break-spaces}"
+        }
+
+        shared("A framed aside for a caveat that applies to everything below it.")
+        builder Callout {
+            css = ".callout{background:color-mix(in srgb,var(--brand) 8%,var(--card));" +
+                  "border:1px solid var(--line);border-left:3px solid var(--brand);" +
+                  "border-radius:.5rem;padding:.9rem 1.1rem;margin:1.2rem 0;font-size:.92rem;" +
+                  "color:var(--muted)}" +
+                  ".callout strong{color:var(--fg)}"
+        }
+
+        shared("Two arrangements: .grid wraps cards into columns, .row lays controls out in a line.")
+        builder Layout {
+            css = ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(14rem,1fr));" +
+                  "gap:1.1rem}" +
+                  ".row{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center}"
+        }
+    }
+
+    // Behaviours — the @Script half of a theme. A look that only exists in CSS cannot have a dark mode
+    // you can turn on, so the toggle belongs here rather than in the page.
+    publicator Behaviours {
+
+        // Persisted, or the theme resets on every navigation — which on a multi-page site means it
+        // never appears to work at all. The restore runs as the script loads, not inside theme().
+        shared("A theme() function toggling .dark on <html>, remembered across pages. Pair with a palette.")
+        builder ThemeToggle {
+            code = "function theme(){" +
+                   "var d=document.documentElement.classList.toggle('dark');" +
+                   "try{localStorage.setItem('theme',d?'dark':'light')}catch(e){}}" +
+                   "try{if(localStorage.getItem('theme')==='dark')" +
+                   "document.documentElement.classList.add('dark')}catch(e){}"
+        }
+
+        // The parameter is `id` and not `target` because `target` is a keyword — the query form a
+        // shard uses to reach identities. A builder parameter cannot borrow it.
+        shared("A ticking clock written into the element with the given id — bring Clock(\"clk\").")
+        builder Clock {
+            id: string
+            code = "function tick(){var e=document.getElementById('" + id + "');" +
+                   "if(e)e.innerText=new Date().toLocaleTimeString()}" +
+                   "tick();setInterval(tick,1000);"
+        }
+    }
+}

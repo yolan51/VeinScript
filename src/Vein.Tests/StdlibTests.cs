@@ -29,7 +29,7 @@ public class StdlibTests
         new VeinCompilerService().Compile(new CompileRequest("t.vein", src));
 
     public static readonly string[] Bundles =
-        { "Core.vein", "Math.vein", "Transform.vein", "Input.vein", "UI.vein", "Time.vein", "Game.vein", "Web.vein", "Diagnostics.vein", "Console.vein" };
+        { "Core.vein", "Math.vein", "Transform.vein", "Input.vein", "UI.vein", "Time.vein", "Game.vein", "Web.vein", "WebTheme.vein", "Net.vein", "Diagnostics.vein", "Console.vein" };
 
     public static IEnumerable<object[]> BundleFiles => Bundles.Select(b => new object[] { b });
 
@@ -75,9 +75,13 @@ public class StdlibTests
         var model = ProjectLoader.Load(StdFile("Vein.app.vein"), diag);
         Assert.False(diag.HasErrors);
         var byKind = model.Symbols.GroupBy(s => s.Kind).ToDictionary(g => g.Key, g => g.Count());
+        // Sanity bounds, not exact counts: the point is that the shared API is non-trivial and that no
+        // shard ever reaches it. The builder ceiling has headroom because Vein.WebTheme is a whole
+        // domain expressed AS builders — a palette or a component is one `css =` field — so that count
+        // grows whenever the library learns a new look.
         Assert.InRange(byKind[SymbolKind.Shape], 10, 30);
         Assert.InRange(byKind[SymbolKind.Event], 5, 40);
-        Assert.InRange(byKind[SymbolKind.Builder], 5, 30);
+        Assert.InRange(byKind[SymbolKind.Builder], 5, 60);
         Assert.False(byKind.ContainsKey(SymbolKind.Shard));   // shards are never in the shared API
     }
 

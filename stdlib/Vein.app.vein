@@ -12,6 +12,7 @@ app Vein {
     load "Time.vein"
     load "Game.vein"
     load "Web.vein"
+    load "WebTheme.vein"
     load "Diagnostics.vein"
     load "Console.vein"
     load "Net.vein"
