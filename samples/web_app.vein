@@ -1,0 +1,186 @@
+// samples/web_app.vein — a FULL site: five routes, a real stylesheet, working JavaScript, and a form.
+//
+//   veinc serve samples/web_app.vein --port 8080
+//   then open http://localhost:8080/
+//
+// This exists to stress the three channels together. A builder's OUTPUT FIELD decides which event it
+// emits, and that is the whole mechanism:
+//
+//     markup = …   →  @Html      (the page)
+//     css    = …   →  @Style     (the stylesheet)
+//     code   = …   →  @Script    (the behaviour)
+//
+// Three streams, three accumulators on the ShardView, one document at the end. Nothing here writes a
+// page; every shard contributes a fragment and the view decides where each kind lands — CSS in <head>,
+// scripts before </body>.
+//
+// Two things the language makes you do differently from a template engine:
+//   * a newline ENDS a statement, so a long string stays on ONE line — there is no `+` continuation;
+//   * there is no `!=`; inequality is `not (a == b)`.
+//
+// Compare samples/web_site.vein, which is the same idea with three routes and no styling.
+
+bundle WebApp by you {
+
+    use Web                       // &Heading &Paragraph &Link &Image &ListItem &JumpLine
+
+    // ---- builders for the channels Elements does not cover -----------------------------------------
+    // Vein.Web.Elements ships markup builders only. A stylesheet and a script are just as much
+    // "elements", so the site declares the two builders that emit into those channels.
+
+    builder Rule    { selector: string, decl: string   css = selector + "{" + decl + "}" }
+    builder Define  { name: string, body: string       code = "function " + name + "(){" + body + "}" }
+    builder Raw     { html: string                     markup = html }
+
+    // ---- reusable page furniture -------------------------------------------------------------------
+
+    builder Nav     { markup = "<nav><a href=\"/\">home</a><a href=\"/docs\">docs</a><a href=\"/counter\">counter</a><a href=\"/greet\">greet</a></nav>" }
+    builder Card    { title: string, body: string   markup = "<div class=\"card\"><h3>" + title + "</h3><p>" + body + "</p></div>" }
+    builder Hero    { title: string, sub: string    markup = "<header class=\"hero\"><h1>" + title + "</h1><p>" + sub + "</p></header>" }
+    builder Footer  { note: string                  markup = "<footer>" + note + "</footer>" }
+
+    // ---- the stylesheet ----------------------------------------------------------------------------
+    // Emitted on EVERY request, before any page decides what it contains. A 404 still collects the CSS
+    // and still answers 404, because the view keys "is there a page" off the HTML, not off the styles.
+
+    shard Styles {
+        hear @Request as r {
+            bring Rule("*", "box-sizing:border-box")
+            bring Rule("body", "margin:0;font:16px/1.6 system-ui,-apple-system,Segoe UI,sans-serif;color:#1c1e21;background:#f7f8fa")
+            bring Rule("nav", "display:flex;gap:1.25rem;padding:1rem 2rem;background:#11141a;position:sticky;top:0")
+            bring Rule("nav a", "color:#9fb4d0;text-decoration:none;font-weight:600")
+            bring Rule("nav a:hover", "color:#fff")
+            bring Rule(".hero", "padding:4rem 2rem;background:linear-gradient(135deg,#1b2735,#28405c);color:#fff")
+            bring Rule(".hero h1", "margin:0 0 .5rem;font-size:2.5rem;letter-spacing:-.02em")
+            bring Rule(".hero p", "margin:0;opacity:.85;font-size:1.15rem")
+            bring Rule("main", "max-width:52rem;margin:0 auto;padding:2rem")
+            bring Rule(".grid", "display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1rem")
+            bring Rule(".card", "background:#fff;border:1px solid #e3e6ea;border-radius:.6rem;padding:1.25rem")
+            bring Rule(".card h3", "margin:0 0 .4rem;font-size:1.05rem;color:#28405c")
+            bring Rule(".card p", "margin:0;color:#5b6470;font-size:.95rem")
+            bring Rule("button", "background:#28405c;color:#fff;border:0;border-radius:.4rem;padding:.6rem 1.1rem;font:inherit;cursor:pointer")
+            bring Rule("button:hover", "background:#365a82")
+            bring Rule("input", "padding:.6rem;border:1px solid #cfd4da;border-radius:.4rem;font:inherit;min-width:14rem")
+            bring Rule("footer", "padding:2rem;text-align:center;color:#8a929c;font-size:.9rem")
+            bring Rule(".count", "font-size:3rem;font-weight:700;color:#28405c;margin:1rem 0")
+            bring Rule(".dark body", "background:#11141a;color:#e6e9ee")
+        }
+    }
+
+    // ---- pages -------------------------------------------------------------------------------------
+
+    shard Home {
+        hear @Request as r {
+            if r.path == "/" {
+                bring Nav()
+                bring Hero("VeinScript", "A website assembled entirely from events.")
+                bring Raw("<main><div class=\"grid\">")
+                bring Card("Shapes", "Data lives in $Shape — identity components with folds.")
+                bring Card("Shards", "Behaviour reacts: hear an event, emit more.")
+                bring Card("Builders", "A builder's output field picks its channel: markup, css or code.")
+                bring Card("One page", "These four cards are four separate @Html fragments.")
+                bring Raw("</div></main>")
+                bring Footer("Served by veinc serve")
+            }
+        }
+    }
+
+    shard Docs {
+        hear @Request as r {
+            if r.path == "/docs" {
+                bring Nav()
+                bring Hero("Docs", "The three channels, and what reaches them.")
+                bring Raw("<main><ul>")
+                bring ListItem("markup = … emits @Html, and lands in the body")
+                bring ListItem("css = … emits @Style, and lands in a &lt;style&gt; in the head")
+                bring ListItem("code = … emits @Script, and lands before &lt;/body&gt;")
+                bring ListItem("@Render fires after every fragment, so the view sees a complete page")
+                bring Raw("</ul>")
+                bring Link("/", "back home")
+                bring Raw("</main>")
+                bring Footer("Every list item above is its own event")
+            }
+        }
+    }
+
+    // ---- JavaScript, which is where the third channel earns its place -------------------------------
+
+    shard Counter {
+        hear @Request as r {
+            if r.path == "/counter" {
+                bring Nav()
+                bring Hero("Counter", "The page reacts in the browser, not on the server.")
+                bring Raw("<main>")
+                bring Raw("<div class=\"count\" id=\"n\">0</div>")
+                bring Raw("<button onclick=\"inc()\">+1</button> <button onclick=\"reset()\">reset</button> <button onclick=\"theme()\">toggle theme</button>")
+                bring JumpLine()
+                bring JumpLine()
+                bring Link("/", "back home")
+                bring Raw("</main>")
+
+                // Each function is a fragment on the @Script channel — same shape as a CSS rule or a
+                // paragraph, just a different output field.
+                bring Define("inc", "var e=document.getElementById('n');e.innerText=(+e.innerText)+1")
+                bring Define("reset", "document.getElementById('n').innerText='0'")
+                bring Define("theme", "document.documentElement.classList.toggle('dark')")
+                bring Footer("Three functions, three @Script fragments")
+            }
+        }
+    }
+
+    // ---- a form: the part a path alone cannot express -----------------------------------------------
+
+    shard Greet {
+        hear @Request as r {
+            if r.path == "/greet" {
+                bring Nav()
+
+                if r.method == "GET" {
+                    bring Hero("Greet", "A form, posted back to the same path.")
+                    bring Raw("<main><form method=\"post\" action=\"/greet\"><input name=\"who\" placeholder=\"your name\"> <button>send</button></form>")
+                    bring Raw("</main>")
+                }
+
+                if r.method == "POST" {
+                    // `who` came from the form body. It is an ordinary payload field by the time it
+                    // reaches here — the same place a query string would have put it.
+                    bring Hero("Hello " + r.who, "Received by POST.")
+                    bring Raw("<main>")
+                    bring Card("method", r.method)
+                    bring Card("raw body", r.body)
+                    bring Link("/greet", "again")
+                    bring Raw("</main>")
+                }
+
+                bring Footer("method and body arrive on @Request")
+            }
+        }
+    }
+
+    // ---- assembly ------------------------------------------------------------------------------------
+
+    // The trigger has to be a separate event. `bring` QUEUES a fragment event rather than writing
+    // anything, and the queue does not drain until every @Request handler has finished — so a view that
+    // answered on @Request would always see an empty page. @Render queues behind the fragments.
+    shard Kernel {
+        hear @Request as r { emit @Render { path: r.path } }
+    }
+
+    ShardView Page {
+        var html: string
+        var css: string
+        var js: string
+
+        hear @Html as f   { html += f.markup }
+        hear @Style as s  { css += s.css }
+        hear @Script as c { js += c.code }
+
+        hear @Render as v {
+            // No HTML means no route matched, so stay silent and let serve answer 404. The stylesheet
+            // arrived regardless, which is exactly why the check is on `html` and not on the page.
+            if not (html == "") {
+                emit @Response { status: 200, body: "<!doctype html><html><head><meta charset=\"utf-8\"><title>VeinScript</title><style>" + css + "</style></head><body>" + html + "<script>" + js + "</script></body></html>" }
+            }
+        }
+    }
+}
