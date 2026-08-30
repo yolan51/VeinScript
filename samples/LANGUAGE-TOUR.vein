@@ -21,6 +21,15 @@
 //    6. shaped    — `$Shape` includes: a shape's fields flatten into a builder's params
 //    7. handles   — cross-linking html/js/css through shared handle values (one source of truth)
 //    8. entities  — the identity runtime RUNNING: spawn/attach, folds reconciling two shards, settled
+//    9. console   — many windows, one program: @Console/@Send/@Message, `here()` as a role switch,
+//                   `every N` (the wall clock), `audience` over the bus, @Undelivered
+//   10. net       — the same model off this machine: @Listen/@Link, encrypted + NAT-crossing peers,
+//                   and @Fetch/@Fetched/@Failed for services that are not VeinScript
+//   11. chat      — entities AS a growing collection: a roster that stacks, and why leaving destroys
+//   12. apps      — a principal bundle boots; capability bundles join ONE runtime and boot nothing
+//   13. toolchain — run / render / serve / build / emit / symbols, and the three checks
+//
+//  Everything in 9–13 was built after the original tour; sections 1–8 are unchanged.
 // ============================================================================================
 
 
@@ -455,3 +464,256 @@ bundle Entities {
         }
     }
 }
+
+
+// ============================================================================================
+//  9. console — MANY WINDOWS, ONE PROGRAM
+//  A program can spawn named console applications and pass events between them. Every window runs
+//  the SAME source, so what differs is `here()` — this process's own console address. That makes
+//  `match here()` a ROLE SWITCH: the window you launched is #Main, each spawned one is its name.
+//    veinc build samples/console_roles.vein   ·   samples/console_broadcast.vein
+//
+//  `every N` is the wall clock — the one schedule in real seconds rather than frames. It runs only
+//  in a live session (`veinc run`, a built .exe); `--ticks N` drives `each tick`, not this.
+//
+//  NOTE: the setup below sits in a `hear` rather than `run once` so that merely running this tour
+//  does not open windows or bind ports. In a real program it is `run once`.
+// ============================================================================================
+
+bundle ConsoleRoles by you {
+
+    event @Begin { }
+
+    shard Boot {
+        hear @Begin as b {
+            match here() {
+                // Only the launched window opens the others; a spawned console cannot spawn again,
+                // so the tree can never run away.
+                when #Main {
+                    emit *Vein.Console.Io.@Console { name: #Alpha, firsttext: "Alpha — I echo." }
+                    emit *Vein.Console.Io.@Console { name: #Beta,  firsttext: "Beta — I count." }
+                }
+            }
+        }
+    }
+
+    shard Driver {
+        var round: int
+
+        // Every window reaches this block; the workers match no arm and do nothing. One timer, one
+        // program, different work per identity.
+        every 2 {
+            match here() {
+                when #Main {
+                    round += 1
+                    let workers = [#Alpha, #Beta]
+                    emit *Vein.Console.Io.@Send { to: pick(workers), text: "ping " + round }
+                }
+            }
+        }
+    }
+
+    shard Worker {
+        var seen: int
+
+        // `audience #Main` is the barrier: only Main reaches this handler. Over a console pipe it is
+        // ADVISORY (the sender's name is unauthenticated); over Vein.Net it is enforced — §10.
+        hear *Vein.Console.Io.@Message as m audience #Main {
+            seen += 1
+            emit *Vein.Console.Io.@Print { text: m.from + " -> " + m.text + " (#" + seen + ")" }
+        }
+    }
+
+    // A window can be CLOSED at any time — normal, not an error. Without this, a closed peer just
+    // makes the sender go quiet, and a silent window is indistinguishable from a dead one.
+    shard Reachability {
+        hear *Vein.Console.Io.@Undelivered as u {
+            emit *Vein.Console.Io.@Print { text: "  (" + u.to + " is not running)" }
+        }
+    }
+}
+
+
+// ============================================================================================
+//  10. net — THE SAME MODEL, OFF THIS MACHINE
+//  `Vein.Net.Peer` re-declares Console's @Send/@Message/@Undelivered because at runtime they are the
+//  SAME events: an `emit` lowers to its bare event name. So there is exactly one place a transport is
+//  chosen — a mark that has been @Link-ed goes over the wire, anything else over the local pipe — and
+//  a console program goes cross-machine by adding @Listen/@Link and changing nothing else.
+//
+//  Connections are persistent and bidirectional, so a reply travels back down the socket the sender
+//  opened: a client behind NAT needs no port forwarding and no public address. Frames are encrypted
+//  (AES-256-GCM under a key derived from `key:`), which is what makes `audience` a real barrier.
+//  Not TLS: one static key means no forward secrecy and no certificate identity.
+//    samples/net_peer.vein + samples/net_spoke.vein   ·   samples/net_fetch.vein
+// ============================================================================================
+
+bundle NetPeer by you {
+
+    event @Begin { }
+
+    shard Boot {
+        hear @Begin as b {
+            // `as` is who this program IS on the network — without it every peer answers to #Main.
+            // A key is MANDATORY: @Listen refuses an empty one, because a port with no key accepts
+            // any claimed identity and `audience` would silently become decoration.
+            emit *Vein.Net.Peer.@Listen { as: #Hub, at: 9700, key: "shared-secret" }
+
+            // Where a peer LIVES. Only the side that speaks FIRST needs this: a frame carries the
+            // port its sender listens on, so receiving one teaches the receiver the way back.
+            emit *Vein.Net.Peer.@Link { name: #Spoke, at: "10.0.0.5:9701", key: "shared-secret" }
+        }
+    }
+
+    // Byte for byte the console version — nothing here says "network".
+    shard Trusted {
+        hear *Vein.Net.Peer.@Message as m audience #Spoke {
+            emit *Vein.Net.Peer.@Send { to: m.from, text: "ack " + m.text }
+        }
+    }
+
+    // HTTP is deliberately a DIFFERENT shape: a URL is not an identity, cannot call back, and answers
+    // once per question. So @Fetch is a request with a reply. ANY status is @Fetched — a 404 is an
+    // ANSWER — and only silence is @Failed, the same line @Undelivered draws for a peer.
+    shard Fetcher {
+        hear @Begin as b {
+            emit *Vein.Net.Http.@Fetch { url: "https://httpbin.org/ip", method: "GET", body: "" }
+        }
+        hear *Vein.Net.Http.@Fetched as r {
+            emit *Vein.Console.Io.@Print { text: r.status + " " + r.body }
+        }
+        hear *Vein.Net.Http.@Failed as f {
+            emit *Vein.Console.Io.@Print { text: "unreachable " + f.url + " — " + f.reason }
+        }
+    }
+}
+
+
+// ============================================================================================
+//  11. chat — ENTITIES AS A GROWING COLLECTION
+//  The chat server's roster. A shard's `var` holds ONE value and the language has no growable list —
+//  but it has entities, and those are the growing collection: `spawn()` makes one, `attach $Client`
+//  gives it data, `target $Client` iterates them. Joining is spawning; leaving is destroying.
+//
+//  Two rules this leans on:
+//    * a `hear` handler CAN build a world — each event is its own commit point, so the next event
+//      sees what the last one built (inside one event a structural change is still deferred);
+//    * `destroy` removes the entity AND its components, so a returning client is not a duplicate —
+//      `unmark` would leak one per disconnect and hand the returner a second entity.
+//
+//  There is no `!=` in VeinScript: inequality is `not (a == b)`.
+//    samples/chat/server.vein + samples/chat/client.vein
+// ============================================================================================
+
+bundle ChatRoster by you {
+
+    shape $Client { addr: string }
+
+    shard Relay {
+        var known: bool
+
+        hear *Vein.Net.Peer.@Message as m {
+            // `target` is the only way to look through the roster, so the answer comes back on shard
+            // state rather than as a return value.
+            known = false
+            target $Client as self {
+                if self.Client.addr == m.from { known = true }
+            }
+
+            // A newcomer becomes an entity. That is the whole "stacking" mechanism.
+            if not known {
+                let e = spawn()
+                attach $Client to e { addr: m.from }
+                emit *Vein.Console.Io.@Print { text: "* " + m.from + " joined" }
+            }
+
+            // Relay to everyone except the sender.
+            target $Client as self {
+                if not (self.Client.addr == m.from) {
+                    emit *Vein.Net.Peer.@Send { to: self.Client.addr, text: m.from + ": " + m.text }
+                }
+            }
+        }
+    }
+
+    shard Reachability {
+        hear *Vein.Net.Peer.@Undelivered as u {
+            target $Client as self {
+                if self.Client.addr == u.to {
+                    destroy self
+                    emit *Vein.Console.Io.@Print { text: "* " + u.to + " left" }
+                }
+            }
+        }
+    }
+}
+
+
+// ============================================================================================
+//  12. apps — A PRINCIPAL BOOTS, CAPABILITIES JOIN ONE RUNTIME
+//  An `app` manifest lists bundles. The FIRST `load` is the PRINCIPAL: its `start` is the app's single
+//  boot event. Every other bundle contributes its shards to the SAME runtime and boots nothing — so an
+//  `emit` in one bundle reaches a `hear` in another, and capabilities compose by being listed.
+//
+//      app Shop {
+//          load "Store.vein"      // * principal — the only bundle that starts anything
+//          load "Billing.vein"    // capability: invoices what Store ships
+//          load "Audit.vein"      // capability: watches both
+//      }
+//
+//  Adding a `load` adds reactions; removing it removes them, with no edit to any other bundle.
+//  Events unify BY NAME, which is what makes that work — and is why two bundles declaring one name
+//  with different fields is reported (VS0332) rather than silently merged. A non-principal `start`
+//  does not fire (VS0331); its shards still run.
+//    samples/app_capabilities/shop.app.vein     ·     veinc run <app.vein>
+//
+//  (Written as a comment on purpose: a real `app { … }` block here would make the tour itself a
+//   manifest, and `veinc run` would try to link bundles that do not exist beside it.)
+//
+//  The principal below shows the other half — `start` names the boot event and its payload.
+// ============================================================================================
+
+bundle Store by you {
+
+    publicator Orders {
+        shared("A customer placed an order.")
+        event @Ordered { item: string, qty: int }
+
+        shared("An order was accepted and is going out.")
+        event @Shipped { item: string }
+    }
+
+    // The app's front door: `veinc run` fires exactly this, once. At most one per bundle; zero makes
+    // the bundle purely reactive, which is what every capability bundle is.
+    start @Ordered { item: "widget", qty: 3 }
+
+    shard Fulfilment {
+        hear @Ordered as o {
+            emit *Vein.Console.Io.@Print { text: "[Store] " + o.qty + " x " + o.item }
+            emit @Shipped { item: o.item }
+        }
+    }
+}
+
+
+// ============================================================================================
+//  13. what runs it — THE TOOLCHAIN IN ONE PLACE
+//
+//    veinc run    <file> [--ticks N]  console session: @Print/@Input, `every N` timers, the network
+//    veinc render <file> [path]       one-shot: fire the boot event, capture @Response
+//    veinc serve  <file> --port N     real HTTP into that same @Request -> @Response pipeline
+//    veinc build  <file> [--rid R]    standalone exe (embeds the interpreter); --rid linux-x64 to
+//                                     cross-build a server for a VPS
+//    veinc emit   <file> -o <dir>     HIR -> C# for the SECS backend (identity half only: shapes,
+//                                     marks, target, folds, run once/each tick/settled — ~10x the
+//                                     interpreter; the reactive half stays interpreted)
+//    veinc symbols <app.vein>         the combined cross-bundle API, with collisions flagged
+//    veinc ir / ast / tokens / graph / events / scaffold / exec
+//
+//  Two execution models share one identity model, and both are implemented:
+//    * the reactive event loop — emit/hear/ShardView/@Response, plus console and network;
+//    * the ECS tick loop — target/each tick/settled/folds, driven by an explicit `--ticks N`.
+//
+//  Checks:  dotnet test src/Vein.Tests  ·  bash tools/check-ir.sh  ·  bash tools/check-backend.sh
+//           (behaviour · the IR's shape · the backend agreeing with the interpreter, byte for byte)
+// ============================================================================================
