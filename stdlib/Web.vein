@@ -11,8 +11,20 @@ bundle Web by Vein {
 
     // Http — the request/response + fragment events used to assemble a page reactively.
     publicator Http {
-        shared("An inbound HTTP request.")
-        event @Request { path: string }
+        // A request is a path AND what was asked of it. `method` and `body` are what separate reading a
+        // page from submitting one: without them a program can render, but it cannot receive. Both are
+        // defaulted, so every existing `hear @Request as r { r.path }` keeps working untouched, and a
+        // one-shot `veinc render` looks exactly like the GET it always was.
+        //
+        // Query-string values arrive as EXTRA payload fields rather than a parsed map — `?name=x` reads
+        // as `r.name` — because the boot payload already overrides named fields (`--set name=x` does the
+        // same thing). One mechanism, two drivers.
+        shared("An inbound HTTP request: the path, what was asked of it, and any submitted body.")
+        event @Request {
+            path: string
+            method: string = "GET"
+            body: string = ""
+        }
 
         shared("A fragment of HTML contributed by some shard.")
         event @Html { markup: string }

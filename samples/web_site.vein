@@ -1,0 +1,98 @@
+// samples/web_site.vein — an actual website: several pages, and a form you can submit.
+//
+//   veinc serve samples/web_site.vein --port 8080
+//   then open http://localhost:8080/
+//
+// What makes this a site rather than a page is `@Request` carrying more than a path. `method` says what
+// the browser asked for, `body` carries what it submitted, and a form's fields arrive as payload fields
+// beside the query string — so `r.who` reads the same whether it came from `?who=x` or a POST form.
+//
+// Routing is `if r.path == "/about"`. Worth knowing: that could not have worked before, because `==`
+// compared any two non-numeric strings as equal, so every path matched the first branch. See
+// docs/RUNTIME.md §4.3.4.
+//
+// The page is ASSEMBLED reactively: shards emit @Html fragments and a ShardView concatenates them. That
+// is the same pattern as samples/site.vein — routing decides WHICH fragments get emitted.
+
+bundle WebSite by you {
+
+    use Web                          // &Heading / &Paragraph / &Link — bare, via `use`
+
+    // ---- pages ---------------------------------------------------------------------------------
+
+    shard Home {
+        hear @Request as r {
+            if r.path == "/" {
+                bring Heading("VeinScript")
+                bring Paragraph("A site assembled from events.")
+                bring Link("/about", "about")
+                bring Link("/greet", "say hello")
+            }
+        }
+    }
+
+    shard About {
+        hear @Request as r {
+            if r.path == "/about" {
+                bring Heading("About")
+                bring Paragraph("Every page here is a set of fragments emitted by shards.")
+                bring Link("/", "home")
+            }
+        }
+    }
+
+    // ---- a form, which is the part a path alone cannot do -----------------------------------------
+
+    shard Greet {
+        hear @Request as r {
+            if r.path == "/greet" {
+                // GET renders the form; POST receives it. Same path, two methods — the distinction the
+                // old single-field @Request could not express.
+                if r.method == "GET" {
+                    bring Heading("Say hello")
+                    emit @Html { markup: "<form method=\"post\" action=\"/greet\">"
+                                       + "<input name=\"who\" placeholder=\"your name\">"
+                                       + "<button>send</button></form>" }
+                    bring Link("/", "home")
+                }
+
+                if r.method == "POST" {
+                    // `who` is a form field, and it arrives as an ordinary payload field. `?` on the
+                    // event declaration is what lets a field the program never declared be read here.
+                    bring Heading("Hello " + r.who)
+                    bring Paragraph("Submitted with " + r.method + ", body: " + r.body)
+                    bring Link("/greet", "again")
+                }
+            }
+        }
+    }
+
+    // ---- assembly ---------------------------------------------------------------------------------
+
+    // The trigger, and it has to be a SEPARATE event rather than the view answering @Request directly.
+    // `bring Heading(…)` does not write markup, it QUEUES an @Html event, and the queue does not drain
+    // until every @Request handler has finished. A view that answered on @Request would therefore always
+    // see an empty page. Emitting @Render here puts it in the queue behind the fragments, so by the time
+    // it is dequeued they have all arrived. Declared after the page shards so it queues last.
+    shard Router {
+        hear @Request as r { emit @Render { path: r.path } }
+    }
+
+    ShardView Page {
+        var html: string
+
+        hear @Html as h { html += h.markup }
+
+        hear @Render as v {
+            // No fragments means nothing matched the path. Staying silent lets the server answer 404,
+            // which is what an unrouted URL is — better than 200 with an empty body.
+            if not (html == "") {
+                emit @Response {
+                    status: 200
+                    body: "<!doctype html><html><head><meta charset=\"utf-8\">"
+                        + "<title>VeinScript</title></head><body>" + html + "</body></html>"
+                }
+            }
+        }
+    }
+}

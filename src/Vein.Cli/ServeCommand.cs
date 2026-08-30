@@ -98,6 +98,18 @@ internal static class ServeCommand
             foreach (string? k in ctx.Request.QueryString.AllKeys)
                 if (k is not null) inputs[k] = ctx.Request.QueryString[k];
 
+            // AFTER the query string, deliberately. These describe what the client actually did, so a
+            // request carrying `?method=DELETE` must not be able to talk the program into believing it.
+            inputs["method"] = ctx.Request.HttpMethod;
+            inputs["body"] = ReadBody(ctx.Request);
+
+            // A submitted form arrives as application/x-www-form-urlencoded, so its fields land beside
+            // the query string ones and `hear @Request as r { r.name }` reads either without caring which
+            // it was — the same field, whether typed in a URL or posted from a form.
+            if (IsFormPost(ctx.Request))
+                foreach (var (key, value) in ParseForm(Str(inputs["body"])))
+                    inputs[key] = value;
+
             var result = new Interp().Render(module, requestPath, inputs);
 
             // No @Response is a 404, not a crash: the program simply had nothing to say about this path,
@@ -113,6 +125,42 @@ internal static class ServeCommand
             try { Write(ctx, 500, "internal error"); } catch { }
         }
     }
+
+    /// The request body as text, or "" when there is none. Capped: a body is read fully into memory to
+    /// become one payload field, so an unbounded one would be an unbounded allocation from any client.
+    private const int MaxBody = 1024 * 1024;
+
+    private static string ReadBody(HttpListenerRequest request)
+    {
+        if (!request.HasEntityBody) return "";
+        try
+        {
+            using var reader = new StreamReader(request.InputStream, request.ContentEncoding ?? Encoding.UTF8);
+            var buffer = new char[MaxBody];
+            int read = reader.Read(buffer, 0, MaxBody);
+            return read <= 0 ? "" : new string(buffer, 0, read);
+        }
+        catch { return ""; }   // a truncated or aborted upload is not the program's problem
+    }
+
+    private static bool IsFormPost(HttpListenerRequest request) =>
+        request.ContentType is { } t &&
+        t.Contains("application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase);
+
+    /// `a=1&b=two+words` → the pairs, percent-decoded. Deliberately minimal: repeated keys keep the last
+    /// value, which is what a single-valued payload field can represent.
+    private static IEnumerable<(string Key, string Value)> ParseForm(string body)
+    {
+        foreach (var pair in body.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            int eq = pair.IndexOf('=');
+            if (eq <= 0) continue;
+            yield return (Uri.UnescapeDataString(pair[..eq].Replace('+', ' ')),
+                          Uri.UnescapeDataString(pair[(eq + 1)..].Replace('+', ' ')));
+        }
+    }
+
+    private static string Str(object? o) => o?.ToString() ?? "";
 
     private static void Write(HttpListenerContext ctx, int status, string body)
     {

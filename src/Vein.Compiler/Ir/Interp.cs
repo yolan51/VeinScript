@@ -287,7 +287,17 @@ public sealed class Interp
                     else if (st.FillRest) boot[fld.Name] = ZeroVal(fld.Type.Name);
                 }
         }
-        else { bootEvent = "Request"; boot["path"] = requestPath; }
+        else
+        {
+            // The built-in boot event when a bundle declares no `start`. It mirrors the stdlib's
+            // @Request declaration rather than only its path: a handler reading `r.method` must see
+            // "GET" on a one-shot render, not an empty string, or every routing check has to special-case
+            // the case where nobody told it the method.
+            bootEvent = "Request";
+            boot["path"] = requestPath;
+            boot["method"] = "GET";
+            boot["body"] = "";
+        }
 
         // Run inputs override named payload fields (e.g. CLI --set path=/home). See docs/RUNTIME.md.
         if (inputs is not null) foreach (var kv in inputs) boot[kv.Key] = kv.Value;
