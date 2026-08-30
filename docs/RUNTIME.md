@@ -352,17 +352,27 @@ That is the console model's claim carried intact: **a mark is an identity, and w
 listens on, so receiving one teaches the receiver the way back ([NetBus.LearnRoute](../src/Vein.Compiler/Ir/NetBus.cs)).
 A hub never has to be told where its spokes are.
 
-**It does not cross NAT, and that is structural.** Every message is its own short-lived TCP connection
-(`NetBus.Send` dials, writes one frame, closes), so a reply is a *new outbound connection* to the route
-that was learned: the sender's source IP paired with the port it said it listens on. Behind NAT those do
-not describe a reachable endpoint — the IP is the router's, and the advertised port is the peer's private
-one, which nothing forwards. So a peer behind NAT can **send** to a public server and will never
-**receive**: its frames arrive, and every reply comes back as `@Undelivered`.
+**It crosses NAT, because connections are persistent and bidirectional.** A reply travels back down the
+socket the sender already opened — the one path NAT is guaranteed to allow, since NAT set that mapping up
+itself. A client therefore needs **no** port forwarding, no public address, and no open inbound port: it
+dials out, and everything comes back on that connection.
 
-This is a property of the transport shape, not a bug to patch at the edges: replying on the connection
-the sender already opened (a persistent, bidirectional socket) is what would fix it, and that is a
-different design from "one frame per connection". Until then `Vein.Net.Peer` is for peers that can
-actually dial each other — one LAN, a VPN, or hosts with routable addresses.
+`Send` tries the live socket **first** and only falls back to dialling. That ordering is the whole fix.
+The earlier design opened a connection per message and closed it, so a reply was a *new outbound
+connection* to the route learned from the frame — the sender's source IP paired with the port it claimed
+to listen on. Behind NAT that pair is not a reachable endpoint (the IP is the router's, the port is
+private and forwarded by nothing), so a NAT'd peer could send to a public server and never receive: its
+frames landed and every reply came back `@Undelivered`.
+
+The learned route survives as a fallback, for a peer that is genuinely dialable and not currently
+connected. It is no longer the mechanism.
+
+Frames are **length-prefixed** for the same reason: one socket now carries many, and the old "read to the
+end of the stream" only ever worked because the stream ended after a single frame.
+
+A dropped connection is reported, not hidden: the peer leaves the live table, the next `@Send` finds no
+socket and no route, and the program hears `@Undelivered` — which is how
+[samples/chat/server.vein](../samples/chat/server.vein) notices a client closed its window.
 
 ### 4.3.2 The trust model — and why `audience` needed one
 

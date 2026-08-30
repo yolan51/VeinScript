@@ -160,6 +160,70 @@ public class NetPeerTests : IDisposable
         Assert.Contains("Hub:pong", atSpoke);
     }
 
+    // ---- reaching a peer that cannot be dialled (the NAT case) --------------------------------
+
+    [Fact]
+    public void A_peer_that_cannot_be_dialled_still_receives_the_reply()
+    {
+        // This is the whole reason connections are persistent. A client behind NAT has no address the
+        // server can dial: its IP is the router's and the port it advertises is private and forwarded by
+        // nothing. Forgetting the routes while keeping the sockets reproduces that exactly — after this,
+        // the ONLY way back to the spoke is the connection the spoke itself opened.
+        var atHub = new List<string>();
+        var atSpoke = new List<string>();
+        using var replied = new ManualResetEventSlim(false);
+
+        using var hub = NetBus.Start("Hub", 0, "shared", (from, text) => atHub.Add(from + ":" + text));
+        Assert.True(NetBus.Link("Hub", "127.0.0.1:" + NetBus.SelfPort, "shared"));
+        Assert.True(NetBus.Send("Hub", "Spoke", "hello"));
+
+        Thread.Sleep(500);
+        Assert.Contains("Spoke:hello", atHub);
+
+        // Now nobody knows where to dial anybody. With no route, the dial fallback in Send returns false
+        // immediately — so a send that still SUCCEEDS can only have used the open socket.
+        NetBus.ForgetRoutes();
+
+        Assert.True(NetBus.Send("Spoke", "Hub", "answered anyway"));
+
+        // And it genuinely arrived: both ends of that socket are served in this process, so the reply
+        // comes back through the same delivery path the first message did.
+        Thread.Sleep(500);
+        Assert.Contains("Hub:answered anyway", atHub);
+        Assert.Empty(atSpoke);   // unused; the single in-process bus delivers everything to atHub
+    }
+
+    [Fact]
+    public void Several_messages_share_one_connection()
+    {
+        // The frame is length-prefixed precisely so a socket can carry more than one. The old format
+        // read to end-of-stream, which only worked because the stream ended after a single frame.
+        var got = new List<string>();
+        using var hub = NetBus.Start("Hub", 0, "shared", (from, text) => { lock (got) got.Add(text); });
+
+        Assert.True(NetBus.Link("Hub", "127.0.0.1:" + NetBus.SelfPort, "shared"));
+        for (int i = 1; i <= 5; i++) Assert.True(NetBus.Send("Hub", "Spoke", "msg" + i));
+
+        Thread.Sleep(800);
+        lock (got) Assert.Equal(new[] { "msg1", "msg2", "msg3", "msg4", "msg5" }, got);
+    }
+
+    [Fact]
+    public void A_body_containing_newlines_survives_the_frame()
+    {
+        // Length-prefixing means the body is no longer "whatever is left"; the split has to stop at the
+        // header so an embedded newline stays part of the message.
+        var got = new List<string>();
+        using var done = new ManualResetEventSlim(false);
+        using var hub = NetBus.Start("Hub", 0, "shared", (from, text) => { got.Add(text); done.Set(); });
+
+        Assert.True(NetBus.Link("Hub", "127.0.0.1:" + NetBus.SelfPort, "shared"));
+        Assert.True(NetBus.Send("Hub", "Spoke", "line one\nline two"));
+
+        Assert.True(done.Wait(TimeSpan.FromSeconds(10)));
+        Assert.Equal("line one\nline two", got[0]);
+    }
+
     [Fact]
     public void A_send_to_an_unknown_mark_reports_failure_rather_than_throwing()
     {
