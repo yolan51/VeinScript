@@ -66,7 +66,7 @@ link+run exists.
 | shape/event + `folds`, publicator, `shared`, `by author` | **works** | stdlib is authored with these |
 | `veinc symbols` cross-bundle discovery + `*` validation | **works** | stdlib's public API is discoverable/validated |
 | single-bundle render (`emit`/`hear`/`bring`/`ShardView`) | **works** | a stdlib bundle can render *within itself* (proof) |
-| `use N` import resolution | **no-op** | can't `use Vein.Core` to pull symbols into scope yet |
+| `use N` import resolution | **works** | `use Console` makes a bare `print(…)`, `bring Button(…)` and `$Vec2` include resolve; local declarations still win |
 | `bring *Bundle.Builder` (qualified builders) | **missing** | can't consume another bundle's builders yet |
 | app **link + run** (load bundles, run together) | **works** | the principal bundle boots; every loaded bundle joins **one** runtime, so a `hear` in one sees an `emit` from another (RUNTIME.md §5.1) |
 | `target`/`each tick`/`settled`/`folds` execution | **works** (`--ticks N` drives the clock) | a stdlib shard's schedule blocks run like any other |
@@ -188,9 +188,15 @@ import/dependency-graph model and are a follow-on.
 ## 6. Missing capabilities for full consumption (isolated, general-purpose follow-ons)
 
 Each is a general language/runtime capability, **not** a stdlib-specific hack:
-1. **Qualified `bring`** — `bring *Vein.Web.Elements.Button(…)` (mirror of the qualified event refs).
-2. **`use` resolution** — make `use` bring another bundle's `shared` symbols into scope so bare names
-   resolve (with `*` still available for disambiguation).
+1. ~~**Qualified `bring`**~~ — **done, and had been for a while**: `LowerBring` resolves
+   `br.BuilderPath` through `ResolveExternalBuilder`, so `bring *Vein.Web.Elements.Button(…)` works.
+   This entry was stale.
+2. ~~**`use` resolution**~~ — **done** ([Lower.ResolveUsed](../src/Vein.Compiler/Ir/Lower.cs)): after
+   every local lookup misses, a bare name is sought in the bundles this one `use`s — builders, shapes
+   and `fn`/`SF`. Local declarations win, so the change is strictly additive; a name exported by two
+   used bundles is reported (VS0216) rather than picked by dictionary order. Events were already
+   dispatching by bare name and are untouched. `use X as Y` still parses an alias that nothing consumes:
+   `*Path.member` is the only qualified form, so alias semantics await a syntax decision.
 3. ~~**App link + run**~~ — **done** ([AppLinker](../src/Vein.Compiler/Ir/AppLinker.cs), RUNTIME.md §5.1):
    loaded bundles merge into one module and run on one event queue, with the first `load` as the
    principal that boots. Event *routing* is by bare name, which is what lets bundles react to each other;
@@ -198,9 +204,10 @@ Each is a general language/runtime capability, **not** a stdlib-specific hack:
 4. (Optional, later) **mark declarations** — a first-class `#Mark` decl so capability marks can be
    shared/validated like shapes/events, instead of being conventions.
 
-Until 1–2 land, `Vein.*` is consumed by **copying the qualified identity** and validating via
-`veinc symbols`. A program is no longer confined to one bundle: an app composes several, and each
-loaded bundle's shards run in the same runtime.
+Only item 4 is left. `Vein.*` is consumed either by the qualified identity (`*Vein.Console.Io.print`,
+always unambiguous) or by naming the bundle once with `use Console` and writing bare names after it. A
+program is no longer confined to one bundle either: an app composes several, and each loaded bundle's
+shards run in the same runtime.
 
 ## 7. Naming rules
 - Identities are `PascalCase` (`@MouseDown`, `$Pool`, `Heading`). Fields are `lowerCamel` (`current`,

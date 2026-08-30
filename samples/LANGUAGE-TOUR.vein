@@ -27,7 +27,8 @@
 //                   and @Fetch/@Fetched/@Failed for services that are not VeinScript
 //   11. chat      — entities AS a growing collection: a roster that stacks, and why leaving destroys
 //   12. apps      — a principal bundle boots; capability bundles join ONE runtime and boot nothing
-//   13. toolchain — run / render / serve / build / emit / symbols, and the three checks
+//   13. use       — naming a bundle once so bare names resolve, instead of qualifying every reference
+//   14. toolchain — run / render / serve / build / emit / symbols, and the three checks
 //
 //  Everything in 9–13 was built after the original tour; sections 1–8 are unchanged.
 // ============================================================================================
@@ -697,7 +698,47 @@ bundle Store by you {
 
 
 // ============================================================================================
-//  13. what runs it — THE TOOLCHAIN IN ONE PLACE
+//  13. use — NAMING A BUNDLE ONCE INSTEAD OF EVERY TIME
+//  `use B` widens what a BARE name may mean: after every local lookup misses, the name is sought in the
+//  bundles this one uses. Builders, shapes and `fn`/`SF` — events never needed it, because an emit
+//  already lowers to its bare event name and the runtime dispatches on that.
+//
+//  Local declarations always win, so `use` cannot change what an existing program means; it only makes
+//  more things resolve. A name exported by TWO used bundles is reported (VS0216) rather than picked by
+//  dictionary order — `send` is a real example, living in both Vein.Console.Io and Vein.Net.Peer.
+//
+//  `*Author.Bundle.member` still works everywhere and is always unambiguous; reach for it when two
+//  bundles collide, or when being explicit is the point.
+// ============================================================================================
+
+bundle UseDemo by you {
+
+    use Console                    // print / send / spawn …
+    use Math                       // $Vec2 / $Vec3 / $Color …
+    use Web                        // &Heading / &Button / &Paragraph …
+
+    // `$Vec2` with no qualifier — resolved through `use Math`.
+    event @Placed { $Vec2, label: string }
+
+    shard Demo {
+        run once {
+            print("bare call, resolved through `use Console`")     // *Vein.Console.Io.print
+            bring Button("Go")                                     // *Vein.Web.Elements.&Button
+            emit @Placed { x: 1.0, y: 2.0, label: "origin" }
+        }
+    }
+
+    shard Watch {
+        hear @Placed as p {
+            // The qualified form, side by side with the bare one above. Same function, same result.
+            *Vein.Console.Io.print(p.label + " at " + p.x + "," + p.y)
+        }
+    }
+}
+
+
+// ============================================================================================
+//  14. what runs it — THE TOOLCHAIN IN ONE PLACE
 //
 //    veinc run    <file> [--ticks N]  console session: @Print/@Input, `every N` timers, the network
 //    veinc render <file> [path]       one-shot: fire the boot event, capture @Response

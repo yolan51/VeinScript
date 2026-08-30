@@ -75,20 +75,24 @@ None of this was on the original map; all of it is on the interpreter.
 
 Ordered by how much each unblocks, not by milestone number.
 
-1. **`use` resolution** — the last ergonomic gap. Cross-bundle references are still written
-   `*you.Store.Orders.@Shipped`; `use` is parsed and does nothing. Linking merged the *runtime*; this is
-   the *naming* axis.
-2. **Qualified `bring`** — `bring *Vein.Web.Elements.Button(…)`, mirroring qualified event refs.
-3. **Backend headroom** — the 10× → the remaining cost is inside SECS (locks + dictionary lookups per
+1. **Backend headroom** — the 10× → the remaining cost is inside SECS (locks + dictionary lookups per
    access). Needs bulk/unlocked access in the vendored SECS, or the adapter owning packed storage.
-4. **Backend coverage** — `target` over multiple components, component removal, seeded `random`. Each is
+2. **Backend coverage** — `target` over multiple components, component removal, seeded `random`. Each is
    a note in the emitter today, so nothing is silently wrong; the notes are the to-do list.
-5. **Net inside a linked app** — a capability bundle doing `@Listen` *should* work (one queue, one
+3. **Net inside a linked app** — a capability bundle doing `@Listen` *should* work (one queue, one
    `_self`), but nothing has run it.
-6. **TLS for `Vein.Net.Peer`** — frames are authenticated, not secret.
-7. **Mark declarations** — `#Mark` as a validated shared symbol instead of a naming convention.
-8. **`SecsRuntime.Probe`** — the repo's one live `TODO`. It was the net8↔net9 linkage proof; M5 supersedes
+4. **TLS for `Vein.Net.Peer`** — frames are encrypted under a pre-shared key, so there is no forward
+   secrecy and no certificate identity. The frames would ride inside an `SslStream` without any `.vein`
+   program changing.
+5. **`use X as Y`** — the alias parses and nothing consumes it, because `*Path.member` is the only
+   qualified form and `Y.@Print` does not. Needs a syntax decision before it can mean anything.
+6. **Mark declarations** — `#Mark` as a validated shared symbol instead of a naming convention.
+7. **`SecsRuntime.Probe`** — the repo's one live `TODO`. It was the net8↔net9 linkage proof; M5 supersedes
    it, so it should either grow into the direct-materialisation path or be deleted.
+
+**Recently closed:** `use` resolution — a bare name now falls back to the bundles a file `use`s
+(builders, shapes, `fn`/`SF`), with local declarations winning and cross-bundle collisions reported as
+VS0216. Qualified `bring` turned out to have been done for some time; the entry was stale.
 
 ## Later
 

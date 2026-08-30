@@ -54,14 +54,24 @@ public sealed class Lower
 
     private static readonly string[] OutputFields = { "markup", "code", "css", "line" };
 
+    /// Bundles this one says `use` on, in declaration order. A bare name that resolves nowhere locally
+    /// is looked for in these, which is the whole of what `use` does.
+    private readonly List<string> _used = new();
+
+    /// Locally declared `fn`/`SF` names. Needed only to tell "this bare call is local" from "this bare
+    /// call resolves nowhere" — nothing tracked that before, because nothing needed to.
+    private readonly HashSet<string> _localFuncs = new(StringComparer.Ordinal);
+
     public IrModule LowerBundle(BundleDecl bundle)
     {
         var types = new List<IrType>();
         var funcs = new List<IrFunction>();
         var shards = new List<IrShard>();
 
-        // First pass: collect builders (for `bring`) and shape fields (for `$Shape` include expansion),
-        // including inside publicators.
+        // First pass: collect builders (for `bring`), shape fields (for `$Shape` include expansion), the
+        // `use` list and local function names (both for bare-name resolution) — including inside
+        // publicators. All of it has to exist before any body is lowered, because a bare reference may
+        // appear above the declaration it resolves to.
         void Collect(IEnumerable<Decl> ms)
         {
             foreach (var m in ms)
@@ -69,6 +79,8 @@ public sealed class Lower
                 {
                     case BuilderDecl bd: _builders[bd.Name] = bd; break;
                     case ShapeDecl s: _shapeFields[s.Name] = s.Members.OfType<FieldDecl>().ToList(); break;
+                    case FuncDecl fd: _localFuncs.Add(fd.Name); break;
+                    case UseDecl ud: if (!_used.Contains(ud.Name, StringComparer.Ordinal)) _used.Add(ud.Name); break;
                     case PublicatorDecl pub: Collect(pub.Members); break;
                 }
         }
@@ -89,7 +101,9 @@ public sealed class Lower
                 case ShardDecl sh: shards.Add(LowerShardLike(sh.Name, sh.Members, "system", sh.Doc, sh.CarriedShapes, sh.CarriedMarks)); break;
                 case ViewDecl vw: shards.Add(LowerView(vw)); break;
                 case BridgeDecl br: shards.Add(LowerShardLike(br.Name, br.Members, "bridge", br.Doc, br.CarriedShapes, br.CarriedMarks)); break;
-                case UseDecl: break;                 // resolved away
+                // Consumed by the Collect pass above, which builds the bare-name fallback list; there is
+                // nothing to lower, because `use` adds no IR — it only widens what a bare name may mean.
+                case UseDecl: break;
                 case VarDecl: break;                 // module-level state: not modeled yet
                 case StartDecl: break;               // captured separately below (module boot)
                 default: break;
@@ -190,9 +204,11 @@ public sealed class Lower
             if (m is FieldDecl f) list.Add((f.Name, f.Type, f.Default));
             else if (m is ShapeInclude si)
             {
-                // A qualified include reaches another bundle's SHARED shapes; a bare one stays local.
+                // A qualified include reaches another bundle's SHARED shapes; a bare one is local first,
+                // then whatever this bundle `use`s.
                 var fs = si.Path.Count > 0 ? ResolveExternalShape(si.Path, si.Shape)
-                       : _shapeFields.TryGetValue(si.Shape, out var local) ? local : null;
+                       : _shapeFields.TryGetValue(si.Shape, out var local) ? local
+                       : ResolveUsed(Index.Shapes, "$", si.Shape, si.Span)?.Value.Members.OfType<FieldDecl>().ToList();
 
                 if (fs is not null)
                 {
@@ -208,6 +224,41 @@ public sealed class Lower
             }
         }
         return list;
+    }
+
+    /// Resolve a BARE name against the bundles this one `use`s — the whole of what `use` does.
+    ///
+    /// Called only after every local lookup has missed, so a local declaration always wins and no
+    /// existing program can change meaning by this being added. `use` names a bundle, not a publicator,
+    /// so the publicator segment is skipped: index keys are `Author.Bundle[.Publicator].Name`, and a
+    /// match needs the bundle segment and the member to line up. That is the same "qualify only as far
+    /// as you need" rule the `*` matchers already use.
+    ///
+    /// Ambiguity is reported rather than guessed at. It can only arise in code that says `use`, so the
+    /// warning cannot reach a program that compiles today.
+    /// Returns the index KEY as well as the value: a `fn`/`SF` is not used directly but re-resolved by
+    /// path through ImportExternalFunction, which needs the key to build one.
+    private (string Key, T Value)? ResolveUsed<T>(
+        IReadOnlyDictionary<string, T> index, string sigil, string name, SourceSpan span)
+        where T : class
+    {
+        if (_used.Count == 0) return null;
+
+        var hits = new List<(string Key, T Value)>();
+        foreach (var kv in index)
+        {
+            var parts = kv.Key.Split('.');
+            if (parts.Length < 3 || !string.Equals(parts[^1], name, StringComparison.Ordinal)) continue;
+            if (_used.Contains(parts[1], StringComparer.Ordinal)) hits.Add((kv.Key, kv.Value));
+        }
+
+        if (hits.Count == 0) return null;
+        if (hits.Count == 1) return hits[0];
+
+        _diag.Warning("VS0216",
+            $"'{sigil}{name}' is ambiguous across the bundles in scope — {string.Join(" and ", hits.Select(h => "*" + h.Key))}. "
+            + "Qualify the reference to choose one.", span);
+        return null;
     }
 
     /// A qualified include's target: the stdlib's SHARED shapes, matched on a path suffix so you qualify
@@ -481,8 +532,8 @@ public sealed class Lower
         BuilderDecl? b;
         if (br.BuilderPath.Count > 0)
             b = ResolveExternalBuilder(br.BuilderPath, br.Builder);
-        else
-            _builders.TryGetValue(br.Builder, out b);
+        else if (!_builders.TryGetValue(br.Builder, out b))
+            b = ResolveUsed(Index.Builders, "&", br.Builder, br.Span)?.Value;   // local first, then `use`
 
         if (b is null)
         {
@@ -601,6 +652,19 @@ public sealed class Lower
                 return imported is null
                     ? new IrCall(new IrScopeRef(string.Join(".", star.Path), star.Member), args)
                     : new IrCall(new IrLocalRef(imported), args);
+            }
+            // A BARE call that is not local: if a `use`d bundle exports it, import it exactly as the
+            // qualified form above does — same mangling, same recursion — so `use Console` makes
+            // `print("hi")` mean `*Vein.Console.Io.print("hi")`. Anything still unresolved falls through
+            // unchanged, so a call to a genuinely local name (or a prebuilt like `spawn`) is untouched.
+            case CallExpr { Callee: NameExpr n } c when !_localFuncs.Contains(n.Name)
+                                                    && ResolveUsed(Index.Functions, "", n.Name, c.Span) is { } found:
+            {
+                var path = found.Key.Split('.')[..^1];
+                string? imported = ImportExternalFunction(path, n.Name, c.Span);
+                var args = c.Args.Select(LowerExpr).ToList();
+                return imported is null ? new IrCall(LowerExpr(c.Callee), args)
+                                        : new IrCall(new IrLocalRef(imported), args);
             }
             case CallExpr c: return new IrCall(LowerExpr(c.Callee), c.Args.Select(LowerExpr).ToList());
             case BinaryExpr b: return new IrBinary(MapBin(b.Op), LowerExpr(b.Left), LowerExpr(b.Right));
