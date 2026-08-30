@@ -61,6 +61,12 @@ bundle Web by Vein {
 
         shared("A list item.")
         builder ListItem { text: string   markup = "<li>" + text + "</li>" }
+
+        // The only builder here with no parameters — a line break has nothing to say, only somewhere to
+        // be. `markup` still carries a default, which is what keeps it a complete builder rather than one
+        // missing its output. Repeat it with the count `bring` already takes: `bring 3 JumpLine()`.
+        shared("A line break — `bring JumpLine()`, or `bring 3 JumpLine()` for several.")
+        builder JumpLine { markup = "<br>" }
     }
 
     // --- no behaviour here ---------------------------------------------------------------------------

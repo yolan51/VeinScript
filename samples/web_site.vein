@@ -25,7 +25,10 @@ bundle WebSite by you {
             if r.path == "/" {
                 bring Heading("VeinScript")
                 bring Paragraph("A site assembled from events.")
+                // Links are inline elements, so they sit side by side without something between them.
+                // `bring JumpLine()` is a `<br>`; `bring 2 JumpLine()` would be two.
                 bring Link("/about", "about")
+                bring JumpLine()
                 bring Link("/greet", "say hello")
             }
         }
