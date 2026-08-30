@@ -2,11 +2,13 @@
 //
 //   veinc run samples/chat/client.vein
 //
-//   > server address (Enter for 144.217.220.127:9700)
-//                              ← Enter for the hosted server; or type 127.0.0.1:9700 for a local one
 //   > your name
 //   alice                      ← whatever you like; this becomes your network identity
 //   hi everyone                ← every line after that is a message
+//
+// There is nothing to configure: the server address is baked in (ServerAddress below), so the only
+// thing anyone types is who they are. To point this at a different server — a local one for testing —
+// change that one function.
 //
 // Run it in as many terminals, on as many machines, as you like. There used to be an alice.vein and a
 // bob.vein because a program had no way to tell which one it was at startup — `here()` answers "which
@@ -23,58 +25,46 @@
 
 bundle ChatClient by you {
 
+    // The one place the address lives. A `fn` because the language has no constant — and one place
+    // beats two, since the address appears both where we connect and where we report failing to.
+    fn ServerAddress() -> string { return "144.217.220.127:9700" }
+
     shard Session {
-        // 0 = waiting for the server address · 1 = waiting for a name · 2 = chatting.
-        var stage: int
-        var server: string
+        var joined: bool
 
         run once {
-            // Two lines, because one terse prompt reads like an invitation to start chatting — and a
-            // message typed here becomes a hostname, which fails later and confusingly ("no server at
-            // allo"). Saying "press Enter" on its own line makes the default the obvious move.
-            emit *Vein.Console.Io.@Print { text: "STEP 1 of 2 — which server?" }
-            emit *Vein.Console.Io.@Print { text: "  press ENTER for 144.217.220.127:9700, or type another address:" }
+            emit *Vein.Console.Io.@Print { text: "your name:" }
         }
 
         hear *Vein.Console.Io.@Input as i {
-            // Read the stage ONCE at entry. The branches below advance it, and without this snapshot a
-            // single line would fall through every stage in one go.
-            let s = stage
+            // Read the state ONCE at entry. The branch below flips it, and without this snapshot the
+            // very first line would be taken as a name AND immediately resent as a message.
+            let first = not joined
 
-            if s == 0 {
-                // A bare host is fine — @Link fills in the default port 9700. Press Enter for the
-                // hosted server; type "127.0.0.1:9700" instead to talk to a server on this machine.
-                server = i.text
-                if i.text == "" { server = "144.217.220.127:9700" }
-                stage = 1
-                emit *Vein.Console.Io.@Print { text: "STEP 2 of 2 — your name (this is your chat identity):" }
-            }
-
-            if s == 1 {
-                stage = 2
+            if first {
+                joined = true
 
                 // The name you typed IS the network identity — a mark is just a name, so a name typed at
                 // the console works exactly as a `#Literal` written in the source would.
                 //
-                // `at: 0` lets the OS pick a free port. Nothing dials us by name: the server replies to
-                // wherever our frame came from, so two clients on one machine cannot collide and no one
-                // maintains a port list.
+                // `at: 0` lets the OS pick a free port. Nothing dials us by name: the server replies down
+                // the connection we opened, so two clients on one machine cannot collide, nobody keeps a
+                // port list, and a client behind a home router needs no port forwarding.
                 emit *Vein.Net.Peer.@Listen { as: i.text, at: 0, key: "chat-secret" }
-                emit *Vein.Net.Peer.@Link { name: #Server, at: server, key: "chat-secret" }
+                emit *Vein.Net.Peer.@Link { name: #Server, at: ServerAddress(), key: "chat-secret" }
 
                 // Saying hello is what puts us on the roster and teaches the server our route.
                 emit *Vein.Net.Peer.@Send { to: #Server, text: "is here" }
-                emit *Vein.Console.Io.@Print { text: "joined as " + i.text + " on " + server + " — type away" }
+                emit *Vein.Console.Io.@Print { text: "joined as " + i.text + " — type away" }
             }
 
-            if s == 2 {
+            if not first {
                 emit *Vein.Net.Peer.@Send { to: #Server, text: i.text }
             }
         }
 
-        // In THIS shard so it can read `server` — see the note below.
         hear *Vein.Net.Peer.@Undelivered as u {
-            emit *Vein.Console.Io.@Print { text: "  (no server at " + server + " — is it running, and is port 9700 open?)" }
+            emit *Vein.Console.Io.@Print { text: "  (cannot reach " + ServerAddress() + " — is the server running?)" }
         }
     }
 
