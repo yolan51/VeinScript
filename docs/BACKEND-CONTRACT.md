@@ -4,6 +4,54 @@ A backend turns an `IrModule` ([IR-SPEC.md](IR-SPEC.md)) into runnable artifacts
 implements one interface and sees only the HIR — so adding JS, native, or an interpreter later
 requires **no front-end changes**.
 
+---
+
+## 0. Status — what runs today
+
+`veinc emit <file> [-o <dir>]` emits C# from the HIR; it compiles against
+[Vein.Runtime.SECS](../src/Vein.Runtime.SECS/VeinWorld.cs) and runs on ShardECS.
+
+**It covers the identity half only** — shapes → components, marks, entities, `target` queries, the fold
+rule, and the `run once` / `each tick` / `settled` phases. That is the half worth compiling, because it
+is the half that runs per-entity per-frame. The reactive half (`emit`/`hear`, `@Response`, console,
+network, `every N`) stays on the interpreter, where the work is I/O-bound and interpretation costs
+nothing measurable. `@Print` is the one bridged event, so a generated program can be diffed against the
+interpreter at all. Anything outside the subset emits a **note**, never silent wrong code (rule 4).
+
+**Equivalence is the specification.** A backend's real spec is the runtime that already exists, so
+[tools/check-backend.sh](../tools/check-backend.sh) emits, compiles, runs, and **diffs against
+`veinc run`**. `samples/entities.vein` at 3 frames is byte-identical today. A golden file of expected C#
+would pin formatting; this pins meaning, which is what can be quietly wrong.
+
+### Measured speed — and why it is not more (yet)
+
+1000 entities × 2 systems per frame, marginal cost with startup subtracted:
+
+| Runtime | per unit activation | 3.2M activations |
+|---|---|---|
+| Interpreter (`Ir/Interp.cs`) | ~2.7 µs | 8.75 s |
+| C# backend on SECS | ~0.48 µs | 1.53 s |
+
+**≈6× today** (~9× on a shorter run — single-run wall-clock, so treat it as 6–9×, not a precise figure).
+
+That is well short of the ~100× a compiled ECS *should* reach, and the reasons are known rather than
+mysterious — this adapter is correctness-first:
+
+- **two allocations per activation** (`__snap` and the working copy), so a frame allocates 2× entities ×
+  systems objects and the GC does the rest;
+- **contributions box** into `(IVeinComponent, IVeinComponent)` tuples and `Reduce` is an interface call;
+- **`Query` is a linear scan** over live entities calling `Has<T>` per entity, per system, per frame,
+  rather than iterating a packed archetype.
+
+Each is fixable without touching the emitter's meaning — which is why equivalence is nailed down first.
+Until they are, quote **6–9×**, not two orders of magnitude.
+
+### Known divergence
+
+SECS **pools and reuses** destroyed entity ids; `EntityStore`'s are monotonic and never reused. There a
+stale id is inert, here it can alias a new entity. It only surfaces in a program that destroys and then
+spawns, and it is recorded rather than papered over.
+
 ## 1. The `IBackend` contract
 
 Lives in `src/Vein.Compiler/Backends/`. Illustrative shape (final in M5):

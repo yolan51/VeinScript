@@ -15,7 +15,7 @@ Source → Lexer → Parser → Desugar → Semantics → Lower → Backend → 
 | M2 | Parser / AST        | [LANGUAGE.md](LANGUAGE.md) + [KEYWORDS.md §2](KEYWORDS.md#2-keywords-to-add-in-milestone-2-not-in-the-lexer-yet) | `Parsing/Ast.cs`, `Parsing/Parser.cs`; new keywords/tokens | `veinc ast <f>`             |
 | M3 | Desugar + Semantics | [DIALECTS.md](DIALECTS.md), [SYNTAX-DECISIONS.md](SYNTAX-DECISIONS.md) | `Semantics/Desugar.cs`, `Semantics/Resolver.cs`, `Semantics/TypeCheck.cs` | `veinc check <f>` |
 | M4 | Lower to HIR        | [IR-SPEC.md](IR-SPEC.md)          | `Ir/*.cs` (nodes), `Ir/Lower.cs`, HIR dumper                | `veinc ir <f>`              |
-| M5 | C# backend          | [BACKEND-CONTRACT.md](BACKEND-CONTRACT.md) | `Backends/IBackend.cs`, `Backends/CSharp/CSharpBackend.cs`, runtime adapter | `veinc build <f> --backend csharp` |
+| M5 | C# backend ✅ (identity half) | [BACKEND-CONTRACT.md](BACKEND-CONTRACT.md) | `Backends/CSharpBackend.cs` + `Vein.Runtime.SECS` adapter | `veinc emit <f> -o <dir>` |
 | M6 | Game domain polish  | [DIALECTS.md §2](DIALECTS.md#2-game-domain-v1--shardecs-runtime) | full query/lifecycle/emit/fold paths end-to-end on ShardECS | (build runs in engine)      |
 
 ## Milestone detail
@@ -48,12 +48,20 @@ Source → Lexer → Parser → Desugar → Semantics → Lower → Backend → 
 - **Done when:** `veinc ir samples/demo.vein` matches the trace in
   [EXAMPLE-PIPELINE.md](EXAMPLE-PIPELINE.md).
 
-### M5 — C# backend
-- `IBackend` contract + `CSharpBackend` per [BACKEND-CONTRACT.md](BACKEND-CONTRACT.md).
-- Define the **runtime adapter** (`SystemBase`, `World.Query<>().With<>()`, `Contribute<>()`, `Emit`,
-  `AddTag`) that sits over the current ShardECS `World` API — first task of this milestone.
-- **Done when:** `veinc build samples/demo.vein` emits `Demo.g.cs` that compiles against the runtime
-  and runs in the engine.
+### M5 — C# backend  *(identity half done; reactive half deferred by design)*
+- ✅ `IVeinBackend` contract + [`CSharpBackend`](../src/Vein.Compiler/Backends/CSharpBackend.cs).
+- ✅ The **runtime adapter** — [`VeinWorld`/`VeinSystem`](../src/Vein.Runtime.SECS/VeinWorld.cs) over the
+  ShardECS `Secs` API, carrying the fold rule and the phase order (the semantics SECS does not have).
+- ✅ `veinc emit <file> -o <dir>` → `<Module>.g.cs`, compiling against that adapter and running on SECS.
+- ✅ **Done-when, sharpened:** the original bar was "compiles and runs", which a wrong translation also
+  passes. The real bar is *agreeing with the runtime we already have*, so
+  [tools/check-backend.sh](../tools/check-backend.sh) compiles the output and **diffs a real run against
+  `veinc run`**. `samples/entities.vein` is byte-identical.
+- **Deliberately not emitted:** `emit`/`hear`, `@Response`, console, network, `every N`. Compiling buys
+  ~6–9× on per-entity-per-frame work and nothing measurable on I/O-bound work, so the reactive half stays
+  on the interpreter. Every skipped construct emits a note rather than silently vanishing.
+- **Open:** the adapter is correctness-first and leaves most of the headroom unclaimed — two allocations
+  per activation, boxed contributions, a linear `Query`. See BACKEND-CONTRACT.md §0.
 
 ## Later (post-v1)
 

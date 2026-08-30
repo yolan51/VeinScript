@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Vein.Compiler.Backends;
 using Vein.Compiler.Diagnostics;
 using Vein.Compiler.Ir;
 using Vein.Compiler.Lexing;
@@ -8,7 +9,7 @@ using Vein.Compiler.Tooling;
 
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("usage: veinc <new|tokens|ast|ir|render|serve|run|build|graph|events|scaffold|symbols|exec> <file.vein> [arg]");
+    Console.Error.WriteLine("usage: veinc <new|tokens|ast|ir|render|serve|run|build|emit|graph|events|scaffold|symbols|exec> <file.vein> [arg]");
     return 2;
 }
 
@@ -180,6 +181,38 @@ switch (command)
                 var lower = new Lower(diagnostics, projectDir);
                 foreach (var bundle in unit!.Bundles)
                     new Interp { Ticks = ticks }.Run(lower.LowerBundle(bundle), Console.In, Console.Out, messaging: true);
+            }
+        }
+        break;
+    }
+
+    case "emit":
+    {
+        // HIR → C# source (docs/BACKEND-CONTRACT.md §2). Separate from `build`, which publishes an exe
+        // around the interpreter: these are two different products and conflating them under one verb
+        // would make "did I get compiled code?" impossible to answer from the command line.
+        string? outDir = null;
+        for (int i = 2; i < args.Length; i++)
+        {
+            if (args[i] == "-o" && i + 1 < args.Length) outDir = args[++i];
+            else if (args[i].StartsWith("-o=")) outDir = args[i]["-o=".Length..];
+        }
+        var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
+        if (diagnostics.HasErrors) break;
+
+        var lower = new Lower(diagnostics, projectDir);
+        var backend = new CSharpBackend();
+        foreach (var bundle in unit.Bundles)
+        {
+            var result = backend.Emit(lower.LowerBundle(bundle));
+            foreach (var note in result.Notes) Console.Error.WriteLine($"  note: {note}");
+            foreach (var file in result.Files)
+            {
+                if (outDir is null) { Console.Write(file.Contents); continue; }
+                Directory.CreateDirectory(outDir);
+                string target = Path.Combine(outDir, file.RelativePath);
+                File.WriteAllText(target, file.Contents);
+                Console.Error.WriteLine($"wrote {target}");
             }
         }
         break;

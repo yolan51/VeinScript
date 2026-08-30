@@ -28,8 +28,8 @@ ask the user first.** Losing a useful file is far worse than leaving a temp fold
   (`Vein.Runtime.SECS` and the vendored `ShardECS.SECS` / `ShardECS.Contracts`). net9 can reference net8,
   not vice-versa.
 - **Build:** `dotnet build VeinScript.sln`
-- **Tests:** `dotnet test src/Vein.Tests`   ·   **Golden IR:** `bash tools/check-ir.sh`
+- **Tests:** `dotnet test src/Vein.Tests`   ·   **Golden IR:** `bash tools/check-ir.sh`   ·   **Backend equivalence:** `bash tools/check-backend.sh`
 - **CLI (`veinc`):** `src/Vein.Cli` — run via `dotnet run --project src/Vein.Cli -- <cmd>` or the wrapper
-  `.\veinc.cmd <cmd>`. Commands: `new tokens ast ir render serve run build graph events scaffold symbols exec`.
+  `.\veinc.cmd <cmd>`. Commands: `new tokens ast ir render serve run build emit graph events scaffold symbols exec`.
 - **Commits:** work on `master` (the session's established flow); end commit messages with the
   `Co-Authored-By: Claude Opus 4.8` trailer.
