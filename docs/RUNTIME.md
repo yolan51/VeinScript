@@ -352,6 +352,18 @@ That is the console model's claim carried intact: **a mark is an identity, and w
 listens on, so receiving one teaches the receiver the way back ([NetBus.LearnRoute](../src/Vein.Compiler/Ir/NetBus.cs)).
 A hub never has to be told where its spokes are.
 
+**It does not cross NAT, and that is structural.** Every message is its own short-lived TCP connection
+(`NetBus.Send` dials, writes one frame, closes), so a reply is a *new outbound connection* to the route
+that was learned: the sender's source IP paired with the port it said it listens on. Behind NAT those do
+not describe a reachable endpoint — the IP is the router's, and the advertised port is the peer's private
+one, which nothing forwards. So a peer behind NAT can **send** to a public server and will never
+**receive**: its frames arrive, and every reply comes back as `@Undelivered`.
+
+This is a property of the transport shape, not a bug to patch at the edges: replying on the connection
+the sender already opened (a persistent, bidirectional socket) is what would fix it, and that is a
+different design from "one frame per connection". Until then `Vein.Net.Peer` is for peers that can
+actually dial each other — one LAN, a VPN, or hosts with routable addresses.
+
 ### 4.3.2 The trust model — and why `audience` needed one
 
 [KEYWORDS.md](KEYWORDS.md) has always defined `audience` as "networking/replication scope". Over the pipe

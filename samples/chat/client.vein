@@ -2,45 +2,68 @@
 //
 //   veinc run samples/chat/client.vein
 //
-//   > type your name and press Enter
+//   > server address (Enter for 127.0.0.1:9700)
+//   192.168.1.40               ← or just Enter for a server on this machine
+//   > your name
 //   alice                      ← whatever you like; this becomes your network identity
 //   hi everyone                ← every line after that is a message
 //
-// Run it in as many terminals as you want. There used to be an alice.vein and a bob.vein because a
-// program had no way to tell which one it was at startup — `here()` answers "which console am I"
-// (#Main for both) and the language cannot read an environment variable. The missing piece was simpler
-// than either: ASK. The first line you type is the answer, so one file serves every client.
+// Run it in as many terminals, on as many machines, as you like. There used to be an alice.vein and a
+// bob.vein because a program had no way to tell which one it was at startup — `here()` answers "which
+// console am I" (#Main for both) and the language cannot read an environment variable. The missing
+// option was simpler than either: ASK.
 //
-// The port is not configured either. `at: 0` lets the OS pick a free one, and the signed frame carries
-// whatever it picked, so the server learns where to answer. Two clients on one machine never collide,
-// and nobody has to keep a list of who owns which port.
+// This file contains no address. The two things that differ between one client and the next — who you
+// are and where the server is — are both typed in, so the same file runs everywhere unchanged.
+//
+// Note the ASYMMETRY with the server, which names no address at all. `@Listen` binds a port and accepts
+// on every interface: a listener does not need an address, it IS one. `@Link` dials, and dialling needs
+// a destination. And only the side that speaks FIRST needs one, because a signed frame carries the port
+// its sender listens on — so the server learns each client's route and never links anybody.
 
 bundle ChatClient by you {
 
     shard Session {
-        var joined: bool
+        // 0 = waiting for the server address · 1 = waiting for a name · 2 = chatting.
+        var stage: int
+        var server: string
 
         run once {
-            emit *Vein.Console.Io.@Print { text: "type your name and press Enter:" }
+            emit *Vein.Console.Io.@Print { text: "server address (Enter for 127.0.0.1:9700):" }
         }
 
         hear *Vein.Console.Io.@Input as i {
-            if joined {
-                // Every line after the first is a message for the server to relay.
-                emit *Vein.Net.Peer.@Send { to: #Server, text: i.text }
+            // Read the stage ONCE at entry. The branches below advance it, and without this snapshot a
+            // single line would fall through every stage in one go.
+            let s = stage
+
+            if s == 0 {
+                // A bare host is fine — @Link fills in the default port 9700.
+                server = i.text
+                if i.text == "" { server = "127.0.0.1:9700" }
+                stage = 1
+                emit *Vein.Console.Io.@Print { text: "your name:" }
             }
 
-            if not joined {
-                joined = true
+            if s == 1 {
+                stage = 2
 
-                // The name you typed IS the network identity — a mark is just a name, so a name typed
-                // at the console works exactly as a `#Literal` written in the source would.
+                // The name you typed IS the network identity — a mark is just a name, so a name typed at
+                // the console works exactly as a `#Literal` written in the source would.
+                //
+                // `at: 0` lets the OS pick a free port. Nothing dials us by name: the server replies to
+                // wherever our frame came from, so two clients on one machine cannot collide and no one
+                // maintains a port list.
                 emit *Vein.Net.Peer.@Listen { as: i.text, at: 0, key: "chat-secret" }
-                emit *Vein.Net.Peer.@Link { name: #Server, at: "127.0.0.1:9700", key: "chat-secret" }
+                emit *Vein.Net.Peer.@Link { name: #Server, at: server, key: "chat-secret" }
 
                 // Saying hello is what puts us on the roster and teaches the server our route.
                 emit *Vein.Net.Peer.@Send { to: #Server, text: "is here" }
-                emit *Vein.Console.Io.@Print { text: "joined as " + i.text + " — type away" }
+                emit *Vein.Console.Io.@Print { text: "joined as " + i.text + " on " + server + " — type away" }
+            }
+
+            if s == 2 {
+                emit *Vein.Net.Peer.@Send { to: #Server, text: i.text }
             }
         }
     }
@@ -55,7 +78,7 @@ bundle ChatClient by you {
 
     shard Reachability {
         hear *Vein.Net.Peer.@Undelivered as u {
-            emit *Vein.Console.Io.@Print { text: "  (server is not running — start samples/chat/server.vein)" }
+            emit *Vein.Console.Io.@Print { text: "  (no server at " + server + " — is it running, and is the port open?)" }
         }
     }
 }
