@@ -6,8 +6,11 @@
 //
 // The roster is DYNAMIC, and $Client is how. A shard's `var` holds one value and the language has no
 // growable list — but it has entities, and that is the growing collection: `spawn()` makes one,
-// `attach $Client` gives it data, `mark #Online` puts it in the set, and `target $Client #Online`
-// iterates the set. Adding a client is adding an entity.
+// `attach $Client` gives it data, and `target $Client` iterates them. Joining is spawning an entity;
+// leaving is destroying it.
+//
+// There is deliberately no `#Online` mark. Existence IS membership — a client that leaves is destroyed,
+// so a mark would be a second copy of the same fact, and the copy is what drifts.
 //
 // The server is told NOTHING about any client. It never `@Link`s one: a signed frame carries the port
 // its sender listens on, so hearing from someone teaches the server how to answer them. Every name and
@@ -32,7 +35,7 @@ bundle ChatServer by you {
             // 1. Do we already have this sender? `target` is the only way to look through the roster,
             //    so the answer comes back on shard state rather than as a return value.
             known = false
-            target $Client #Online as self {
+            target $Client as self {
                 if self.Client.addr == m.from { known = true }
             }
 
@@ -40,7 +43,6 @@ bundle ChatServer by you {
             if not known {
                 let e = spawn()
                 attach $Client to e { addr: m.from }
-                mark e #Online
                 emit *Vein.Console.Io.@Print { text: "* " + m.from + " joined" }
             }
 
@@ -48,7 +50,7 @@ bundle ChatServer by you {
 
             // 3. Relay to everyone except the sender. No `!=` in VeinScript (LANGUAGE.md §7) —
             //    inequality is `not (a == b)`. Without the guard the sender gets their own line back.
-            target $Client #Online as self {
+            target $Client as self {
                 if not (self.Client.addr == m.from) {
                     emit *Vein.Net.Peer.@Send { to: self.Client.addr, text: m.from + ": " + m.text }
                 }
@@ -56,14 +58,21 @@ bundle ChatServer by you {
         }
     }
 
-    // A client that closed its window. Unmarking drops them from the roster, so the next relay skips
-    // them and the server stops shouting into a void. The entity stays — ids are never reused, so a
-    // stale one is inert — it simply leaves the #Online set.
+    // A client that closed its window. `destroy` removes the identity outright — the entity AND the
+    // $Client component on it.
+    //
+    // Unmarking would have looked equivalent and is not. The entity would linger with its component
+    // forever, so every disconnect leaks one; and because the roster is "which entities exist", a
+    // returning client would not be recognised as already known and would be given a SECOND entity for
+    // the same address. Leaving is a lifecycle event, so it gets the lifecycle operation.
+    //
+    // Destroying mid-iteration is safe: a query materialises its ids before the body runs, and the
+    // destroy itself is queued for the commit point — so nothing here observes a half-changed roster.
     shard Reachability {
         hear *Vein.Net.Peer.@Undelivered as u {
-            target $Client #Online as self {
+            target $Client as self {
                 if self.Client.addr == u.to {
-                    unmark self #Online
+                    destroy self
                     emit *Vein.Console.Io.@Print { text: "* " + u.to + " left" }
                 }
             }

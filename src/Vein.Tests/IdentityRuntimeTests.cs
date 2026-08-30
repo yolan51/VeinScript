@@ -187,6 +187,53 @@ public class IdentityRuntimeTests
     }
 
     [Fact]
+    public void Destroy_in_a_hear_handler_removes_the_entity_and_its_component()
+    {
+        // Leaving is a lifecycle event, so the chat server destroys rather than unmarks. `destroy` takes
+        // the component with the entity, so the row stops matching `target $Client` entirely.
+        var output = React(
+            "bundle T by me {\n" +
+            "  shape $Client { addr: string }\n" +
+            "  shard R { hear *Vein.Console.Io.@Input as i {\n" +
+            "      if i.text == \"drop\" { target $Client as self {\n" +
+            "          if self.Client.addr == \"alice\" { destroy self } } }\n" +
+            "      if not (i.text == \"drop\") {\n" +
+            "        let e = spawn()\n" +
+            "        attach $Client to e { addr: i.text } }\n" +
+            "      target $Client as self { emit *Vein.Console.Io.@Print { text: \"[\" + i.text + \"] \" + self.Client.addr } } } }\n}",
+            "alice", "bob", "drop", "check");
+
+        // By the "check" event alice is gone and only bob remains.
+        Assert.Contains("[check] bob", output);
+        Assert.DoesNotContain("[check] alice", output);
+    }
+
+    [Fact]
+    public void A_destroyed_client_that_returns_is_not_a_duplicate()
+    {
+        // Why `destroy` and not `unmark`: with the entity merely unmarked it would linger forever AND a
+        // returning client would not be recognised as known, so it would be given a SECOND entity for the
+        // same address. Destroying leaves nothing to duplicate.
+        var output = React(
+            "bundle T by me {\n" +
+            "  shape $Client { addr: string }\n" +
+            "  shard R { var known: bool\n" +
+            "    hear *Vein.Console.Io.@Input as i {\n" +
+            "      if i.text == \"drop\" { target $Client as self {\n" +
+            "          if self.Client.addr == \"alice\" { destroy self } } }\n" +
+            "      if not (i.text == \"drop\") {\n" +
+            "        known = false\n" +
+            "        target $Client as self { if self.Client.addr == i.text { known = true } }\n" +
+            "        if not known { let e = spawn()\n" +
+            "          attach $Client to e { addr: i.text } } }\n" +
+            "      target $Client as self { emit *Vein.Console.Io.@Print { text: \"[\" + i.text + \"] \" + self.Client.addr } } } }\n}",
+            "alice", "drop", "alice", "check");
+
+        // Exactly one alice on the roster after she returns — not two.
+        Assert.Equal(1, Count(output, "[check] alice"));
+    }
+
+    [Fact]
     public void An_unmark_in_a_hear_handler_takes_effect_for_the_next_event()
     {
         // The chat server's "client left" path: a failed relay unmarks that client so later relays skip
