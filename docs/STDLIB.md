@@ -67,7 +67,7 @@ link+run exists.
 | `veinc symbols` cross-bundle discovery + `*` validation | **works** | stdlib's public API is discoverable/validated |
 | single-bundle render (`emit`/`hear`/`bring`/`ShardView`) | **works** | a stdlib bundle can render *within itself* (proof) |
 | `use N` import resolution | **works** | `use Console` makes a bare `print(…)`, `bring Button(…)` and `$Vec2` include resolve; local declarations still win |
-| `bring *Bundle.Builder` (qualified builders) | **missing** | can't consume another bundle's builders yet |
+| `bring *Bundle.Builder` (qualified builders) | **works** | `LowerBring` resolves a builder path, so another bundle's builders are consumable — bare too, via `use` |
 | app **link + run** (load bundles, run together) | **works** | the principal bundle boots; every loaded bundle joins **one** runtime, so a `hear` in one sees an `emit` from another (RUNTIME.md §5.1) |
 | `target`/`each tick`/`settled`/`folds` execution | **works** (`--ticks N` drives the clock) | a stdlib shard's schedule blocks run like any other |
 | **mark declaration** (`#Mark { }`) | **does not exist** | marks are implicit names; "shared marks" can't be declared |
@@ -114,7 +114,7 @@ Ten platform-independent bundles authored `by Vein`. A bundle has two layers:
 
 - **Publicators = the shared API** (`shared` shapes/events/builders/functions), reachable across bundles
   as `*Vein.Bundle.Publicator.member` and listed by `veinc symbols stdlib/Vein.app.vein`. Totals:
-  **25 shapes · 39 events · 8 builders · 6 fn · 11 SF**, in **22 publicators**. Four of those names are
+  **25 shapes · 39 events · 16 builders · 6 fn · 11 SF**, in **24 publicators**. Four of those names are
   declared twice on purpose — `Vein.Net.Peer` re-declares Console's `@Send`/`@Message`/`@Undelivered`/`send`
   so a headless program need not name "Console" to reach the network. `veinc symbols` flags them as
   collisions and says to qualify with the **bundle**, since both bundles share the author `Vein`.
@@ -144,7 +144,7 @@ runtime auto-attaches a provenance envelope (`from`, `origin`, `id`, `cause`, `t
 | **UI** | `Widgets` (`$Text` `$Button` `$Field` `$Image`) · `Interaction` (`@Clicked`/`@Focused`/`@Blurred`/`@Hovered {target:Entity}`) | — |
 | **Time** | `Clock` (`$Clock{now,delta}` `@Ticked{frame,delta}`) | — |
 | **Game** | `Collision` (`$Collider` `@Collided{a,b:Entity}`) · `Bodies` (`$Body`) · `Combat` (`@Damaged{target,amount}`) | `CollisionDetection` `GravitySystem` `DamageSystem` |
-| **Web** | `Http` (`@Request` `@Html` `@Style` `@Script` `@Render` `@Response`) · `Elements` (builders `Heading` `Paragraph` `Button` `Link` `Image` `ListItem`) | `Router` `Demo` + `Page` view — renders standalone |
+| **Web** | `Http` (`@Request{path,method,body}` `@Html` `@Style` `@Script` `@Render` `@Response`) · `Elements` (markup builders `Heading` `Subheading` `Paragraph` `Button` `Link` `Image` `ListItem` `JumpLine` `Form` `Raw`) · `Styles` (`Rule` `Css` → `@Style`) · `Scripts` (`Define` `Js` → `@Script`) — a builder's **output field** picks its channel (`markup`/`css`/`code`), so a stylesheet and a script assemble exactly as a page does. `&Raw` is the escape hatch a one-fragment builder needs: it cannot wrap other fragments, so anything structural is written directly | — |
 | **Diagnostics** | `Report` (`$Diagnostic` `@DiagnosticRaised`) | `Collector` |
 | **Console** | `Io` (`@Print{text}` `@Input{text}` `@Console{name: Mark,firsttext}` `@Send{to: Mark,text}` `@Message{from: Mark,text}` + builders `Line{text}`→`@Print`, `Console{name: Mark,firsttext}`→`@Console`) — console I/O, spawning named console apps, and messaging between them; the runtime bridges `@Print`/`@Input`↔stdout/stdin, `@Console`→a new console window, and `@Send`→another console (delivered as `@Message` over a local named pipe). Addresses are identity references, not strings — write `#Server`, and `#Main` for the root console; an address nothing spawns is reported as VS0212 | — |
 | **Net** | `Peer` (`@Listen{as: Mark,at: int,key}` `@Link{name: Mark,at,key}` + `@Send`/`@Message`/`@Undelivered`) — the same messaging vocabulary Console declares, because at runtime they are the **same events**: `@Send` picks the wire when the mark is linked and the pipe when it is not, so a console program goes cross-machine by adding `@Listen`/`@Link` and changing nothing else. Frames are HMAC-signed with a pre-shared `key`, which is what makes `from` a proven identity and `audience` an enforced barrier rather than advice · `Http` (`@Fetch{url,method,body}` `@Fetched{url,status,body}` `@Failed{url,reason}`) — the asymmetric half: a URL is not an identity, so this is a request with a reply. Any status is `@Fetched`; only *no answer* is `@Failed` | — |

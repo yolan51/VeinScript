@@ -59,14 +59,50 @@ bundle Web by Vein {
         shared("An image element.")
         builder Image { source: string, alt: string   markup = "<img src=\"" + source + "\" alt=\"" + alt + "\">" }
 
+        shared("A second-level heading.")
+        builder Subheading { text: string   markup = "<h2>" + text + "</h2>" }
+
         shared("A list item.")
         builder ListItem { text: string   markup = "<li>" + text + "</li>" }
+
+        // A builder emits ONE fragment, so it cannot wrap other fragments — there is no way to express
+        // "open a div, then some cards, then close it" as a single builder. `Raw` is the escape hatch
+        // that makes the rest of the library able to stay small and unopinionated: anything this
+        // vocabulary does not model, you write directly.
+        shared("Markup this library does not model — passed through unchanged.")
+        builder Raw { html: string   markup = html }
+
+        // Self-contained on purpose, for the same reason: a form has to enclose its fields, and one
+        // fragment cannot. This covers the common single-field case; anything richer is &Raw.
+        shared("A single-field form that POSTs back to `action`.")
+        builder Form { action: string, field: string, label: string   markup = "<form method=\"post\" action=\"" + action + "\"><input name=\"" + field + "\"> <button>" + label + "</button></form>" }
 
         // The only builder here with no parameters — a line break has nothing to say, only somewhere to
         // be. `markup` still carries a default, which is what keeps it a complete builder rather than one
         // missing its output. Repeat it with the count `bring` already takes: `bring 3 JumpLine()`.
         shared("A line break — `bring JumpLine()`, or `bring 3 JumpLine()` for several.")
         builder JumpLine { markup = "<br>" }
+    }
+
+    // Styles — the CSS channel. A builder's OUTPUT FIELD is what picks its channel, so `css = …` emits
+    // @Style exactly as `markup = …` emits @Html. A stylesheet is therefore assembled the same way a
+    // page is: shards contribute rules, the view collects them.
+    publicator Styles {
+        shared("One CSS rule — a selector and its declarations.")
+        builder Rule { selector: string, decl: string   css = selector + "{" + decl + "}" }
+
+        shared("A stylesheet fragment passed through unchanged (media queries, keyframes, …).")
+        builder Css { text: string   css = text }
+    }
+
+    // Scripts — the JavaScript channel, `code = …` emitting @Script. Behaviour that runs in the BROWSER,
+    // which is not the same thing as a shard: a shard reacts on the server, this ships to the client.
+    publicator Scripts {
+        shared("A named JavaScript function, callable from markup (onclick=\"name()\").")
+        builder Define { name: string, body: string   code = "function " + name + "(){" + body + "}" }
+
+        shared("JavaScript passed through unchanged — runs when the page loads.")
+        builder Js { text: string   code = text }
     }
 
     // --- no behaviour here ---------------------------------------------------------------------------

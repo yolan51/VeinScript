@@ -22,17 +22,13 @@
 
 bundle WebApp by you {
 
-    use Web                       // &Heading &Paragraph &Link &Image &ListItem &JumpLine
+    // One `use` reaches all three channels: Elements (markup), Styles (css) and Scripts (code) are
+    // publicators of the same bundle, so &Heading, &Rule and &Define all resolve by bare name.
+    use Web
 
-    // ---- builders for the channels Elements does not cover -----------------------------------------
-    // Vein.Web.Elements ships markup builders only. A stylesheet and a script are just as much
-    // "elements", so the site declares the two builders that emit into those channels.
-
-    builder Rule    { selector: string, decl: string   css = selector + "{" + decl + "}" }
-    builder Define  { name: string, body: string       code = "function " + name + "(){" + body + "}" }
-    builder Raw     { html: string                     markup = html }
-
-    // ---- reusable page furniture -------------------------------------------------------------------
+    // ---- page furniture, which is this SITE and not the library ------------------------------------
+    // These stay local on purpose: a hero and a card are design decisions, not vocabulary. The library
+    // gives the channels and the primitives; what a page looks like belongs to the page.
 
     builder Nav     { markup = "<nav><a href=\"/\">home</a><a href=\"/docs\">docs</a><a href=\"/counter\">counter</a><a href=\"/greet\">greet</a></nav>" }
     builder Card    { title: string, body: string   markup = "<div class=\"card\"><h3>" + title + "</h3><p>" + body + "</p></div>" }
@@ -137,7 +133,10 @@ bundle WebApp by you {
 
                 if r.method == "GET" {
                     bring Hero("Greet", "A form, posted back to the same path.")
-                    bring Raw("<main><form method=\"post\" action=\"/greet\"><input name=\"who\" placeholder=\"your name\"> <button>send</button></form>")
+                    bring Raw("<main>")
+                    // &Form is self-contained because one fragment cannot wrap others: it carries its
+                    // own input and submit. Anything richer than a single field is &Raw.
+                    bring Form("/greet", "who", "send")
                     bring Raw("</main>")
                 }
 
