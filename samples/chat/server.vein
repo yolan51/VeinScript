@@ -1,0 +1,49 @@
+// samples/chat/server.vein — the chat SERVER. Start this first.
+//
+//   Terminal 1:  veinc run samples/chat/server.vein
+//   Terminal 2:  veinc run samples/chat/alice.vein     ← type here
+//   Terminal 3:  veinc run samples/chat/bob.vein       ← and here
+//
+// The server relays: every line one client sends is forwarded to the others, tagged with who said it.
+//
+// Notice what the server does NOT do: it never `@Link`s a client. A signed frame carries the port its
+// sender listens on, so receiving a client's first message teaches the server the way back. Only the
+// side that speaks first needs configuring — which is why the clients link the server and not the
+// reverse. That is also why each client says hello in `run once`.
+
+bundle ChatServer by you {
+
+    shard Boot {
+        run once {
+            // `as` is this program's network identity; the clients address it as #Server.
+            emit *Vein.Net.Peer.@Listen { as: #Server, at: 9700, key: "chat-secret" }
+            emit *Vein.Console.Io.@Print { text: "server listening on 9700 — waiting for clients" }
+        }
+    }
+
+    shard Relay {
+        hear *Vein.Net.Peer.@Message as m {
+            emit *Vein.Console.Io.@Print { text: m.from + ": " + m.text }
+
+            // The roster is fixed because this is a two-client demo: a shard's `var` holds a value, and
+            // the language has no growing collection to append a newcomer to. Everything else here is
+            // dynamic — the server learned both ROUTES at runtime and was told neither.
+            let clients = [#Alice, #Bob]
+            target clients as c {
+                // No `!=` in VeinScript (LANGUAGE.md §7) — inequality is `not (a == b)`. Without this
+                // guard the sender would receive an echo of their own line.
+                if not (c == m.from) {
+                    emit *Vein.Net.Peer.@Send { to: c, text: m.from + ": " + m.text }
+                }
+            }
+        }
+    }
+
+    // A client that is not running yet — normal, not an error. Without this the server would go quiet
+    // and a closed client would look exactly like a working one.
+    shard Reachability {
+        hear *Vein.Net.Peer.@Undelivered as u {
+            emit *Vein.Console.Io.@Print { text: "  (" + u.to + " is not connected)" }
+        }
+    }
+}

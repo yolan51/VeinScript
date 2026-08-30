@@ -1,0 +1,51 @@
+// samples/chat/alice.vein — a chat CLIENT (Alice). Start samples/chat/server.vein first.
+//
+//   veinc run samples/chat/alice.vein
+//
+// Type a line and press Enter; it goes to the server, which relays it to the other client. Lines from
+// the other client arrive here the same way.
+//
+// alice.vein and bob.vein are the same program with two lines different — the identity (`as`) and the
+// port. They are separate FILES rather than one file choosing a role, because a role switch needs a way
+// to tell the two apart at startup: `here()` answers "which console am I", which is #Main for both, and
+// the language cannot read an environment variable. Two files is the honest version.
+
+bundle ChatAlice by you {
+
+    shard Boot {
+        run once {
+            emit *Vein.Net.Peer.@Listen { as: #Alice, at: 9701, key: "chat-secret" }
+
+            // Where the server lives. Registering a route connects nothing — if the server is down the
+            // hello below simply comes back as @Undelivered.
+            emit *Vein.Net.Peer.@Link { name: #Server, at: "127.0.0.1:9700", key: "chat-secret" }
+
+            emit *Vein.Console.Io.@Print { text: "Alice connected — type a line and press Enter" }
+
+            // Saying hello is what teaches the SERVER how to reach us: it reads the return port off this
+            // signed frame. Without it the server could not relay anything to Alice until Alice spoke.
+            emit *Vein.Net.Peer.@Send { to: #Server, text: "joined" }
+        }
+    }
+
+    // Each line typed at this console becomes an @Input event, which we forward to the server.
+    shard Typing {
+        hear *Vein.Console.Io.@Input as i {
+            emit *Vein.Net.Peer.@Send { to: #Server, text: i.text }
+        }
+    }
+
+    // `audience #Server` admits only the server. The frame is signed, so this excludes anyone else on
+    // the network rather than merely asking them politely not to talk to us.
+    shard Incoming {
+        hear *Vein.Net.Peer.@Message as m audience #Server {
+            emit *Vein.Console.Io.@Print { text: m.text }
+        }
+    }
+
+    shard Reachability {
+        hear *Vein.Net.Peer.@Undelivered as u {
+            emit *Vein.Console.Io.@Print { text: "  (server is not running — start samples/chat/server.vein)" }
+        }
+    }
+}

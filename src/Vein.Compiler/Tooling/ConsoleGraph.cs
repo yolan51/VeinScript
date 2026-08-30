@@ -18,7 +18,8 @@ namespace Vein.Compiler.Tooling;
 //     value, so mixed or not-yet-migrated code must not produce false warnings.
 public sealed class ConsoleGraph
 {
-    /// One `@Console { name }` / `bring &Console(name, …)` — a console this bundle brings into existence.
+    /// One site that makes an address REACHABLE: `@Console { name }` or `bring &Console(name, …)` spawns a
+    /// local console; `@Link { name }` routes to a network peer; `@Listen { as }` names this program.
     public sealed record Spawn(string Address, string Owner, SourceSpan Span);
 
     /// One `@Send { to }` — a console this bundle talks to.
@@ -84,6 +85,19 @@ public sealed class ConsoleGraph
 
                     case EmitStmt em when em.Event == "Send":
                         if (Field(em, "to") is { } target) addresses.Add(new Address(target, owner, em.Span));
+                        break;
+
+                    // A NETWORK peer is reachable without ever being spawned: `@Link { name: #Server }`
+                    // registers a route to a program on another machine, and `@Listen { as: #Me }` names
+                    // this one. Both make an address real, so both resolve a `@Send` — without this,
+                    // VS0212 fires on every Vein.Net program, telling it to spawn a console for a peer
+                    // that is not a console and cannot be spawned.
+                    case EmitStmt em when em.Event == "Link":
+                        if (Field(em, "name") is { } linked) spawns.Add(new Spawn(linked, owner, em.Span));
+                        break;
+
+                    case EmitStmt em when em.Event == "Listen":
+                        if (Field(em, "as") is { } self) spawns.Add(new Spawn(self, owner, em.Span));
                         break;
 
                     // `bring &Console(name, firsttext)` desugars to @Console, so it spawns too.

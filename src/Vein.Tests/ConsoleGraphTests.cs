@@ -146,4 +146,45 @@ public class ConsoleGraphTests
         Assert.NotNull(got);
         Assert.Equal("Main", got!.Value.Name);   // not "" — that would be the pipe `vein.console.`
     }
+
+    // ---- network addresses are reachable without being spawned ---------------------------------
+
+    [Fact]
+    public void A_linked_network_peer_does_not_warn()
+    {
+        // VS0212 was written for the console model, where an address nothing spawns routes to a pipe
+        // nobody listens on. A Vein.Net peer is a program on another machine: it is reached by @Link and
+        // cannot be spawned, so the warning fired on every network program and told you to fix it by
+        // spawning a console for something that is not a console.
+        var r = Compile(Boot(
+            "emit *Vein.Net.Peer.@Link { name: #Server, at: \"127.0.0.1:9700\", key: \"k\" }\n" +
+            "emit *Vein.Net.Peer.@Send { to: #Server, text: \"hi\" }"));
+
+        Assert.True(r.Success);
+        Assert.Empty(Vs0212(r));
+    }
+
+    [Fact]
+    public void The_identity_a_program_listens_as_is_addressable()
+    {
+        var r = Compile(Boot(
+            "emit *Vein.Net.Peer.@Listen { as: #Me, at: 9700, key: \"k\" }\n" +
+            "emit *Vein.Net.Peer.@Send { to: #Me, text: \"hi\" }"));
+
+        Assert.True(r.Success);
+        Assert.Empty(Vs0212(r));
+    }
+
+    [Fact]
+    public void An_unlinked_unspawned_address_still_warns()
+    {
+        // The check has to keep earning its place: a peer that is neither spawned nor linked is exactly
+        // the typo VS0212 exists to catch, and widening it for the network must not blunt it.
+        var r = Compile(Boot(
+            "emit *Vein.Net.Peer.@Link { name: #Server, at: \"127.0.0.1:9700\", key: \"k\" }\n" +
+            "emit *Vein.Net.Peer.@Send { to: #Sevrer, text: \"hi\" }"));
+
+        Assert.True(r.Success);
+        Assert.Contains(Vs0212(r), d => d.Message.Contains("Sevrer"));
+    }
 }
