@@ -160,6 +160,43 @@ public class NetPeerTests : IDisposable
         Assert.Contains("Hub:pong", atSpoke);
     }
 
+    // ---- a listening program is a server, and servers have no stdin ------------------------------
+
+    /// Start `body` on a background thread with stdin already at EOF, and report whether it finished.
+    private static bool ExitsWithClosedStdin(string body)
+    {
+        var module = Compile(body);
+        var finished = new ManualResetEventSlim(false);
+        new Thread(() =>
+        {
+            try { new Interp().Run(module, new StringReader(""), new StringWriter(), messaging: true); }
+            catch { }
+            finished.Set();
+        })
+        { IsBackground = true }.Start();
+        return finished.Wait(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public void A_program_with_no_listener_still_ends_when_stdin_ends()
+    {
+        // `veinc run < file` must not hang. This is the behaviour the listener exception is carved out
+        // of, so it has to be pinned first or the carve-out could swallow it.
+        Assert.True(ExitsWithClosedStdin("  shard S { run once { " + P("\"done\"") + " } }"));
+    }
+
+    [Fact]
+    public void A_listening_program_outlives_its_stdin()
+    {
+        // A server deployed headless gets no stdin at all: systemd hands it /dev/null, EOF arrives before
+        // any client can connect, and on the old rule the port closed a moment after it opened — which
+        // looks exactly like a crash on startup. A program that is listening still has someone to hear
+        // from, which is the same reason a spawned console stays alive.
+        Assert.False(ExitsWithClosedStdin(
+            "  shard S { run once {\n" +
+            "    emit *Vein.Net.Peer.@Listen { as: #Srv, at: 0, key: \"k\" } } }"));
+    }
+
     // ---- the wire is unreadable -----------------------------------------------------------------
 
     [Fact]

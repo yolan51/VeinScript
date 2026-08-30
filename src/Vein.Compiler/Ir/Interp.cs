@@ -189,8 +189,18 @@ public sealed class Interp
         {
             try { string? l; while ((l = input.ReadLine()) is not null) { var line = l; inbox.Add(() => { FireInput(line); Drain(); }); } }
             catch { /* input closed */ }
-            // A root run (piped stdin) ends when stdin ends; a spawned console stays alive for messages.
-            if (ConsoleLauncher.CurrentName is null) { try { inbox.CompleteAdding(); } catch { } }
+
+            // A root run ends when stdin ends — `veinc run < file` should not hang. Two things keep it
+            // alive instead, and both are "there is still someone to hear from":
+            //
+            //   * a spawned console, which exists to receive from the program that spawned it;
+            //   * a program LISTENING on the network, which is the whole shape of a server.
+            //
+            // Without the second, a built server deployed headless dies instantly: systemd gives it no
+            // stdin, EOF arrives before the first client can connect, and the port closes a moment after
+            // it opened. It looks like a crash on startup and is not.
+            if (ConsoleLauncher.CurrentName is null && _net is null)
+            { try { inbox.CompleteAdding(); } catch { } }
         }) { IsBackground = true, Name = "vein-stdin" };
         reader.Start();
 
