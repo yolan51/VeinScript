@@ -50,9 +50,9 @@ bundle WebSite by you {
                 // old single-field @Request could not express.
                 if r.method == "GET" {
                     bring Heading("Say hello")
-                    emit @Html { markup: "<form method=\"post\" action=\"/greet\">"
-                                       + "<input name=\"who\" placeholder=\"your name\">"
-                                       + "<button>send</button></form>" }
+                    // One line: a newline ENDS a statement in VeinScript, so a `+` continuation on the
+                    // next line is not a continuation at all.
+                    emit @Html { markup: "<form method=\"post\" action=\"/greet\"><input name=\"who\" placeholder=\"your name\"><button>send</button></form>" }
                     bring Link("/", "home")
                 }
 
@@ -89,8 +89,7 @@ bundle WebSite by you {
             if not (html == "") {
                 emit @Response {
                     status: 200
-                    body: "<!doctype html><html><head><meta charset=\"utf-8\">"
-                        + "<title>VeinScript</title></head><body>" + html + "</body></html>"
+                    body: "<!doctype html><html><head><meta charset=\"utf-8\"><title>VeinScript</title></head><body>" + html + "</body></html>"
                 }
             }
         }
