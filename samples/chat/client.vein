@@ -29,7 +29,11 @@ bundle ChatClient by you {
         var server: string
 
         run once {
-            emit *Vein.Console.Io.@Print { text: "server address (Enter for 144.217.220.127:9700):" }
+            // Two lines, because one terse prompt reads like an invitation to start chatting — and a
+            // message typed here becomes a hostname, which fails later and confusingly ("no server at
+            // allo"). Saying "press Enter" on its own line makes the default the obvious move.
+            emit *Vein.Console.Io.@Print { text: "STEP 1 of 2 — which server?" }
+            emit *Vein.Console.Io.@Print { text: "  press ENTER for 144.217.220.127:9700, or type another address:" }
         }
 
         hear *Vein.Console.Io.@Input as i {
@@ -43,7 +47,7 @@ bundle ChatClient by you {
                 server = i.text
                 if i.text == "" { server = "144.217.220.127:9700" }
                 stage = 1
-                emit *Vein.Console.Io.@Print { text: "your name:" }
+                emit *Vein.Console.Io.@Print { text: "STEP 2 of 2 — your name (this is your chat identity):" }
             }
 
             if s == 1 {
@@ -67,6 +71,11 @@ bundle ChatClient by you {
                 emit *Vein.Net.Peer.@Send { to: #Server, text: i.text }
             }
         }
+
+        // In THIS shard so it can read `server` — see the note below.
+        hear *Vein.Net.Peer.@Undelivered as u {
+            emit *Vein.Console.Io.@Print { text: "  (no server at " + server + " — is it running, and is port 9700 open?)" }
+        }
     }
 
     // `audience #Server` admits the server and refuses everyone else. Frames are signed, so that is a
@@ -77,9 +86,7 @@ bundle ChatClient by you {
         }
     }
 
-    shard Reachability {
-        hear *Vein.Net.Peer.@Undelivered as u {
-            emit *Vein.Console.Io.@Print { text: "  (no server at " + server + " — is it running, and is the port open?)" }
-        }
-    }
+    // NOTE: this handler lives inside Session on purpose. `var` state belongs to ONE shard, so a
+    // `hear` in a separate shard reading `server` would get that shard's own empty copy — which is
+    // exactly what happened here: the warning printed "no server at " with nothing after it.
 }
