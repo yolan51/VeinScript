@@ -9,8 +9,14 @@ internal static class BuildCommand
     public static int Build(string sourcePath, string source, string? outPath, string? rid, bool selfContained)
     {
         string name = Sanitize(Path.GetFileNameWithoutExtension(sourcePath));
-        string exeExt = OperatingSystem.IsWindows() ? ".exe" : "";
         rid ??= RuntimeInformation.RuntimeIdentifier;
+
+        // The extension belongs to the TARGET, not to the machine doing the building. Taking it from the
+        // host meant every cross-build looked for the wrong file: `--rid linux-x64` on Windows published
+        // `server` successfully and then failed with "published exe not found: server.exe", which reads
+        // like the compile broke when in fact only the lookup did. Deploying a Linux server from a
+        // Windows box is the ordinary case for this command, not an exotic one.
+        string exeExt = rid.StartsWith("win", StringComparison.OrdinalIgnoreCase) ? ".exe" : "";
 
         string compilerDll = Path.Combine(AppContext.BaseDirectory, "Vein.Compiler.dll");
         if (!File.Exists(compilerDll))
