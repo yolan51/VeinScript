@@ -32,6 +32,23 @@ bundle WebApp by you {
     // ---- page furniture, which is this SITE and not the library ------------------------------------
     // A hero and a card are still decisions this page makes: the theme styles `.card`, but what goes
     // in one belongs here.
+    //
+    // Each one is a SHAPE plus a builder that includes it. The include costs nothing — it is a
+    // compile-time field expansion, so `bring Card("a", "b")` reads exactly as it did with loose
+    // params — but the same declaration is now attachable, which is what lets the home grid below be
+    // a `target` query instead of four hard-coded lines.
+
+    shape $Card   { title: string, body: string }
+    shape $Hero   { title: string, sub: string }
+    shape $Footer { note: string }
+
+    // One section of the reference at /docs. The BODY of that page cannot be a query — `target` binds
+    // one shape per loop and there is no way to ask an entity which shape it carries, so a document
+    // that interleaves headings, prose, lists and code in reading order stays an ordered sequence.
+    // Its sections can be identities though, and that is enough to make the contents list a query and
+    // to let a route filter them. Declared here, in the main file, because a `shards/` fragment may
+    // hold only behaviour — a shape there is VS0321.
+    shape $Section { title: string, ord: int }
 
     builder Nav {
         markup = "<nav>" +
@@ -44,9 +61,9 @@ bundle WebApp by you {
                  "</nav>"
     }
 
-    builder Card    { title: string, body: string   markup = "<div class='card'><h3>" + title + "</h3><p>" + body + "</p></div>" }
-    builder Hero    { title: string, sub: string    markup = "<header class='hero'><h1>" + title + "</h1><p>" + sub + "</p></header>" }
-    builder Footer  { note: string                  markup = "<footer>" + note + "</footer>" }
+    builder Card    { $Card     markup = "<div class='card'><h3>" + title + "</h3><p>" + body + "</p></div>" }
+    builder Hero    { $Hero     markup = "<header class='hero'><h1>" + title + "</h1><p>" + sub + "</p></header>" }
+    builder Footer  { $Footer   markup = "<footer>" + note + "</footer>" }
 
     // ---- the stylesheet ----------------------------------------------------------------------------
     // Emitted on EVERY request, before any page decides what it contains. A 404 still collects the CSS
@@ -102,6 +119,33 @@ bundle WebApp by you {
     // &Open and &Close cannot nest — each is its own fragment — but the indentation between them shows
     // the nesting the fragments will produce once the view concatenates them.
 
+    // The home page's content is a WORLD, not a list of literals. `run once` runs before the boot event
+    // on every render — `veinc serve` gives each request its own interpreter, so this is re-seeded per
+    // request and no page can ever see the last visitor's state.
+    //
+    // Making them identities is what buys the `target` below: #Featured filters, a second shard could
+    // fold a score into them without knowing who else writes it, and a card can be destroyed. Four
+    // literal `bring` lines could express none of that.
+    shard Catalog {
+        run once {
+            let a = spawn()
+            attach $Card to a { title: "Shapes", body: "Data lives in $Shape — identity components with folds." }
+            mark a #Featured
+
+            let b = spawn()
+            attach $Card to b { title: "Shards", body: "Behaviour reacts: hear an event, emit more." }
+            mark b #Featured
+
+            let c = spawn()
+            attach $Card to c { title: "Builders", body: "A builder's output field picks its channel: markup, css or code." }
+            mark c #Featured
+
+            let d = spawn()
+            attach $Card to d { title: "One page", body: "These four cards are four separate @Html fragments." }
+            mark d #Featured
+        }
+    }
+
     shard Home {
         hear @Request as r {
             if r.path == "/" {
@@ -109,10 +153,12 @@ bundle WebApp by you {
                 bring Hero("VeinScript", "A website assembled entirely from events.")
                 bring Open("main")
                     bring OpenAs("div", "grid")
-                        bring Card("Shapes", "Data lives in $Shape — identity components with folds.")
-                        bring Card("Shards", "Behaviour reacts: hear an event, emit more.")
-                        bring Card("Builders", "A builder's output field picks its channel: markup, css or code.")
-                        bring Card("One page", "These four cards are four separate @Html fragments.")
+                        // The grid is a query. `target` works inside a `hear` — the same statement the
+                        // ECS schedules use — so the page renders whatever the world currently holds,
+                        // in spawn order, and adding a card is an `attach` rather than an edit here.
+                        target $Card #Featured as self {
+                            bring Card(self.Card.title, self.Card.body)
+                        }
                     bring Close("div")
                 bring Close("main")
                 bring Footer("Served by veinc serve")

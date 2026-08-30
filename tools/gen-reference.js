@@ -72,6 +72,7 @@ let m;
 while ((m = re.exec(body))) nodes.push({ tag: m[1], inner: m[2] });
 
 const out = [];
+const sections = [];                                   // h2 titles, in document order → $Section identities
 const stats = { h1: 0, h2: 0, h3: 0, p: 0, ul: 0, li: 0, pre: 0, fenceBlocks: 0, fenceLines: 0 };
 let fence = null;
 
@@ -95,7 +96,14 @@ for (const n of nodes) {
     out.push(emitText('Paragraph', n.inner.trim()));
     stats.p++;
   } else if (n.tag === 'h1') { out.push(emitText('Heading', n.inner.trim())); stats.h1++; }
-  else if (n.tag === 'h2') { out.push(emitText('Subheading', n.inner.trim())); stats.h2++; }
+  else if (n.tag === 'h2') {
+    // Each h2 is a $Section identity as well as a heading. The anchor is emitted as its own fragment
+    // so &Subheading keeps rendering a plain <h2> — the id rides beside it rather than inside it.
+    stats.h2++;
+    sections.push(stripTags(n.inner).trim());
+    out.push('            bring Raw("<span id=\'sec' + stats.h2 + '\'></span>")');
+    out.push(emitText('Subheading', n.inner.trim()));
+  }
   else if (n.tag === 'h3') { out.push(emitText('Subsubheading', n.inner.trim())); stats.h3++; }
   else if (n.tag === 'ul') {
     out.push('            bring Open("ul")');
@@ -129,6 +137,18 @@ const header = `// samples/web_app/shards/Reference.vein — the /docs route: th
 //
 // GENERATED — do not hand-edit. Re-run:  node tools/gen-reference.js <reference.html>
 
+// The reference's sections as IDENTITIES. A run-once schedule fires before the boot event on every
+// render, and it has to be here rather than in the route: a structural change is deferred within one
+// event, so entities attached inside the @Request handler would not be visible to a query in that
+// same handler. Seeded once, queried below.
+shard ReferenceIndex {
+    run once {
+${sections.map((t, i) => `        let s${i + 1} = spawn()\n` +
+  `        attach $Section to s${i + 1} { title: ${veinStr(t)}, ord: ${i + 1} }\n` +
+  `        mark s${i + 1} #Doc`).join('\n\n')}
+    }
+}
+
 shard Reference {
     hear @Request as r {
         if r.path == "/docs" {
@@ -148,6 +168,18 @@ shard Reference {
                           "<code class='inline-code'>method</code> and " +
                           "<code class='inline-code'>body</code>. For what the compiler actually " +
                           "accepts, read stdlib/ and docs/LANGUAGE.md.</div>")
+
+                // Contents — a QUERY, not a list. Nothing below is written twice: add a \`$Section\`
+                // and it appears here, in spawn order, with its anchor. The body of the page cannot
+                // work this way (see \`shape $Section\` in web_app.vein), but its index can.
+                bring Subheading("Contents")
+                bring Open("ul")
+                    target $Section #Doc as self {
+                        bring Open("li")
+                            bring Link("#sec" + self.Section.ord, self.Section.title)
+                        bring Close("li")
+                    }
+                bring Close("ul")
 
 `;
 

@@ -14,6 +14,94 @@
 //
 // GENERATED — do not hand-edit. Re-run:  node tools/gen-reference.js <reference.html>
 
+// The reference's sections as IDENTITIES. A run-once schedule fires before the boot event on every
+// render, and it has to be here rather than in the route: a structural change is deferred within one
+// event, so entities attached inside the @Request handler would not be visible to a query in that
+// same handler. Seeded once, queried below.
+shard ReferenceIndex {
+    run once {
+        let s1 = spawn()
+        attach $Section to s1 { title: "File: console_chat.vein", ord: 1 }
+        mark s1 #Doc
+
+        let s2 = spawn()
+        attach $Section to s2 { title: "File: console_builder.vein", ord: 2 }
+        mark s2 #Doc
+
+        let s3 = spawn()
+        attach $Section to s3 { title: "File: console.vein", ord: 3 }
+        mark s3 #Doc
+
+        let s4 = spawn()
+        attach $Section to s4 { title: "File: Web.vein", ord: 4 }
+        mark s4 #Doc
+
+        let s5 = spawn()
+        attach $Section to s5 { title: "File: Vein.app.vein", ord: 5 }
+        mark s5 #Doc
+
+        let s6 = spawn()
+        attach $Section to s6 { title: "File: UI.vein", ord: 6 }
+        mark s6 #Doc
+
+        let s7 = spawn()
+        attach $Section to s7 { title: "File: Transform.vein", ord: 7 }
+        mark s7 #Doc
+
+        let s8 = spawn()
+        attach $Section to s8 { title: "File: Time.vein", ord: 8 }
+        mark s8 #Doc
+
+        let s9 = spawn()
+        attach $Section to s9 { title: "File: Math.vein", ord: 9 }
+        mark s9 #Doc
+
+        let s10 = spawn()
+        attach $Section to s10 { title: "File: Input.vein", ord: 10 }
+        mark s10 #Doc
+
+        let s11 = spawn()
+        attach $Section to s11 { title: "File: Game.vein", ord: 11 }
+        mark s11 #Doc
+
+        let s12 = spawn()
+        attach $Section to s12 { title: "File: Diagnostics.vein", ord: 12 }
+        mark s12 #Doc
+
+        let s13 = spawn()
+        attach $Section to s13 { title: "File: Core.vein", ord: 13 }
+        mark s13 #Doc
+
+        let s14 = spawn()
+        attach $Section to s14 { title: "File: Console.vein", ord: 14 }
+        mark s14 #Doc
+
+        let s15 = spawn()
+        attach $Section to s15 { title: "Keywords", ord: 15 }
+        mark s15 #Doc
+
+        let s16 = spawn()
+        attach $Section to s16 { title: "Syntax", ord: 16 }
+        mark s16 #Doc
+
+        let s17 = spawn()
+        attach $Section to s17 { title: "IR", ord: 17 }
+        mark s17 #Doc
+
+        let s18 = spawn()
+        attach $Section to s18 { title: "Runtime", ord: 18 }
+        mark s18 #Doc
+
+        let s19 = spawn()
+        attach $Section to s19 { title: "Standard Library", ord: 19 }
+        mark s19 #Doc
+
+        let s20 = spawn()
+        attach $Section to s20 { title: "Examples", ord: 20 }
+        mark s20 #Doc
+    }
+}
+
 shard Reference {
     hear @Request as r {
         if r.path == "/docs" {
@@ -34,8 +122,21 @@ shard Reference {
                           "<code class='inline-code'>body</code>. For what the compiler actually " +
                           "accepts, read stdlib/ and docs/LANGUAGE.md.</div>")
 
+                // Contents — a QUERY, not a list. Nothing below is written twice: add a `$Section`
+                // and it appears here, in spawn order, with its anchor. The body of the page cannot
+                // work this way (see `shape $Section` in web_app.vein), but its index can.
+                bring Subheading("Contents")
+                bring Open("ul")
+                    target $Section #Doc as self {
+                        bring Open("li")
+                            bring Link("#sec" + self.Section.ord, self.Section.title)
+                        bring Close("li")
+                    }
+                bring Close("ul")
+
             bring Heading("VeinScript Language Reference")
             bring Paragraph("*Auto-compiled from 28 source files and discussion history.*")
+            bring Raw("<span id='sec1'></span>")
             bring Subheading("File: console_chat.vein")
             bring Paragraph("This reference documentation describes the <code class=\"inline-code\">console_chat.vein</code> " +
                             "source file, which demonstrates inter-process communication between multiple console " +
@@ -141,6 +242,7 @@ shard Reference {
                             "joined using the <code class=\"inline-code\">+</code> operator. This is demonstrated by formatting " +
                             "incoming messages for display.")
             bring CodeBlock("emit *Vein.Console.Io.@Print { text: m.from + &quot; says: &quot; + m.text }")
+            bring Raw("<span id='sec2'></span>")
             bring Subheading("File: console_builder.vein")
             bring Paragraph("This reference page documents the constructs and syntax demonstrated in <code " +
                             "class=\"inline-code\">console_builder.vein</code>, which serves as a demonstration of cross-bundle " +
@@ -255,6 +357,7 @@ shard Reference {
                 bring ListItem("<strong>Example</strong>:")
             bring Close("ul")
             bring CodeBlock("bring *Vein.Console.Io.&amp;Console(#Server,  &quot;Server ready.&quot;)")
+            bring Raw("<span id='sec3'></span>")
             bring Subheading("File: console.vein")
             bring Paragraph("The <code class=\"inline-code\">console.vein</code> file demonstrates a standard interactive " +
                             "console application. It serves as a reference for handling standard input/output (I/O) using the " +
@@ -380,6 +483,7 @@ shard Reference {
             bring CodeBlock("hear *Vein.Console.Io.@Input as i {\n" +
                             "    emit *Vein.Console.Io.@Print { text: &quot;you said &quot; + i.text }\n" +
                             "}")
+            bring Raw("<span id='sec4'></span>")
             bring Subheading("File: Web.vein")
             bring Paragraph("The <code class=\"inline-code\">Web.vein</code> file defines the <code " +
                             "class=\"inline-code\">Vein.Web</code> namespace within the standard library. It serves as the " +
@@ -486,6 +590,7 @@ shard Reference {
                             "facilitate web development.")
             bring CodeBlock("shared(&quot;A paragraph of text.&quot;)\n" +
                             "builder Paragraph { body: string   markup = &quot;&lt;p&gt;&quot; + body + &quot;&lt;/p&gt;&quot; }")
+            bring Raw("<span id='sec5'></span>")
             bring Subheading("File: Vein.app.vein")
             bring Paragraph("This file serves as the primary manifest and entry point for the VeinScript Standard Library. It " +
                             "utilizes the <code class=\"inline-code\">app</code> construct to aggregate various modular " +
@@ -655,6 +760,7 @@ shard Reference {
             bring CodeBlock("app Vein {\n" +
                             "    load &quot;Console.vein&quot;\n" +
                             "}")
+            bring Raw("<span id='sec6'></span>")
             bring Subheading("File: UI.vein")
             bring Paragraph("This file defines the standard library for platform-independent User Interface primitives in " +
                             "VeinScript. It organizes visual states as shapes and interaction occurrences as events, " +
@@ -788,6 +894,7 @@ shard Reference {
             bring CodeBlock("event @Hovered { \n" +
                             "    target: Entity \n" +
                             "}")
+            bring Raw("<span id='sec7'></span>")
             bring Subheading("File: Transform.vein")
             bring Paragraph("This reference page documents the <code class=\"inline-code\">Transform.vein</code> source file, " +
                             "which defines the core spatial primitives and movement signals for the VeinScript Standard " +
@@ -906,6 +1013,7 @@ shard Reference {
                             "dimensions and magnitudes in this file, providing the necessary precision for coordinate " +
                             "geometry.")
             bring CodeBlock("x: float")
+            bring Raw("<span id='sec8'></span>")
             bring Subheading("File: Time.vein")
             bring Paragraph("The <code class=\"inline-code\">Time.vein</code> file is the foundational module of the VeinScript " +
                             "Standard Library responsible for time management. It establishes an event-driven time system " +
@@ -1011,6 +1119,7 @@ shard Reference {
                 bring ListItem("<strong>Example:</strong>")
             bring Close("ul")
             bring CodeBlock("frame: int")
+            bring Raw("<span id='sec9'></span>")
             bring Subheading("File: Math.vein")
             bring Paragraph("The <code class=\"inline-code\">Math.vein</code> file defines the foundational value types and " +
                             "scalar computation utilities for the VeinScript Standard Library. It is organized into the <code " +
@@ -1155,6 +1264,7 @@ shard Reference {
                             "class=\"inline-code\">*</code> (multiplication), as seen in the <code " +
                             "class=\"inline-code\">lerp</code> and <code class=\"inline-code\">distance2</code> implementations.")
             bring CodeBlock("return a + (b - a) * t")
+            bring Raw("<span id='sec10'></span>")
             bring Subheading("File: Input.vein")
             bring Paragraph("This file defines the <code class=\"inline-code\">Vein.Input</code> bundle, which serves as the " +
                             "standard interface for platform-independent input handling in VeinScript. It abstracts " +
@@ -1302,6 +1412,7 @@ shard Reference {
             bring Close("ul")
             bring CodeBlock("shared(&quot;Text was entered (already composed — not raw key codes).&quot;)\n" +
                             "event @TextInput { text: string }")
+            bring Raw("<span id='sec11'></span>")
             bring Subheading("File: Game.vein")
             bring Paragraph("This reference documents the <code class=\"inline-code\">Game.vein</code> standard library file, " +
                             "which defines the core vocabulary for game-specific interactions within the VeinScript " +
@@ -1388,6 +1499,7 @@ shard Reference {
             bring CodeBlock("a: Entity\n" +
                             "b: Entity\n" +
                             "target: Entity")
+            bring Raw("<span id='sec12'></span>")
             bring Subheading("File: Diagnostics.vein")
             bring Paragraph("This file defines the standard diagnostic messaging system for the VeinScript ecosystem. It " +
                             "provides a common language for the compiler, integrated development environments, and external " +
@@ -1505,6 +1617,7 @@ shard Reference {
                             "the <code class=\"inline-code\">@DiagnosticRaised</code> event, passing the appropriate severity " +
                             "and message data to any active listeners or collectors in the environment.")
             bring CodeBlock("emit @DiagnosticRaised { severity: 2, message: message }")
+            bring Raw("<span id='sec13'></span>")
             bring Subheading("File: Core.vein")
             bring Paragraph("The <code class=\"inline-code\">Core.vein</code> file defines the <code " +
                             "class=\"inline-code\">Vein.Core</code> bundle, which serves as the universal, platform-independent " +
@@ -1644,6 +1757,7 @@ shard Reference {
                             "    count: int,\n" +
                             "    label: string\n" +
                             "}")
+            bring Raw("<span id='sec14'></span>")
             bring Subheading("File: Console.vein")
             bring Paragraph("The <code class=\"inline-code\">Console.vein</code> file defines the standard interface for " +
                             "terminal-based I/O within the VeinScript environment. Rather than using traditional blocking " +
@@ -1734,6 +1848,7 @@ shard Reference {
                             "SF spawn(name: Mark, firsttext: string) { emit @Console { name: name, firsttext: firsttext } }")
             bring Paragraph("---")
             bring Heading("Consolidated Reference")
+            bring Raw("<span id='sec15'></span>")
             bring Subheading("Keywords")
             bring Subsubheading("and")
             bring Paragraph("Syntax: <code class=\"inline-code\">expr and expr</code>")
@@ -2095,6 +2210,7 @@ shard Reference {
                             "    process()\n" +
                             "    count -= 1\n" +
                             "}")
+            bring Raw("<span id='sec16'></span>")
             bring Subheading("Syntax")
             bring Subsubheading("Identity Declarations")
             bring Paragraph("Identities in VeinScript are represented by the <code class=\"inline-code\">Entity</code> type. " +
@@ -2194,6 +2310,7 @@ shard Reference {
             bring CodeBlock("shape $Stats {\n" +
                             "    score: int folds sum\n" +
                             "}")
+            bring Raw("<span id='sec17'></span>")
             bring Subheading("IR")
             bring Subsubheading("ASCII Tree Format")
             bring Paragraph("VeinIR is rendered as an ASCII tree where structure is shown via vertical pipes and dashes.")
@@ -2255,6 +2372,7 @@ shard Reference {
                             "                    `--- Then @16:49\n" +
                             "                         `--- Mark #Dead @16:51\n" +
                             "                              `--- Ref self @16:56")
+            bring Raw("<span id='sec18'></span>")
             bring Subheading("Runtime")
             bring Subsubheading("Execution Models")
             bring Paragraph("VeinScript utilizes two runtime modes:")
@@ -2295,6 +2413,7 @@ shard Reference {
             bring Paragraph("Bundles declare a <code class=\"inline-code\">start @Event { ... }</code>. When an app is run, it " +
                             "loads every bundle and fires their respective <code class=\"inline-code\">start</code> events. App " +
                             "manifests can override these payloads at the <code class=\"inline-code\">load</code> site.")
+            bring Raw("<span id='sec19'></span>")
             bring Subheading("Standard Library")
             bring Subsubheading("Vein.Core")
             bring Open("ul")
@@ -2387,6 +2506,7 @@ shard Reference {
                 bring ListItem("<code class=\"inline-code\">SF info(message: string)</code>")
                 bring ListItem("<code class=\"inline-code\">SF error(message: string)</code>")
             bring Close("ul")
+            bring Raw("<span id='sec20'></span>")
             bring Subheading("Examples")
             bring Subsubheading("Inter-Process Console Chat")
             bring CodeBlock("bundle ConsoleChat by you {\n" +

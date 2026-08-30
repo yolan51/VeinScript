@@ -76,10 +76,11 @@ public class StdlibTests
         Assert.False(diag.HasErrors);
         var byKind = model.Symbols.GroupBy(s => s.Kind).ToDictionary(g => g.Key, g => g.Count());
         // Sanity bounds, not exact counts: the point is that the shared API is non-trivial and that no
-        // shard ever reaches it. The builder ceiling has headroom because Vein.WebTheme is a whole
-        // domain expressed AS builders — a palette or a component is one `css =` field — so that count
-        // grows whenever the library learns a new look.
-        Assert.InRange(byKind[SymbolKind.Shape], 10, 30);
+        // shard ever reaches it. Both ceilings have headroom on purpose. Vein.WebTheme is a whole domain
+        // expressed AS builders — a palette or a component is one `css =` field — and Vein.Web's elements
+        // are each a shape PLUS a builder, so the two counts now grow together with every element the
+        // library learns.
+        Assert.InRange(byKind[SymbolKind.Shape], 10, 60);
         Assert.InRange(byKind[SymbolKind.Event], 5, 40);
         Assert.InRange(byKind[SymbolKind.Builder], 5, 60);
         Assert.False(byKind.ContainsKey(SymbolKind.Shard));   // shards are never in the shared API

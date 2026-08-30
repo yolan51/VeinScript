@@ -184,11 +184,14 @@ bundle WebTheme by Vein {
                    "document.documentElement.classList.add('dark')}catch(e){}"
         }
 
-        // The parameter is `id` and not `target` because `target` is a keyword — the query form a
-        // shard uses to reach identities. A builder parameter cannot borrow it.
+        // The field is `id` and not `target` because `target` is a keyword — the query form a shard uses
+        // to reach identities. A shape field cannot borrow it.
+        shared("Which element a clock writes itself into.")
+        shape $Clock { id: string }
+
         shared("A ticking clock written into the element with the given id — bring Clock(\"clk\").")
         builder Clock {
-            id: string
+            *Vein.WebTheme.Behaviours.$Clock
             code = "function tick(){var e=document.getElementById('" + id + "');" +
                    "if(e)e.innerText=new Date().toLocaleTimeString()}" +
                    "tick();setInterval(tick,1000);"
