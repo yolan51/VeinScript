@@ -131,6 +131,82 @@ public class IdentityRuntimeTests
         Assert.Empty(interp.World.Query(new[] { "Health" }, Array.Empty<string>()));
     }
 
+    // ---- a purely reactive program can build a world too --------------------------------------
+
+    /// Feed `lines` in on stdin, with no clock at all, and return what the program printed.
+    private static string React(string src, params string[] lines)
+    {
+        var r = new VeinCompilerService().Compile(new CompileRequest("t.vein", src));
+        Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
+        var sw = new StringWriter();
+        new Interp().Run(r.Modules[0], new StringReader(string.Join("\n", lines) + "\n"), sw);
+        return sw.ToString();
+    }
+
+    /// A roster built entirely from events: each input line registers an entity and lists the roster.
+    private const string Roster =
+        "bundle T by me {\n" +
+        "  shape $Client { addr: string }\n" +
+        "  shard R { hear *Vein.Console.Io.@Input as i {\n" +
+        "      let e = spawn()\n" +
+        "      attach $Client to e { addr: i.text }\n" +
+        "      mark e #Online\n" +
+        "      target $Client #Online as self { emit *Vein.Console.Io.@Print { text: \"roster \" + self.Client.addr } } } }\n}";
+
+    [Fact]
+    public void A_hear_handler_can_build_an_entity_that_later_events_can_see()
+    {
+        // The bug this pins: `mark`/`attach` queue into _commands and apply at a COMMIT, which the clock
+        // reaches every frame — but a purely reactive program has no clock and Drain never committed. The
+        // entity existed, carried nothing, matched no `target`, and the roster stayed empty forever.
+        // A fourth line so carol's own registration has a later event to become visible in — each name
+        // appears only once someone else's event queries the roster.
+        var output = React(Roster, "alice", "bob", "carol", "dave");
+
+        Assert.Contains("roster alice", output);
+        Assert.Contains("roster bob", output);
+        Assert.Contains("roster carol", output);
+    }
+
+    [Fact]
+    public void Each_event_commits_so_the_roster_grows_by_one_per_event()
+    {
+        // Every event sees exactly the entities built by the events BEFORE it: alice sees nobody, bob
+        // sees alice, carol sees alice+bob, dave sees all three — 0 + 1 + 2 + 3 = 6 lines.
+        var output = React(Roster, "alice", "bob", "carol", "dave");
+        Assert.Equal(6, Count(output, "roster "));
+    }
+
+    [Fact]
+    public void A_structural_change_is_still_deferred_within_the_event_that_makes_it()
+    {
+        // Committing per event must not become committing per statement: the rule that no unit observes
+        // a half-changed world is what the whole phase model rests on.
+        var output = React(Roster, "alice");
+        Assert.DoesNotContain("roster alice", output);
+    }
+
+    [Fact]
+    public void An_unmark_in_a_hear_handler_takes_effect_for_the_next_event()
+    {
+        // The chat server's "client left" path: a failed relay unmarks that client so later relays skip
+        // them. Without a commit in Drain the unmark never landed and the server kept shouting.
+        var output = React(
+            "bundle T by me {\n" +
+            "  shape $Client { addr: string }\n" +
+            "  shard R { hear *Vein.Console.Io.@Input as i {\n" +
+            "      if i.text == \"drop\" { target $Client #Online as self { unmark self #Online } }\n" +
+            "      if not (i.text == \"drop\") {\n" +
+            "        let e = spawn()\n" +
+            "        attach $Client to e { addr: i.text }\n" +
+            "        mark e #Online }\n" +
+            "      target $Client #Online as self { emit *Vein.Console.Io.@Print { text: \"has \" + self.Client.addr } } } }\n}",
+            "alice", "bob", "drop", "check");
+
+        // "bob" sees alice; "drop" sees alice+bob then unmarks both; "check" registers and sees nobody.
+        Assert.Equal(3, Count(output, "has "));
+    }
+
     // ---- the entity in scope -----------------------------------------------------------------
 
     [Fact]

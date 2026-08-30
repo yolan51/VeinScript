@@ -1,0 +1,61 @@
+// samples/chat/client.vein — ONE chat client, for everybody. Start samples/chat/server.vein first.
+//
+//   veinc run samples/chat/client.vein
+//
+//   > type your name and press Enter
+//   alice                      ← whatever you like; this becomes your network identity
+//   hi everyone                ← every line after that is a message
+//
+// Run it in as many terminals as you want. There used to be an alice.vein and a bob.vein because a
+// program had no way to tell which one it was at startup — `here()` answers "which console am I"
+// (#Main for both) and the language cannot read an environment variable. The missing piece was simpler
+// than either: ASK. The first line you type is the answer, so one file serves every client.
+//
+// The port is not configured either. `at: 0` lets the OS pick a free one, and the signed frame carries
+// whatever it picked, so the server learns where to answer. Two clients on one machine never collide,
+// and nobody has to keep a list of who owns which port.
+
+bundle ChatClient by you {
+
+    shard Session {
+        var joined: bool
+
+        run once {
+            emit *Vein.Console.Io.@Print { text: "type your name and press Enter:" }
+        }
+
+        hear *Vein.Console.Io.@Input as i {
+            if joined {
+                // Every line after the first is a message for the server to relay.
+                emit *Vein.Net.Peer.@Send { to: #Server, text: i.text }
+            }
+
+            if not joined {
+                joined = true
+
+                // The name you typed IS the network identity — a mark is just a name, so a name typed
+                // at the console works exactly as a `#Literal` written in the source would.
+                emit *Vein.Net.Peer.@Listen { as: i.text, at: 0, key: "chat-secret" }
+                emit *Vein.Net.Peer.@Link { name: #Server, at: "127.0.0.1:9700", key: "chat-secret" }
+
+                // Saying hello is what puts us on the roster and teaches the server our route.
+                emit *Vein.Net.Peer.@Send { to: #Server, text: "is here" }
+                emit *Vein.Console.Io.@Print { text: "joined as " + i.text + " — type away" }
+            }
+        }
+    }
+
+    // `audience #Server` admits the server and refuses everyone else. Frames are signed, so that is a
+    // guarantee rather than a convention another peer could simply ignore.
+    shard Incoming {
+        hear *Vein.Net.Peer.@Message as m audience #Server {
+            emit *Vein.Console.Io.@Print { text: m.text }
+        }
+    }
+
+    shard Reachability {
+        hear *Vein.Net.Peer.@Undelivered as u {
+            emit *Vein.Console.Io.@Print { text: "  (server is not running — start samples/chat/server.vein)" }
+        }
+    }
+}

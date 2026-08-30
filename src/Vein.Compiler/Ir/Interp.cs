@@ -541,6 +541,20 @@ public sealed class Interp
                 var locals = new Dictionary<string, object?> { [h.BindName] = payload };
                 Exec(h.Body, h.Owner, locals);
             }
+
+            // An event is its own commit point.
+            //
+            // `mark`/`attach`/`destroy` queue into _commands and apply at a commit — which the clock
+            // reaches every frame, but a purely REACTIVE program never does. So a handler that built an
+            // entity (`let e = spawn()` + `attach $Client to e`) queued the attach and nothing ever
+            // applied it: the entity existed, carried nothing, matched no `target`, and the program was
+            // silently missing the state it thought it had just created.
+            //
+            // Committing per EVENT rather than per drain is what a reactive program expects: handlers run
+            // sequentially, so the next event sees what the last one built. Inside one event the change is
+            // still deferred, which keeps the rule the phase model relies on — no unit observes a
+            // half-changed world.
+            CommitPhase();
         }
     }
 
