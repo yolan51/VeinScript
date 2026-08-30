@@ -2,8 +2,8 @@
 //
 //   veinc run samples/chat/client.vein
 //
-//   > server address (Enter for 127.0.0.1:9700)
-//   192.168.1.40               ← or just Enter for a server on this machine
+//   > server address (Enter for 144.217.220.127:9700)
+//                              ← Enter for the hosted server; or type 127.0.0.1:9700 for a local one
 //   > your name
 //   alice                      ← whatever you like; this becomes your network identity
 //   hi everyone                ← every line after that is a message
@@ -29,7 +29,7 @@ bundle ChatClient by you {
         var server: string
 
         run once {
-            emit *Vein.Console.Io.@Print { text: "server address (Enter for 127.0.0.1:9700):" }
+            emit *Vein.Console.Io.@Print { text: "server address (Enter for 144.217.220.127:9700):" }
         }
 
         hear *Vein.Console.Io.@Input as i {
@@ -38,9 +38,10 @@ bundle ChatClient by you {
             let s = stage
 
             if s == 0 {
-                // A bare host is fine — @Link fills in the default port 9700.
+                // A bare host is fine — @Link fills in the default port 9700. Press Enter for the
+                // hosted server; type "127.0.0.1:9700" instead to talk to a server on this machine.
                 server = i.text
-                if i.text == "" { server = "127.0.0.1:9700" }
+                if i.text == "" { server = "144.217.220.127:9700" }
                 stage = 1
                 emit *Vein.Console.Io.@Print { text: "your name:" }
             }
