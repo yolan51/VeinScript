@@ -24,7 +24,10 @@ bundle Net by Vein {
         // barrier (KEYWORDS.md) — into decoration. Every frame is signed with this secret and carries a
         // timestamp and a nonce, so a peer's name is proven and a captured frame cannot be replayed.
         //
-        // What this does NOT do is hide the body: frames are authenticated, not encrypted.
+        // Frames are also ENCRYPTED with this key (AES-256-GCM under an HKDF-derived key), so the wire
+        // carries nothing readable but a length. What that is not is TLS: one static key means no
+        // forward secrecy — a later leak decrypts traffic captured earlier — and no certificate
+        // identity, so everyone holding the secret can impersonate anyone else.
         shared("Accept peers on a port, under a network identity. `as` is who this program IS on the network; `key` is the shared secret that signs every frame.")
         event @Listen { as: Mark, at: int, key: string }
 

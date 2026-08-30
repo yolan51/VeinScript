@@ -160,6 +160,72 @@ public class NetPeerTests : IDisposable
         Assert.Contains("Hub:pong", atSpoke);
     }
 
+    // ---- the wire is unreadable -----------------------------------------------------------------
+
+    [Fact]
+    public void The_message_text_never_appears_on_the_wire()
+    {
+        // The claim is confidentiality, so this reads the actual bytes off a socket rather than trusting
+        // that encryption was wired up. A plain TcpListener stands in for anyone with a packet capture.
+        const string secretText = "SUPERSECRETPAYLOAD";
+        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+
+        byte[] captured = Array.Empty<byte>();
+        using var got = new ManualResetEventSlim(false);
+        var sniffer = new Thread(() =>
+        {
+            using var client = listener.AcceptTcpClient();
+            using var stream = client.GetStream();
+            var buffer = new byte[8192];
+            int n = stream.Read(buffer, 0, buffer.Length);
+            captured = buffer[..Math.Max(n, 0)];
+            got.Set();
+        }) { IsBackground = true };
+        sniffer.Start();
+
+        Assert.True(NetBus.Link("Eavesdropped", "127.0.0.1:" + port, "the-key"));
+        NetBus.Send("Eavesdropped", "Sender", secretText);
+
+        Assert.True(got.Wait(TimeSpan.FromSeconds(10)), "nothing reached the socket");
+        listener.Stop();
+
+        var asText = System.Text.Encoding.UTF8.GetString(captured);
+        Assert.DoesNotContain(secretText, asText);   // the body
+        Assert.DoesNotContain("Sender", asText);     // and the identity, which is inside the ciphertext
+        Assert.DoesNotContain("VEIN2", asText);      // even the magic — only the length is in the clear
+        Assert.True(captured.Length > 0);
+    }
+
+    [Fact]
+    public void A_tampered_frame_is_rejected()
+    {
+        // GCM's tag is the integrity check now that there is no separate HMAC, so a single flipped bit
+        // anywhere in the frame must make it fail to decrypt rather than decode to something.
+        var got = new List<string>();
+        using var hub = NetBus.Start("Hub", 0, "shared", (from, text) => { lock (got) got.Add(text); });
+        int port = NetBus.SelfPort;
+
+        Assert.True(NetBus.Link("Hub", "127.0.0.1:" + port, "shared"));
+        Assert.True(NetBus.Send("Hub", "Spoke", "genuine"));
+        Thread.Sleep(400);
+        lock (got) Assert.Contains("genuine", got);
+
+        // Now send a frame with a corrupted body: same length prefix, garbage inside.
+        using var raw = new System.Net.Sockets.TcpClient();
+        raw.Connect("127.0.0.1", port);
+        using var s = raw.GetStream();
+        var junk = new byte[64];
+        Random.Shared.NextBytes(junk);
+        s.Write(new byte[] { 0, 0, 0, (byte)junk.Length });
+        s.Write(junk, 0, junk.Length);
+        s.Flush();
+
+        Thread.Sleep(400);
+        lock (got) Assert.Single(got);   // still only the genuine one
+    }
+
     // ---- reaching a peer that cannot be dialled (the NAT case) --------------------------------
 
     [Fact]

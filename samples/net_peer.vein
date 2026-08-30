@@ -19,7 +19,8 @@
 // with it, which is what makes `from` a proven identity rather than a claim, and therefore what makes
 // the `audience #Spoke` barrier below an actual barrier. A port with no key would take anyone's word.
 //
-// It authenticates; it does not encrypt. The text below travels in plaintext.
+// Frames are encrypted (AES-256-GCM under a key derived from that secret), so the wire carries nothing
+// readable but a length. Not TLS though: one static key, so no forward secrecy and no cert identity.
 
 bundle PeerHub by you {
 

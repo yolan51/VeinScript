@@ -382,19 +382,27 @@ Machine-local, that was tolerable — "who may claim to be `#Main`" was already 
 into this machine". **A TCP port is not bounded that way**, so shipping `Peer` with the same honesty gap
 would have turned `audience #Hub` into a decoration that reads like a barrier.
 
-So every frame is HMAC-SHA256 signed with the pre-shared `key`, over the claimed mark, the advertised
-return port, a timestamp, a nonce, and the body. The receiver refuses anything outside a ±30s window,
-anything whose nonce it has already accepted (a bounded FIFO cache, so the check cannot itself be the
-denial-of-service), and anything whose MAC does not verify in constant time.
+So every frame is **encrypted** with AES-256-GCM under a key derived from the pre-shared `key` by HKDF —
+a passphrase is not a key, and HKDF spreads a short one across the full width with a domain-separating
+salt. The whole payload is sealed, the claimed identity included, so the wire carries nothing readable
+but a length. GCM authenticates as well as encrypting, so it **replaces** the HMAC this used to carry:
+a frame that decrypts was written by someone holding the key, and a tampered one does not decrypt at all.
+Decryption does not stop *replay*, so the ±30s window and the bounded nonce cache remain.
 
 | Property | Guaranteed? |
 |---|---|
+| **Secrecy** — nothing readable on the wire but the frame length | **yes** |
 | **Authenticity** — `from` is a mark held by someone with the key, so `audience` really excludes | **yes** |
-| **Integrity** — the body cannot be altered in flight | **yes** |
+| **Integrity** — a tampered frame fails to decrypt | **yes** |
 | **Freshness** — a captured frame cannot be replayed | **yes** |
-| **Secrecy** — the body is hidden from anyone sniffing the wire | **no — plaintext** |
+| **Forward secrecy** — a later key leak cannot decrypt old captured traffic | **no** |
+| **Certificate identity** — peers distinguished by anything but the shared key | **no** |
 
-**This is authentication, not TLS.** Do not put a password in a `@Send` and assume the wire hid it.
+**This is a pre-shared-key channel, not TLS**, and the two gaps are the honest difference. One static key
+protects every session, so anyone who later learns the secret can read traffic they captured earlier; and
+peers are only as distinct as the secret makes them, so everyone holding it can impersonate anyone else.
+For a mesh of machines you control that is the right trade. For anything wider, terminate it under real
+TLS — the frames would ride inside an `SslStream` without a single `.vein` program changing.
 
 `@Listen` **refuses an empty key** rather than accepting one. It is the single hard stop in the bundle:
 a keyless listener would accept any claimed identity, and `audience` would still compile and still read

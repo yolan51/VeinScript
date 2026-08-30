@@ -18,18 +18,33 @@ namespace Vein.Compiler.Ir;
 /// already opened, which is the one path NAT is guaranteed to allow: it is the connection NAT itself set
 /// up. A client needs no port forwarding, no public address, and no open inbound port at all.
 ///
-/// The pipe bus could be unauthenticated because a pipe name is machine-local, so "who may claim to be
-/// #Main" was bounded by "who is logged into this machine". A TCP port is not bounded that way, and
-/// `audience` is the language's declared networking scope (KEYWORDS.md), so every frame carries an HMAC
-/// over its own contents keyed by a pre-shared secret.
+/// **Every frame is encrypted.** The pipe bus could be plaintext and unauthenticated because a pipe name
+/// is machine-local, so "who may claim to be #Main" was bounded by "who is logged into this machine". A
+/// TCP port crossing the internet is bounded by nothing, so the whole payload — the claimed identity
+/// included — is sealed with AES-256-GCM under a key derived from the pre-shared secret by HKDF.
 ///
-/// What that buys: AUTHENTICITY (`from` is a mark held by someone with the key, so `audience` really
-/// excludes), INTEGRITY (the body cannot be altered in flight), FRESHNESS (a timestamp window plus a
-/// nonce cache defeats replay). What it does NOT buy: SECRECY — the body travels in plaintext. This is
-/// authentication, not TLS.
+/// GCM authenticates as well as encrypts, so it REPLACES the HMAC this used to carry rather than sitting
+/// beside it: a frame that decrypts was written by someone holding the key, and one that was tampered
+/// with does not decrypt at all. That is what keeps `audience` — the language's declared networking scope
+/// (KEYWORDS.md) — a real barrier rather than advice.
+///
+/// What that buys: SECRECY (nothing readable on the wire but the frame length), AUTHENTICITY (`from` is a
+/// mark held by someone with the key), INTEGRITY (GCM's tag), FRESHNESS (a timestamp window plus a nonce
+/// cache, because decryption alone does not stop a captured frame being replayed).
+///
+/// What it is NOT is TLS, and the difference is worth stating: there is **no forward secrecy** — one
+/// static key protects every session, so anyone who later learns the secret can decrypt traffic they
+/// captured earlier — and **no certificate identity**, so peers are only as distinct as their shared
+/// secret makes them. For a mesh whose machines you control this is the right trade; for anything else,
+/// terminate it under real TLS.
 public sealed class NetBus : IDisposable
 {
-    private const string Magic = "VEIN1";
+    /// Bumped from VEIN1: the frame is encrypted now, so the format is not backward compatible.
+    private const string Magic = "VEIN2";
+
+    /// AES-GCM sizes. A 96-bit nonce is the size GCM is defined for; the tag is its full 128 bits.
+    private const int NonceSize = 12;
+    private const int TagSize = 16;
 
     /// The port a peer is reached on when its address names no port.
     public const int DefaultPort = 9700;
@@ -208,11 +223,11 @@ public sealed class NetBus : IDisposable
         {
             while (_running && link.Alive)
             {
-                var frame = ReadFrame(link.Stream);
-                if (frame is null) break;                       // clean close or a malformed header
+                var frame = ReadFrame(link.Stream, _key);
+                if (frame is null) break;                       // clean close, bad length, or wrong key
 
                 var remote = (link.Client.Client.RemoteEndPoint as IPEndPoint)?.Address ?? IPAddress.None;
-                if (!Verify(frame, remote, out string from, out string body)) continue;
+                if (!Verify(frame.Value.Parts, frame.Value.Nonce, remote, out string from, out string body)) continue;
 
                 if (peer is null)
                 {
@@ -239,25 +254,24 @@ public sealed class NetBus : IDisposable
         }
     }
 
-    /// Check a frame's freshness, authenticity and novelty, in that order. Returns false for anything
-    /// that fails, without telling the caller which — a peer that cannot produce a valid MAC learns
-    /// nothing from us.
-    private bool Verify(string[] frame, IPAddress remote, out string from, out string body)
+    /// Check a decrypted frame's shape, freshness and novelty. Authenticity is already established: the
+    /// bytes only became readable because GCM verified its tag, so anything reaching here was written by
+    /// someone holding the key.
+    ///
+    /// What decryption does NOT cover is replay — a captured frame is still a valid frame — so the
+    /// timestamp window and the nonce cache stay.
+    private bool Verify(string[] frame, string nonce, IPAddress remote, out string from, out string body)
     {
         from = ""; body = "";
-        if (frame.Length < 7 || frame[0] != Magic) return false;
+        if (frame.Length < 5 || frame[0] != Magic) return false;
 
         from = frame[1];
         if (!int.TryParse(frame[2], out int peerPort) || !long.TryParse(frame[3], out long ts)) return false;
-        string nonce = frame[4], mac = frame[5];
-        body = frame[6];
+        body = frame[4];
 
-        // Freshness BEFORE authenticity is deliberate: rejecting a stale frame is cheap, and it keeps the
-        // nonce cache from having to remember anything older than one window.
         var age = DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeSeconds(ts);
         if (age > Skew || age < -Skew) return false;
 
-        if (!FixedTimeEquals(mac, Mac(_key, from, peerPort, ts, nonce, body))) return false;
         if (!RememberNonce(nonce)) return false;   // already used inside this window — a replay
 
         LearnRoute(from, remote, peerPort);
@@ -318,16 +332,25 @@ public sealed class NetBus : IDisposable
     }
 
     /// Write one frame, serialised per connection so two emits cannot interleave on the same socket.
+    ///
+    /// The whole payload — the claimed identity included — is encrypted, so the wire carries no readable
+    /// text and no readable metadata beyond the length. GCM's tag authenticates it at the same time,
+    /// which is why there is no separate MAC: a frame that decrypts is a frame written by someone holding
+    /// the key, and one that does not simply fails to decrypt.
     private static bool TryWrite(Conn link, string from, string text, string? key = null)
     {
         key ??= KeyFor(link);
         if (key is null) return false;
 
         long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        string nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(18));
-        string payload = string.Join('\n', Magic, from, _selfPort.ToString(), ts.ToString(), nonce,
-                                     Mac(key, from, _selfPort, ts, nonce, text), text);
-        var bytes = new UTF8Encoding(false).GetBytes(payload);
+        string payload = string.Join('\n', Magic, from, _selfPort.ToString(), ts.ToString(), text);
+        var plain = new UTF8Encoding(false).GetBytes(payload);
+
+        var nonce = RandomNumberGenerator.GetBytes(NonceSize);
+        var cipher = new byte[plain.Length];
+        var tag = new byte[TagSize];
+        using (var gcm = new AesGcm(KeyFrom(key), TagSize))
+            gcm.Encrypt(nonce, plain, cipher, tag);
 
         try
         {
@@ -337,9 +360,11 @@ public sealed class NetBus : IDisposable
                 // Length-prefixed, because a persistent connection carries many frames and "read to the
                 // end of the stream" only ever worked when the stream ended after one.
                 Span<byte> header = stackalloc byte[4];
-                BinaryPrimitives.WriteInt32BigEndian(header, bytes.Length);
+                BinaryPrimitives.WriteInt32BigEndian(header, NonceSize + TagSize + cipher.Length);
                 link.Stream.Write(header);
-                link.Stream.Write(bytes, 0, bytes.Length);
+                link.Stream.Write(nonce);
+                link.Stream.Write(tag);
+                link.Stream.Write(cipher, 0, cipher.Length);
                 link.Stream.Flush();
             }
             return true;
@@ -362,19 +387,37 @@ public sealed class NetBus : IDisposable
         return _current?._key;
     }
 
-    /// Read one length-prefixed frame, or null when the connection ends. Splits into exactly 7 parts so a
-    /// body containing newlines survives intact.
-    private static string[]? ReadFrame(NetworkStream stream)
+    /// Read and decrypt one length-prefixed frame, or null when the connection ends or the frame does not
+    /// authenticate. Splits into exactly 5 parts so a body containing newlines survives intact.
+    ///
+    /// Decryption IS the authentication check: AES-GCM verifies its tag before yielding any plaintext, so
+    /// a frame from someone without the key throws here and is dropped. The nonce is returned alongside
+    /// because it doubles as the replay-cache key — it is already unique per frame, so there is no reason
+    /// to carry a second one.
+    private static (string[] Parts, string Nonce)? ReadFrame(NetworkStream stream, string key)
     {
         var header = new byte[4];
         if (!ReadExactly(stream, header, 4)) return null;
         int length = BinaryPrimitives.ReadInt32BigEndian(header);
-        if (length is <= 0 or > MaxFrame) return null;
+        if (length <= NonceSize + TagSize || length > MaxFrame) return null;
 
-        var payload = new byte[length];
-        if (!ReadExactly(stream, payload, length)) return null;
+        var frame = new byte[length];
+        if (!ReadExactly(stream, frame, length)) return null;
 
-        return new UTF8Encoding(false).GetString(payload).Split('\n', 7);
+        var nonce = frame.AsSpan(0, NonceSize);
+        var tag = frame.AsSpan(NonceSize, TagSize);
+        var cipher = frame.AsSpan(NonceSize + TagSize);
+        var plain = new byte[cipher.Length];
+
+        try
+        {
+            using var gcm = new AesGcm(KeyFrom(key), TagSize);
+            gcm.Decrypt(nonce, cipher, tag, plain);
+        }
+        catch (CryptographicException) { return null; }   // wrong key, or tampered in flight
+
+        return (new UTF8Encoding(false).GetString(plain).Split('\n', 5),
+                Convert.ToBase64String(nonce));
     }
 
     private static bool ReadExactly(NetworkStream stream, byte[] buffer, int count)
@@ -389,22 +432,30 @@ public sealed class NetBus : IDisposable
         return true;
     }
 
-    /// The MAC covers every field the receiver trusts — the claimed mark, the port it may learn, the
-    /// freshness pair, and the body. Anything left out is something an attacker may rewrite.
-    private static string Mac(string key, string from, int port, long ts, string nonce, string body)
-    {
-        using var h = new HMACSHA256(Encoding.UTF8.GetBytes(key));
-        var data = Encoding.UTF8.GetBytes(from + "\n" + port + "\n" + ts + "\n" + nonce + "\n" + body);
-        return Convert.ToBase64String(h.ComputeHash(data));
-    }
+    /// Turn the human-typed shared secret into a real 256-bit key.
+    ///
+    /// A passphrase is not a key: "chat-secret" is short, low-entropy and structured, and handing it
+    /// straight to AES would key the cipher with whatever bytes the user happened to type. HKDF spreads
+    /// it across the full width with a domain-separating salt and info, so two protocols sharing a
+    /// passphrase do not share a key.
+    ///
+    /// Cached, because deriving per frame would put a KDF on the hot path for no benefit — the input
+    /// never changes during a run.
+    private static readonly Dictionary<string, byte[]> Keys = new(StringComparer.Ordinal);
 
-    /// Compare in time independent of how many bytes match, so the comparison cannot be used as an oracle
-    /// to guess a MAC one byte at a time.
-    private static bool FixedTimeEquals(string a, string b)
+    private static byte[] KeyFrom(string psk)
     {
-        var x = Encoding.UTF8.GetBytes(a);
-        var y = Encoding.UTF8.GetBytes(b);
-        return x.Length == y.Length && CryptographicOperations.FixedTimeEquals(x, y);
+        lock (Keys)
+        {
+            if (Keys.TryGetValue(psk, out var cached)) return cached;
+            var derived = HKDF.DeriveKey(
+                HashAlgorithmName.SHA256,
+                ikm: Encoding.UTF8.GetBytes(psk),
+                outputLength: 32,
+                salt: Encoding.UTF8.GetBytes("vein.net.frame.v2"),
+                info: Encoding.UTF8.GetBytes("aes-256-gcm frame key"));
+            return Keys[psk] = derived;
+        }
     }
 
     public void Stop()
