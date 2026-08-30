@@ -1,78 +1,111 @@
 # VeinScript — Roadmap
 
-Milestones from the current lexer to a working C# backend. Each milestone names the **doc it
-implements**, the **code it produces**, and the **`veinc` subcommand** that proves it (a debug dump
-you can eyeball, following the pattern of the existing `veinc tokens`).
+**Status is measured, not planned.** Every "done" below names the command that proves it and the check
+that guards it. Where the project took a different route than originally mapped, this says so rather than
+quietly renumbering — the divergence is the useful part.
 
 ```
-Source → Lexer → Parser → Desugar → Semantics → Lower → Backend → Runtime
-         M1 ✅    M2 ▶     M3        M3          M4       M5
+Source → Lexer → Parser → Lower → ┬→ Interpreter   (primary runtime — reactive + identity)
+         M1 ✅    M2 ✅    M4 ✅   └→ C# backend    (identity half, on SECS)
+                                       M5 ✅
 ```
 
-| M  | Name                | Implements                        | Produces                                                    | CLI                         |
-|----|---------------------|-----------------------------------|-------------------------------------------------------------|-----------------------------|
-| M1 | Lexer ✅            | [LANGUAGE.md §1](LANGUAGE.md#1-lexical-structure) | `Lexing/` (done)                       | `veinc tokens <f>` ✅        |
-| M2 | Parser / AST        | [LANGUAGE.md](LANGUAGE.md) + [KEYWORDS.md §2](KEYWORDS.md#2-keywords-to-add-in-milestone-2-not-in-the-lexer-yet) | `Parsing/Ast.cs`, `Parsing/Parser.cs`; new keywords/tokens | `veinc ast <f>`             |
-| M3 | Desugar + Semantics | [DIALECTS.md](DIALECTS.md), [SYNTAX-DECISIONS.md](SYNTAX-DECISIONS.md) | `Semantics/Desugar.cs`, `Semantics/Resolver.cs`, `Semantics/TypeCheck.cs` | `veinc check <f>` |
-| M4 | Lower to HIR        | [IR-SPEC.md](IR-SPEC.md)          | `Ir/*.cs` (nodes), `Ir/Lower.cs`, HIR dumper                | `veinc ir <f>`              |
-| M5 | C# backend ✅ (identity half) | [BACKEND-CONTRACT.md](BACKEND-CONTRACT.md) | `Backends/CSharpBackend.cs` + `Vein.Runtime.SECS` adapter | `veinc emit <f> -o <dir>` |
-| M6 | Game domain polish  | [DIALECTS.md §2](DIALECTS.md#2-game-domain-v1--shardecs-runtime) | full query/lifecycle/emit/fold paths end-to-end on ShardECS | (build runs in engine)      |
+## Where it actually went
 
-## Milestone detail
+The original plan was **transpiler-first**: parse → semantics → lower → emit C#, with a tree-walking
+interpreter filed under "Later (post-v1)" as a nice-to-have for an editor REPL.
 
-### M2 — Parser / AST  *(the README's current "next")*
-- `Ast.cs`: one record per production in [LANGUAGE.md §7](LANGUAGE.md#7-grammar-sketch-ebnf); every
-  node carries `SourceSpan`. Include IOP nodes (`ShapeDecl`, `ShardDecl`, `TargetBlock`, `EachTick`,
-  `EmitStmt`, `MarkStmt`, …) as first-class AST — desugaring is M3, not here.
-- `Parser.cs`: recursive descent, precedence climbing (`Peek`/`Match`/`Expect`); error recovery per
-  the README (skip to `}` or a statement-starting keyword).
-- **Lexer changes:** add `TokenKind`s + `Keywords` for `fn type enum if while repeat break continue
-  match` (and `[` `]` if [D9(a)](SYNTAX-DECISIONS.md#d9)); **remove** `push`. Do **not** add
-  `class`/`for`/`in`/`loop`. Update `CanEndStatement` for any new statement-ending tokens.
-- **Done when:** `veinc ast samples/demo.vein` dumps a tree; golden tests in `tests/golden/`.
+That inverted. The interpreter was built early, and it became the primary runtime — everything since is
+built on it: the reactive event loop, the ECS tick loop, `start`, consoles, `Vein.Net`, `veinc serve`,
+app linking. The C# backend arrived last and covers only the half where compiling pays.
 
-### M3 — Desugar + Semantics
-- **Desugar** (`Semantics/Desugar.cs`): IOP surface sugar → plainer core, per the tables in
-  [DIALECTS.md §1](DIALECTS.md#1-surface-sugar--core-desugaring). Pure AST→AST; preserves spans.
-- **Resolver**: bind every name; resolve `*` qualified paths; build symbol tables per bundle.
-- **TypeCheck**: assign types to every expression; enforce `SF` purity; verify `target` component
-  references exist (the resolution checks the README defers out of the parser).
-- **Done when:** `veinc check` reports diagnostics and exits clean on `demo.vein`.
+Two consequences worth stating plainly:
 
-### M4 — Lower to HIR
-- `Ir/` node records per [IR-SPEC.md §1](IR-SPEC.md#1-node-catalog) (`IrType`, `IrShard`,
-  `IrFunction` — no `IrClass`); `Lower.cs` implements the tables in
-  [§2–3](IR-SPEC.md#2-lowering--core--hir); enforce the invariants in
-  [§Invariants](IR-SPEC.md#invariants-what-a-backend-can-rely-on).
-- HIR text dumper matching [IR-SPEC.md §5](IR-SPEC.md#5-textual-dump--veinc-ir-file).
-- **Done when:** `veinc ir samples/demo.vein` matches the trace in
-  [EXAMPLE-PIPELINE.md](EXAMPLE-PIPELINE.md).
+- **M3 as specified was never built.** There is no `Semantics/` directory and no `veinc check`. Desugar
+  happens in the parser/lowerer, and validation is spread across `Lower.cs`, `Tooling/` and `Project/`.
+  This is not a gap to fill later so much as a route not taken; the diagnostics exist, they just do not
+  live where the plan put them.
+- **"Runtime" is not one thing.** A VeinScript program is reactive *and* identity-shaped, and those halves
+  want different execution. The interpreter runs both; the backend compiles the identity half. That split
+  is a design outcome, not an unfinished migration.
 
-### M5 — C# backend  *(identity half done; reactive half deferred by design)*
-- ✅ `IVeinBackend` contract + [`CSharpBackend`](../src/Vein.Compiler/Backends/CSharpBackend.cs).
-- ✅ The **runtime adapter** — [`VeinWorld`/`VeinSystem`](../src/Vein.Runtime.SECS/VeinWorld.cs) over the
-  ShardECS `Secs` API, carrying the fold rule and the phase order (the semantics SECS does not have).
-- ✅ `veinc emit <file> -o <dir>` → `<Module>.g.cs`, compiling against that adapter and running on SECS.
-- ✅ **Done-when, sharpened:** the original bar was "compiles and runs", which a wrong translation also
-  passes. The real bar is *agreeing with the runtime we already have*, so
-  [tools/check-backend.sh](../tools/check-backend.sh) compiles the output and **diffs a real run against
-  `veinc run`**. `samples/entities.vein` is byte-identical.
-- **Deliberately not emitted:** `emit`/`hear`, `@Response`, console, network, `every N`. Compiling buys
-  ~6–9× on per-entity-per-frame work and nothing measurable on I/O-bound work, so the reactive half stays
-  on the interpreter. Every skipped construct emits a note rather than silently vanishing.
-- **Open:** the adapter is correctness-first and leaves most of the headroom unclaimed — two allocations
-  per activation, boxed contributions, a linear `Query`. See BACKEND-CONTRACT.md §0.
+## Milestones
 
-## Later (post-v1)
+| M  | Name | State | Proven by |
+|----|------|-------|-----------|
+| M1 | Lexer | ✅ | `veinc tokens <f>` |
+| M2 | Parser / AST | ✅ | `veinc ast <f>`, `veinc ir <f>`; 8 golden IR trees |
+| M3 | Desugar + Semantics | **route not taken** — no `Semantics/`, no `veinc check`; diagnostics live in `Lower`/`Tooling`/`Project` | ~340 tests |
+| M4 | Lower to HIR | ✅ | `veinc ir <f> --ir=legacy`; `tools/check-ir.sh` |
+| M5 | C# backend → SECS | ✅ **identity half**; reactive half deferred by design | `veinc emit <f> -o <dir>`; `tools/check-backend.sh` |
+| M6 | Game domain on ShardECS | **partial** — folds/query/lifecycle run, but in the net8 interpreter; the SECS path covers them via M5 | `veinc run samples/entities.vein --ticks 3` |
 
-- **Web / Desktop domains** — [DIALECTS.md §3–4](DIALECTS.md#3-web-domain-later--sketch); modeled as
-  shape/shard libraries with `@route`/`@view`/`@window` metadata, no IR/backend core changes.
-- **JS backend** — second `IBackend` over the same HIR (web client).
-- **IR interpreter** — tree-walking VM over HIR for the editor REPL (`ReplPanel` in ShardECS.Editor).
-- **Low-level IR (LIR)** — HIR→SSA/CFG lowering for a native/VM backend; its own spec when needed.
+### M5 — what "done" means here
+
+The original bar was "emits `Demo.g.cs` that compiles against the runtime and runs in the engine". A
+*wrong* translation clears that bar. The bar that means something is **agreeing with the runtime that
+already exists**, so [tools/check-backend.sh](../tools/check-backend.sh) emits, compiles, runs, and diffs
+against `veinc run`. `samples/entities.vein` is byte-identical — folds, phase order, death checks, ids.
+
+Measured at **≈10×** the interpreter on per-entity-per-frame work (~2.30 µs → ~0.23 µs per activation).
+Not the ~100× a compiled ECS should reach; the remaining cost is SECS's per-access `ReaderWriterLockSlim`
+and dictionary lookups, quantified in [BACKEND-CONTRACT.md §0](BACKEND-CONTRACT.md).
+
+Deliberately **not** emitted: `emit`/`hear`, `@Response`, console, network, `every N`. Compiling buys
+nothing measurable on I/O-bound work. Every skipped construct emits a note rather than vanishing.
+
+## What runs today (beyond the milestones)
+
+None of this was on the original map; all of it is on the interpreter.
+
+| Capability | Command |
+|---|---|
+| Reactive event loop, provenance, `audience` | `veinc render <f>` |
+| ECS tick loop — `target`/`folds`/`settled`, explicit clock | `veinc run <f> --ticks N` |
+| `start` boot event + `--set` overrides | `veinc render <f> --set k=v` |
+| Console I/O, spawning named consoles, local messaging | `veinc run`, `veinc build` |
+| `every N` wall-clock schedules, `here()` | live console sessions |
+| Cross-machine peers, HMAC-signed, `audience` **enforced** | `samples/net_peer.vein` + `net_spoke.vein` |
+| HTTP client (`@Fetch`/`@Fetched`/`@Failed`) | `samples/net_fetch.vein` |
+| HTTP server over the `@Request`/`@Response` pipeline | `veinc serve <f> --port N` |
+| App link + run — principal boots, capabilities join one runtime | `veinc run samples/app_capabilities/shop.app.vein` |
+| Standalone executable | `veinc build <f>` |
+
+## Open work
+
+Ordered by how much each unblocks, not by milestone number.
+
+1. **`use` resolution** — the last ergonomic gap. Cross-bundle references are still written
+   `*you.Store.Orders.@Shipped`; `use` is parsed and does nothing. Linking merged the *runtime*; this is
+   the *naming* axis.
+2. **Qualified `bring`** — `bring *Vein.Web.Elements.Button(…)`, mirroring qualified event refs.
+3. **Backend headroom** — the 10× → the remaining cost is inside SECS (locks + dictionary lookups per
+   access). Needs bulk/unlocked access in the vendored SECS, or the adapter owning packed storage.
+4. **Backend coverage** — `target` over multiple components, component removal, seeded `random`. Each is
+   a note in the emitter today, so nothing is silently wrong; the notes are the to-do list.
+5. **Net inside a linked app** — a capability bundle doing `@Listen` *should* work (one queue, one
+   `_self`), but nothing has run it.
+6. **TLS for `Vein.Net.Peer`** — frames are authenticated, not secret.
+7. **Mark declarations** — `#Mark` as a validated shared symbol instead of a naming convention.
+8. **`SecsRuntime.Probe`** — the repo's one live `TODO`. It was the net8↔net9 linkage proof; M5 supersedes
+   it, so it should either grow into the direct-materialisation path or be deleted.
+
+## Later
+
+- **JS backend** — a second `IVeinBackend` over the same HIR.
+- **Web / Desktop domains** — shape/shard libraries with `@route`/`@view`/`@window` metadata.
+- **Low-level IR (LIR)** — HIR→SSA/CFG for a native target; its own spec when needed.
 - **User-defined generics** — resolve [D10](SYNTAX-DECISIONS.md).
 
-## Cross-cutting: golden tests
-Per the README, keep `.vein` + expected-output pairs in `tests/golden/`, diffed on build. Add a
-tier per milestone: token dumps (M1), AST dumps (M2), HIR dumps (M4), emitted-C# (M5). Resolution and
-lowering regressions surface here and nowhere else.
+## Cross-cutting: the checks
+
+Three, and they guard different things:
+
+| Check | Guards |
+|---|---|
+| `dotnet test src/Vein.Tests` | behaviour — ~340 tests |
+| `bash tools/check-ir.sh` | the IR's *shape* — 8 golden trees, so lowering regressions surface |
+| `bash tools/check-backend.sh` | the backend's *meaning* — emitted C# is compiled, run, and diffed against the interpreter |
+
+A golden file of expected C# would pin the emitter's formatting; diffing a real run pins its meaning,
+which is the thing that can be quietly wrong.

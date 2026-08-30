@@ -4,30 +4,40 @@ using ShardECS.SECS;
 namespace Vein.Runtime.SECS;
 
 /// The runtime the C# backend emits against — the adapter ROADMAP M5 calls the milestone's first task.
-/// Generated code never touches [Secs] directly: it sees `World.Query<T>()`, `Contribute`, `Mark`, and
-/// the phase order, and this class maps those onto the ShardECS world underneath.
+/// Generated code never touches [Secs] directly: it sees `World.Query<T>()`, `Contribute`, `Mark` and the
+/// phase order, and this maps them onto the ShardECS world underneath.
 ///
-/// Why an adapter rather than emitting raw SECS calls: the semantics a VeinScript program relies on are
-/// not SECS's. SECS gives entities, components and a parallel scheduler. VeinScript adds the FOLD rule —
-/// two shards may write one field in a frame and the frame must still be order-independent — and the
-/// phase boundary that `settled` is defined against. Both live here, so the emitter stays a translator
-/// rather than a semantics engine, and so the rule has exactly one implementation to be right.
+/// Why an adapter rather than raw SECS calls: the semantics a VeinScript program relies on are not
+/// SECS's. SECS gives entities, components and a parallel scheduler. VeinScript adds the FOLD rule — two
+/// shards may write one field in a frame and the frame must still be order-independent — and the phase
+/// boundary `settled` is defined against. Both live here, so the emitter stays a translator rather than a
+/// second semantics engine, and the rule has one implementation to be right.
+///
+/// **Components are structs, and that is a performance decision.** An activation needs two values: the
+/// snapshot it entered with, and the value it leaves. With class components each of those is a heap
+/// allocation, so a frame allocated 2 × entities × systems objects and the GC dominated the profile. As
+/// structs they are stack copies that cost nothing, and `Fold` is reached through a static abstract
+/// interface member, so contributions never box either. SECS permits this: its stores constrain only
+/// `where T : IComponent`, with no `class`.
 public sealed class VeinWorld
 {
     private readonly Secs _secs = new();
 
-    /// Entities in creation order. SECS's Query returns store order; a VeinScript run has to be
-    /// reproducible, so iteration is always ascending by id — the same reason the interpreter's
-    /// EntityStore uses SortedSet throughout.
+    /// Live entities, ascending. SECS's Query returns store order; a VeinScript run must be reproducible,
+    /// so iteration is always by id — the same reason EntityStore uses SortedSet throughout.
     private readonly SortedSet<int> _alive = new();
 
-    /// mark → entities carrying it. Marks are VeinScript identity, not SECS components, so they live
-    /// here rather than as empty component types.
+    /// mark → entities carrying it. Marks are VeinScript identity, not SECS components.
     private readonly Dictionary<string, SortedSet<int>> _marks = new(StringComparer.Ordinal);
 
-    /// Structural changes (mark/unmark/attach/destroy) queued during a phase and applied at the commit
-    /// point, AFTER folds — so no unit in a phase can observe a half-changed world.
+    /// Structural changes queued during a phase and applied at the commit point, AFTER folds — so no
+    /// unit in a phase can observe a half-changed world.
     private readonly List<Action> _commands = new();
+
+    /// Bumped whenever the set of entities or marks changes, which is the only thing that can invalidate
+    /// a cached query. Structural changes are deferred to commit, so within a phase this never moves —
+    /// which is exactly what makes caching a query safe for the whole phase.
+    private int _structuralVersion;
 
     /// Where `@Print` goes. Settable so a test can capture it.
     public TextWriter Out { get; set; } = Console.Out;
@@ -36,37 +46,33 @@ public sealed class VeinWorld
 
     /// Allocate an entity id.
     ///
-    /// Ids line up with the interpreter's for free: SECS returns `Interlocked.Increment(ref _next)` on a
-    /// field starting at 0, so its first id is 1 — the same convention VeinEntityRegistry uses, and for
-    /// the same reason (0 means "no entity"). Reserving 0 explicitly here would shift every id by one
-    /// and make generated output disagree with the interpreter's on the very first line.
-    ///
-    /// KNOWN DIVERGENCE: SECS pools destroyed ids and hands them out again, while EntityStore's are
-    /// monotonic and never reused — there, a stale id is inert; here it can alias a new entity. It does
-    /// not show up until a program destroys and then spawns, so it is recorded rather than papered over.
+    /// Ids line up with the interpreter's for free: SECS returns `Interlocked.Increment` on a field
+    /// starting at 0, so its first id is 1 — the same convention VeinEntityRegistry uses, and for the
+    /// same reason (0 means "no entity"). Reserving 0 here would shift every id by one and make generated
+    /// output disagree with the interpreter's on the very first line.
     public int Spawn()
     {
         int id = _secs.CreateEntity();
         _alive.Add(id);
+        _structuralVersion++;
         return id;
     }
 
-    public void Attach<T>(int entity, T component) where T : class, IVeinComponent
+    public void Attach<T>(int entity, T component) where T : struct, IVeinComponent<T>
     {
         _secs.Add(entity, component);
-        Bucket<T>().Register(entity);
+        Of<T>().Touch(entity);
     }
 
-    public bool Has<T>(int entity) where T : class, IVeinComponent => _secs.Has<T>(entity);
-    public T Get<T>(int entity) where T : class, IVeinComponent => _secs.Get<T>(entity);
+    public bool Has<T>(int entity) where T : struct, IVeinComponent<T> => _secs.Has<T>(entity);
+    public T Get<T>(int entity) where T : struct, IVeinComponent<T> => _secs.Get<T>(entity);
 
-    public void Mark(int entity, string mark) => Tag(mark).Add(entity);
-    public void Unmark(int entity, string mark) => Tag(mark).Remove(entity);
+    public void Mark(int entity, string mark) { Tag(mark).Add(entity); _structuralVersion++; }
+    public void Unmark(int entity, string mark) { Tag(mark).Remove(entity); _structuralVersion++; }
     public bool Marked(int entity, string mark) => _marks.TryGetValue(mark, out var s) && s.Contains(entity);
 
-    /// Queue a structural change for the commit point. `mark`/`attach`/`destroy` in a phase body go
-    /// through here for the same reason they do in the interpreter: applied immediately, they would let
-    /// one unit see a world another unit had half-changed.
+    /// Queue a structural change for the commit point — applied immediately, it would let one unit see a
+    /// world another unit had half-changed.
     public void Defer(Action change) => _commands.Add(change);
 
     public void Destroy(int entity) =>
@@ -75,13 +81,36 @@ public sealed class VeinWorld
             _alive.Remove(entity);
             foreach (var set in _marks.Values) set.Remove(entity);
             _secs.DestroyEntity(entity);
+
+            // SECS returns a destroyed id to a pool and hands it out again; EntityStore's ids are
+            // monotonic and never reused, so there a stale id is inert while here it could alias a NEW
+            // entity — the same reference silently meaning something else. Consuming the pooled id
+            // restores monotonicity with no bookkeeping and no cost on the hot path: CreateEntity pops
+            // the pool first, so this call takes back exactly the id just freed and drops it.
+            _secs.CreateEntity();
+            _structuralVersion++;
         });
 
-    /// Every entity carrying component T and all of `marks`, ascending by id. Materialised before
-    /// returning, so a body may spawn, mark or destroy mid-iteration with no dying-entity bookkeeping —
-    /// the same guarantee EntityStore.Query gives.
-    public IReadOnlyList<int> Query<T>(params string[] marks) where T : class, IVeinComponent
+    // ---- queries ---------------------------------------------------------
+
+    private readonly Dictionary<(Type, string), (int Version, int[] Ids)> _queryCache = new();
+
+    /// Every entity carrying component T and all of `marks`, ascending by id.
+    ///
+    /// Cached per (component, marks) and invalidated by the structural version. Structural changes are
+    /// deferred to the commit point, so a query cannot change underneath a phase — which is what makes
+    /// the cache correct rather than merely fast. Without it, every system re-scanned every live entity
+    /// every frame.
+    ///
+    /// The result is a materialised array, so a body may spawn, mark or destroy mid-iteration with no
+    /// dying-entity bookkeeping — the same guarantee EntityStore.Query gives.
+    public int[] Query<T>(params string[] marks) where T : struct, IVeinComponent<T>
     {
+        // A separator that cannot occur in a mark name, so two different mark lists cannot collide
+        // into one cache key.
+        var key = (typeof(T), marks.Length == 0 ? "" : string.Join("|", marks));
+        if (_queryCache.TryGetValue(key, out var hit) && hit.Version == _structuralVersion) return hit.Ids;
+
         var result = new List<int>();
         foreach (int id in _alive)
         {
@@ -91,71 +120,68 @@ public sealed class VeinWorld
                 if (!Marked(id, m)) { ok = false; break; }
             if (ok) result.Add(id);
         }
-        return result;
+
+        var ids = result.ToArray();
+        _queryCache[key] = (_structuralVersion, ids);
+        return ids;
     }
 
     // ---- the fold rule ---------------------------------------------------
 
-    /// One activation's contribution: the snapshot it took, and the value it left behind. Keeping both
-    /// is what lets a Sum field contribute its DELTA rather than its absolute value — the distinction
-    /// that makes `hp -= 1` from two shards mean `hp − 2` instead of `2·hp − 2`.
-    private interface IContributions { void Commit(VeinWorld world); }
+    private interface IBucket { void Commit(VeinWorld world); }
 
-    private sealed class Contributions<T> : IContributions where T : class, IVeinComponent
+    /// Contributions to one component type this phase. Fully typed: the tuples hold `T`, not an
+    /// interface, so nothing boxes between an activation and the fold.
+    private sealed class Bucket<T> : IBucket where T : struct, IVeinComponent<T>
     {
-        public readonly List<(int Entity, T Snapshot, T Current)> Items = new();
-        private readonly SortedSet<int> _entities = new();
+        private readonly List<(int Entity, T Snapshot, T Current)> _items = new();
+        private readonly Dictionary<int, List<(T Snapshot, T Current)>> _byEntity = new();
 
-        public void Register(int entity) => _entities.Add(entity);
-
-        /// Reused across frames so a steady-state tick allocates nothing here.
-        private readonly Dictionary<int, List<(IVeinComponent Snapshot, IVeinComponent Current)>> _byEntity = new();
+        public void Touch(int entity) { if (!_byEntity.ContainsKey(entity)) _byEntity[entity] = new(); }
+        public void Add(int entity, T snapshot, T current) => _items.Add((entity, snapshot, current));
 
         public void Commit(VeinWorld world)
         {
-            if (Items.Count == 0) return;
+            if (_items.Count == 0) return;
 
-            // ONE pass to group. Scanning `Items` per entity instead is O(entities × contributions) —
-            // quadratic in the entity count, which is precisely the axis a compiled backend exists to
-            // make large.
-            foreach (var (entity, snap, cur) in Items)
+            // ONE grouping pass. Scanning the contribution list once per entity instead is quadratic in
+            // the entity count — precisely the axis a compiled backend exists to make large.
+            foreach (var (entity, snap, cur) in _items)
             {
-                if (!_byEntity.TryGetValue(entity, out var list))
-                    _byEntity[entity] = list = new List<(IVeinComponent, IVeinComponent)>();
+                if (!_byEntity.TryGetValue(entity, out var list)) _byEntity[entity] = list = new();
                 list.Add((snap, cur));
             }
 
             foreach (var (entity, list) in _byEntity)
             {
-                // The generated component owns its own per-field reducers — it knows which fields are
-                // `folds sum` and which replace, because that is a fact about the shape declaration.
-                // Reduce mutates the committed instance in place, which is what makes it the new value.
-                if (world._secs.Has<T>(entity)) world._secs.Get<T>(entity).Reduce(list);
+                if (list.Count > 0 && world._secs.Has<T>(entity))
+                    // Static abstract dispatch: no boxing, no virtual call through an instance.
+                    world._secs.Add(entity, T.Fold(world._secs.Get<T>(entity), list));
                 list.Clear();
             }
-            Items.Clear();
+            _items.Clear();
         }
     }
 
-    private readonly Dictionary<Type, IContributions> _contributions = new();
+    private readonly Dictionary<Type, IBucket> _buckets = new();
 
-    private Contributions<T> Bucket<T>() where T : class, IVeinComponent
+    private Bucket<T> Of<T>() where T : struct, IVeinComponent<T>
     {
-        if (!_contributions.TryGetValue(typeof(T), out var c))
-            _contributions[typeof(T)] = c = new Contributions<T>();
-        return (Contributions<T>)c;
+        if (!_buckets.TryGetValue(typeof(T), out var b)) _buckets[typeof(T)] = b = new Bucket<T>();
+        return (Bucket<T>)b;
     }
 
-    /// Record what one activation did to one component. Generated code calls this at the end of a
-    /// `target` body, handing back the snapshot it copied on entry and the value it mutated.
-    public void Contribute<T>(int entity, T snapshot, T current) where T : class, IVeinComponent =>
-        Bucket<T>().Items.Add((entity, snapshot, current));
+    /// Record what one activation did to one component: the snapshot it copied on entry, and the value
+    /// it mutated. Keeping both is what lets a `folds sum` field contribute its DELTA rather than its
+    /// absolute value — the distinction that makes `hp -= 1` from two shards mean `hp − 2`, not `2·hp − 2`.
+    public void Contribute<T>(int entity, T snapshot, T current) where T : struct, IVeinComponent<T> =>
+        Of<T>().Add(entity, snapshot, current);
 
     /// The one point in a phase where the world changes: folds reconcile every contribution first, then
     /// the queued structural commands apply on top of the reconciled state.
     public void Commit()
     {
-        foreach (var c in _contributions.Values) c.Commit(this);
+        foreach (var b in _buckets.Values) b.Commit(this);
 
         if (_commands.Count == 0) return;
         var pending = _commands.ToList();
@@ -177,9 +203,9 @@ public sealed class VeinWorld
     }
 
     /// One frame, in the order docs/RUNTIME.md §4.1 defines: every tick block contributes, the phase
-    /// commits, and only THEN does `settled` run — so a death check reads an hp that every system has
-    /// finished subtracting from. It commits again afterwards, so a mark made in `settled` is visible to
-    /// the NEXT frame rather than to the middle of this one.
+    /// commits, and only THEN does `settled` run — so a death check reads an hp every system has finished
+    /// subtracting from. It commits again afterwards, so a mark made in `settled` is visible to the NEXT
+    /// frame rather than to the middle of this one.
     public void Frame()
     {
         foreach (var s in _systems) s.Tick();
@@ -199,13 +225,17 @@ public sealed class VeinWorld
     }
 }
 
-/// Every generated component implements this. `Reduce` is generated per shape, because which fields are
+/// Every generated component implements this. `Fold` is generated per shape, because which fields are
 /// `folds sum` is a fact about the shape declaration rather than something the runtime can infer.
-public interface IVeinComponent : IComponent
+///
+/// Self-referencing (`T : IVeinComponent<T>`) with a *static abstract* member so the adapter can fold a
+/// component without an instance and without boxing — the whole point of making components structs.
+public interface IVeinComponent<T> : IComponent where T : struct, IVeinComponent<T>
 {
-    /// Apply this frame's contributions to `this`, the committed value. A `folds sum` field accumulates
-    /// each contribution's DELTA from its own snapshot; every other reducer takes the absolute value.
-    void Reduce(IReadOnlyList<(IVeinComponent Snapshot, IVeinComponent Current)> contributions);
+    /// Apply this frame's contributions to `committed` and return the new value. A `folds sum` field
+    /// accumulates each contribution's DELTA from its own snapshot; every other reducer takes the
+    /// absolute value written.
+    static abstract T Fold(T committed, List<(T Snapshot, T Current)> contributions);
 }
 
 /// Base for a generated shard. The emitter overrides only the phases the shard declares.

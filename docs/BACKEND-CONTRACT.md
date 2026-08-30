@@ -11,6 +11,12 @@ requires **no front-end changes**.
 `veinc emit <file> [-o <dir>]` emits C# from the HIR; it compiles against
 [Vein.Runtime.SECS](../src/Vein.Runtime.SECS/VeinWorld.cs) and runs on ShardECS.
 
+**Entity ids stay monotonic.** SECS pools a destroyed id and hands it out again, while `EntityStore`'s
+are monotonic and never reused — there a stale id is inert, and reused it could silently alias a *new*
+entity. `VeinWorld.Destroy` consumes the pooled id (`CreateEntity` pops the pool first, so the call takes
+back exactly the id just freed and drops it), restoring the interpreter's semantics with no bookkeeping
+and no cost on the hot path.
+
 **It covers the identity half only** — shapes → components, marks, entities, `target` queries, the fold
 rule, and the `run once` / `each tick` / `settled` phases. That is the half worth compiling, because it
 is the half that runs per-entity per-frame. The reactive half (`emit`/`hear`, `@Response`, console,
@@ -23,34 +29,33 @@ interpreter at all. Anything outside the subset emits a **note**, never silent w
 `veinc run`**. `samples/entities.vein` at 3 frames is byte-identical today. A golden file of expected C#
 would pin formatting; this pins meaning, which is what can be quietly wrong.
 
-### Measured speed — and why it is not more (yet)
+### Measured speed — and where the rest of it went
 
 1000 entities × 2 systems per frame, marginal cost with startup subtracted:
 
 | Runtime | per unit activation | 3.2M activations |
 |---|---|---|
-| Interpreter (`Ir/Interp.cs`) | ~2.7 µs | 8.75 s |
-| C# backend on SECS | ~0.48 µs | 1.53 s |
+| Interpreter (`Ir/Interp.cs`) | ~2.30 µs | 7.36 s |
+| C# backend on SECS | ~0.23 µs | 0.74 s |
 
-**≈6× today** (~9× on a shorter run — single-run wall-clock, so treat it as 6–9×, not a precise figure).
+**≈10×.** The first cut of the adapter was ≈6×; three changes doubled it, none of which altered what the
+emitter *means* — equivalence stayed byte-identical throughout, which is the point of pinning it first:
 
-That is well short of the ~100× a compiled ECS *should* reach, and the reasons are known rather than
-mysterious — this adapter is correctness-first:
+- **components are `struct`s.** An activation needs a snapshot and a working value; as classes those were
+  two heap allocations, so a frame allocated 2 × entities × systems objects and the GC dominated. As
+  structs they are stack copies. SECS allows it — its stores constrain only `where T : IComponent`.
+- **`Fold` is a static abstract interface member**, so contributions stay `(T, T)` and never box.
+- **`Query` is cached** per (component, marks), invalidated by a structural version counter. Structural
+  changes are deferred to the commit point, so a query cannot change underneath a phase — which is what
+  makes the cache correct, not merely fast.
 
-- **two allocations per activation** (`__snap` and the working copy), so a frame allocates 2× entities ×
-  systems objects and the GC does the rest;
-- **contributions box** into `(IVeinComponent, IVeinComponent)` tuples and `Reduce` is an interface call;
-- **`Query` is a linear scan** over live entities calling `Has<T>` per entity, per system, per frame,
-  rather than iterating a packed archetype.
-
-Each is fixable without touching the emitter's meaning — which is why equivalence is nailed down first.
-Until they are, quote **6–9×**, not two orders of magnitude.
-
-### Known divergence
-
-SECS **pools and reuses** destroyed entity ids; `EntityStore`'s are monotonic and never reused. There a
-stale id is inert, here it can alias a new entity. It only surfaces in a program that destroys and then
-spawns, and it is recorded rather than papered over.
+**Why not 100×.** The remaining cost is inside SECS, not the adapter. Every `Get<T>`/`Has<T>` takes a
+`ReaderWriterLockSlim` read lock plus a `ConcurrentDictionary` type lookup plus an entity→index
+`Dictionary` lookup ([ComponentBuckets.TryGet](../src/ShardECS.SECS/Components/ComponentBuckets.cs)) —
+about four lock round-trips per entity per frame, which is roughly half of what is left. Reaching
+nanoseconds means iterating the packed array directly instead of random-access by entity id, and that
+needs either bulk/unlocked access in SECS (vendored code) or the adapter owning storage and demoting
+SECS to a backing store. Both are real changes with real trade-offs, so the number to quote is **10×**.
 
 ## 1. The `IBackend` contract
 

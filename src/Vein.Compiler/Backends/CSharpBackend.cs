@@ -90,41 +90,42 @@ public sealed class CSharpBackend : IVeinBackend
         }
     }
 
+    /// A component is a STRUCT. An activation needs a snapshot and a working value; as a class each is a
+    /// heap allocation, so a frame allocated 2 × entities × systems objects and the GC dominated. As a
+    /// struct they are stack copies, and `Fold` being static abstract means contributions never box.
     private void EmitComponent(StringBuilder sb, IrType t)
     {
         string name = Ident(t.Name);
-        sb.AppendLine($"public sealed class {name} : IVeinComponent");
+        sb.AppendLine($"public struct {name} : IVeinComponent<{name}>");
         sb.AppendLine("{");
         foreach (var f in t.Fields) sb.AppendLine($"    public {Cs(f.Type)} {Ident(f.Name)};");
-        sb.AppendLine();
-
-        sb.AppendLine($"    public {name} Copy() => new {name} {{ {string.Join(", ", t.Fields.Select(f => $"{Ident(f.Name)} = {Ident(f.Name)}"))} }};");
         sb.AppendLine();
 
         // The fold rule, generated per shape because which fields are `folds sum` is a fact about the
         // declaration. A Sum field accumulates each contribution's DELTA from its own snapshot — the
         // distinction that makes `hp -= 1` from two shards mean `hp − 2` and not `2·hp − 2`.
-        sb.AppendLine("    public void Reduce(IReadOnlyList<(IVeinComponent Snapshot, IVeinComponent Current)> contributions)");
+        sb.AppendLine($"    public static {name} Fold({name} committed, List<({name} Snapshot, {name} Current)> contributions)");
         sb.AppendLine("    {");
         sb.AppendLine("        for (int i = 0; i < contributions.Count; i++)");
         sb.AppendLine("        {");
-        sb.AppendLine($"            var snap = ({name})contributions[i].Snapshot;");
-        sb.AppendLine($"            var cur  = ({name})contributions[i].Current;");
+        sb.AppendLine("            var snap = contributions[i].Snapshot;");
+        sb.AppendLine("            var cur  = contributions[i].Current;");
         foreach (var f in t.Fields)
         {
             string fn = Ident(f.Name);
             sb.AppendLine("            " + (f.Fold switch
             {
-                FoldReducer.Sum => $"{fn} += cur.{fn} - snap.{fn};",
-                FoldReducer.Min => $"if (cur.{fn} < {fn}) {fn} = cur.{fn};",
-                FoldReducer.Max => $"if (cur.{fn} > {fn}) {fn} = cur.{fn};",
-                FoldReducer.First => $"if (i == 0) {fn} = cur.{fn};",
+                FoldReducer.Sum => $"committed.{fn} += cur.{fn} - snap.{fn};",
+                FoldReducer.Min => $"if (cur.{fn} < committed.{fn}) committed.{fn} = cur.{fn};",
+                FoldReducer.Max => $"if (cur.{fn} > committed.{fn}) committed.{fn} = cur.{fn};",
+                FoldReducer.First => $"if (i == 0) committed.{fn} = cur.{fn};",
                 // Replace, All, Any and no-fold all take the last writer's absolute value, which is what
                 // a single-writer field means anyway.
-                _ => $"{fn} = cur.{fn};"
+                _ => $"committed.{fn} = cur.{fn};"
             }));
         }
         sb.AppendLine("        }");
+        sb.AppendLine("        return committed;");
         sb.AppendLine("    }");
         sb.AppendLine("}");
         sb.AppendLine();
@@ -261,11 +262,13 @@ public sealed class CSharpBackend : IVeinBackend
         string prev = _selfComponent!;
         _selfComponent = comp;
 
+        // Two struct copies, both free. `Get` returns by value, and assigning it again gives the working
+        // copy — so an activation reads its own pending writes while every other unit still sees the
+        // committed value, with no allocation anywhere in the loop.
         sb.AppendLine($"{pad}foreach (var __e in World.Query<{comp}>({marks}))");
         sb.AppendLine(pad + "{");
-        sb.AppendLine($"{pad}    var __committed = World.Get<{comp}>(__e);");
-        sb.AppendLine($"{pad}    var __snap = __committed.Copy();");
-        sb.AppendLine($"{pad}    var self_{comp} = __committed.Copy();");
+        sb.AppendLine($"{pad}    var __snap = World.Get<{comp}>(__e);");
+        sb.AppendLine($"{pad}    var self_{comp} = __snap;");
         foreach (var s in loop.Body.Statements) EmitStmt(sb, s, depth + 1);
         sb.AppendLine($"{pad}    World.Contribute(__e, __snap, self_{comp});");
         sb.AppendLine(pad + "}");

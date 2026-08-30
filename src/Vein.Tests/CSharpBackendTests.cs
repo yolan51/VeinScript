@@ -31,13 +31,25 @@ public class CSharpBackendTests
     // ---- the identity subset ------------------------------------------------------------------
 
     [Fact]
-    public void A_shape_becomes_a_component_class_with_a_copy()
+    public void A_shape_becomes_a_component_struct()
     {
+        // A STRUCT, deliberately: an activation needs a snapshot and a working value, and as a class
+        // each is a heap allocation — a frame then allocates 2 × entities × systems objects and the GC
+        // dominates. As structs they are stack copies. Measured: this alone doubled the backend's speed.
         var (code, _) = Emit("  shape $Health { hp: int folds sum }");
 
-        Assert.Contains("public sealed class Health : IVeinComponent", code);
+        Assert.Contains("public struct Health : IVeinComponent<Health>", code);
         Assert.Contains("public long hp;", code);          // VeinScript `int` is 64-bit
-        Assert.Contains("public Health Copy()", code);
+        Assert.DoesNotContain("Copy()", code);             // no allocation left to make
+    }
+
+    [Fact]
+    public void Fold_is_static_so_contributions_never_box()
+    {
+        // Reached through a static abstract interface member, so the adapter folds a component without
+        // an instance — which is what keeps a struct component from being boxed on the way in.
+        var (code, _) = Emit("  shape $Health { hp: int folds sum }");
+        Assert.Contains("public static Health Fold(Health committed,", code);
     }
 
     [Fact]
@@ -83,8 +95,8 @@ public class CSharpBackendTests
             "  shard S { each tick { target $H #Live as self { self.H.hp -= 1 } } }");
 
         Assert.Contains("foreach (var __e in World.Query<H>(\"Live\"))", code);
-        Assert.Contains("var __snap = __committed.Copy();", code);
-        Assert.Contains("var self_H = __committed.Copy();", code);
+        Assert.Contains("var __snap = World.Get<H>(__e);", code);
+        Assert.Contains("var self_H = __snap;", code);      // struct copy — free, and no allocation
         Assert.Contains("World.Contribute(__e, __snap, self_H);", code);
     }
 
