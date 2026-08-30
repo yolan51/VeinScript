@@ -191,7 +191,7 @@ bundle WebTheme by Vein {
 
         shared("A ticking clock written into the element with the given id — bring Clock(\"clk\").")
         builder Clock {
-            *Vein.WebTheme.Behaviours.$Clock
+            $Clock
             code = "function tick(){var e=document.getElementById('" + id + "');" +
                    "if(e)e.innerText=new Date().toLocaleTimeString()}" +
                    "tick();setInterval(tick,1000);"

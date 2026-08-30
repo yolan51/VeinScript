@@ -101,6 +101,13 @@ Ordered by how much each unblocks, not by milestone number.
 (builders, shapes, `fn`/`SF`), with local declarations winning and cross-bundle collisions reported as
 VS0216. Qualified `bring` turned out to have been done for some time; the entry was stale.
 
+**Recently closed:** a bare `$Shape` include inside an imported builder resolved against the *consuming*
+bundle, so it found nothing and the builder's params expanded to zero. The diagnostics pointed away from
+the cause — a VS0210 warning on the library's source, then a VS0204 arity error at every call site in the
+consumer. `LowerBring` now carries the index key of the bundle a builder was imported from (by qualified
+path *or* by `use`) and resolves its bare includes there. This is what let `Vein.Web` model every element
+as a shape plus a builder that includes it.
+
 ## Later
 
 - **JS backend** — a second `IVeinBackend` over the same HIR.

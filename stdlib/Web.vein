@@ -70,13 +70,13 @@ bundle Web by Vein {
         shape $Heading { text: string }
 
         shared("A top-level heading element.")
-        builder Heading { *Vein.Web.Elements.$Heading   markup = "<h1>" + text + "</h1>" }
+        builder Heading { $Heading   markup = "<h1>" + text + "</h1>" }
 
         shared("The text a second-level heading carries.")
         shape $Subheading { text: string }
 
         shared("A second-level heading.")
-        builder Subheading { *Vein.Web.Elements.$Subheading   markup = "<h2>" + text + "</h2>" }
+        builder Subheading { $Subheading   markup = "<h2>" + text + "</h2>" }
 
         // Named for the pair above rather than for how it reads: Heading/Subheading/Subsubheading are
         // h1/h2/h3, and a document deep enough to need three levels wants the ordering obvious.
@@ -84,13 +84,13 @@ bundle Web by Vein {
         shape $Subsubheading { text: string }
 
         shared("A third-level heading.")
-        builder Subsubheading { *Vein.Web.Elements.$Subsubheading   markup = "<h3>" + text + "</h3>" }
+        builder Subsubheading { $Subsubheading   markup = "<h3>" + text + "</h3>" }
 
         shared("The prose a paragraph carries.")
         shape $Paragraph { body: string }
 
         shared("A paragraph of text.")
-        builder Paragraph { *Vein.Web.Elements.$Paragraph   markup = "<p>" + body + "</p>" }
+        builder Paragraph { $Paragraph   markup = "<p>" + body + "</p>" }
 
         // Two elements whose data Vein.UI already models. Reusing its shapes rather than declaring a
         // second $Button is the same choice Vein.Input makes with Vein.Math's $Vec2 — and it is what
@@ -106,13 +106,13 @@ bundle Web by Vein {
         shape $Link { href: string, label: string }
 
         shared("An anchor / hyperlink.")
-        builder Link { *Vein.Web.Elements.$Link   markup = "<a href=\"" + href + "\">" + label + "</a>" }
+        builder Link { $Link   markup = "<a href=\"" + href + "\">" + label + "</a>" }
 
         shared("The text one list item carries.")
         shape $ListItem { text: string }
 
         shared("A list item.")
-        builder ListItem { *Vein.Web.Elements.$ListItem   markup = "<li>" + text + "</li>" }
+        builder ListItem { $ListItem   markup = "<li>" + text + "</li>" }
 
         // The one element whose content must NOT be touched: whitespace is significant inside <pre>, so
         // the caller's newlines are the layout. &Code in Vein.WebTheme styles it.
@@ -125,7 +125,7 @@ bundle Web by Vein {
         shape $CodeBlock { text: string }
 
         shared("A block of preformatted code.")
-        builder CodeBlock { *Vein.Web.Elements.$CodeBlock   markup = "<pre class=\"code-block\"><code>" + text + "</code></pre>" }
+        builder CodeBlock { $CodeBlock   markup = "<pre class=\"code-block\"><code>" + text + "</code></pre>" }
 
         // A builder emits ONE fragment, so it cannot wrap other fragments — there is no way to express
         // "open a div, then some cards, then close it" as a single builder. What a builder CAN do is
@@ -139,13 +139,13 @@ bundle Web by Vein {
         shape $Container { tag: string }
 
         shared("Opens a container element — pair it with &Close.")
-        builder Open { *Vein.Web.Elements.$Container   markup = "<" + tag + ">" }
+        builder Open { $Container   markup = "<" + tag + ">" }
 
         shared("Opens a container element carrying a class — pair it with &Close.")
-        builder OpenAs { *Vein.Web.Elements.$Container, cls: string   markup = "<" + tag + " class=\"" + cls + "\">" }
+        builder OpenAs { $Container, cls: string   markup = "<" + tag + " class=\"" + cls + "\">" }
 
         shared("Closes a container opened with &Open or &OpenAs.")
-        builder Close { *Vein.Web.Elements.$Container   markup = "</" + tag + ">" }
+        builder Close { $Container   markup = "</" + tag + ">" }
 
         // `Raw` remains the escape hatch for everything the vocabulary above does not model, and is
         // what lets the rest of the library stay small and unopinionated. It gets a shape too, so a
@@ -154,7 +154,7 @@ bundle Web by Vein {
         shape $Markup { html: string }
 
         shared("Markup this library does not model — passed through unchanged.")
-        builder Raw { *Vein.Web.Elements.$Markup   markup = html }
+        builder Raw { $Markup   markup = html }
 
         // Self-contained on purpose, for the same reason: a form has to enclose its fields, and one
         // fragment cannot. This covers the common single-field case; anything richer is &Raw.
@@ -162,7 +162,7 @@ bundle Web by Vein {
         shape $Form { action: string, field: string, label: string }
 
         shared("A single-field form that POSTs back to `action`.")
-        builder Form { *Vein.Web.Elements.$Form   markup = "<form method=\"post\" action=\"" + action + "\"><input name=\"" + field + "\"> <button>" + label + "</button></form>" }
+        builder Form { $Form   markup = "<form method=\"post\" action=\"" + action + "\"><input name=\"" + field + "\"> <button>" + label + "</button></form>" }
 
         // The only builder here with no parameters — a line break has nothing to say, only somewhere to
         // be. `markup` still carries a default, which is what keeps it a complete builder rather than one

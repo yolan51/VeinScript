@@ -116,6 +116,39 @@ public class StdlibTests
     }
 
     [Fact]
+    public void An_imported_builders_bare_shape_include_resolves_against_its_own_bundle()
+    {
+        // Every Vein.Web element is a shape plus a builder that INCLUDES it, written bare (`$Heading`),
+        // because that is how you would naturally write it beside the declaration.
+        //
+        // A bare include used to be resolved against the bundle being lowered rather than the one that
+        // declared the builder, so an imported builder's include found nothing and expanded to ZERO
+        // params. What made it expensive to diagnose is where it surfaced: a VS0210 *warning* on the
+        // library's own source, then a VS0204 *error* at each call site in the consumer — "Builder
+        // 'Heading' takes 0 param(s), got 1" — blaming the caller for a library's include.
+        //
+        // Both import paths are covered: web_demo reaches the builders by qualified path, web_app by
+        // `use Web`. Neither declares a $Heading of its own, so a regression cannot hide behind one.
+        foreach (var (file, expect) in new[]
+                 {
+                     (Path.Combine(RepoRoot(), "samples", "web_demo.vein"), "<h1>VeinScript Vein.Web</h1>"),
+                     (Path.Combine(RepoRoot(), "samples", "web_app", "web_app.vein"), "<h3>Shapes</h3>"),
+                 })
+        {
+            var result = new VeinCompilerService().Compile(new CompileRequest(
+                Path.GetFileName(file), File.ReadAllText(file), SourcePath: file));
+
+            Assert.True(result.Success, file + ":\n  " +
+                string.Join("\n  ", result.Diagnostics.Select(d => d.ToString())));
+
+            // The warning is the cause; assert on it directly so a regression names itself rather than
+            // showing up as a mystery arity error somewhere downstream.
+            Assert.DoesNotContain(result.Diagnostics, d => d.Code == "VS0210");
+            Assert.Contains(expect, new Interp().Render(result.Modules[0], "/").Body);
+        }
+    }
+
+    [Fact]
     public void Stdlib_declares_no_behaviour()
     {
         // The library is vocabulary — $Shape, @Event, &Builder. A shard/view/bridge can never be `shared`

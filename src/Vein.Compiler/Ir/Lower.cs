@@ -196,7 +196,12 @@ public sealed class Lower
 
     /// Expand an event/builder body to ordered (name, type, default) fields — `$Shape` includes pull
     /// in the shape's fields; `$Shape.field` pulls one.
-    private List<(string Name, TypeRef? Type, Expr? Default)> ExpandMembers(IEnumerable<Node> members)
+    ///
+    /// `ownerKey` names the bundle this body was IMPORTED from, and is null for a body declared here.
+    /// It matters because a bare include means "a shape beside me", and for an imported builder that is
+    /// its bundle's shapes rather than the consumer's.
+    private List<(string Name, TypeRef? Type, Expr? Default)> ExpandMembers(
+        IEnumerable<Node> members, string? ownerKey = null)
     {
         var list = new List<(string, TypeRef?, Expr?)>();
         foreach (var m in members)
@@ -204,9 +209,11 @@ public sealed class Lower
             if (m is FieldDecl f) list.Add((f.Name, f.Type, f.Default));
             else if (m is ShapeInclude si)
             {
-                // A qualified include reaches another bundle's SHARED shapes; a bare one is local first,
-                // then whatever this bundle `use`s.
+                // A qualified include reaches another bundle's SHARED shapes. A bare one resolves beside
+                // its own declaration: the owner's bundle when this body was imported, otherwise local
+                // first and then whatever this bundle `use`s.
                 var fs = si.Path.Count > 0 ? ResolveExternalShape(si.Path, si.Shape)
+                       : ownerKey is not null ? ResolveOwnedShape(ownerKey, si.Shape)
                        : _shapeFields.TryGetValue(si.Shape, out var local) ? local
                        : ResolveUsed(Index.Shapes, "$", si.Shape, si.Span)?.Value.Members.OfType<FieldDecl>().ToList();
 
@@ -516,11 +523,41 @@ public sealed class Lower
     /// code/css); that output field's `=` value is the template. No new IR node.
     // Resolve a qualified `*Author.Bundle.Publicator.&Builder` against the stdlib builders, matching by
     // trailing segments (so a shorter qualifier still resolves, like the qualified event refs).
-    private BuilderDecl? ResolveExternalBuilder(IReadOnlyList<string> path, string name)
+    //
+    // Returns the index KEY as well, because the builder's own `$Shape` includes have to be resolved
+    // against the bundle that DECLARED it, not the one bringing it — see ResolveOwnedShape.
+    private (string Key, BuilderDecl Value)? ResolveExternalBuilder(IReadOnlyList<string> path, string name)
     {
         string refKey = string.Join(".", path) + "." + name;
         foreach (var kv in Index.Builders)
-            if (kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal)) return kv.Value;
+            if (kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal)) return (kv.Key, kv.Value);
+        return null;
+    }
+
+    /// A bare `$Shape` include inside a builder that came from ANOTHER bundle resolves against that
+    /// bundle, never against the consumer's shapes.
+    ///
+    /// Without this, `ExpandMembers` looked the name up in `_shapeFields` — which holds only the bundle
+    /// being lowered — so an imported builder's include found nothing and expanded to zero fields. The
+    /// symptom pointed everywhere but the cause: a VS0210 *warning* against the library's source, then a
+    /// VS0204 *error* at every call site in the consumer saying the builder takes 0 params.
+    ///
+    /// `ownerKey` is `Author.Bundle.Publicator.Member`. The shape may sit in any publicator of that
+    /// bundle, so the search is on the `Author.Bundle.` prefix — the same "a bundle's publicators are one
+    /// vocabulary" rule `use` follows.
+    private List<FieldDecl>? ResolveOwnedShape(string? ownerKey, string name)
+    {
+        if (ownerKey is null) return null;
+
+        int firstDot = ownerKey.IndexOf('.');
+        int secondDot = firstDot < 0 ? -1 : ownerKey.IndexOf('.', firstDot + 1);
+        if (secondDot < 0) return null;
+        string bundlePrefix = ownerKey[..(secondDot + 1)];          // "Author.Bundle."
+
+        foreach (var kv in Index.Shapes)
+            if (kv.Key.StartsWith(bundlePrefix, StringComparison.Ordinal) &&
+                kv.Key.EndsWith("." + name, StringComparison.Ordinal))
+                return kv.Value.Members.OfType<FieldDecl>().ToList();
         return null;
     }
 
@@ -529,11 +566,21 @@ public sealed class Lower
         // Qualified `bring *Author.Bundle.Publicator.&Builder(…)` resolves against the stdlib's builders;
         // a bare/local `bring Builder(…)` resolves against this bundle. Either way we get a BuilderDecl and
         // desugar it identically (the qualifier is dropped — like emit — since the runtime keys on the name).
+        // `ownerKey` stays null for a builder declared HERE and is the index key for one that came from
+        // another bundle — by qualified path or by `use`. Both are imports, and both need it, or the
+        // builder's own `$Shape` includes are resolved against the wrong bundle.
         BuilderDecl? b;
+        string? ownerKey = null;
         if (br.BuilderPath.Count > 0)
-            b = ResolveExternalBuilder(br.BuilderPath, br.Builder);
+        {
+            var hit = ResolveExternalBuilder(br.BuilderPath, br.Builder);
+            (ownerKey, b) = (hit?.Key, hit?.Value);
+        }
         else if (!_builders.TryGetValue(br.Builder, out b))
-            b = ResolveUsed(Index.Builders, "&", br.Builder, br.Span)?.Value;   // local first, then `use`
+        {
+            var hit = ResolveUsed(Index.Builders, "&", br.Builder, br.Span);    // local first, then `use`
+            (ownerKey, b) = (hit?.Key, hit?.Value);
+        }
 
         if (b is null)
         {
@@ -554,7 +601,7 @@ public sealed class Lower
         }
 
         // Parameters = every member except the (optional) output channel field, with $Shape includes expanded.
-        var prms = ExpandMembers(b.Members.Where(m => !ReferenceEquals(m, output)));
+        var prms = ExpandMembers(b.Members.Where(m => !ReferenceEquals(m, output)), ownerKey);
         if (!br.FillRest && br.Args.Count > prms.Count)
             _diag.Error("VS0204", $"Builder '{b.Name}' takes {prms.Count} param(s), got {br.Args.Count}.", br.Span);
 
