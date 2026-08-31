@@ -1,0 +1,19 @@
+// samples/app_net/hub.app.vein — the network as a CAPABILITY.
+//
+//   Terminal 1:   veinc run samples/app_net/hub.app.vein     ← this app; #Hub on 9700
+//   Terminal 2:   veinc run samples/net_spoke.vein           ← the unchanged spoke from the pair demo
+//
+// samples/net_peer.vein is the same hub as ONE bundle. Here it is split: the principal knows nothing
+// about networks, and a capability bundle does the listening. Comment out the `Wire.vein` load and the
+// program is still a valid app — it just has no network, with no edit to Gate.vein.
+//
+// What this proves that app_capabilities does not: a capability's `@Listen` binds a real socket and its
+// `hear @Message` receives, inside a runtime it did not boot. App link+run gives every loaded bundle ONE
+// queue and ONE `_self`, so the network identity a non-principal declares is the identity the whole app
+// answers to — the spoke's `audience #Hub` barrier admits the reply, which it could only do if the frame
+// were signed as #Hub.
+
+app HubApp {
+    load "Gate.vein"     // ★ principal — boots, and never mentions the network
+    load "Wire.vein"     // capability: listens, receives, replies
+}

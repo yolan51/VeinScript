@@ -71,6 +71,7 @@ None of this was on the original map; all of it is on the interpreter.
 | HTTP client (`@Fetch`/`@Fetched`/`@Failed`) | `samples/net_fetch.vein` |
 | HTTP server over the `@Request`/`@Response` pipeline | `veinc serve <f> --port N` |
 | App link + run — principal boots, capabilities join one runtime | `veinc run samples/app_capabilities/shop.app.vein` |
+| The network AS a capability — a non-principal bundle binds the socket | `veinc run samples/app_net/hub.app.vein` + `net_spoke.vein` |
 | Standalone executable | `veinc build <f>` |
 
 ## Open work
@@ -79,20 +80,26 @@ Ordered by how much each unblocks, not by milestone number.
 
 1. **Backend headroom** — the 10× → the remaining cost is inside SECS (locks + dictionary lookups per
    access). Needs bulk/unlocked access in the vendored SECS, or the adapter owning packed storage.
-2. **Net inside a linked app** — a capability bundle doing `@Listen` *should* work (one queue, one
-   `_self`), but nothing has run it.
-3. **TLS for `Vein.Net.Peer`** — frames are encrypted under a pre-shared key, so there is no forward
+2. **TLS for `Vein.Net.Peer`** — frames are encrypted under a pre-shared key, so there is no forward
    secrecy and no certificate identity. The frames would ride inside an `SslStream` without any `.vein`
    program changing.
-4. **`use X as Y`** — the alias parses and nothing consumes it, because `*Path.member` is the only
+3. **`use X as Y`** — the alias parses and nothing consumes it, because `*Path.member` is the only
    qualified form and `Y.@Print` does not. Needs a syntax decision before it can mean anything.
-5. **Mark declarations** — `#Mark` as a validated shared symbol instead of a naming convention.
-6. **`SecsRuntime.Probe`** — the repo's one live `TODO`. It was the net8↔net9 linkage proof; M5 supersedes
+4. **Mark declarations** — `#Mark` as a validated shared symbol instead of a naming convention.
+5. **`SecsRuntime.Probe`** — the repo's one live `TODO`. It was the net8↔net9 linkage proof; M5 supersedes
    it, so it should either grow into the direct-materialisation path or be deleted.
 
 **Recently closed:** `use` resolution — a bare name now falls back to the bundles a file `use`s
 (builders, shapes, `fn`/`SF`), with local declarations winning and cross-bundle collisions reported as
 VS0216. Qualified `bring` turned out to have been done for some time; the entry was stale.
+
+**Recently closed:** net inside a linked app — it works, and now something has run it.
+`samples/app_net/` is the hub from `net_peer.vein` split in two: a principal that never mentions the
+network, and a capability bundle that binds the socket. Against the unchanged `net_spoke.vein` it
+receives pings and replies, and the spoke's `audience #Hub` barrier *admits* those replies — which it
+could only do if the frame were signed as `#Hub`, so the identity a non-principal declared is the one the
+whole runtime answers to. One queue and one `_self`, as believed. Guarded by a test that links an app
+whose capability listens on port 0 and asserts a socket really bound.
 
 **Recently closed:** backend coverage — `target` over multiple components, component removal, and seeded
 `random` all emit now, each with a sample in `tools/check-backend.sh`. Two of the three were not gaps but

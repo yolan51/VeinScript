@@ -1,0 +1,20 @@
+// The PRINCIPAL. It owns the boot event and the port number as a decision — and nothing else. There is
+// no `@Listen` here and no mention of Vein.Net: whether this app is reachable is a capability someone
+// else supplies, which is the point of the split.
+
+bundle Gate by you {
+
+    publicator Doors {
+        shared("The gate is open; here is the port anyone listening should use.")
+        event @Opened { at: int }
+    }
+
+    // The app's single boot event — only the principal has one.
+    start @Opened { at: 9700 }
+
+    shard Announce {
+        hear @Opened as o {
+            emit *Vein.Console.Io.@Print { text: "[Gate] open on " + o.at + " — a listener may now bind" }
+        }
+    }
+}

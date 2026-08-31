@@ -374,4 +374,53 @@ public class NetPeerTests : IDisposable
         Assert.DoesNotContain("trusted from-stranger", text);
         Assert.Contains("seen from-stranger", text);
     }
+
+    // ---- inside a linked app ---------------------------------------------------------------------
+
+    [Fact]
+    public void A_capability_bundle_can_listen_for_the_whole_app()
+    {
+        // App link+run gives every loaded bundle ONE queue and ONE `_self`, so a bundle that boots
+        // nothing should still be able to bind the socket the whole app answers on. That was believed
+        // rather than run — samples/app_net exists to demonstrate it, and this holds it down.
+        //
+        // Port 0 lets the OS choose, so the test cannot collide with anything on the machine; the
+        // binding is then read back off the bus.
+        string dir = Path.Combine(Path.GetTempPath(), "vein-appnet-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "Gate.vein"),
+                "bundle Gate by t {\n" +
+                "  publicator Doors { shared(\"open\") event @Opened { at: int } }\n" +
+                "  start @Opened { at: 0 }\n}");
+
+            // The capability: no `start`, and the only mention of the network in the app.
+            File.WriteAllText(Path.Combine(dir, "Wire.vein"),
+                "bundle Wire by t {\n" +
+                "  shard L { hear *t.Gate.Doors.@Opened as o {\n" +
+                "    emit *Vein.Net.Peer.@Listen { as: #Hub, at: o.at, key: \"k\" }\n" +
+                "    " + P("\"listening\"") + " } } }");
+
+            string appFile = Path.Combine(dir, "hub.app.vein");
+            File.WriteAllText(appFile, "app HubApp {\n  load \"Gate.vein\"\n  load \"Wire.vein\"\n}");
+
+            var diag = new Vein.Compiler.Diagnostics.DiagnosticBag();
+            var linked = Vein.Compiler.Ir.AppLinker.Link(appFile, File.ReadAllText(appFile), diag);
+            Assert.NotNull(linked);
+
+            var sw = new StringWriter();
+            new Interp().Run(linked!.Module, new StringReader(""), sw);
+
+            Assert.Contains("listening", sw.ToString());
+
+            // The claim that matters: a real socket is bound, and it was a non-principal that bound it.
+            Assert.NotEqual(0, NetBus.SelfPort);
+        }
+        finally
+        {
+            NetBus.ResetRoutes();
+            try { Directory.Delete(dir, recursive: true); } catch { }
+        }
+    }
 }
