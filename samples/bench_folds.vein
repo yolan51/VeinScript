@@ -1,0 +1,38 @@
+// bench_folds.vein — the measurement program behind tools/check-perf.sh. Not a teaching sample.
+//
+// It exists to make ONE number reproducible: the cost of an ACTIVATION — one identity's pass through one
+// `target` body in one frame. That is the axis a compiled backend exists to make cheap, and the axis the
+// roadmap's "≈10×" claim is about.
+//
+// Shaped for measuring, which is why it looks unlike the other samples:
+//
+//   * it PRINTS NOTHING. A `@Print` per entity per frame is I/O, and I/O would dominate the number
+//     and hide the thing being measured;
+//   * two shards write the same `folds sum` field, so the fold path is on the hot loop rather than
+//     beside it — reconciliation is a real per-activation cost, not an extra;
+//   * the work per activation is arithmetic on the component, so what is timed is the runtime's
+//     dispatch and storage, not a program doing something interesting.
+//
+// The harness runs it at two frame counts and takes the DIFFERENCE, which cancels process start, JIT and
+// world construction — none of which are per-activation costs. Correctness is not this file's job:
+// tools/check-backend.sh already diffs five programs covering these same constructs.
+//
+//   bash tools/check-perf.sh
+
+bundle BenchFolds by you {
+
+    shape $Health { hp: int folds sum }
+
+    shard Spawn {
+        run once {
+            repeat 1000 {
+                let e = spawn()
+                attach $Health to e { hp: 1000000 }
+                mark e #Mob
+            }
+        }
+    }
+
+    shard Drain { each tick { target $Health #Mob as self { self.Health.hp -= 1 } } }
+    shard Rot   { each tick { target $Health #Mob as self { self.Health.hp -= 2 } } }
+}

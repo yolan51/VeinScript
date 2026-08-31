@@ -31,14 +31,26 @@ would pin formatting; this pins meaning, which is what can be quietly wrong.
 
 ### Measured speed — and where the rest of it went
 
-1000 entities × 2 systems per frame, marginal cost with startup subtracted:
+Reproduce with **[tools/check-perf.sh](../tools/check-perf.sh)** (`samples/bench_folds.vein`): 1000
+entities × 2 systems per frame, marginal cost with startup subtracted.
 
 | Runtime | per unit activation | 3.2M activations |
 |---|---|---|
 | Interpreter (`Ir/Interp.cs`) | ~2.30 µs | 7.36 s |
 | C# backend on SECS | ~0.23 µs | 0.74 s |
 
-**≈10×.** The first cut of the adapter was ≈6×; three changes doubled it, none of which altered what the
+**≈10×** as first recorded. Re-running the harness on a different machine gives ~1.95 µs → ~0.28 µs, so
+**6.6–7.3×** — the absolute figures land near the baseline and the ratio comes out lower. Two rules the
+measurement depends on, both easy to get wrong in a way that flatters the backend:
+
+- **Time both sides in Release.** A Debug interpreter against a Release backend reports 9.1× where the
+  honest answer is 6.5×; that number is measuring the build configuration.
+- **Take the difference between two frame counts.** Process start, JIT and world construction are fixed
+  costs, and on the compiled side they are larger than the per-activation work being measured.
+
+Per-activation cost also **degrades with entity count** — 1k → 2k takes the backend 302 → 475 ns and the
+interpreter 2158 → 3624 ns. Both runtimes, so it is memory pressure rather than a SECS artifact, and it
+is the axis packed storage would attack. The first cut of the adapter was ≈6×; three changes doubled it, none of which altered what the
 emitter *means* — equivalence stayed byte-identical throughout, which is the point of pinning it first:
 
 - **components are `struct`s.** An activation needs a snapshot and a working value; as classes those were

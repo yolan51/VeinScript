@@ -49,9 +49,25 @@ against `veinc run`. Four samples are byte-identical — folds, phase order, dea
 (`entities`), multi-component AND queries (`entities_multi`), seeded `chance` draws (`entities_chance`),
 and component attach/detach (`entities_detach`).
 
-Measured at **≈10×** the interpreter on per-entity-per-frame work (~2.30 µs → ~0.23 µs per activation).
-Not the ~100× a compiled ECS should reach; the remaining cost is SECS's per-access `ReaderWriterLockSlim`
-and dictionary lookups, quantified in [BACKEND-CONTRACT.md §0](BACKEND-CONTRACT.md).
+Speed has a command now: **[tools/check-perf.sh](../tools/check-perf.sh)**. It was the one figure in this
+document with no way to re-derive it and no check to guard it, which for a *performance* milestone is the
+number that matters most — a backend that got slower would have gone unnoticed.
+
+| | per activation | ratio |
+|---|---|---|
+| recorded baseline (1000 entities × 2 systems) | 2.30 µs → 0.23 µs | ≈10× |
+| `check-perf.sh`, same shape, this machine | ~1.95 µs → ~0.28 µs | **6.6–7.3×** |
+
+Both absolute figures land near the baseline; the ratio comes out lower. Two things the harness had to
+get right to say even that much. It times **both sides in Release** — a Debug interpreter against a
+Release backend reports 9.1× here where the honest answer is 6.5×, so the build configuration was
+measuring itself. And it takes the **difference between two frame counts**, which cancels process start,
+JIT and world construction; those are fixed costs, and on the compiled side they otherwise dwarf the
+per-activation work being measured.
+
+Still not the ~100× a compiled ECS should reach. The remaining cost is SECS's per-access
+`ReaderWriterLockSlim` and dictionary lookups, quantified in
+[BACKEND-CONTRACT.md §0](BACKEND-CONTRACT.md).
 
 Deliberately **not** emitted: `emit`/`hear`, `@Response`, console, network, `every N`. Compiling buys
 nothing measurable on I/O-bound work. Every skipped construct emits a note rather than vanishing.
@@ -78,8 +94,13 @@ None of this was on the original map; all of it is on the interpreter.
 
 Ordered by how much each unblocks, not by milestone number.
 
-1. **Backend headroom** — the 10× → the remaining cost is inside SECS (locks + dictionary lookups per
-   access). Needs bulk/unlocked access in the vendored SECS, or the adapter owning packed storage.
+1. **Backend headroom** — the remaining cost is inside SECS (locks + dictionary lookups per access).
+   Needs bulk/unlocked access in the vendored SECS, or the adapter owning packed storage.
+   `tools/check-perf.sh` now measures the before, so the after is comparable rather than asserted.
+   One thing it already shows and nobody had looked for: per-activation cost **degrades with entity
+   count** — 1k → 2k entities takes the backend 302 → 475 ns and the interpreter 2158 → 3624 ns. Both
+   runtimes, so it is memory pressure rather than anything SECS-specific, and it is the axis packed
+   storage would attack.
 2. **TLS for `Vein.Net.Peer`** — frames are encrypted under a pre-shared key, so there is no forward
    secrecy and no certificate identity. The frames would ride inside an `SslStream` without any `.vein`
    program changing.
@@ -142,13 +163,20 @@ as a shape plus a builder that includes it.
 
 ## Cross-cutting: the checks
 
-Three, and they guard different things:
+Four, and they guard different things:
 
 | Check | Guards |
 |---|---|
-| `dotnet test src/Vein.Tests` | behaviour — ~380 tests |
+| `dotnet test src/Vein.Tests` | behaviour — ~390 tests |
 | `bash tools/check-ir.sh` | the IR's *shape* — 8 golden trees, so lowering regressions surface |
-| `bash tools/check-backend.sh` | the backend's *meaning* — emitted C# is compiled, run, and diffed against the interpreter |
+| `bash tools/check-backend.sh` | the backend's *meaning* — emitted C# is compiled, run, and diffed against the interpreter, on five programs |
+| `bash tools/check-perf.sh` | the backend's *speed* — the number M5 is judged on, re-derived rather than remembered |
 
 A golden file of expected C# would pin the emitter's formatting; diffing a real run pins its meaning,
 which is the thing that can be quietly wrong.
+
+`check-perf.sh` is the slowest of the four (it builds Release and runs four timed programs), so it is
+not part of the ordinary loop — run it when the emitter, the adapter or SECS changes. Its failure
+threshold is deliberately loose: it fails under 3×, well below the 6.6–7.3× measured, because a tight
+bound on a laptop under load fails for reasons that have nothing to do with the code, and a check people
+learn to ignore guards nothing.
