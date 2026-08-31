@@ -216,6 +216,14 @@ shards run in the same runtime.
   `text`, `path`). No C#-isms, no abbreviations, no synonyms for one concept.
 - One concept = one identity, defined once, in the lowest layer that owns it (input events in
   `Vein.Input`, not per-domain). Different concepts get clearly different identities.
+- **The same rule applies to layout and syntax, not just names.** VeinScript does not take a C-family
+  convention on the strength of being familiar — see [SYNTAX-DECISIONS.md](SYNTAX-DECISIONS.md) D3
+  (no `for`/`in`/`loop`), D5 (no `class`), D7 (no semicolons), D12 (no `!=`; logic is words). Concretely
+  for the stdlib: there is no `std*` grab-bag file. A shape lives with the events and builders of its own
+  concept — `$Velocity` beside `@Moved` in `Transform`, not in a header of every type — because that is
+  where its `folds sum` is explained. A file collecting "all the basic shapes" would either duplicate
+  those definitions or move them away from their meaning, and re-exporting a name a domain bundle already
+  exports makes `use Math` + that file **VS0216** on every duplicate.
 
 ## 8. Collisions & conflicts
 - Simple names *will* repeat across authors/bundles; the **author root + publicator path** disambiguate
@@ -225,8 +233,11 @@ shards run in the same runtime.
 
 ## 9. What NOT to add yet
 - No new keywords/lifecycle/event semantics; no second type system; no compiler hacks per stdlib type.
-- No `use Vein.Core` dotted syntax, no mark declarations, no giant universal payloads, no HTML/CSS/JS in
-  Core (that lives in `Vein.Web`), no whole-tree build — start at Core + Web, expand on demand.
+- No `use Vein.Core` dotted syntax, no giant universal payloads, no HTML/CSS/JS in Core (that lives in
+  `Vein.Web`), no whole-tree build — start at Core + Web, expand on demand.
+- *(Mark declarations were on this list and have since shipped: `mark #Enemy` declares one, `shared`
+  exports it, and a mark reached through `use` counts as declared. The stdlib declares none yet —
+  declaring any in a bundle opts it into VS0218 checking, so that is a deliberate per-bundle call.)*
 
 ## 10. Recommended implementation order
 1. **Vein.Core** (this pass) — Lifecycle, Meta, Quantity(folds).

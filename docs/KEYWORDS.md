@@ -102,7 +102,9 @@ Held so they aren't accidentally repurposed. Assign a meaning or cut before v1.0
 ## 2. Deliberately NOT keywords
 
 `class`, `for`, `in`, `loop` — see [SYNTAX-DECISIONS.md](SYNTAX-DECISIONS.md) D3/D5. `push` was in the
-lexer once and is gone (D4). `!` is unlexed and reserved: inequality is `not (a == b)`.
+lexer once and is gone (D4). `!` is unlexed and reserved: inequality is `not (a == b)` — see
+[D12](SYNTAX-DECISIONS.md#not), which is also the general rule that a C-family construct is not adopted
+merely for being familiar.
 
 ---
 

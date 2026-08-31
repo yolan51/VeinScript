@@ -28,7 +28,10 @@ markup = "<a>"            // WRONG — the line ends, and the next one is a new 
 Commit `62e4189` reverted the wrong form and concluded wrapping was impossible; it is not, it is just
 trailing-only. The same holds for a trailing `,` in an argument list.
 
-**2. There is no `!=`.** Inequality is `not (a == b)`. `!` is deliberately unlexed and reserved.
+**2. There is no `!=`, and no `!` at all.** Inequality is `not (a == b)`; negation is `not x`. Logic in
+this language is words, because `and`/`or`/`not` are the operators
+([D12](SYNTAX-DECISIONS.md#not)) — which is also the general rule: a C-family construct is not adopted
+here just for being familiar.
 
 **3. A string literal is one line.** `\n \t \r \\ \"` are the escapes; a literal newline inside quotes is
 VS0003. To emit a multi-line string, use `\n` and wrap the source with trailing `+` per rule 1.

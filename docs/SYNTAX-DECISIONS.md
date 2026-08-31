@@ -187,10 +187,36 @@ shape $Movement {
 ```
 
 In the HIR the enum becomes a named type scoped to its shape (e.g. `Movement.Facing`). `match`/`when`
-branch on it. `enum` and `match` are **new** keywords to add.
+branch on it. Both are in the lexer.
 
 *Rationale:* keeps state definitions next to the data they constrain; avoids a floating global enum
 namespace; reinforces that meaning attaches to identities.
+
+---
+
+## D12 — Logic is words: `not (a == b)`, and `!` stays unlexed {#not}
+
+**DECIDED.** VeinScript has no `!=`, no `!x`, and no `!` token at all. Negation and inequality are
+spelled with the word operator the language already has:
+
+```
+if not ready { … }                 // not  !ready
+if not (hp == max) { … }           // not  hp != max
+```
+
+*Rationale:* `and`, `or` and `not` are already **core** keywords (see the table below), so logic in this
+language is written in words. Adding `!=` would make inequality the single symbolic exception in an
+otherwise word-shaped logic vocabulary — and it would do so for no gain, since `not (a == b)` says the
+same thing.
+
+It also removes a class of misreading that costs real time: `!` is one glyph, it sits flush against the
+term it inverts, and a dropped one turns a condition into its opposite while still compiling. `not ready`
+cannot be skimmed as `ready`.
+
+**This is the general rule, not a special case.** C-family syntax is not adopted on the strength of being
+familiar — it has to earn its place on its own merits. The same reasoning already produced D3 (no
+`for`/`in`/`loop`), D4 (no `push`), D5 (no general `class`) and D7 (no semicolons). "C does it" is not an
+argument.
 
 ---
 
@@ -202,6 +228,8 @@ Full detail in [KEYWORDS.md](KEYWORDS.md).
 | Keyword(s) | Disposition | Notes |
 |-----------|-------------|-------|
 | `bundle` `use` `publicator` `shared` | **core** | module / import / export / doc |
+| `app` | **core** | the manifest that composes bundles (`app N { load "…" }`) |
+| `Entity` | **core (IOP)** | the identity handle a `spawn()` returns |
 | `let` `var` `SF` `return` | **core** | bindings, pure fn, return |
 | `true` `false` `and` `or` `not` `as` | **core** | literals, logic, binding/alias |
 | `map` `count` `random` | **core / core-lib** | collection type; `count`/`random` become stdlib |
@@ -215,14 +243,26 @@ Full detail in [KEYWORDS.md](KEYWORDS.md).
 | `chance` | **core (IOP)** | probabilistic branch |
 | `folds` | **core (IOP)** | shape field reducer (D4) |
 | `sync` | **core (IOP)** | shard scheduling hint |
-| `push` | **cut** | removed; use `+=` + `folds` (D4) |
-| `by` | **reserved** | was `push`'s separator; candidate: range step |
-| `start` `on` | **reserved** | shard once-start / event-handler candidates |
-| `audience` `bridge` `bring` `builder` `mute` `unmute` `transform` | **reserved** | held; assign meaning or cut before v1.0 |
+| `push` | **cut** | removed from the lexer too; use `+=` + `folds` (D4) |
+| `by` | **core** | `bundle N by author` — roots the qualified name |
+| `start` | **core** | a bundle's boot event |
+| `bring` `builder` | **core (IOP)** | build a thing; the output field's NAME picks the channel |
+| `audience` | **core (IOP)** | who a `hear` admits — enforced across machines |
+| `bridge` | **core (IOP)** | a shard-like that spans a boundary |
+| `fn` `type` `if` `while` `repeat` `break` `continue` `match` `enum` | **core** | general computation and control flow (D2, D11) |
+| `ShardView` | **core (IOP)** | a First-Class object that ASSEMBLES |
+| `on` `mute` `unmute` `transform` | **reserved** | genuinely unassigned: no parser case, no sample |
 
-**Keywords to ADD in M2** (not in the lexer today): `fn`, `type`, `enum`, `if`, `while`, `repeat`,
-`break`, `continue`, `match`. Plus tokens `LBracket`/`RBracket` if D9(a). **Not added / removed:**
-`class`, `for`, `in`, `loop` (never keywords); `push` (cut).
+The nine keywords this section once listed as **"to ADD in M2"** — `fn` `type` `enum` `if` `while`
+`repeat` `break` `continue` `match` — have all been in the lexer for some time; they are classified
+above. Verify against the source rather than this table, and note the map holds two entries per line:
+
+```bash
+sed -n '/Keywords = new/,/^    };/p' src/Vein.Compiler/Lexing/Lexer.cs | grep -o '\["[a-zA-Z]*"\]' | wc -l
+```
+
+Still pending: tokens `LBracket`/`RBracket` if D9(a). **Never keywords:** `class`, `for`, `in`, `loop`
+(D3, D5); `!` (D12). **Cut:** `push` (D4).
 
 ---
 
@@ -230,5 +270,6 @@ Full detail in [KEYWORDS.md](KEYWORDS.md).
 
 - **D9** — brackets & list syntax: (a) vs (b). *(specs assume (a).)*
 - **D10** — user-defined generics timing. *(deferred.)*
-- **Reserved block** — `by`, `start`, `on`, `audience`, `bridge`, `bring`, `builder`, `mute`,
-  `unmute`, `transform`: assign a meaning or cut before v1.0. *(kept reserved for now.)*
+- **Reserved block** — `on`, `mute`, `unmute`, `transform`: assign a meaning or cut before v1.0.
+  *(The rest of what this list once held — `by`, `start`, `audience`, `bridge`, `bring`, `builder` —
+  all got meanings and are classified above.)*
