@@ -681,7 +681,7 @@ public class ServiceTests
             "  shape $H { hp: int folds sum }\n" +
             "  shard S { settled { target $H #Enmey as self { mark self #Dead } } } }");
 
-        var hit = Assert.Single(r.Diagnostics.Where(d => d.Code == "VS0218"));
+        var hit = Assert.Single(r.Diagnostics, d => d.Code == "VS0218");
         Assert.Contains("#Enmey", hit.Message);
         Assert.Contains("known: #Dead #Enemy", hit.Message);   // sorted, so the message is stable
     }
