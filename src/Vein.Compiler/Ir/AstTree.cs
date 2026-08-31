@@ -74,6 +74,7 @@ public sealed class AstTree
     {
         FieldDecl f => Field(f),
         ShapeInclude si => Include(si),
+        MarkMember mm => Leaf("Mark", string.Join(" ", mm.Marks.Select(x => "#" + x)), mm.Span),
         _ => Leaf(m.GetType().Name, "", m.Span)
     };
 

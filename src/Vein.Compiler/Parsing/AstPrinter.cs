@@ -134,6 +134,7 @@ public static class AstPrinter
     {
         FieldDecl f => $"{(f.IsVar ? "var " : "")}{f.Name}{(f.Type is null ? "" : ": " + Type(f.Type))}{(f.Fold is null ? "" : " folds " + f.Fold)}{(f.Default is null ? "" : " = " + Ex(f.Default))}",
         ShapeInclude si => $"${si.Shape}{(si.Field is null ? "" : "." + si.Field)}{(si.Default is null ? "" : " = " + Ex(si.Default))}",
+        MarkMember mm => "mark " + string.Join(" ", mm.Marks.Select(m => "#" + m)),
         _ => m.GetType().Name
     };
     private static string Field(FieldDecl f) => $"{f.Name}: {Type(f.Type)}{(f.Fold is null ? "" : " folds " + f.Fold)}{(f.Default is null ? "" : " = " + Ex(f.Default))}";

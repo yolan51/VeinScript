@@ -87,6 +87,14 @@ public sealed record ShapeInclude(string Shape, string? Field, Expr? Default, So
     public IReadOnlyList<string> Path { get; init; } = Array.Empty<string>();
 }
 
+/// A `mark #M` member inside a BUILDER body — the marks the identity it builds will wear.
+///
+/// This is what makes a builder an identity template rather than a fragment or an event one: only an
+/// identity can be marked, so the presence of a `mark` member says the builder constructs one. It is
+/// deliberately the same keyword as the `mark e #M` statement, minus the target — inside a template the
+/// target is the identity being built, and there is nothing else it could name.
+public sealed record MarkMember(IReadOnlyList<string> Marks, SourceSpan Span) : Node(Span);
+
 public sealed record FuncDecl(
     bool IsPure, string Name, IReadOnlyList<Param> Params, TypeRef? Return, Block Body, SourceSpan Span)
     : Decl(Span);

@@ -300,4 +300,73 @@ public class IdentityRuntimeTests
         Assert.Equal(first, Run(src).Out);
         Assert.Contains("hit", first);   // and it is not simply always false
     }
+
+    // ---- identity templates ------------------------------------------------------------------
+
+    /// The claim the feature makes, tested as a claim: `bring` on a builder carrying a `mark` member
+    /// does the same thing as writing the spawn/attach/mark sequence out. Two programs, one output.
+    [Fact]
+    public void An_identity_template_builds_exactly_what_the_hand_written_form_builds()
+    {
+        const string report =
+            "  shard Report { settled { target $Health #Enemy as self {\n" +
+            "      *Vein.Console.Io.print(\"e\" + Entity + \" hp=\" + self.Health.hp + \" sp=\" + self.Shield.sp) } } }";
+        const string shapes = "  shape $Shield { sp: int folds sum }\n";
+
+        string byHand = Bundle(shapes +
+            "  shard Seed { run once { let e = spawn()\n" +
+            "      attach $Health to e { hp: 10 }\n" +
+            "      attach $Shield to e { sp: 6 }\n" +
+            "      mark e #Enemy } }\n" + report);
+
+        string byTemplate = Bundle(shapes +
+            "  builder Unit { $Health $Shield   mark #Enemy }\n" +
+            "  shard Seed { run once { bring Unit(10, 6) } }\n" + report);
+
+        Assert.Equal("e1 hp=10 sp=6", Run(byHand).Out.Trim());
+        Assert.Equal(Run(byHand).Out, Run(byTemplate).Out);
+    }
+
+    [Fact]
+    public void A_template_attaches_only_the_shapes_it_declares_and_a_count_makes_separate_identities()
+    {
+        // Two things one program can show: `Mob` carries no $Shield, so it must be absent from a query
+        // that asks for one; and `bring 2` has to build TWO identities rather than one shared.
+        var output = Run(Bundle(
+            "  shape $Shield { sp: int folds sum }\n" +
+            "  builder Unit { $Health $Shield   mark #Enemy }\n" +
+            "  builder Mob  { $Health           mark #Enemy }\n" +
+            "  shard Seed { run once { bring 2 Unit(4, 2)\n      bring Mob(9) } }\n" +
+            "  shard Report { settled {\n" +
+            "      target $Health $Shield #Enemy as self { *Vein.Console.Io.print(\"both e\" + Entity) }\n" +
+            "      target $Health #Enemy as self { *Vein.Console.Io.print(\"health e\" + Entity) } } }")).Out;
+
+        Assert.Equal("both e1\nboth e2\nhealth e1\nhealth e2\nhealth e3", output.Trim().ReplaceLineEndings("\n"));
+    }
+
+    [Fact]
+    public void A_loose_field_in_an_identity_template_is_reported()
+    {
+        // An identity template's values all have to land in a shape it attaches. A loose field would take
+        // an argument and put it nowhere, so it is an error at the declaration rather than a silent drop.
+        var r = new VeinCompilerService().Compile(new CompileRequest("t.vein", Bundle(
+            "  builder Unit { $Health   level: int   mark #Enemy }\n" +
+            "  shard S { run once { bring Unit(5, 3) } }")));
+
+        Assert.Contains(r.Diagnostics, d => d.Code == "VS0206" && d.Message.Contains("level"));
+    }
+
+    [Fact]
+    public void Without_a_mark_member_a_builder_still_emits_its_event()
+    {
+        // The discriminator, from the other side: the SAME shape includes with no `mark` keep the old
+        // meaning — construct and emit @<Builder> — so adding this feature changed no existing program.
+        var output = Run(Bundle(
+            "  builder Unit { $Health }\n" +
+            "  shard S { run once { bring Unit(7) } }\n" +
+            "  shard W { hear @Unit as u { *Vein.Console.Io.print(\"event hp=\" + u.hp) } }\n" +
+            "  shard R { settled { target $Health as self { *Vein.Console.Io.print(\"entity!\") } } }")).Out;
+
+        Assert.Equal("event hp=7", output.Trim());   // an event, and no entity was built
+    }
 }

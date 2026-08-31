@@ -271,19 +271,28 @@ switch (command)
 
     case "scaffold":
     {
-        if (args.Length < 3) { Console.Error.WriteLine("usage: veinc scaffold <file.vein> <EventName>"); return 2; }
-        string want = args[2].TrimStart('@');
+        if (args.Length < 3) { Console.Error.WriteLine("usage: veinc scaffold <file.vein> <@Event | &Builder>"); return 2; }
+        // The sigil picks which catalog to look in; a bare name tries the event first, then the builder,
+        // so `veinc scaffold f.vein Unit` finds an identity template without needing to know the spelling.
+        string raw = args[2];
+        string want = raw.TrimStart('@', '&');
         var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
         if (!diagnostics.HasErrors)
         {
-            var events = EventCatalog.Catalog(unit);
-            var match = events.FirstOrDefault(e => string.Equals(e.Name, want, StringComparison.Ordinal));
-            if (match is null)
+            var events = raw.StartsWith('&') ? new List<EventEntry>() : EventCatalog.Catalog(unit);
+            var builders = raw.StartsWith('@') ? new List<BuilderEntry>() : EventCatalog.Builders(unit);
+
+            var ev = events.FirstOrDefault(e => string.Equals(e.Name, want, StringComparison.Ordinal));
+            var bl = builders.FirstOrDefault(b => string.Equals(b.Name, want, StringComparison.Ordinal));
+
+            if (ev is not null) Console.Write(EventCatalog.Scaffold(ev));
+            else if (bl is not null) Console.Write(EventCatalog.Scaffold(bl));
+            else
             {
-                Console.Error.WriteLine($"no event '{want}'. available: {string.Join(", ", events.Select(e => "@" + e.Name))}");
+                var available = events.Select(e => "@" + e.Name).Concat(builders.Select(b => "&" + b.Name));
+                Console.Error.WriteLine($"no event or builder '{want}'. available: {string.Join(", ", available)}");
                 return 2;
             }
-            Console.Write(EventCatalog.Scaffold(match));
         }
         break;
     }

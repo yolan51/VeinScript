@@ -99,14 +99,32 @@ public sealed class BundleModel
                 Payload = Fields(e.Members), EmittedBy = EmittedBy(e.Name), HeardBy = HeardBy(e.Name)
             });
 
+        // A builder's params are its members with `$Shape` INCLUDES FLATTENED — the same expansion `bring`
+        // binds arguments against, and the same one `?` has to offer. Listing only the plain `FieldDecl`s
+        // reported no params at all for every builder written the shape-backed way, which is most of
+        // Vein.Web and the whole point of an identity template. It matters most for a `shared` builder,
+        // where the consumer is in another bundle and the declaration is not on screen.
+        var shapeFields = shapes.OfType<ShapeDecl>()
+            .ToDictionary(s => s.Name, s => s.Members.OfType<FieldDecl>().ToList(), StringComparer.Ordinal);
+
         foreach (var (b, shared) in builders)
         {
             var output = b.Members.OfType<FieldDecl>().FirstOrDefault(f => f.Name is "markup" or "code" or "css" or "line");
-            string generates = output?.Name switch { "code" => "@Script", "css" => "@Style", "line" => "@Print", "markup" => "@Html", _ => "@" + b.Name };
+            var marks = b.Members.OfType<MarkMember>().SelectMany(m => m.Marks).ToList();
+
+            // A `mark` member makes it an identity template: it builds rather than emits.
+            string generates = marks.Count > 0
+                ? "an identity " + string.Join(" ", marks.Select(m => "#" + m))
+                : output?.Name switch { "code" => "@Script", "css" => "@Style", "line" => "@Print", "markup" => "@Html", _ => "@" + b.Name };
+
+            var payload = Sig.Expand(b.Members.Where(m => !ReferenceEquals(m, output)).ToList(), shapeFields)
+                             .Select(f => (f.Name, f.OriginShape is null ? f.Type : f.Type + " ($" + f.OriginShape + ")"))
+                             .ToList();
+
             prims.Add(new PrimitiveInfo
             {
                 Kind = PrimitiveKind.Builder, Name = b.Name, Visibility = shared ? Visibility.Shared : Visibility.Public,
-                Payload = Fields(b.Members.Where(m => !ReferenceEquals(m, output))), Generates = generates
+                Payload = payload, Generates = generates
             });
         }
 

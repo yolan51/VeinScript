@@ -154,6 +154,46 @@ public class ServiceTests
     }
 
     [Fact]
+    public void A_builders_shape_includes_are_catalogued_as_its_params()
+    {
+        // What `bring X ?` has to offer, and where it matters most: a `shared` builder is consumed from
+        // another bundle, so its declaration is off-screen and the include hides the field names one
+        // level down. The catalog listed only plain fields before, which for a shape-backed builder —
+        // most of Vein.Web, and every identity template — meant NO params at all.
+        var r = Compile("bundle B { shape $Health { hp: int } shape $Shield { sp: int = 3 } " +
+                        "builder Unit { $Health $Shield  mark #Unit } }");
+        Assert.True(r.Success);
+
+        var unit = EventCatalog.Builders(r.Ast!).Single(b => b.Name == "Unit");
+
+        // Flattened, in the order `bring` binds them, each carrying the shape it came from.
+        Assert.Equal(new[] { "hp", "sp" }, unit.Fields.Select(f => f.Name).ToArray());
+        Assert.Equal("Health", unit.Fields[0].OriginShape);
+        Assert.Equal("Shield", unit.Fields[1].OriginShape);
+        Assert.False(unit.Fields[1].Required);          // sp is defaulted
+        Assert.Equal(new[] { "Unit" }, unit.Marks.ToArray());
+        Assert.Equal("an identity", unit.Generates);
+
+        // And the scaffold `?` stands for names every slot.
+        string scaffold = EventCatalog.Scaffold(unit);
+        Assert.Contains("bring Unit(", scaffold);
+        Assert.Contains("hp: int   from $Health", scaffold);
+        Assert.Contains("sp: int   from $Shield", scaffold);
+    }
+
+    [Fact]
+    public void A_fragment_builder_reports_the_channel_it_writes_on()
+    {
+        var r = Compile("bundle B { shape $H { text: string } builder Head { $H  markup = \"<h1>\" + text + \"</h1>\" } }");
+        var head = EventCatalog.Builders(r.Ast!).Single(b => b.Name == "Head");
+
+        Assert.Equal("@Html", head.Generates);
+        Assert.Empty(head.Marks);
+        // The output field is not a parameter — `bring Head("hi")` takes only the include's field.
+        Assert.Equal(new[] { "text" }, head.Fields.Select(f => f.Name).ToArray());
+    }
+
+    [Fact]
     public void Shape_include_expands_into_event_fields()
     {
         var r = Compile("bundle B { shape $Pos { x: int, y: int } event @Moved { who: Entity  $Pos } }");

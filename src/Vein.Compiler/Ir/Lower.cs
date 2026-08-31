@@ -561,6 +561,89 @@ public sealed class Lower
         return null;
     }
 
+    /// `bring Unit(10, 6)` where `Unit` is an identity template — a builder carrying a `mark` member.
+    ///
+    /// Desugars to the spawn/attach/mark sequence an author would write by hand, and to the SAME IR
+    /// nodes, so the two forms cannot drift apart: `spawn()` is immediate, `attach` and `mark` are
+    /// deferred to the commit point exactly as the statements are. `bring N Unit(…)` wraps the whole
+    /// sequence in the repeat `LowerBring` already builds, so it makes N separate identities.
+    ///
+    /// Arguments bind positionally across the includes in declaration order — `$Health` takes hp, then
+    /// `$Shield` takes sp — which is the same rule that flattens includes into a fragment builder's
+    /// parameter list, just grouped back into one `attach` per shape.
+    private IrStmt LowerIdentityBring(BringStmt br, BuilderDecl b, string? ownerKey)
+    {
+        var stmts = new List<IrStmt>();
+        string ent = "__ent" + _identityDepth++;
+        stmts.Add(new IrLet(ent, null, new IrCall(new IrLocalRef("spawn"), Array.Empty<IrExpr>()), false));
+
+        int arg = 0;
+        foreach (var m in b.Members)
+        {
+            switch (m)
+            {
+                case ShapeInclude si:
+                {
+                    var fields = si.Path.Count > 0 ? ResolveExternalShape(si.Path, si.Shape)
+                               : ownerKey is not null ? ResolveOwnedShape(ownerKey, si.Shape)
+                               : _shapeFields.TryGetValue(si.Shape, out var local) ? local
+                               : ResolveUsed(Index.Shapes, "$", si.Shape, si.Span)?.Value.Members.OfType<FieldDecl>().ToList();
+                    if (fields is null)
+                    {
+                        _diag.Warning("VS0210", $"Unknown shape '${si.Shape}' in include.", si.Span);
+                        continue;
+                    }
+
+                    // `$Shape.field` includes ONE field; the rest of the shape keeps its declared default.
+                    var take = si.Field is null ? fields : fields.Where(f => f.Name == si.Field).ToList();
+                    var init = new List<(string, IrExpr)>();
+                    foreach (var f in take)
+                    {
+                        IrExpr value = arg < br.Args.Count ? LowerExpr(br.Args[arg])
+                                     : f.Default is not null ? LowerExpr(f.Default)
+                                     : br.FillRest ? ZeroLiteral(f.Type?.Name ?? "string")
+                                     : new IrLiteral(null, IrLiteralKind.Int);
+                        arg++;
+                        init.Add((f.Name, value));
+                    }
+                    stmts.Add(new IrExprStmt(new IrRuntimeCall("AddComponent",
+                        new IrExpr[] { new IrLocalRef(ent), new IrStructInit(si.Shape, init) })));
+                    break;
+                }
+
+                case MarkMember mm:
+                    foreach (var tag in mm.Marks)
+                    {
+                        _tags.Add(tag);
+                        stmts.Add(new IrExprStmt(new IrRuntimeCall("AddTag",
+                            new IrExpr[] { new IrLocalRef(ent), new IrTypeNameExpr(tag) })));
+                    }
+                    break;
+
+                // A loose field has no component to land in. Silently dropping it would take an argument
+                // and put it nowhere, so it is reported at the declaration that caused it.
+                case FieldDecl fd:
+                    _diag.Error("VS0206",
+                        $"Identity template '{b.Name}' cannot carry the field '{fd.Name}' — a `mark` member " +
+                        "makes it build an identity, and every value it takes has to belong to a $Shape it " +
+                        "attaches. Move the field into a shape, or drop the `mark` to make this a builder " +
+                        "that emits.", fd.Span);
+                    break;
+            }
+        }
+
+        if (arg < br.Args.Count && !br.FillRest)
+            _diag.Error("VS0204", $"Builder '{b.Name}' takes {arg} param(s), got {br.Args.Count}.", br.Span);
+
+        _identityDepth--;
+        var body = new IrBlock(stmts);
+        return br.Count is null ? body
+             : new IrLoop(IrLoopKind.Repeat, null, null, null, null, LowerExpr(br.Count), body);
+    }
+
+    /// Nesting depth of identity templates being lowered, so two in one scope get distinct entity locals.
+    private int _identityDepth;
+
     private IrStmt LowerBring(BringStmt br)
     {
         // Qualified `bring *Author.Bundle.Publicator.&Builder(…)` resolves against the stdlib's builders;
@@ -589,10 +672,20 @@ public sealed class Lower
             return new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
         }
 
-        // A builder either has a fragment output channel (markup/code/css/line — emits that one field to
-        // @Html/@Script/@Style/@Print) OR no channel at all, in which case it constructs and emits an event
-        // named after the builder carrying ALL its params (`builder Console { name, firsttext }` → emit
-        // @Console { name, firsttext }).
+        // An IDENTITY template: a `mark` member says this builder constructs an identity rather than
+        // emitting anything, because only an identity can be marked. `bring Unit(10, 6)` then means
+        // exactly what the hand-written form means — and desugars to the same IR, so it cannot drift:
+        //
+        //     let e = spawn()
+        //     attach $Health to e { hp: 10 }
+        //     attach $Shield to e { sp: 6 }
+        //     mark e #Unit
+        if (b.Members.OfType<MarkMember>().Any()) return LowerIdentityBring(br, b, ownerKey);
+
+        // Otherwise a builder either has a fragment output channel (markup/code/css/line — emits that one
+        // field to @Html/@Script/@Style/@Print) OR no channel at all, in which case it constructs and emits
+        // an event named after the builder carrying ALL its params (`builder Console { name, firsttext }` →
+        // emit @Console { name, firsttext }).
         var output = b.Members.OfType<FieldDecl>().FirstOrDefault(f => OutputFields.Contains(f.Name));
         if (output is not null && output.Default is null)
         {

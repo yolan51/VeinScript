@@ -1,0 +1,83 @@
+// entities_template.vein — a builder that builds an IDENTITY.
+//
+// A builder's output field decides what it emits: `markup` an @Html fragment, `css` a @Style, `code` a
+// @Script, none at all an event named after it. A `mark` member picks a fifth thing — it builds an
+// identity, because only an identity can be marked.
+//
+//     builder Unit { $Health $Shield   mark #Unit }
+//
+//     bring Unit(10, 6)          ==          let e = spawn()
+//                                            attach $Health to e { hp: 10 }
+//                                            attach $Shield to e { sp: 6 }
+//                                            mark e #Unit
+//
+// The two really are the same: `bring` desugars to those statements and to the same IR, so `spawn` is
+// immediate and `attach`/`mark` are deferred to the commit point either way. Arguments bind positionally
+// across the includes in declaration order — $Health takes hp, then $Shield takes sp — the same rule that
+// flattens includes into a fragment builder's parameter list, grouped back into one `attach` per shape.
+//
+// `bring N Unit(…)` makes N separate identities, since the count wraps the whole sequence.
+//
+// An include hides the field names one level down, and a `shared` template is consumed from another
+// bundle where its declaration is off-screen entirely — so ask, rather than reading the shape:
+//
+//     $ veinc scaffold samples/entities_template.vein Unit
+//     // &Unit builds an identity #Unit
+//     bring Unit(
+//         ?,     // hp: int   from $Health
+//         ?      // sp: int   from $Shield
+//     )
+//
+// `bring Unit ?` is the same list written at the call site — every parameter filled with its type's
+// zero, which is how you get a template running before you have decided the values.
+//
+//   veinc run samples/entities_template.vein --ticks 2
+//   bash tools/check-backend.sh          (the same program, emitted to C# and diffed against the above)
+
+bundle EntitiesTemplate by you {
+
+    shape $Health { hp: int folds sum }
+    shape $Shield { sp: int folds sum }
+
+    // Three templates over two shapes. What an identity CARRIES is the template's whole definition —
+    // there is no body and nothing to run, which is what keeps a template a declaration rather than a
+    // little constructor with its own rules.
+    builder Unit { $Health $Shield   mark #Unit }
+    builder Mob  { $Health           mark #Unit }
+    builder Ward { $Shield           mark #Unit }
+
+    shard Seed {
+        run once {
+            bring Unit(12, 6)
+            bring Mob(12)
+            bring Ward(6)
+            bring 2 Unit(4, 2)     // the count makes two separate identities, not one shared
+        }
+    }
+
+    shard Wear {
+        each tick {
+            target $Health $Shield #Unit as self {
+                self.Health.hp -= 1
+                self.Shield.sp -= 2
+            }
+        }
+    }
+
+    shard Report {
+        settled {
+            target $Health $Shield #Unit as self {
+                emit *Vein.Console.Io.@Print { text: "unit  e" + Entity + " hp=" + self.Health.hp + " sp=" + self.Shield.sp }
+            }
+            // The templates that attached only one shape are visible to the single-component queries and
+            // absent from the paired one above — which is the check that a template attaches exactly what
+            // it declares and nothing else.
+            target $Health #Unit as self {
+                emit *Vein.Console.Io.@Print { text: "  health e" + Entity + " hp=" + self.Health.hp }
+            }
+            target $Shield #Unit as self {
+                emit *Vein.Console.Io.@Print { text: "  shield e" + Entity + " sp=" + self.Shield.sp }
+            }
+        }
+    }
+}

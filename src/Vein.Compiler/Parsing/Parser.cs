@@ -265,6 +265,17 @@ public sealed class Parser
     private Node ParseSigMember()
     {
         var s = Here;
+        // `mark #A #B` — the marks the identity this builder builds will wear. No target: inside a
+        // template the target is the identity being built. Its presence is also what tells `bring` this
+        // builder constructs an identity rather than emitting a fragment or an event.
+        if (Match(TokenKind.KwMark))
+        {
+            var marks = new List<string>();
+            while (Check(TokenKind.MarkRef)) marks.Add(Advance().Text);
+            if (marks.Count == 0)
+                _diag.Error("VS0100", $"Expected a #Mark after `mark`, found {Cur.Kind} '{Cur.Text}'.", Here);
+            return new MarkMember(marks, s);
+        }
         if (Check(TokenKind.ShapeRef))                                   // $Shape or $Shape.field
         {
             string shape = Advance().Text;
@@ -777,9 +788,17 @@ public sealed class Parser
         var s = Here; Advance();
         // Optional count: `bring 3 Item(...)` / `bring n Item(...)`. Present when the token before the
         // builder name is not immediately followed by '(' (i.e. a number, or an ident that isn't the callee).
+        // A leading count is `bring 3 Item(…)` or `bring n Item(…)`. A NUMBER is unambiguous — it can
+        // never be a builder name. An IDENT only is one when a builder reference still follows it;
+        // testing "the next token is not `(`" instead swallowed the builder itself in every form that
+        // does not end in an argument list, so `bring Unit ?` and a bare `bring JumpLine` both failed
+        // with "Expected builder name, found Question" — pointing at the `?`, not at the real cause.
+        static bool StartsBuilderRef(TokenKind k) =>
+            k is TokenKind.Ident or TokenKind.BuilderRef or TokenKind.Star;
+
         Expr? count = null;
         if (Check(TokenKind.Int) || Check(TokenKind.Float) ||
-            (Check(TokenKind.Ident) && Peek(1).Kind != TokenKind.LParen))
+            (Check(TokenKind.Ident) && StartsBuilderRef(Peek(1).Kind)))
             count = ParsePrimary();
 
         // The builder: bare `Name` (local, back-compat), `&Name` (local, sigil'd), or a qualified

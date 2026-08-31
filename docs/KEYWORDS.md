@@ -51,6 +51,7 @@ dialect. There is no general `class`.
 | *(contextual)* `run once`, `every N` | `run once { … }` · `every 1.0 { … }` | shard schedules: once at start; every N seconds. `run`/`once`/`every` are contextual words, not reserved | — |
 | `folds` | (in `shape`) `f: T folds sum` | concurrent-write reducer | `@fold(f, sum)` |
 | `mark` `unmark` | `mark self #T` | add / remove a tag | `AddTag` / `RemoveTag` |
+| `mark` (in a `builder`) | `mark #T` | no target — the marks the identity this builder BUILDS will wear. Its presence is what makes the builder an **identity template**: `bring Unit(10, 6)` spawns, attaches each included `$Shape`, then marks. [LANGUAGE.md §3.9](LANGUAGE.md) | `spawn` + `AddComponent`… + `AddTag`… |
 | `attach` `unattach` | `attach $C to self { … }` | add / remove a component | `AddComponent` / `RemoveComponent` |
 | `to` `from` | (with attach/unattach) | component target / source | operands |
 | `emit` | `emit @E { … }` | send a message | `Emit(E{…})` |
@@ -80,7 +81,7 @@ Held so they aren't accidentally repurposed. Assign a meaning or cut before v1.0
 | `audience` | networking/replication scope (who sees an identity/event) — **enforced** over `Vein.Net.Peer`, where a signed frame makes the sender's mark provable ([RUNTIME.md §4.3.2](RUNTIME.md)); advisory over the local console pipe |
 | `bridge` | interop / FFI boundary |
 | `bring` | instantiate a `builder` (`bring [N] Name(args)`), binding args positionally + emitting its output event |
-| `builder` | a reusable element template: signature body (params + one `markup`/`code`/`css` output field) |
+| `builder` | a reusable template: signature body (params + one `markup`/`code`/`css`/`line` output field), or a `mark` member making it an identity template |
 | `mute` `unmute` | disable / re-enable a shard or handler |
 | `transform` | AST macro / source transform, or Transform component sugar |
 

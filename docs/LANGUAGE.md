@@ -306,6 +306,10 @@ after the builder, carrying all its params:
 | `line`       | console | `@Print`            |
 | *(none)*     | event   | `@<BuilderName>` with all params |
 
+…**or** it carries a `mark` member, which makes it an **identity template**: `bring` builds an identity
+instead of emitting anything. `mark` picks that kind for the same reason the field names above pick
+theirs — only an identity can be marked, so the keyword says what the builder makes.
+
 ```
 builder Button {
     label: string                                    // required param
@@ -321,6 +325,29 @@ There is no `( )` parameter list and no trailing kind keyword. Instantiate with 
 binds arguments positionally to the parameters (every member except the output field, with `$Shape`
 includes expanded), fills defaults, and emits the output event. `bring N Name(…)` repeats N times;
 `?` fills the rest.
+
+**Identity templates.** A `mark #M` member — the `mark` statement (§4) minus its target, because inside
+a template the target is the identity being built — makes the builder construct an identity:
+
+```
+builder Unit { $Health $Shield   mark #Unit }
+
+bring Unit(10, 6)          ==          let e = spawn()
+                                       attach $Health to e { hp: 10 }
+                                       attach $Shield to e { sp: 6 }
+                                       mark e #Unit
+```
+
+The two forms are the same: `bring` desugars to exactly those statements, so `spawn` is immediate and
+`attach`/`mark` are deferred to the commit point either way. Arguments bind positionally **across the
+includes in declaration order** — `$Health` takes `hp`, then `$Shield` takes `sp` — the same flattening
+a fragment builder's parameter list gets, grouped back into one `attach` per shape. `bring N Unit(…)`
+builds N separate identities.
+
+Every value an identity template takes has to belong to a shape it attaches, so a loose field is an
+error (**VS0206**): it would consume an argument and put it nowhere. A template with `$Shape` includes
+and **no** `mark` keeps the old meaning — it emits `@<BuilderName>` — so this changed no existing
+program.
 
 ---
 

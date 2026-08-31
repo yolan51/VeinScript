@@ -1,4 +1,4 @@
-# VeinScript — Event tooling (`veinc events` / `veinc scaffold`)
+# VeinScript — Event & builder tooling (`veinc events` / `veinc scaffold`)
 
 The `event`/`emit`/`hear` grammar is fixed (braces on `emit`, `as`/`audience` on `hear`). The
 friction is *knowing what to put in an `emit` body*. These two read-only commands answer that: they
@@ -73,7 +73,7 @@ bring Button ?      ->  bring Button(? /* label: string */, ? /* cls: string */)
 
 Typed anywhere else, `?` stays as the fill-the-rest token described above.
 
-## `veinc scaffold <file> <EventName>`
+## `veinc scaffold <file> <@Event | &Builder>`
 
 Prints a paste-ready `emit` body with **required fields first**, each a `?` placeholder plus a label,
 so you only replace what you need:
@@ -92,6 +92,34 @@ emit @Hit {
 
 The scaffold is a snippet: it deliberately isn't valid VeinScript until you replace the `?`s. Replace
 them (or delete the optional lines to accept defaults), and it parses/renders like any `emit`.
+
+### Builders — `veinc scaffold <file> <&Builder>`
+
+The same for a `bring`, and this is where it earns the most. A builder's parameters are its members with
+`$Shape` **includes flattened**, so the field names live one level down in the shape — and for a
+`shared` builder the declaration is in another bundle entirely. The scaffold names every slot, in the
+order `bring` binds them, with the shape each came from:
+
+```
+$ veinc scaffold samples/entities_template.vein Unit
+// &Unit builds an identity #Unit
+bring Unit(
+    ?,     // hp: int   from $Health
+    ?      // sp: int   from $Shield
+)
+
+$ veinc scaffold stdlib/Web.vein '&Image'
+// &Image builds @Html
+bring Image(
+    ?,     // source: string   from $Vein.UI.Widgets.Image
+    ?      // alt: string
+)
+```
+
+The sigil picks the catalog — `@Name` an event, `&Name` a builder — and a bare name tries the event
+first, then the builder. `bring X ?` is the same list written at the call site: it fills every remaining
+parameter with its type's zero, which is what makes it useful for seeing the shape of a call before you
+know the values.
 
 ## `veinc symbols <app.vein> [--json]` — cross-bundle discovery
 
