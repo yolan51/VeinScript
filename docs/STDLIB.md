@@ -216,6 +216,12 @@ shards run in the same runtime.
   `text`, `path`). No C#-isms, no abbreviations, no synonyms for one concept.
 - One concept = one identity, defined once, in the lowest layer that owns it (input events in
   `Vein.Input`, not per-domain). Different concepts get clearly different identities.
+- **Reusing a stdlib shape means retyping its fields, and the name is what unifies them.** A `shape` body
+  takes fields, not `$Shape` includes — only builders and events can include one — so a consumer of
+  `Vein.Transform.Spatial.$Position` declares its own `shape $Position { x, y, z: float }`. That is not a
+  fork: components unify by **bare name** at link, so both are one component. Diverge on the fields and
+  it is **VS0220** where you declared it, or **VS0332** when an app links both. This is why a canonical
+  shape earns its keep by being *copied accurately*, and why the check matters more than the file layout.
 - **The same rule applies to layout and syntax, not just names.** VeinScript does not take a C-family
   convention on the strength of being familiar — see [SYNTAX-DECISIONS.md](SYNTAX-DECISIONS.md) D3
   (no `for`/`in`/`loop`), D5 (no `class`), D7 (no semicolons), D12 (no `!=`; logic is words). Concretely

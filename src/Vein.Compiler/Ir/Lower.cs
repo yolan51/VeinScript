@@ -149,6 +149,7 @@ public sealed class Lower
         foreach (var declared in _declaredMarks) _tags.Add(declared);
 
         CheckDeclaredMarks();
+        CheckShapeConvergence(bundle);
 
         // Marks discovered while lowering become Tag types, deduped BY KIND AS WELL AS NAME.
         //
@@ -195,6 +196,72 @@ public sealed class Lower
     ///
     /// A warning, not an error, and it names what IS known — the shape VS0212 already uses for console
     /// addresses, which is the narrower version of this same check.
+    /// A locally declared shape whose name is already a SHARED shape elsewhere, with different fields.
+    ///
+    /// Components unify by BARE NAME. `attach $Position` lowers to the name alone, and `AppLinker.Merge`
+    /// folds every linked bundle's types into one table keyed by it — deliberately, since that is how a
+    /// capability bundle sees the principal's data. Two bundles that both say `$Position` therefore share
+    /// one component whether or not they agree on what it holds.
+    ///
+    /// VS0332 already reports that, but only at app link, and only between bundles that actually meet.
+    /// The stdlib never triggers it: a shape is not linked, it is a declaration you copy. And copy is the
+    /// operative word — a `shape` body takes fields, not `$Shape` includes (only builders and events can
+    /// include one), so an author reusing `$Position` retypes its fields by hand. That is precisely where
+    /// a field goes missing, and nothing said so until the two halves met in some app months later.
+    ///
+    /// Silent when the fields agree: matching by hand is the intended way to reuse a shape, not a
+    /// mistake. Only DIVERGENCE is worth a word.
+    private void CheckShapeConvergence(BundleDecl bundle)
+    {
+        // A bundle sitting inside an indexed root finds ITSELF. Skip its own qualified prefix, or every
+        // stdlib file would report each of its own shapes.
+        string ownPrefix = (bundle.Author ?? "local") + "." + bundle.Name + ".";
+
+        void Walk(IEnumerable<Decl> members)
+        {
+            foreach (var m in members)
+            {
+                if (m is PublicatorDecl p) { Walk(p.Members); continue; }
+                if (m is not ShapeDecl s) continue;
+
+                var mine = s.Members.OfType<FieldDecl>().ToList();
+
+                // Sorted, and every divergent declaration named. Reporting only the first hit would pick
+                // one by dictionary order, so the same source could report a different bundle run to run.
+                var clashes = Index.Shapes
+                    .Where(kv => !kv.Key.StartsWith(ownPrefix, StringComparison.Ordinal)
+                              && kv.Key.EndsWith("." + s.Name, StringComparison.Ordinal)
+                              && !SameFields(mine, kv.Value.Members.OfType<FieldDecl>().ToList()))
+                    .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                    .ToList();
+                if (clashes.Count == 0) continue;
+
+                string others = string.Join(" and ", clashes.Select(
+                    kv => $"*{kv.Key} {Fields(kv.Value.Members.OfType<FieldDecl>().ToList())}"));
+
+                _diag.Warning("VS0220",
+                    $"'${s.Name}' is {Fields(mine)}, but is also declared as {others}. Components unify " +
+                    $"by name, so linking both into one app makes them one component with two meanings " +
+                    $"(VS0332). Match the fields, or rename.",
+                    s.Span);
+            }
+        }
+        Walk(bundle.Members);
+
+        static bool SameFields(List<FieldDecl> a, List<FieldDecl> b)
+        {
+            if (a.Count != b.Count) return false;
+            for (int i = 0; i < a.Count; i++)
+                if (!string.Equals(a[i].Name, b[i].Name, StringComparison.Ordinal) ||
+                    !string.Equals(a[i].Type?.Name, b[i].Type?.Name, StringComparison.Ordinal))
+                    return false;
+            return true;
+        }
+
+        static string Fields(List<FieldDecl> f) =>
+            f.Count == 0 ? "{ }" : "{ " + string.Join(", ", f.Select(x => x.Name + ": " + (x.Type?.Name ?? "infer"))) + " }";
+    }
+
     /// A mark shared by a `use`d bundle counts as declared. The gate above stays on THIS bundle's own
     /// declarations — widening it would switch checking on for a file that never opted in, merely because
     /// something it uses declares marks. Only what counts as *known* widens.

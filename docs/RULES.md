@@ -111,6 +111,13 @@ only its section index is a query.
 **15. `$Enemy` and `#Enemy` are different things.** Different keyword, different sigil; a program may use
 both. In emitted C# the mark becomes `Marks.Enemy` and the shape `Enemy`.
 
+**15b. COMPONENTS UNIFY BY BARE NAME, and a `shape` cannot include a `shape`.** `attach $Position`
+lowers to the name alone, and linking folds every bundle's types into one table keyed by it — deliberately,
+since that is how a capability bundle sees the principal's data. So two bundles saying `$Position` share
+one component whether or not they agree on its fields. Only builders and events can include a `$Shape`;
+a shape body takes fields, so reusing `Vein.Transform.Spatial.$Position` means retyping its fields. Get
+them wrong and it is **VS0220** at declaration, or **VS0332** when an app links both.
+
 **16. A mark is a name unless declared.** `mark #Enemy` at bundle or publicator level declares it, and a
 bundle that declares *any* mark has its mark names checked — an undeclared one is **VS0218**. A bundle
 that declares none is unchecked, so a misspelling there is silently a new mark. `shared("…")` exports a

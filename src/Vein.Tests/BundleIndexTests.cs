@@ -303,6 +303,73 @@ public class BundleIndexTests : IDisposable
         Assert.DoesNotContain(r.Diagnostics, d => d.Code == "VS0218");
     }
 
+    // ---- shapes converge by name, so divergence is worth a word (VS0220) ----------------------
+
+    private const string AcmeSpatial = """
+        bundle Spatial by acme {
+            publicator Api {
+                shared("Where an identity is.")
+                shape $Position { x: float, y: float, z: float }
+            }
+        }
+        """;
+
+    [Fact]
+    public void A_shape_that_diverges_from_a_shared_one_of_the_same_name_is_reported()
+    {
+        // Components unify by BARE NAME — `attach $Position` lowers to the name alone and AppLinker folds
+        // every linked bundle's types into one table keyed by it. So these two are one component with two
+        // meanings the moment an app links both, and VS0332 would say so only then. This says it now.
+        string dir = AppWithInstalledBundle("acme.Spatial.vein", AcmeSpatial);
+
+        var r = new VeinCompilerService().Compile(new CompileRequest("Demo.vein",
+            "bundle Demo by me { shape $Position { x: float, y: float } }", ProjectDir: dir));
+
+        var hit = Assert.Single(r.Diagnostics, d => d.Code == "VS0220");
+        Assert.Contains("*acme.Spatial.Api.Position { x: float, y: float, z: float }", hit.Message);
+        Assert.Contains("'$Position' is { x: float, y: float }", hit.Message);
+    }
+
+    [Fact]
+    public void A_shape_that_matches_the_shared_one_is_silent()
+    {
+        // The whole point of the check being about DIVERGENCE. A `shape` body takes fields, not `$Shape`
+        // includes — only builders and events can include one — so retyping the canonical fields by hand
+        // is the only way to reuse a shape, and it must not be treated as a mistake.
+        string dir = AppWithInstalledBundle("acme.Spatial.vein", AcmeSpatial);
+
+        var r = new VeinCompilerService().Compile(new CompileRequest("Demo.vein",
+            "bundle Demo by me { shape $Position { x: float, y: float, z: float } }", ProjectDir: dir));
+
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "VS0220");
+    }
+
+    [Fact]
+    public void A_bundle_indexed_under_its_own_name_does_not_report_itself()
+    {
+        // A bundle sitting inside an indexed root finds its OWN shapes in the index. Without the
+        // own-prefix skip every stdlib file would report each of its shapes as diverging from itself.
+        string dir = AppWithInstalledBundle("acme.Spatial.vein", AcmeSpatial);
+
+        var r = new VeinCompilerService().Compile(new CompileRequest("acme.Spatial.vein",
+            AcmeSpatial, ProjectDir: dir));
+
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "VS0220");
+    }
+
+    [Fact]
+    public void A_shape_with_its_own_name_is_not_reported()
+    {
+        // Guard against matching on a suffix: the index key is `Author.Bundle.Pub.Name`, and `$Pos` must
+        // not match `…Api.Position`.
+        string dir = AppWithInstalledBundle("acme.Spatial.vein", AcmeSpatial);
+
+        var r = new VeinCompilerService().Compile(new CompileRequest("Demo.vein",
+            "bundle Demo by me { shape $Pos { x: float } }", ProjectDir: dir));
+
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "VS0220");
+    }
+
     // ---- regression: the existing no-ProjectDir path -----------------------------------------
 
     [Fact]
