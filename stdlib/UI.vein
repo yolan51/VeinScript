@@ -11,8 +11,17 @@ bundle UI by Vein {
         shared("A run of display text.")
         shape $Text { content: string }
 
-        shared("A button's label.")
-        shape $Button { label: string }
+        // `label` is what the user reads; the other three are NAMES a renderer resolves, not markup —
+        // an identifier, a style class, and the handler to invoke. That keeps the no-HTML rule above
+        // intact (a DOM renderer maps them to attributes; a native one to whatever it uses) while
+        // matching what a button actually needs. It was `{ label: string }` alone, which no button in
+        // this repo could use, so every sample declared a richer `$Button` of its own — and components
+        // unify by name, so those were one component with two meanings waiting to happen (VS0220).
+        // `label` FIRST, and that ordering is load-bearing: builder params bind positionally, so putting
+        // `id` first would silently turn every existing `Button("Save")` into a button with the id
+        // "Save" and no label. The essential field leads; the decoration follows.
+        shared("A button: its label, plus the identifier, style class and handler a renderer resolves.")
+        shape $Button { label: string, id: string, class: string, onclick: string }
 
         shared("A text input field with current value and placeholder.")
         shape $Field { value: string, placeholder: string }

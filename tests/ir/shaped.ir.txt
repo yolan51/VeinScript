@@ -13,9 +13,9 @@ Bundle App
 |    |--- Shape $Heading
 |    |    `--- Field text: string
 |    `--- Shape $Button
+|         |--- Field label: string
 |         |--- Field id: string
 |         |--- Field class: string
-|         |--- Field label: string
 |         `--- Field onclick: string
 |--- Builder Heading  kind=html
 |    |--- Include $Heading
@@ -40,9 +40,9 @@ Bundle App
 |         |--- Bring Heading
 |         |    `--- Arg = Str "Counter"
 |         `--- Bring Button
+|              |--- Arg = Str "+1"
 |              |--- Arg = Str "inc"
 |              |--- Arg = Str "primary"
-|              |--- Arg = Str "+1"
 |              `--- Arg = Str "inc"
 |--- Shard Kernel
 |    `--- Hear @Request as req

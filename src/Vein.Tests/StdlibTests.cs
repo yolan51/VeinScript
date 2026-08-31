@@ -112,7 +112,7 @@ public class StdlibTests
         Assert.True(r.Success);
         var body = new Interp().Render(r.Modules[0], "/").Body;
         Assert.Contains("<h1>VeinScript Vein.Web</h1>", body);
-        Assert.Contains("<button>Click me</button>", body);
+        Assert.Contains(">Click me</button>", body);   // label leads the shape, so a 1-arg call is the label
     }
 
     [Fact]

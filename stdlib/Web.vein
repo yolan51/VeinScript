@@ -97,7 +97,11 @@ bundle Web by Vein {
         // UI.vein's own header describes, with UI owning widget STATE and Vein.Web rendering it. So a
         // button attached for a UI backend and a button rendered to HTML are one identity, not two.
         shared("A clickable button element.")
-        builder Button { *Vein.UI.Widgets.$Button   markup = "<button>" + label + "</button>" }
+        builder Button {
+            *Vein.UI.Widgets.$Button
+            markup = "<button id=\"" + id + "\" class=\"" + class + "\" onclick=\"" + onclick + "\">" +
+                     label + "</button>"
+        }
 
         shared("An image element.")
         builder Image { *Vein.UI.Widgets.$Image, alt: string   markup = "<img src=\"" + source + "\" alt=\"" + alt + "\">" }

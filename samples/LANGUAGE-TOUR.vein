@@ -283,7 +283,7 @@ bundle App {
 //  6. shaped.vein — `$Shape` INCLUDES FLATTEN INTO BUILDER PARAMS
 //  Instead of taking a whole shape VALUE as a param (which forces a shape literal at the call site
 //  and repeats the name), a builder INCLUDES the shape (`$Heading`): its fields become the params
-//  directly. Then `bring Button("inc","primary","+1","inc")` — no literal, no repeated name.
+//  directly. Then `bring Button("+1","inc","primary","inc")` — no literal, no repeated name.
 //  (`bring Button ?` in the Workbench expands `?` into the flattened fields to fill.)
 //  Run:  veinc render samples/shaped.vein /
 // ============================================================================================
@@ -299,7 +299,7 @@ bundle App {
 
         // Element data as shapes:
         shape $Heading { text: string }
-        shape $Button  { id: string, class: string, label: string, onclick: string }
+        shape $Button  { label: string, id: string, class: string, onclick: string }
     }
 
     // Builders INCLUDE the shape ($Heading / $Button) — its fields become the builder's params
@@ -317,7 +317,7 @@ bundle App {
     shard Ui {
         hear @Request as req {
             bring Heading("Counter")
-            bring Button("inc", "primary", "+1", "inc")
+            bring Button("+1", "inc", "primary", "inc")
         }
     }
 

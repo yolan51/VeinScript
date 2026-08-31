@@ -59,7 +59,10 @@ public class UseResolutionTests
             "  shard S { run once { bring Button(\"Go\") } }\n" +
             "  shard L { hear @Html as h { *Vein.Console.Io.print(h.markup) } }\n}");
 
-        Assert.Contains("<button>Go</button>", output);
+        // `$Button` carries id/class/onclick as well as the label, so a one-argument call fills the
+        // label and leaves the rest empty. `label` is FIRST in the shape precisely so that this call
+        // still means what it says — see the ordering note in stdlib/UI.vein.
+        Assert.Contains(">Go</button>", output);
     }
 
     [Fact]
