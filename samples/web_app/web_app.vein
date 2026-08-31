@@ -235,21 +235,14 @@ bundle WebApp by you {
 
     // The trigger has to be a separate event. `bring` QUEUES a fragment event rather than writing
     // anything, and the queue does not drain until every @Request handler has finished — so a view that
-    // answered on @Request would always see an empty page.
+    // answered on @Request would always see an empty page. @Render queues behind the fragments.
     //
-    // But queueing @Render during @Request is not enough either, and this is where the sample used to be
-    // quietly wrong: it worked only because Kernel was written BELOW every page shard, so its @Render
-    // landed behind their fragments. Move a route into shards/ — as /docs now is — and the fragments are
-    // queued after Kernel, so @Render arrives at an empty page and the route silently 404s.
-    //
-    // @Assembled is the fix, and it is one hop rather than one ordering rule. Everything queued during
-    // @Request drains before anything queued during @Assembled, so @Render lands after every fragment no
-    // matter which shard emitted it or what order the shards were declared in.
-    event @Assembled { path: string }
-
+    // Which makes Kernel's POSITION load-bearing: it is written below every page shard, so its @Render is
+    // queued after their fragments. That still holds with /docs living in shards/Reference.vein, because
+    // fragments are merged BEFORE the main file's members — a bundle's closing shard is in its main file,
+    // and it keeps the last word. Move this shard up and the page goes blank.
     shard Kernel {
-        hear @Request as r   { emit @Assembled { path: r.path } }
-        hear @Assembled as a { emit @Render { path: a.path } }
+        hear @Request as r { emit @Render { path: r.path } }
     }
 
     ShardView Page {

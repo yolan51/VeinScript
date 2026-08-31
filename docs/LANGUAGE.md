@@ -70,6 +70,24 @@ bundle Web by studio {
 }
 ```
 
+**A bundle may span files.** It is its main `.vein` file plus every fragment beside it in two folders,
+merged by [BundleLoader](../src/Vein.Compiler/Project/BundleLoader.cs). A fragment carries no `bundle`
+header — the folder declares its kind, which is the same API-vs-behaviour split VS0108 enforces for a
+shard inside a publicator:
+
+```
+web_app/
+    web_app.vein            the main file — the bundle header and its spine
+    publicators/Api.vein    members of one publicator, named after the file (so `shared` needs no wrapper)
+    shards/Route.vein       shard / ShardView / bridge declarations, at bundle level
+```
+
+**Fragments extend; the main file closes.** Member order is the order shards run in, and fragments are
+merged **before** the main file's own members — so a shard declared last in the main file still runs
+last. That is what keeps the assembly idiom working across files: a kernel that closes a phase (§4)
+belongs in the main file, and a fragment cannot displace it. The corollary is the deliberate half: a
+fragment cannot close a phase.
+
 ### 2.1 Author & cross-bundle references (`by`, `app`, `*`)
 
 At scale, bundle names collide between authors, so a bundle may declare an **author/pseudo** with `by`:

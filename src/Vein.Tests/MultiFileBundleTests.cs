@@ -152,6 +152,51 @@ public class MultiFileBundleTests : IDisposable
     }
 
     [Fact]
+    public void A_shard_declared_last_in_the_main_file_still_runs_last()
+    {
+        // The trap this guards, in full: member order is the order shards run in, and the language's one
+        // ordering idiom is "the kernel closes the phase, so declare it last" (samples/site.vein). Move a
+        // route into `shards/` and, with fragments appended, the kernel's @Render was queued BEFORE the
+        // fragment's @Html — so the view assembled an empty page and the route answered nothing. No
+        // diagnostic: the page was simply blank, and the cause was in a file the author never edited.
+        //
+        // Fragments are merged first now, so the main file keeps the last word. Asserting on the RENDERED
+        // page rather than on member order is deliberate — order is the mechanism, an answered request is
+        // the property that actually matters.
+        string main = Bundle("Site",
+            """
+            bundle Site by acme {
+                event @Request { path: string }
+                event @Html { markup: string }
+                event @Render { }
+                event @Response { status: int, body: string }
+
+                shard Kernel { hear @Request as r { emit @Render { } } }
+
+                ShardView Page {
+                    var html: string
+                    hear @Html as f { html += f.markup }
+                    hear @Render as v {
+                        if not (html == "") { emit @Response { status: 200, body: "[" + html + "]" } }
+                    }
+                }
+            }
+            """,
+            ("shards/Route.vein",
+             """
+             shard Route {
+                 hear @Request as r { emit @Html { markup: "from-a-fragment" } }
+             }
+             """));
+
+        var r = CompileFile(main);
+        Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
+
+        var body = new Vein.Compiler.Ir.Interp().Render(r.Modules[0], "/").Body;
+        Assert.Equal("[from-a-fragment]", body);
+    }
+
+    [Fact]
     public void Merged_member_order_is_deterministic()
     {
         string main = Bundle("Kit",

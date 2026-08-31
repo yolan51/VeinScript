@@ -17,6 +17,9 @@ namespace Vein.Compiler.Project;
 //
 // A fragment has no `bundle` header, so parsing one as a compilation unit yields zero bundles and a
 // VS0101 — which is why every consumer that reads a `.vein` file has to come through here.
+//
+// Fragments are merged BEFORE the main file's own members, so a shard declared last in the main file
+// still runs last. See the note at the merge itself for why that direction and not the other.
 public static class BundleLoader
 {
     public const string PublicatorsFolder = "publicators";
@@ -45,8 +48,20 @@ public static class BundleLoader
         extra.AddRange(Fragments(Path.Combine(dir, ShardsFolder), exported: false, editing, diag));
         if (extra.Count == 0) return unit;
 
+        // FRAGMENTS EXTEND; THE MAIN FILE CLOSES. Member order is the order shards run in, and the
+        // language's one documented ordering idiom leans on it — samples/site.vein: "Kernel closes the
+        // request phase (declared last, so @Render is queued after the fragments)". A bundle's closing
+        // shard lives in its main file, because that is where its spine is.
+        //
+        // Appending fragments took that away the moment a route moved into `shards/`: the kernel's
+        // trigger was queued before the fragment's `bring`s, so the view assembled an empty page and the
+        // route 404'd with no diagnostic at all. Prepending keeps "declared last in the main file" meaning
+        // "runs last", which is what every author already believes.
+        //
+        // A fragment therefore cannot close a phase. That is the deliberate half of the trade: the
+        // extension point is for adding behaviour, and the bundle keeps the last word.
         var host = unit.Bundles[0];
-        var merged = host with { Members = host.Members.Concat(extra).ToList() };
+        var merged = host with { Members = extra.Concat(host.Members).ToList() };
         CheckDuplicates(merged, diag);
 
         var bundles = unit.Bundles.ToList();

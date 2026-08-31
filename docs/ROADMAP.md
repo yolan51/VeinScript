@@ -84,22 +84,22 @@ Ordered by how much each unblocks, not by milestone number.
 4. **TLS for `Vein.Net.Peer`** — frames are encrypted under a pre-shared key, so there is no forward
    secrecy and no certificate identity. The frames would ride inside an `SslStream` without any `.vein`
    program changing.
-5. **A fragment's shards run last, and nothing says so** — `BundleLoader` merges `shards/` *after* the
-   main file's members, and member order is the order shards run in. So a route moved into a fragment
-   queues its `bring` fragments behind a trigger emitted from the main file, and the view assembles an
-   empty page: the route 404s with no diagnostic. Hit for real by `samples/web_app`, whose `/docs` lives
-   in `shards/Reference.vein`; worked around there by making the trigger a second hop (`@Assembled` →
-   `@Render`) instead of relying on where `Kernel` was written. The workaround is right, but the trap is
-   silent and every multi-file bundle that assembles fragments will meet it.
-6. **`use X as Y`** — the alias parses and nothing consumes it, because `*Path.member` is the only
+5. **`use X as Y`** — the alias parses and nothing consumes it, because `*Path.member` is the only
    qualified form and `Y.@Print` does not. Needs a syntax decision before it can mean anything.
-7. **Mark declarations** — `#Mark` as a validated shared symbol instead of a naming convention.
-8. **`SecsRuntime.Probe`** — the repo's one live `TODO`. It was the net8↔net9 linkage proof; M5 supersedes
+6. **Mark declarations** — `#Mark` as a validated shared symbol instead of a naming convention.
+7. **`SecsRuntime.Probe`** — the repo's one live `TODO`. It was the net8↔net9 linkage proof; M5 supersedes
    it, so it should either grow into the direct-materialisation path or be deleted.
 
 **Recently closed:** `use` resolution — a bare name now falls back to the bundles a file `use`s
 (builders, shapes, `fn`/`SF`), with local declarations winning and cross-bundle collisions reported as
 VS0216. Qualified `bring` turned out to have been done for some time; the entry was stale.
+
+**Recently closed:** a fragment's shards ran *after* the main file's, which silently broke the one
+ordering idiom the language documents — "the kernel closes the phase, so declare it last". Move a route
+into `shards/` and the kernel's trigger was queued before the fragment's fragments, so the view assembled
+an empty page and the route answered nothing, with no diagnostic and the cause in a file the author never
+edited. `BundleLoader` now merges fragments *before* the main file's members: fragments extend, the main
+file closes. A fragment consequently cannot close a phase, which is the deliberate half of the trade.
 
 **Recently closed:** a bare `$Shape` include inside an imported builder resolved against the *consuming*
 bundle, so it found nothing and the builder's params expanded to zero. The diagnostics pointed away from
