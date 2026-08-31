@@ -23,6 +23,13 @@
 
 bundle EntitiesMarks by you {
 
+    // Declared, so this bundle opts in to having its mark names checked: a `#Enmey` anywhere below
+    // would now be VS0218 rather than a new mark that silently matches nothing. A bundle that declares
+    // none is unchecked, which is why every other sample here is untouched.
+    mark #Enemy
+    mark #Awake
+    mark #Spent
+
     shape $Enemy { hp: int folds sum }
 
     shard Seed {

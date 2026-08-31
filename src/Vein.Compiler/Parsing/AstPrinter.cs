@@ -30,6 +30,7 @@ public static class AstPrinter
                 Line(sb, ind, StartText(st));
                 break;
             case UseDecl u: Line(sb, ind, $"use {u.Name}{(u.Alias is null ? "" : " as " + u.Alias)}"); break;
+            case MarkDecl mk: Line(sb, ind, tag($"mark #{mk.Name}") + Doc(d)); break;
             case ShapeDecl s:
                 Line(sb, ind, tag($"shape {s.Name}") + Doc(d));
                 foreach (var m in s.Members)

@@ -60,6 +60,14 @@ public sealed record StartDecl(string Event, IReadOnlyList<FieldInit> Fields, bo
 public sealed record PublicatorDecl(string Name, IReadOnlyList<Decl> Members, SourceSpan Span) : Decl(Span);
 
 public sealed record ShapeDecl(string Name, IReadOnlyList<Node> Members, SourceSpan Span) : Decl(Span);
+
+/// `mark #Enemy` at bundle or publicator level — a mark declared rather than merely typed.
+///
+/// A mark has no fields, so the declaration carries only the name. What it buys is that the name becomes
+/// checkable: once a bundle declares any mark, an undeclared one used there is reported (VS0218) instead
+/// of silently being a new mark that matches nothing. `shared("…")` above it exports it, the same as any
+/// other publicator member.
+public sealed record MarkDecl(string Name, SourceSpan Span) : Decl(Span);
 public sealed record TypeDecl(string Name, IReadOnlyList<FieldDecl> Fields, SourceSpan Span) : Decl(Span);
 public sealed record EnumDecl(string Name, IReadOnlyList<string> Cases, SourceSpan Span) : Decl(Span);
 

@@ -222,6 +222,28 @@ emit *Vein.Console.Io.@Send    { to: #Server,   text: i.text }
 is a reference rather than text, the compiler can check it: an address no `@Console` ever spawns is
 reported as **VS0212**, instead of silently opening a pipe nobody is listening on.
 
+**Declaring a mark.** `mark #Enemy`, at bundle or publicator level, makes the name a declaration rather
+than whatever you happened to type:
+
+```
+bundle Combat by you {
+    mark #Enemy
+    mark #Dead
+
+    shard Drain { settled { target $Health #Enmey as self { … } } }   // VS0218
+}
+```
+
+Declaring is **opt-in per bundle**: a bundle that declares at least one mark has its mark names checked,
+and one that declares none behaves exactly as before. That is the same additive rule `use` follows — a
+new check must not change what an existing program means. The report is a **warning (VS0218)** naming
+what *is* known, the shape [VS0212](RUNTIME.md) already uses for console addresses.
+
+A declared mark exists whether or not the bundle uses it, so it can be `shared` and queried by name from
+elsewhere. Every place a `#Mark` can appear counts as a use: `mark`/`unmark`, a `target` tag, a `match`
+arm, an `audience` barrier, the marks a shard carries, and a mark in value position such as a console
+address.
+
 ### 3.7 `event` — a message identities send
 
 ```

@@ -660,4 +660,61 @@ public class ServiceTests
             _ => Array.Empty<string>()
         };
     }
+
+    // ---- mark declarations (VS0218) ------------------------------------------------------------
+
+    [Fact]
+    public void A_bundle_that_declares_marks_reports_one_it_did_not_declare()
+    {
+        // Opt-in: declaring any mark asks for this bundle's mark names to be checked. The warning names
+        // what IS known — the shape VS0212 uses for console addresses — because a misspelt mark is
+        // otherwise indistinguishable from a query that legitimately matches nothing.
+        var r = Compile(
+            "bundle T by me {\n" +
+            "  mark #Enemy\n  mark #Dead\n" +
+            "  shape $H { hp: int folds sum }\n" +
+            "  shard S { settled { target $H #Enmey as self { mark self #Dead } } } }");
+
+        var hit = Assert.Single(r.Diagnostics.Where(d => d.Code == "VS0218"));
+        Assert.Contains("#Enmey", hit.Message);
+        Assert.Contains("known: #Dead #Enemy", hit.Message);   // sorted, so the message is stable
+    }
+
+    [Fact]
+    public void A_bundle_that_declares_no_marks_is_not_checked_at_all()
+    {
+        // The additive guarantee, and the whole reason this is opt-in: every sample and stdlib file uses
+        // marks without declaring any, and none may start warning. The same rule `use` was built on.
+        var r = Compile(
+            "bundle T by me {\n" +
+            "  shape $H { hp: int folds sum }\n" +
+            "  shard S { settled { target $H #Anything as self { mark self #Whatever } } } }");
+
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "VS0218");
+    }
+
+    [Fact]
+    public void A_declared_mark_exists_even_when_nothing_uses_it()
+    {
+        // Declaring asserts the name is real; using it is a separate question. The tag is emitted either
+        // way, so the engine can query `Marks.X` for identities another bundle marked.
+        var r = Compile("bundle T by me {\n  mark #Reserved\n  shape $H { hp: int }\n}");
+
+        Assert.True(r.Success);
+        Assert.Contains(r.Modules[0].Types, t => t.Name == "Reserved" && t.Kind == IrTypeKind.Tag);
+    }
+
+    [Fact]
+    public void A_mark_used_only_by_a_query_still_becomes_a_tag()
+    {
+        // `target $H #Ghost` with nothing ever marking #Ghost is legitimate — the query is simply always
+        // empty. It used to emit a reference to `Marks.Ghost` with no `Marks` class to hold it, so the
+        // generated C# did not compile. A query is a USE like any other.
+        var r = Compile(
+            "bundle T by me {\n" +
+            "  shape $H { hp: int folds sum }\n" +
+            "  shard S { each tick { target $H #Ghost as self { self.H.hp -= 1 } } } }");
+
+        Assert.Contains(r.Modules[0].Types, t => t.Name == "Ghost" && t.Kind == IrTypeKind.Tag);
+    }
 }

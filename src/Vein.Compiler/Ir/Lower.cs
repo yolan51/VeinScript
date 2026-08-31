@@ -62,6 +62,24 @@ public sealed class Lower
     /// call resolves nowhere" — nothing tracked that before, because nothing needed to.
     private readonly HashSet<string> _localFuncs = new(StringComparer.Ordinal);
 
+    /// Marks this bundle DECLARES (`mark #Enemy`), as opposed to `_tags`, which is every mark it USES.
+    ///
+    /// Empty means the bundle never opted in, and nothing is checked — the additive rule `use` was built
+    /// on. Non-empty means the author asked for the names to be checked, so a used-but-undeclared mark is
+    /// reported (VS0218).
+    private readonly SortedSet<string> _declaredMarks = new(StringComparer.Ordinal);
+
+    /// Where each mark was FIRST used, so VS0218 can point at the source rather than at the bundle.
+    private readonly Dictionary<string, SourceSpan> _markUses = new(StringComparer.Ordinal);
+
+    /// Record a mark use: it becomes a Tag type, and it is a candidate for the declared-mark check.
+    /// Every place a `#Mark` can appear routes through here, which is what keeps the two in step.
+    private void UseMark(string name, SourceSpan span)
+    {
+        _tags.Add(name);
+        if (!_markUses.ContainsKey(name)) _markUses[name] = span;
+    }
+
     public IrModule LowerBundle(BundleDecl bundle)
     {
         var types = new List<IrType>();
@@ -80,6 +98,7 @@ public sealed class Lower
                     case BuilderDecl bd: _builders[bd.Name] = bd; break;
                     case ShapeDecl s: _shapeFields[s.Name] = s.Members.OfType<FieldDecl>().ToList(); break;
                     case FuncDecl fd: _localFuncs.Add(fd.Name); break;
+                    case MarkDecl md: _declaredMarks.Add(md.Name); break;
                     case UseDecl ud: if (!_used.Contains(ud.Name, StringComparer.Ordinal)) _used.Add(ud.Name); break;
                     case PublicatorDecl pub: Collect(pub.Members); break;
                 }
@@ -122,6 +141,13 @@ public sealed class Lower
             startDecl.Fields.Select(f => (f.Name, LowerExpr(f.Value))).ToList(),
             startDecl.FillRest);
 
+        // A DECLARED mark exists whether or not this bundle uses it: the tag type is emitted so the engine
+        // can query `Marks.X` for identities another bundle marked, and so `veinc symbols` has something
+        // to list. Declaring is the assertion that the name is real; using it is a separate question.
+        foreach (var declared in _declaredMarks) _tags.Add(declared);
+
+        CheckDeclaredMarks();
+
         // Marks discovered while lowering become Tag types, deduped BY KIND AS WELL AS NAME.
         //
         // `$Enemy` and `#Enemy` are different things — different keyword, different sigil — and a program
@@ -161,6 +187,23 @@ public sealed class Lower
     /// runtime drops it silently (ConsoleBus.Send's `false` is discarded). Catch it here instead.
     /// A WARNING, not an error: a console may legitimately be spawned by another bundle or at runtime, and
     /// this lowers one bundle at a time so a cross-bundle spawn is invisible to it.
+    /// A bundle that DECLARES marks has asked for its mark names to be checked; one that declares none is
+    /// untouched. That is the same additive rule `use` was built on — a new check must not change what an
+    /// existing program means, and every sample in the repo uses marks without declaring any.
+    ///
+    /// A warning, not an error, and it names what IS known — the shape VS0212 already uses for console
+    /// addresses, which is the narrower version of this same check.
+    private void CheckDeclaredMarks()
+    {
+        if (_declaredMarks.Count == 0) return;
+
+        string known = string.Join(" ", _declaredMarks.Select(m => "#" + m));
+        foreach (var (name, span) in _markUses)
+            if (!_declaredMarks.Contains(name))
+                _diag.Warning("VS0218",
+                    $"Mark #{name} is not declared in this bundle. known: {known}", span);
+    }
+
     private void CheckConsoleAddresses(BundleDecl bundle)
     {
         var graph = Tooling.ConsoleGraph.Analyze(bundle);
@@ -370,6 +413,8 @@ public sealed class Lower
         var state = new List<IrField>();
         var methods = new List<IrFunction>();
         var attrs = new List<IrAttr> { IrAttr.Of(kind) };
+        // A mark a First-Class object CARRIES is a use — `shard Combat $Session #Trusted` names #Trusted.
+        foreach (var cm in carriedMarks ?? (IReadOnlyList<string>)Array.Empty<string>()) UseMark(cm, default);
         if ((carriedShapes?.Count ?? 0) > 0 || (carriedMarks?.Count ?? 0) > 0)
             attrs.Add(IrAttr.Of("carries",
                 carriedShapes ?? (IReadOnlyList<string>)Array.Empty<string>(),
@@ -431,6 +476,9 @@ public sealed class Lower
     private IrFunction LowerHear(HearBlock hb)
     {
         var attrs = new List<IrAttr> { IrAttr.Of("hear", hb.Event) };
+        // An `audience #Mark` barrier names a mark too, and it is where a typo costs most: a misspelt
+        // audience admits nobody, which reads exactly like a barrier doing its job.
+        foreach (var am in hb.AudienceMarks) UseMark(am, hb.Span);
         if (hb.AudienceShapes.Count > 0 || hb.AudienceMarks.Count > 0)
             attrs.Add(IrAttr.Of("audience", hb.AudienceShapes, hb.AudienceMarks));
         return new IrFunction(
@@ -471,6 +519,11 @@ public sealed class Lower
             }
             case QueryStmt q:
             {
+                // A mark a query MATCHES on is a use like any other. Recording it was not merely tidy
+                // once marks became types: `target $H #Ghost` with nothing ever marking #Ghost emitted a
+                // reference to `Marks.Ghost` and no `Marks` class to hold it, so the generated C# did not
+                // compile. Querying a mark nothing sets is legitimate — the query is simply always empty.
+                foreach (var tag in q.Tags) UseMark(tag, q.Span);
                 using var _ = BindTarget(q.Bind);
                 return new IrLoop(IrLoopKind.Target, null, q.Bind, null, new IrQuery(q.Components, q.Tags, q.Bind), null, LowerBlock(q.Body));
             }
@@ -478,7 +531,7 @@ public sealed class Lower
                 return new IrLoop(IrLoopKind.Repeat, null, r.Var, null, null, LowerExpr(r.Count), LowerBlock(r.Body));
             case MatchStmt m:
                 return new IrMatch(LowerExpr(m.Subject),
-                    m.Arms.Select(a => { if (a.IsMark) _tags.Add(a.CaseName); return new IrMatchArm(a.CaseName, LowerBlock(a.Body)); }).ToList(),
+                    m.Arms.Select(a => { if (a.IsMark) UseMark(a.CaseName, a.Span); return new IrMatchArm(a.CaseName, LowerBlock(a.Body)); }).ToList(),
                     m.Else is null ? null : LowerBlock(m.Else));
             case ReturnStmt r: return new IrReturn(r.Value is null ? null : LowerExpr(r.Value));
             case BreakStmt: return new IrBreak();
@@ -489,7 +542,7 @@ public sealed class Lower
             // IOP surface sugar → runtime calls / if
             case MarkStmt mk:
             {
-                _tags.Add(mk.Mark);
+                UseMark(mk.Mark, mk.Span);
                 string fn = mk.Remove ? "RemoveTag" : "AddTag";
                 return new IrExprStmt(new IrRuntimeCall(fn,
                     new IrExpr[] { LowerExpr(mk.Target), new IrTypeNameExpr(mk.Mark) }));
@@ -620,7 +673,7 @@ public sealed class Lower
                 case MarkMember mm:
                     foreach (var tag in mm.Marks)
                     {
-                        _tags.Add(tag);
+                        UseMark(tag, mm.Span);
                         stmts.Add(new IrExprStmt(new IrRuntimeCall("AddTag",
                             new IrExpr[] { new IrLocalRef(ent), new IrTypeNameExpr(tag) })));
                     }
@@ -784,7 +837,7 @@ public sealed class Lower
             case StarRefExpr star: return new IrScopeRef(string.Join(".", star.Path), SigilChar(star.Sigil) + star.Member);
             case ShapeRefExpr sr: return new IrTypeNameExpr(sr.Name);
             case EventRefExpr er: return new IrTypeNameExpr(er.Name);
-            case MarkRefExpr mr: _tags.Add(mr.Name); return new IrTypeNameExpr(mr.Name);
+            case MarkRefExpr mr: UseMark(mr.Name, mr.Span); return new IrTypeNameExpr(mr.Name);
             case MemberExpr me: return new IrFieldAccess(LowerExpr(me.Receiver), me.Name);
             case IndexExpr ix: return new IrIndex(LowerExpr(ix.Receiver), LowerExpr(ix.Index));
             // `*Author.Bundle.Publicator.name(…)` — a cross-bundle call. The callee resolves to a shared

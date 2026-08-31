@@ -176,6 +176,7 @@ public sealed class Parser
             case TokenKind.KwUse: return ParseUse();
             case TokenKind.KwPublicator: return ParsePublicator();
             case TokenKind.KwShape: return ParseShape();
+            case TokenKind.KwMark: return ParseMarkDecl();
             case TokenKind.KwType: return ParseType();
             case TokenKind.KwEvent: return ParseEvent();
             case TokenKind.KwShard: return ParseShard();
@@ -209,6 +210,17 @@ public sealed class Parser
         var members = ParseDeclList(exported: true, until: TokenKind.RBrace);
         Expect(TokenKind.RBrace, "'}'");
         return new PublicatorDecl(name, members, s);
+    }
+
+    /// `mark #Enemy` — a mark declared rather than merely typed. No body: a mark has no fields.
+    ///
+    /// Unambiguous with the `mark e #T` STATEMENT because statements never appear at declaration level;
+    /// `mark` there was a VS0102 until now.
+    private MarkDecl ParseMarkDecl()
+    {
+        var s = Here; Advance();
+        string name = Expect(TokenKind.MarkRef, "#MarkName").Text;
+        return new MarkDecl(name, s);
     }
 
     private ShapeDecl ParseShape()

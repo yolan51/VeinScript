@@ -51,6 +51,7 @@ dialect. There is no general `class`.
 | *(contextual)* `run once`, `every N` | `run once { … }` · `every 1.0 { … }` | shard schedules: once at start; every N seconds. `run`/`once`/`every` are contextual words, not reserved | — |
 | `folds` | (in `shape`) `f: T folds sum` | concurrent-write reducer | `@fold(f, sum)` |
 | `mark` `unmark` | `mark self #T` | add / remove a tag | `AddTag` / `RemoveTag` |
+| `mark` (declaration) | `mark #Enemy` at bundle/publicator level | DECLARES the mark, so the name is checked rather than merely typed. Opt-in per bundle: declare one and an undeclared mark used there is **VS0218**; declare none and nothing changes. [LANGUAGE.md §3.6](LANGUAGE.md) | an `IrTypeKind.Tag`, emitted used or not |
 | `mark` (in a `builder`) | `mark #T` | no target — the marks the identity this builder BUILDS will wear. Its presence is what makes the builder an **identity template**: `bring Unit(10, 6)` spawns, attaches each included `$Shape`, then marks. [LANGUAGE.md §3.9](LANGUAGE.md) | `spawn` + `AddComponent`… + `AddTag`… |
 | `attach` `unattach` | `attach $C to self { … }` | add / remove a component | `AddComponent` / `RemoveComponent` |
 | `to` `from` | (with attach/unattach) | component target / source | operands |

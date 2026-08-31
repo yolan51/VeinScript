@@ -135,13 +135,11 @@ Ordered by how much each unblocks, not by milestone number.
    program changing.
 3. **`use X as Y`** — the alias parses and nothing consumes it, because `*Path.member` is the only
    qualified form and `Y.@Print` does not. Needs a syntax decision before it can mean anything.
-4. **Mark declarations** — `#Mark` as a validated shared symbol instead of a naming convention.
-   The *backend* half is done: a mark compiles to a SECS identity tag (`Marks.Enemy : IIdentityTag`),
-   so it is a type rather than a string, and the engine can ask `GetEntitiesByIdentity<Marks.Enemy>()`
-   for it. What is left is the language side — a mark is still whatever you happened to type, so a
-   misspelling in the *source* is a new mark rather than an error, and no mark crosses a bundle
-   boundary as a `shared` symbol. Declaring them would close that, and the tag types give the
-   declaration something real to compile to.
+4. **Mark declarations, cross-bundle half** — a mark can now be DECLARED (`mark #Enemy`), and a bundle
+   that declares any has its mark names checked (VS0218, opt-in, additive). What is left is the
+   boundary: `shared` on a mark does not yet export it, `veinc symbols` never lists one, and
+   `*Author.Bundle.Pub.#Mark` does not resolve — `BundleIndex` has Shapes/Builders/Functions and no
+   Marks, and `SymbolKind` has no `Mark`. Mechanical, mirroring what Shapes already does end to end.
 5. **`SecsRuntime.Probe`** — the repo's one live `TODO`. It was the net8↔net9 linkage proof; M5 supersedes
    it, so it should either grow into the direct-materialisation path or be deleted.
 
@@ -161,6 +159,7 @@ closed it. `git log --grep` on the phrase finds the full account.
 | The speed number | `tools/check-perf.sh`. The ≈10× baseline holds; measuring it *wrong* is easy in both directions (see M5 above). |
 | Fold commit off the `Secs` path | Four locked lookups per entity per frame became two, 175 → 109 ns/activation — and the tracker `ConcurrentBag` stopped growing every frame, since nothing drains it and no VeinScript program can subscribe to it. |
 | Marks are SECS identity tags | `mark e #Enemy` compiles to `World.MarkAs<Marks.Enemy>(e)`, not a string — type-checked, and visible to the engine as `GetEntitiesByIdentity<Marks.Enemy>()`. Tags nest in a `Marks` class so a shape and a mark may share a name; that case exposed a latent bug, since `Lower` deduped marks by name alone and a shape swallowed the mark. |
+| Mark declarations (in-bundle) | `mark #Enemy` declares a mark, and declaring any in a bundle opts it into checking — VS0218 names an undeclared one and lists what is known. Opt-in, so every existing file is untouched. Adding it found that a mark used ONLY by a `target` query never became a Tag, so the emitted C# referenced a `Marks.X` that did not exist. |
 
 ## Later
 
