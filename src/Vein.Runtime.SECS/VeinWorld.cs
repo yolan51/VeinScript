@@ -180,11 +180,25 @@ public sealed class VeinWorld
                 list.Add((snap, cur));
             }
 
+            // Straight to the STORE, not through `Secs`, and this is the hot path — it runs once per
+            // entity per component per frame, for the life of the program.
+            //
+            // `Secs.Has` + `Secs.Get` + `Secs.Add` is four locked lookups where `TryGet` + `Add` is two:
+            // each `Secs` call takes a ConcurrentDictionary lookup by Type, a ReaderWriterLockSlim and a
+            // Dictionary<int,int>, and `Secs.Add` repeats the `Has` internally to decide added-vs-changed.
+            //
+            // Skipping `Secs.Add` also skips the tracker event it reports. That queue is a ConcurrentBag
+            // drained only by `Secs.Reset()` or the SECS `World` tick, and VeinWorld runs neither — so
+            // every fold write grew it, for the whole run. Nothing could ever read it: component-change
+            // callbacks are a SECS feature and VeinScript has no syntax that subscribes to one.
+            //
+            // Attach/Detach deliberately stay on the tracked `Secs` path. They are structural, rare, and
+            // outside the frame loop, and keeping them there leaves an engine-side listener working.
             foreach (var (entity, list) in _byEntity)
             {
-                if (list.Count > 0 && world._secs.Has<T>(entity))
+                if (list.Count > 0 && world._secs.Store.TryGet<T>(entity, out var committed))
                     // Static abstract dispatch: no boxing, no virtual call through an instance.
-                    world._secs.Add(entity, T.Fold(world._secs.Get<T>(entity), list));
+                    world._secs.Store.Add(entity, T.Fold(committed!, list));
                 list.Clear();
             }
             _items.Clear();

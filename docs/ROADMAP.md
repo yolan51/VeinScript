@@ -56,7 +56,8 @@ number that matters most — a backend that got slower would have gone unnoticed
 | | per activation | ratio |
 |---|---|---|
 | recorded baseline (1000 entities × 2 systems) | 2.30 µs → 0.23 µs | ≈10× |
-| `check-perf.sh`, same shape, this machine | ~2.3 µs → ~0.17–0.26 µs | **10–18×** |
+| `check-perf.sh`, same shape, this machine | ~2.3 µs → ~0.17–0.26 µs | 10–18× |
+| …after the commit path stopped going through `Secs` | ~2.3 µs → **~0.10–0.16 µs** | **14–25×** |
 
 The baseline holds. Three things the harness has to get right, and the first two are how a speedup number
 goes wrong in the flattering direction while the third is how it goes wrong in the other:
@@ -71,7 +72,7 @@ goes wrong in the flattering direction while the third is how it goes wrong in t
   reports **6.6×** where the steady state is 10–18×. That is exactly the mistake the first version of this
   harness made, and it is why `SHORT` is 1000 rather than a token warm-up.
 
-The interpreter side is stable at ~2.3 µs run to run; the backend is the noisy one (0.17–0.26 µs), which
+The interpreter side is stable at ~2.3 µs run to run; the backend is the noisy one (0.10–0.16 µs), which
 is why the pass threshold is loose rather than a tight bound on a number that moves.
 
 Still not the ~100× a compiled ECS should reach. The remaining cost is SECS's per-access
@@ -103,29 +104,31 @@ None of this was on the original map; all of it is on the interpreter.
 
 Ordered by how much each unblocks, not by milestone number.
 
-1. **Backend headroom** — ~0.2 µs/activation against the ~0.02 µs a packed ECS should reach.
+1. **Backend headroom** — ~0.11 µs/activation against the ~0.02 µs a packed ECS should reach.
    `tools/check-perf.sh` measures the before, so any after is comparable rather than asserted, and
    **entity count is the axis to measure on**: past warm-up, 1k → 2k entities costs the backend
    155 → 221 ns, 43% dearer per activation for twice the work. The interpreter degrades on the same
    axis, so it is memory pressure rather than a SECS artifact — and it is exactly what packed storage
    would attack.
 
-   What one component access costs today, read off `ComponentBuckets`: a `ConcurrentDictionary` lookup
-   keyed by `Type`, a cast, a `ReaderWriterLockSlim` acquire/release, then a `Dictionary<int,int>`
-   entity→index lookup, then the array read. Per activation the emitted loop pays that once for `Get`;
-   the fold commit in `VeinWorld.Bucket.Commit` then pays it **three more times per entity per frame** —
-   `Has`, `Get`, `Add` — where `TryGet` + `Add` would do, and `Add` takes the write lock and reports a
-   tracker event on top.
+   What one component access costs, read off `ComponentBuckets`: a `ConcurrentDictionary` lookup keyed
+   by `Type`, a cast, a `ReaderWriterLockSlim` acquire/release, then a `Dictionary<int,int>` entity→index
+   lookup, then the array read.
 
-   Two things to fix before reaching for packed storage, both inside `VeinWorld.cs` (Vein's own file,
-   not the vendored ECS, so the blast radius is one project):
+   **Done — the fold commit no longer goes through `Secs`.** It was `Has` + `Get` + `Add`, four locked
+   lookups per entity per component per frame (`Secs.Add` repeats the `Has` internally to decide
+   added-vs-changed). Going straight to the public `Secs.Store` makes it `TryGet` + `Add`, two. Measured
+   over a wide window, best of four: **175 → 109 ns/activation**, ranges not overlapping. It also stopped
+   the tracker `ConcurrentBag` growing every frame — only `Secs.Reset()` and the SECS `World` tick drain
+   it and `VeinWorld` runs neither, and no VeinScript program can subscribe to a component-change
+   callback anyway. `attach`/`unattach` stay on the tracked path: structural, rare, outside the frame
+   loop, and leaving them there keeps an engine-side listener working.
 
-   - `Commit` calls `Has` then `Get`; `_secs.TryGet` does both in one locked lookup.
-   - **Nothing ever drains the tracker queue.** `Secs.Add` appends to a `ConcurrentBag` per write, and
-     only `Secs.Reset()` and the SECS `World` tick clear it — `VeinWorld` runs its own loop and calls
-     neither, so the bag grows for the life of the process. A leak, though the timings say it is not
-     what is costing throughput. A VeinScript program has no component-change callbacks at all, so the
-     bookkeeping is pure waste here regardless.
+   **Left.** The remaining ~110 ns is the locked lookup itself, twice per activation (`Get` in the loop,
+   `TryGet` at commit) plus a `Dictionary<Type,…>` probe per `Contribute`. Removing it means packed
+   storage — the adapter owning arrays indexed by a dense slot, so a `target` walks memory in order
+   instead of hashing an entity id per access. That is the change worth measuring across entity counts,
+   because it is the one that should flatten the 155 → 221 ns curve rather than just lower it.
 2. **TLS for `Vein.Net.Peer`** — frames are encrypted under a pre-shared key, so there is no forward
    secrecy and no certificate identity. The frames would ride inside an `SslStream` without any `.vein`
    program changing.
@@ -149,6 +152,7 @@ closed it. `git log --grep` on the phrase finds the full account.
 | Backend coverage | Multi-component `target`, `unattach`, seeded `random`. Two were not gaps but disagreements — the multi-component emit did not compile, and `random` emitted `0.0`, making `chance 30%` mean *always*. |
 | Net in a linked app | A capability bundle binds the socket for the whole app (`samples/app_net`). The spoke's `audience #Hub` admits the reply, which only a frame signed as `#Hub` could do — one `_self` per runtime, as believed. |
 | The speed number | `tools/check-perf.sh`. The ≈10× baseline holds; measuring it *wrong* is easy in both directions (see M5 above). |
+| Fold commit off the `Secs` path | Four locked lookups per entity per frame became two, 175 → 109 ns/activation — and the tracker `ConcurrentBag` stopped growing every frame, since nothing drains it and no VeinScript program can subscribe to it. |
 
 ## Later
 

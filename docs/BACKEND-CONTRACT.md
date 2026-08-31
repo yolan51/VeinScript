@@ -40,7 +40,10 @@ entities × 2 systems per frame, marginal cost with startup subtracted.
 | C# backend on SECS | ~0.23 µs | 0.74 s |
 
 **≈10×** as first recorded, and the harness agrees: ~2.3 µs → ~0.17–0.26 µs on another machine, so
-**10–18×**. Three rules the measurement depends on:
+10–18×. Since then the fold commit stopped routing through `Secs` (see below), taking the backend to
+**~0.10–0.16 µs — 14–25×**.
+
+Three rules the measurement depends on:
 
 - **Time both sides in Release.** A Debug interpreter against a Release backend inflates the ratio ~1.4×;
   that number is measuring the build configuration.
@@ -51,10 +54,12 @@ entities × 2 systems per frame, marginal cost with startup subtracted.
   frame 100 charges the backend for tiering it has already finished paying and reports 6.6×. This is the
   one that bites in the *un*flattering direction, and it is why `SHORT` is 1000.
 
-Per-activation cost also **degrades with entity count** — 1k → 2k takes the backend 302 → 475 ns and the
-interpreter 2158 → 3624 ns. Both runtimes, so it is memory pressure rather than a SECS artifact, and it
-is the axis packed storage would attack. The first cut of the adapter was ≈6×; three changes doubled it, none of which altered what the
-emitter *means* — equivalence stayed byte-identical throughout, which is the point of pinning it first:
+Per-activation cost also **degrades with entity count** — past warm-up, 1k → 2k takes the backend
+155 → 221 ns, 43% dearer per activation for twice the work. The interpreter degrades on the same axis, so
+it is memory pressure rather than a SECS artifact, and it is what packed storage would attack.
+
+The first cut of the adapter was ≈6×. The changes below lifted it, and none altered what the emitter
+*means* — equivalence stayed byte-identical throughout, which is the point of pinning it first:
 
 - **components are `struct`s.** An activation needs a snapshot and a working value; as classes those were
   two heap allocations, so a frame allocated 2 × entities × systems objects and the GC dominated. As
@@ -63,14 +68,24 @@ emitter *means* — equivalence stayed byte-identical throughout, which is the p
 - **`Query` is cached** per (component, marks), invalidated by a structural version counter. Structural
   changes are deferred to the commit point, so a query cannot change underneath a phase — which is what
   makes the cache correct, not merely fast.
+- **the fold commit writes to `Secs.Store` directly**, not through `Secs`. It was `Has` + `Get` + `Add`
+  — four locked lookups per entity per component per frame, because `Secs.Add` repeats the `Has`
+  internally to decide added-vs-changed. `TryGet` + `Add` on the store is two. Measured 175 → 109
+  ns/activation. It also stopped the tracker `ConcurrentBag` growing on every fold write: only
+  `Secs.Reset()` and the SECS `World` tick drain it, `VeinWorld` runs neither, and no VeinScript program
+  can subscribe to a component-change callback. `attach`/`unattach` stay on the tracked `Secs` path —
+  structural, rare, outside the frame loop, and an engine-side listener still sees them.
 
-**Why not 100×.** The remaining cost is inside SECS, not the adapter. Every `Get<T>`/`Has<T>` takes a
-`ReaderWriterLockSlim` read lock plus a `ConcurrentDictionary` type lookup plus an entity→index
-`Dictionary` lookup ([ComponentBuckets.TryGet](../src/ShardECS.SECS/Components/ComponentBuckets.cs)) —
-about four lock round-trips per entity per frame, which is roughly half of what is left. Reaching
-nanoseconds means iterating the packed array directly instead of random-access by entity id, and that
-needs either bulk/unlocked access in SECS (vendored code) or the adapter owning storage and demoting
-SECS to a backing store. Both are real changes with real trade-offs, so the number to quote is **10×**.
+**Why not 100×.** What is left is the locked lookup itself, now paid twice per activation instead of
+four times — `Get` in the loop and `TryGet` at commit. Each takes a `ReaderWriterLockSlim` read lock, a
+`ConcurrentDictionary` lookup by `Type`, and an entity→index `Dictionary` lookup
+([ComponentBuckets.TryGet](../src/ShardECS.SECS/Components/ComponentBuckets.cs)); `Contribute` adds a
+`Dictionary<Type,…>` probe of its own.
+
+Reaching nanoseconds means iterating the packed array directly instead of random-access by entity id,
+which needs either bulk/unlocked access in SECS (vendored code) or the adapter owning storage and
+demoting SECS to a backing store. Both are real changes with real trade-offs. Quote **≥10×** — the
+figure a reader can reproduce with `check-perf.sh` rather than the best run on the quietest machine.
 
 ## 1. The `IBackend` contract
 
