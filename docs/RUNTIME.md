@@ -552,7 +552,7 @@ shard, entity or event in scope for anything else to evaluate against (`VS0335`)
 | HTTP client (`Vein.Net.Http` `@Fetch`/`@Fetched`/`@Failed`) | **runs** (§4.3.3) |
 | HTTP server — real `@Request`→`@Response` over a socket | **runs** (`veinc serve <file> --port N`) |
 | transport encryption (TLS) for `Vein.Net.Peer` | **follow-on** — frames are authenticated, not secret |
-| C# backend → SECS (identity half: shapes/marks/`target`/folds/phases) | **runs** — ≈10× the interpreter, verified byte-equal by `tools/check-backend.sh` |
+| C# backend → SECS (identity half: shapes/marks/`target`/folds/phases) | **runs** — ≈10× the interpreter, verified byte-equal by `tools/check-backend.sh`, speed by `tools/check-perf.sh` |
 | app link + run — principal boots, capabilities join one runtime | **runs** (`veinc run samples/app_capabilities/shop.app.vein`) |
 
 ## 7. Open questions

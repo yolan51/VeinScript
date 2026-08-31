@@ -35,9 +35,9 @@ Two consequences worth stating plainly:
 |----|------|-------|-----------|
 | M1 | Lexer | ✅ | `veinc tokens <f>` |
 | M2 | Parser / AST | ✅ | `veinc ast <f>`, `veinc ir <f>`; 8 golden IR trees |
-| M3 | Desugar + Semantics | **route not taken** — no `Semantics/`, no `veinc check`; diagnostics live in `Lower`/`Tooling`/`Project` | ~340 tests |
+| M3 | Desugar + Semantics | **route not taken** — no `Semantics/`, no `veinc check`; diagnostics live in `Lower`/`Tooling`/`Project` | ~390 tests |
 | M4 | Lower to HIR | ✅ | `veinc ir <f> --ir=legacy`; `tools/check-ir.sh` |
-| M5 | C# backend → SECS | ✅ **identity half**; reactive half deferred by design | `veinc emit <f> -o <dir>`; `tools/check-backend.sh` |
+| M5 | C# backend → SECS | ✅ **identity half**; reactive half deferred by design | `veinc emit <f> -o <dir>`; `tools/check-backend.sh` + `tools/check-perf.sh` |
 | M6 | Game domain on ShardECS | **partial** — folds/query/lifecycle run, but in the net8 interpreter; the SECS path covers them via M5 | `veinc run samples/entities.vein --ticks 3` |
 
 ### M5 — what "done" means here
@@ -45,9 +45,9 @@ Two consequences worth stating plainly:
 The original bar was "emits `Demo.g.cs` that compiles against the runtime and runs in the engine". A
 *wrong* translation clears that bar. The bar that means something is **agreeing with the runtime that
 already exists**, so [tools/check-backend.sh](../tools/check-backend.sh) emits, compiles, runs, and diffs
-against `veinc run`. Four samples are byte-identical — folds, phase order, death checks and ids
+against `veinc run`. Five samples are byte-identical — folds, phase order, death checks and ids
 (`entities`), multi-component AND queries (`entities_multi`), seeded `chance` draws (`entities_chance`),
-and component attach/detach (`entities_detach`).
+component attach/detach (`entities_detach`), and identity templates (`entities_template`).
 
 Speed has a command now: **[tools/check-perf.sh](../tools/check-perf.sh)**. It was the one figure in this
 document with no way to re-derive it and no check to guard it, which for a *performance* milestone is the
@@ -103,14 +103,29 @@ None of this was on the original map; all of it is on the interpreter.
 
 Ordered by how much each unblocks, not by milestone number.
 
-1. **Backend headroom** — the remaining cost is inside SECS (locks + dictionary lookups per access).
-   Needs bulk/unlocked access in the vendored SECS, or the adapter owning packed storage.
-   `tools/check-perf.sh` now measures the before, so the after is comparable rather than asserted.
-   One thing it already shows and nobody had looked for: per-activation cost **degrades with entity
-   count** — past warm-up, 1k → 2k entities takes the backend 155 → 221 ns, 43% dearer per activation
-   for twice the work. The interpreter degrades on the same axis, so it is memory pressure rather than
-   anything SECS-specific — and it is precisely what packed storage would attack, which makes entity
-   count the axis to measure that work on rather than a single fixed size.
+1. **Backend headroom** — ~0.2 µs/activation against the ~0.02 µs a packed ECS should reach.
+   `tools/check-perf.sh` measures the before, so any after is comparable rather than asserted, and
+   **entity count is the axis to measure on**: past warm-up, 1k → 2k entities costs the backend
+   155 → 221 ns, 43% dearer per activation for twice the work. The interpreter degrades on the same
+   axis, so it is memory pressure rather than a SECS artifact — and it is exactly what packed storage
+   would attack.
+
+   What one component access costs today, read off `ComponentBuckets`: a `ConcurrentDictionary` lookup
+   keyed by `Type`, a cast, a `ReaderWriterLockSlim` acquire/release, then a `Dictionary<int,int>`
+   entity→index lookup, then the array read. Per activation the emitted loop pays that once for `Get`;
+   the fold commit in `VeinWorld.Bucket.Commit` then pays it **three more times per entity per frame** —
+   `Has`, `Get`, `Add` — where `TryGet` + `Add` would do, and `Add` takes the write lock and reports a
+   tracker event on top.
+
+   Two things to fix before reaching for packed storage, both inside `VeinWorld.cs` (Vein's own file,
+   not the vendored ECS, so the blast radius is one project):
+
+   - `Commit` calls `Has` then `Get`; `_secs.TryGet` does both in one locked lookup.
+   - **Nothing ever drains the tracker queue.** `Secs.Add` appends to a `ConcurrentBag` per write, and
+     only `Secs.Reset()` and the SECS `World` tick clear it — `VeinWorld` runs its own loop and calls
+     neither, so the bag grows for the life of the process. A leak, though the timings say it is not
+     what is costing throughput. A VeinScript program has no component-change callbacks at all, so the
+     bookkeeping is pure waste here regardless.
 2. **TLS for `Vein.Net.Peer`** — frames are encrypted under a pre-shared key, so there is no forward
    secrecy and no certificate identity. The frames would ride inside an `SslStream` without any `.vein`
    program changing.
@@ -120,49 +135,20 @@ Ordered by how much each unblocks, not by milestone number.
 5. **`SecsRuntime.Probe`** — the repo's one live `TODO`. It was the net8↔net9 linkage proof; M5 supersedes
    it, so it should either grow into the direct-materialisation path or be deleted.
 
-**Recently closed:** `use` resolution — a bare name now falls back to the bundles a file `use`s
-(builders, shapes, `fn`/`SF`), with local declarations winning and cross-bundle collisions reported as
-VS0216. Qualified `bring` turned out to have been done for some time; the entry was stale.
+### Recently closed
 
-**Recently closed:** net inside a linked app — it works, and now something has run it.
-`samples/app_net/` is the hub from `net_peer.vein` split in two: a principal that never mentions the
-network, and a capability bundle that binds the socket. Against the unchanged `net_spoke.vein` it
-receives pings and replies, and the spoke's `audience #Hub` barrier *admits* those replies — which it
-could only do if the frame were signed as `#Hub`, so the identity a non-principal declared is the one the
-whole runtime answers to. One queue and one `_self`, as believed. Guarded by a test that links an app
-whose capability listens on port 0 and asserts a socket really bound.
+Kept short on purpose — the entry itself is worth a line, and the reasoning belongs in the commit that
+closed it. `git log --grep` on the phrase finds the full account.
 
-**Recently closed:** backend coverage — `target` over multiple components, component removal, and seeded
-`random` all emit now, each with a sample in `tools/check-backend.sh`. Two of the three were not gaps but
-disagreements, which is the failure mode the contract exists to forbid: a multi-component `target` emitted
-only the first component, so the loop visited identities lacking the others and referenced a `self_<Other>`
-that was never declared (the generated C# did not compile); and `random` emitted the constant `0.0`, which
-compiled, ran, and made `chance 30%` mean ALWAYS. Adding the cases also surfaced a latent one in the
-adapter — `Attach` never bumped the structural version, so a component gained mid-run left the query cache
-stale. `attach` with no initialiser is emitted too, and reported rather than guessed at when the shape
-declares field defaults the emitted struct would zero.
-
-**Recently closed:** `use` could capture a built-in. `use Console` bound bare `spawn` to
-`*Vein.Console.Io.spawn(name, firsttext)` — a console-window launcher — so `let e = spawn()` built no
-entity, reported nothing, and every `target` in the program then matched an empty world, with the symptom
-nowhere near the `use` line that caused it. A built-in already resolves and `use` only widens, so the
-built-in now wins and the shadowed member is reported as VS0217, reachable by its qualified path. The
-lowerer's own comment had claimed this behaviour ("a prebuilt like `spawn` is untouched") while the guard
-only checked local declarations.
-
-**Recently closed:** a fragment's shards ran *after* the main file's, which silently broke the one
-ordering idiom the language documents — "the kernel closes the phase, so declare it last". Move a route
-into `shards/` and the kernel's trigger was queued before the fragment's fragments, so the view assembled
-an empty page and the route answered nothing, with no diagnostic and the cause in a file the author never
-edited. `BundleLoader` now merges fragments *before* the main file's members: fragments extend, the main
-file closes. A fragment consequently cannot close a phase, which is the deliberate half of the trade.
-
-**Recently closed:** a bare `$Shape` include inside an imported builder resolved against the *consuming*
-bundle, so it found nothing and the builder's params expanded to zero. The diagnostics pointed away from
-the cause — a VS0210 warning on the library's source, then a VS0204 arity error at every call site in the
-consumer. `LowerBring` now carries the index key of the bundle a builder was imported from (by qualified
-path *or* by `use`) and resolves its bare includes there. This is what let `Vein.Web` model every element
-as a shape plus a builder that includes it.
+| What | And the part worth remembering |
+|---|---|
+| `use` resolution | A bare name falls back to the bundles a file `use`s. Qualified `bring` turned out to have been done for some time; the entry was stale. |
+| `use` capturing a built-in | `use Console` bound bare `spawn` to a console-window launcher, so `let e = spawn()` built no entity and every `target` matched an empty world. Built-ins now win, shadowing reported as **VS0217**. |
+| Fragment ordering | `shards/` fragments ran *after* the main file, silently breaking "the kernel closes the phase, so declare it last" — a route moved into a fragment answered nothing, with no diagnostic. Fragments now merge first: they extend, the main file closes. |
+| Cross-bundle `$Shape` includes | A bare include in an imported builder resolved against the *consuming* bundle, so its params expanded to zero. The errors landed on the caller, not the cause. |
+| Backend coverage | Multi-component `target`, `unattach`, seeded `random`. Two were not gaps but disagreements — the multi-component emit did not compile, and `random` emitted `0.0`, making `chance 30%` mean *always*. |
+| Net in a linked app | A capability bundle binds the socket for the whole app (`samples/app_net`). The spoke's `audience #Hub` admits the reply, which only a frame signed as `#Hub` could do — one `_self` per runtime, as believed. |
+| The speed number | `tools/check-perf.sh`. The ≈10× baseline holds; measuring it *wrong* is easy in both directions (see M5 above). |
 
 ## Later
 
