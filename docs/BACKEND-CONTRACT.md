@@ -39,14 +39,17 @@ entities × 2 systems per frame, marginal cost with startup subtracted.
 | Interpreter (`Ir/Interp.cs`) | ~2.30 µs | 7.36 s |
 | C# backend on SECS | ~0.23 µs | 0.74 s |
 
-**≈10×** as first recorded. Re-running the harness on a different machine gives ~1.95 µs → ~0.28 µs, so
-**6.6–7.3×** — the absolute figures land near the baseline and the ratio comes out lower. Two rules the
-measurement depends on, both easy to get wrong in a way that flatters the backend:
+**≈10×** as first recorded, and the harness agrees: ~2.3 µs → ~0.17–0.26 µs on another machine, so
+**10–18×**. Three rules the measurement depends on:
 
-- **Time both sides in Release.** A Debug interpreter against a Release backend reports 9.1× where the
-  honest answer is 6.5×; that number is measuring the build configuration.
-- **Take the difference between two frame counts.** Process start, JIT and world construction are fixed
-  costs, and on the compiled side they are larger than the per-activation work being measured.
+- **Time both sides in Release.** A Debug interpreter against a Release backend inflates the ratio ~1.4×;
+  that number is measuring the build configuration.
+- **Take the difference between two frame counts.** Process start and world construction are fixed costs,
+  and on the compiled side they are larger than the per-activation work being measured.
+- **Start both windows past JIT warm-up.** The generated code keeps getting faster for several hundred
+  frames — ~470 ns/activation measured from frame 100, ~240 from 600, ~150 from 1100. A window opening at
+  frame 100 charges the backend for tiering it has already finished paying and reports 6.6×. This is the
+  one that bites in the *un*flattering direction, and it is why `SHORT` is 1000.
 
 Per-activation cost also **degrades with entity count** — 1k → 2k takes the backend 302 → 475 ns and the
 interpreter 2158 → 3624 ns. Both runtimes, so it is memory pressure rather than a SECS artifact, and it

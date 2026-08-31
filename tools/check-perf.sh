@@ -11,10 +11,16 @@
 # same shape BACKEND-CONTRACT §0 recorded its baseline at, so the numbers are directly comparable.
 #
 # HOW, and why this way: each side is timed at TWO frame counts and the difference is taken. Process
-# start, JIT, and building the world are all fixed costs that have nothing to do with per-activation
-# speed, and on the compiled side they would otherwise dwarf the thing being measured. Subtracting a
-# short run from a long one cancels every fixed cost exactly. Each timing is the best of N runs, because
-# a scheduler can only ever make a run slower than the machine is capable of.
+# start and building the world are fixed costs with nothing to do with per-activation speed, and on the
+# compiled side they would otherwise dwarf the thing being measured. Subtracting one run from another
+# cancels every fixed cost exactly. Each timing is the best of N runs, because a scheduler can only ever
+# make a run slower than the machine is capable of.
+#
+# BOTH WINDOWS START PAST JIT WARM-UP, and that is not a detail. The generated code keeps getting faster
+# for the first several hundred frames — measured over successive windows the backend costs ~470 ns from
+# frame 100, then ~240, then ~150. A window that begins at frame 100 therefore charges the backend for
+# tiering it has already finished paying, and reports ~6.6x where the steady state is 10-18x. SHORT is
+# large for that reason alone; it is not a warm-up run, it is the lower end of the measured interval.
 #
 #   bash tools/check-perf.sh            # report both, and the ratio
 #
@@ -25,18 +31,17 @@ WIN_REPO="$(cd "$REPO" && pwd -W 2>/dev/null || echo "$REPO")"
 WORK="${TMPDIR:-/tmp}/vein-perf-check"
 SRC="samples/bench_folds.vein"
 
-# BOTH SIDES IN RELEASE. This is the whole methodology, and getting it wrong is how a speedup number
-# gets inflated for free: timing a Debug interpreter against a Release backend measured the build
-# configuration as much as the backend, and reported 9.1x on this machine where the honest figure is
-# 6.5x. The other checks use Debug because they compare OUTPUT, where the build cannot change the
+# BOTH SIDES IN RELEASE. Timing the Debug CLI the other checks use against a Release backend inflates
+# the ratio by roughly 1.4x for free — the number then measures the build configuration as much as the
+# backend. The other checks can use Debug because they compare OUTPUT, where the build cannot change the
 # answer; here it changes the only thing being measured.
 CLI="$REPO/src/Vein.Cli/bin/Release/net8.0/veinc.dll"
 
 ENTITIES=1000
 SHARDS=2            # two `each tick` targets, so a frame is ENTITIES * SHARDS activations
-SHORT=100
-LONG=1000
-REPEATS=3
+SHORT=1000
+LONG=2500
+REPEATS=2
 
 # The floor the check FAILS on. Deliberately far below the ≈10× the roadmap reports: this guards against
 # "the backend stopped being meaningfully faster", not against normal machine-to-machine variation. A

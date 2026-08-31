@@ -56,14 +56,23 @@ number that matters most — a backend that got slower would have gone unnoticed
 | | per activation | ratio |
 |---|---|---|
 | recorded baseline (1000 entities × 2 systems) | 2.30 µs → 0.23 µs | ≈10× |
-| `check-perf.sh`, same shape, this machine | ~1.95 µs → ~0.28 µs | **6.6–7.3×** |
+| `check-perf.sh`, same shape, this machine | ~2.3 µs → ~0.17–0.26 µs | **10–18×** |
 
-Both absolute figures land near the baseline; the ratio comes out lower. Two things the harness had to
-get right to say even that much. It times **both sides in Release** — a Debug interpreter against a
-Release backend reports 9.1× here where the honest answer is 6.5×, so the build configuration was
-measuring itself. And it takes the **difference between two frame counts**, which cancels process start,
-JIT and world construction; those are fixed costs, and on the compiled side they otherwise dwarf the
-per-activation work being measured.
+The baseline holds. Three things the harness has to get right, and the first two are how a speedup number
+goes wrong in the flattering direction while the third is how it goes wrong in the other:
+
+- **Time both sides in Release.** The Debug CLI the other checks use, against a Release backend, inflates
+  the ratio ~1.4× for nothing — the figure then measures the build configuration.
+- **Take the difference between two frame counts.** Process start and world construction are fixed costs,
+  and on the compiled side they are larger than the per-activation work being measured.
+- **Start both windows past JIT warm-up.** The generated code keeps getting faster for several hundred
+  frames — measured over successive windows the backend costs ~470 ns from frame 100, then ~240, then
+  ~150. A window opening at frame 100 charges the backend for tiering it has already finished paying, and
+  reports **6.6×** where the steady state is 10–18×. That is exactly the mistake the first version of this
+  harness made, and it is why `SHORT` is 1000 rather than a token warm-up.
+
+The interpreter side is stable at ~2.3 µs run to run; the backend is the noisy one (0.17–0.26 µs), which
+is why the pass threshold is loose rather than a tight bound on a number that moves.
 
 Still not the ~100× a compiled ECS should reach. The remaining cost is SECS's per-access
 `ReaderWriterLockSlim` and dictionary lookups, quantified in
@@ -98,9 +107,10 @@ Ordered by how much each unblocks, not by milestone number.
    Needs bulk/unlocked access in the vendored SECS, or the adapter owning packed storage.
    `tools/check-perf.sh` now measures the before, so the after is comparable rather than asserted.
    One thing it already shows and nobody had looked for: per-activation cost **degrades with entity
-   count** — 1k → 2k entities takes the backend 302 → 475 ns and the interpreter 2158 → 3624 ns. Both
-   runtimes, so it is memory pressure rather than anything SECS-specific, and it is the axis packed
-   storage would attack.
+   count** — past warm-up, 1k → 2k entities takes the backend 155 → 221 ns, 43% dearer per activation
+   for twice the work. The interpreter degrades on the same axis, so it is memory pressure rather than
+   anything SECS-specific — and it is precisely what packed storage would attack, which makes entity
+   count the axis to measure that work on rather than a single fixed size.
 2. **TLS for `Vein.Net.Peer`** — frames are encrypted under a pre-shared key, so there is no forward
    secrecy and no certificate identity. The frames would ride inside an `SslStream` without any `.vein`
    program changing.
