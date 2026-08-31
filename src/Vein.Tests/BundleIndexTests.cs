@@ -443,6 +443,53 @@ public class BundleIndexTests : IDisposable
         Assert.Equal(new[] { "Mine" }, EventCatalog.Catalog(unit).Select(e => e.Name).ToArray());
     }
 
+    [Fact]
+    public void A_scaffold_body_names_the_shape_each_field_came_from()
+    {
+        // What `?` inserts. An include flattens someone else's shape into this payload, so `x` and `y`
+        // appear in no declaration the reader can see — the provenance IS the useful part.
+        string dir = TempDir();
+        var unit = Parse("bundle Demo by me { shape $Pos { x: float, y: float }\n" +
+                         " event @Moved { $Pos, who: string, fast: bool = false } }", dir);
+
+        string body = EventCatalog.Body(Assert.Single(EventCatalog.Catalog(unit), e => e.Name == "Moved"));
+
+        Assert.Contains("x: ?      // required — float   from $Pos", body);
+        Assert.Contains("who: ?      // required — string", body);
+        Assert.DoesNotContain("who: ?      // required — string   from", body);   // declared inline
+        Assert.Contains("fast: ?      // optional — bool = false", body);         // not C#'s "False"
+    }
+
+    [Fact]
+    public void Builder_args_name_the_shape_each_slot_fills()
+    {
+        // `bring` binds positionally, so the slots are bare `?`s. Without the comment there is nothing
+        // on screen saying which is which.
+        string dir = TempDir();
+        var unit = Parse("bundle Demo by me { shape $Box { label: string, width: int }\n" +
+                         " builder Box { $Box   markup = label } }", dir);
+
+        string args = EventCatalog.Args(Assert.Single(EventCatalog.Builders(unit), b => b.Name == "Box"));
+
+        Assert.Contains("?,     // label: string   from $Box", args);
+        Assert.Contains("?      // width: int   from $Box", args);   // last slot, no comma
+    }
+
+    [Fact]
+    public void Field_picks_show_the_shape_and_insert_only_the_name()
+    {
+        // The popup shown when `?` is typed INSIDE a payload. It must offer, never rewrite: `?` there is
+        // the documented fill-the-rest token, so the label carries the detail and the insert is minimal.
+        string dir = TempDir();
+        var unit = Parse("bundle Demo by me { shape $Pos { x: float }\n event @M { $Pos, n: int } }", dir);
+
+        var picks = EventCatalog.FieldPicks(Assert.Single(EventCatalog.Catalog(unit), e => e.Name == "M").Fields);
+
+        Assert.Equal("x: float   from $Pos", picks[0].Label);
+        Assert.Equal("x: ", picks[0].Insert);
+        Assert.Equal("n: int", picks[1].Label);
+    }
+
     // ---- regression: the existing no-ProjectDir path -----------------------------------------
 
     [Fact]

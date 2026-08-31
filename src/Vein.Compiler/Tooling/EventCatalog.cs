@@ -144,16 +144,22 @@ public static class EventCatalog
     }
 
     /// A paste-ready emit body: required fields first, each a `?` placeholder with a label.
-    public static string Scaffold(EventEntry e)
+    public static string Scaffold(EventEntry e) => "emit @" + e.Name + " " + Body(e);
+
+    /// Just the `{ … }`, for a caller that has already typed `emit @E` — the Workbench's `?`. Required
+    /// fields first, each labelled with its type and, when it arrived through an include, the `$Shape`
+    /// it came from. That provenance is the part an include otherwise hides: the field is real, but its
+    /// name appears nowhere in the event's own declaration.
+    public static string Body(EventEntry e)
     {
-        var sb = new StringBuilder();
-        sb.Append("emit @").Append(e.Name).Append(" {\n");
-        foreach (var f in e.Fields.Where(f => f.Required))
-            sb.Append("    ").Append(f.Name).Append(": ?      // required — ").Append(f.Type).Append('\n');
-        foreach (var f in e.Fields.Where(f => !f.Required))
-            sb.Append("    ").Append(f.Name).Append(": ?      // optional — default ").Append(f.Default).Append('\n');
-        sb.Append("}\n");
-        return sb.ToString();
+        if (e.Fields.Count == 0) return "{ }";
+        var sb = new StringBuilder("{\n");
+        foreach (var f in e.Fields.Where(f => f.Required).Concat(e.Fields.Where(f => !f.Required)))
+            sb.Append("    ").Append(f.Name).Append(": ?      // ")
+              .Append(f.Required ? "required — " + f.Type : "optional — " + f.Type + " = " + f.Default)
+              .Append(f.OriginShape is null ? "" : "   from $" + f.OriginShape)
+              .Append('\n');
+        return sb.Append('}').ToString();
     }
 
     /// Every builder the unit declares, with its `$Shape` includes FLATTENED into the parameter list —
@@ -215,11 +221,20 @@ public static class EventCatalog
         if (b.Marks.Count > 0) sb.Append(' ').Append(string.Join(" ", b.Marks.Select(m => "#" + m)));
         sb.Append('\n');
 
-        if (b.Fields.Count == 0) { sb.Append("bring ").Append(b.Name).Append("()\n"); return sb.ToString(); }
+        sb.Append("bring ").Append(b.Name).Append(Args(b)).Append('\n');
+        return sb.ToString();
+    }
 
-        // Positional, because that is how `bring` binds — so the comment carries the name each slot fills
-        // and the shape it came from, which is the part an include would otherwise hide.
-        sb.Append("bring ").Append(b.Name).Append("(\n");
+    /// Just the `( … )`, for a caller that has already typed `bring X` — the Workbench's `?`.
+    ///
+    /// Positional, because that is how `bring` binds, so the slot itself carries no name. The comment
+    /// supplies it along with the `$Shape` the field came from — which for a builder is the whole point:
+    /// an include flattens someone else's shape into this parameter list, and the reader is looking at
+    /// four bare `?`s with nothing on screen to say which is which.
+    public static string Args(BuilderEntry b)
+    {
+        if (b.Fields.Count == 0) return "()";
+        var sb = new StringBuilder("(\n");
         for (int i = 0; i < b.Fields.Count; i++)
         {
             var f = b.Fields[i];
@@ -229,9 +244,18 @@ public static class EventCatalog
               .Append(f.Required ? "" : "   optional — default " + f.Default)
               .Append('\n');
         }
-        sb.Append(")\n");
-        return sb.ToString();
+        return sb.Append(')').ToString();
     }
+
+    /// One line per field for a completion popup: `name: type   from $Shape`. The popup is shown when
+    /// `?` is typed INSIDE a payload or an argument list, where `?` is the documented fill-the-rest
+    /// token and must survive being dismissed — so this only ever offers, it never rewrites.
+    public static List<(string Label, string Insert)> FieldPicks(IReadOnlyList<EventField> fields) =>
+        fields.Select(f => (
+            Label: f.Name + ": " + f.Type
+                 + (f.OriginShape is null ? "" : "   from $" + f.OriginShape)
+                 + (f.Required ? "" : "   = " + f.Default),
+            Insert: f.Name + ": ")).ToList();
 
     private static string TypeStr(TypeRef t) =>
         t.Name + (t.Args.Count > 0 ? "<" + string.Join(", ", t.Args.Select(TypeStr)) + ">" : "");

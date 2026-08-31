@@ -1070,7 +1070,7 @@ public partial class MainWindow : Window
         var emit = Regex.Match(before, @"emit\s+@(\w+)\s*$");
         var start = Regex.Match(before, @"start\s+@(\w+)\s*$");   // a bundle's entry-point payload
         var bring = Regex.Match(before, @"bring\s+(?:\d+\s+)?(\w+)\s*$");
-        if (!emit.Success && !start.Success && !bring.Success) return;   // a plain fill-rest `?` — leave it
+        if (!emit.Success && !start.Success && !bring.Success) { ShowFieldPicks(before); return; }
 
         var ast = _service.Compile(new CompileRequest("untitled.vein", _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
         if (ast is null) return;
@@ -1091,21 +1091,66 @@ public partial class MainWindow : Window
     // the shared events and builders of `use`d bundles. The Workbench used to reach a builder through a
     // private FindBuilder/BuilderParams pair that walked the local AST only, so `bring Button ?` against
     // anything from `use Web` silently expanded to nothing: the one case a `?` is most wanted in.
-    private string? EmitBody(CompilationUnit ast, string eventName)
+    /// `?` typed INSIDE `emit @E { … }` or `bring X( … )`: offer the fields, each showing its type and
+    /// the `$Shape` it came from. A popup, not an expansion — inside a payload `?` is the documented
+    /// fill-the-rest token (`emit @Damaged { amount: 5, ? }`), so dismissing the list has to leave the
+    /// `?` exactly where it was. Picking an entry is a deliberate act and replaces it with `name: `.
+    private void ShowFieldPicks(string before)
     {
-        var ev = EventCatalog.Catalog(ast, ProjectDir).FirstOrDefault(e => e.Name == eventName);
-        if (ev is null) return null;
-        var parts = ev.Fields.Select(f => $"{f.Name}: {(f.Required ? "?" : f.Default)}");
-        return "{ " + string.Join(", ", parts) + " }";
+        var ast = _service.Compile(new CompileRequest("untitled.vein", _editor.Text,
+            ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
+        if (ast is null) return;
+
+        // A `(` opening closer than the innermost `{` means we are in an argument list, not a payload.
+        var (builder, _) = EnclosingBuilderArg(before, before.Length);
+        int brace = LastOpen(before, '{', '}');
+        int paren = LastOpen(before, '(', ')');
+
+        IReadOnlyList<EventField>? fields = null;
+        if (builder is not null && paren > brace)
+            fields = EventCatalog.Builders(ast, ProjectDir).FirstOrDefault(b => b.Name == builder)?.Fields;
+        else if (brace >= 0)
+        {
+            var head = Regex.Match(before[..brace], @"(?:emit|start)\s+@(\w+)\s*$");
+            if (head.Success)
+                fields = EventCatalog.Catalog(ast, ProjectDir).FirstOrDefault(e => e.Name == head.Groups[1].Value)?.Fields;
+        }
+        if (fields is null || fields.Count == 0) return;
+
+        // Drop the ones already written in this payload — the list is what is LEFT to fill.
+        string open = brace > paren ? before[(brace + 1)..] : before[(paren + 1)..];
+        var picks = EventCatalog.FieldPicks(fields)
+            .Where(p => !Regex.IsMatch(open, @"\b" + Regex.Escape(p.Insert.TrimEnd(' ', ':')) + @"\s*:"))
+            .ToList();
+        if (picks.Count == 0) return;
+
+        _completion = new CompletionWindow(_editor.TextArea);
+        _completion.CompletionList.IsFiltering = true;
+        foreach (var (label, insert) in picks)
+            _completion.CompletionList.CompletionData.Add(new VeinCompletion(label, "field", insert));
+        _completion.Closed += (_, _) => _completion = null;
+        _completion.Show();
     }
 
-    private string? BringBody(CompilationUnit ast, string builderName)
+    /// Offset of the innermost unclosed `open` before the end of `text`, or -1.
+    private static int LastOpen(string text, char open, char close)
     {
-        var b = EventCatalog.Builders(ast, ProjectDir).FirstOrDefault(x => x.Name == builderName);
-        if (b is null) return null;
-        var parts = b.Fields.Select(p => $"? /* {p.Name}: {p.Type} */");
-        return "(" + string.Join(", ", parts) + ")";
+        int depth = 0;
+        for (int i = text.Length - 1; i >= 0; i--)
+        {
+            if (text[i] == close) depth++;
+            else if (text[i] == open) { if (depth == 0) return i; depth--; }
+        }
+        return -1;
     }
+
+    private string? EmitBody(CompilationUnit ast, string eventName) =>
+        EventCatalog.Catalog(ast, ProjectDir).FirstOrDefault(e => e.Name == eventName) is { } ev
+            ? EventCatalog.Body(ev) : null;
+
+    private string? BringBody(CompilationUnit ast, string builderName) =>
+        EventCatalog.Builders(ast, ProjectDir).FirstOrDefault(x => x.Name == builderName) is { } b
+            ? EventCatalog.Args(b) : null;
 
     private static BuilderDecl? FindBuilder(CompilationUnit ast, string name)
     {

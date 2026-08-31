@@ -62,16 +62,35 @@ placeholders with real values as needed; without `?`, omitted fields still fill 
 context (the current event/locals), just not with placeholders. The `?` shows in the IR as
 `fill=?` on the `Emit`/`Bring` node.
 
-**In the Workbench**, typing `?` right after `emit @Event` or `bring Builder` *expands* it into the
-field list so you can see the values and fill the required ones — defaults are shown, required fields
-become `?` holes (caret lands on the first one):
+**In the Workbench**, typing `?` right after `emit @Event`, `start @Event` or `bring Builder` *expands*
+it into the field list, each field labelled with its type and — when it arrived through an include —
+**the `$Shape` it came from**. That provenance is the point: an include flattens someone else's shape
+into this payload, so those field names appear in no declaration on screen.
 
 ```
-emit @Damaged ?     ->  emit @Damaged { amount: 5, victim: ? }     (amount had a default; victim required)
-bring Button ?      ->  bring Button(? /* label: string */, ? /* cls: string */)
+emit @Moved ?        ->  emit @Moved {
+                             x: ?      // required — float   from $Pos
+                             y: ?      // required — float   from $Pos
+                             who: ?    // required — string
+                             fast: ?   // optional — bool = false
+                         }
+
+bring Button ?       ->  bring Button(
+                             ?,     // label: string   from $Vein.UI.Widgets.Button
+                             ?      // id: string      from $Vein.UI.Widgets.Button
+                         )
 ```
 
-Typed anywhere else, `?` stays as the fill-the-rest token described above.
+Required fields come first and the caret lands on the first hole. This is the same body
+`veinc scaffold` prints — one format, one implementation.
+
+Typed **inside** a payload or argument list, `?` opens a completion list of the fields still unfilled,
+each showing its type and origin shape. It is a list, not an expansion: `?` there is the fill-the-rest
+token above (`emit @Damaged { amount: 5, ? }`), so dismissing the popup leaves it untouched. Picking an
+entry replaces it with `name: `.
+
+Both see what the compiler sees, including the shared events and builders of `use`d bundles — so
+`bring Button ?` works on a builder you did not write, which is the case it exists for.
 
 ## `veinc scaffold <file> <@Event | &Builder>`
 

@@ -74,6 +74,9 @@ public static class Sig
     {
         null => null,
         LiteralExpr { Kind: LiteralKind.String } l => "\"" + (l.Value as string ?? "") + "\"",
+        // `bool.ToString()` is "True"/"False" — C# casing, which is not VeinScript. A scaffold is meant
+        // to be pasted and edited, so it has to spell its own literals.
+        LiteralExpr { Value: bool b } => b ? "true" : "false",
         LiteralExpr l => l.Value?.ToString() ?? "null",
         NameExpr n => n.Name,
         _ => "…"

@@ -12,11 +12,15 @@ namespace Vein.Workbench;
 public sealed class VeinCompletion : ICompletionData
 {
     private readonly string _kind;
+    private readonly string _insert;
 
-    public VeinCompletion(string name, string kind)
+    /// `insert` differs from `name` when the list shows more than it types — a field pick reads
+    /// `label: string   from $Box` so the shape it came from is visible, and inserts `label: `.
+    public VeinCompletion(string name, string kind, string? insert = null)
     {
         Text = name;
         _kind = kind;
+        _insert = insert ?? name;
     }
 
     public IImage? Image => null;
@@ -30,5 +34,5 @@ public sealed class VeinCompletion : ICompletionData
     public double Priority => 0;
 
     public void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs) =>
-        textArea.Document.Replace(completionSegment, Text);
+        textArea.Document.Replace(completionSegment, _insert);
 }
