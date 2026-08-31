@@ -22,6 +22,10 @@ ask the user first.** Losing a useful file is far worse than leaving a temp fold
 
 ## Project quick facts
 
+- **Writing `.vein`? READ [docs/RULES.md](docs/RULES.md) FIRST.** 25 numbered rules, ordered by when they
+  bite — the newline/`+` continuation rule, why a builder param cannot be called `code`, why `bring` on a
+  shape-including builder attaches nothing, why fragments merge before the main file. Each one was learned
+  by getting it wrong; reading it costs a minute and saves re-deriving them.
 - **OS/shell:** Windows 11 + PowerShell (`$null`, `$env:VAR`, backtick line-continuation). Bash tool also
   available for POSIX scripts.
 - **Frameworks:** net8 (`Vein.Compiler`, `Vein.Cli`, `Vein.Workbench`, `Vein.Tests`) + net9

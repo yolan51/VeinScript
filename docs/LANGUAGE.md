@@ -5,13 +5,6 @@ VeinScript is an **Identity Oriented Programming** language. This is the whole c
 is no general `class`. Domains (game/web/desktop) are libraries written in this same core — see
 [DIALECTS.md](DIALECTS.md).
 
-> **Status note.** Some keywords/tokens below are **not yet in the lexer** and are added by the
-> parser milestone (M2): `fn`, `type`, `enum`, `if`, `while`, `repeat`, `break`, `continue`, `match`
-> (and `[` `]` if [D9(a)](SYNTAX-DECISIONS.md#d9) is chosen). The IOP keywords already in the lexer
-> (`shape`, `shard`, `event`, `target`, `each`, `tick`, `settled`, `mark`, `emit`, `hear`, `folds`,
-> `chance`, `attach`, `destroy`, `sync`, …) are marked ✅ in [KEYWORDS.md](KEYWORDS.md). `class`,
-> `for`, `in`, `loop`, `push` are **not** part of the language (see SYNTAX-DECISIONS).
-
 ---
 
 ## 1. Lexical structure

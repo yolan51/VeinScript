@@ -13,7 +13,7 @@ dialect. There is no general `class`.
 
 ---
 
-## 1. Keywords currently in the lexer (closure — all 51)
+## 1. Keywords currently in the lexer (closure — all 60)
 
 ### General core
 
@@ -37,6 +37,10 @@ dialect. There is no general `class`.
 | `as` | `use N as M` · `target … as x` | alias / iteration binding | |
 | `true` `false` | | bool literals | |
 | `map` | `map<K,V>` | built-in collection | |
+| `type` | `type N { fields }` | plain value data, not an identity component | `IrTypeKind.Struct` |
+| `enum` | `enum N { A, B }` **inside a `shape`** | the discrete states one of its fields can hold | a named type scoped to the shape |
+| `repeat` | `repeat N [as i] { … }` | counted loop | `IrLoop` (Repeat) |
+| `break` / `continue` | `break` · `continue` | leave / skip the nearest enclosing loop | loop control |
 
 ### Core (IOP)
 
@@ -60,6 +64,7 @@ dialect. There is no general `class`.
 | `destroy` | `destroy self` | remove an identity | `DestroyEntity(self)` |
 | `chance` | `chance 30% { … }` | probabilistic branch | `if random() < 0.30 { … }` |
 | `sync` | `sync` | shard scheduling hint | `@sync` metadata |
+| `ShardView` | `ShardView N { … }` | a First-Class object that ASSEMBLES — hears fragments and emits the finished artifact | `IrShard` (kind `view`) |
 
 > **Field mutation is not a keyword.** A shard changes a field with core compound assignment
 > (`self.Health.hp -= 1` → `self.Health.hp += -1`). When several shards write one field in a tick, the
@@ -86,23 +91,18 @@ Held so they aren't accidentally repurposed. Assign a meaning or cut before v1.0
 | `mute` `unmute` | disable / re-enable a shard or handler |
 | `transform` | AST macro / source transform, or Transform component sugar |
 
-### Cut (in the lexer, removed from the language)
+### Cut (gone from the lexer and the language)
 
 | Keyword | Note |
 |---------|------|
-| `push` | Removed. Field mutation uses `+=`/`-=`; `folds` reconciles concurrent writes (D4). Remove its `TokenKind`/`Keywords` entry in M2. |
+| `push` | Field mutation uses `+=`/`-=`; `folds` reconciles concurrent writes (D4). Its `TokenKind`/`Keywords` entries are gone, so it is now an ordinary identifier. |
 
 ---
 
-## 2. Keywords to ADD in Milestone 2 (not in the lexer yet)
+## 2. Deliberately NOT keywords
 
-Each needs a `TokenKind` and a `Keywords` entry:
-
-`fn` · `type` · `enum` · `if` · `while` · `repeat` · `break` · `continue` · `match`
-
-Plus tokens (not keywords) `LBracket` `[`, `RBracket` `]` if [D9(a)](SYNTAX-DECISIONS.md#d9).
-**Deliberately NOT added:** `class`, `for`, `in`, `loop` (see [SYNTAX-DECISIONS.md](SYNTAX-DECISIONS.md)
-D3/D5).
+`class`, `for`, `in`, `loop` — see [SYNTAX-DECISIONS.md](SYNTAX-DECISIONS.md) D3/D5. `push` was in the
+lexer once and is gone (D4). `!` is unlexed and reserved: inequality is `not (a == b)`.
 
 ---
 
@@ -169,12 +169,14 @@ Identifiers resolved to built-in reducers — **not keywords**, so no new keywor
 
 ## 4. Closure check
 
-Keywords in the lexer map: **51**. Classified above as **40 core** (20 general core + 20 core-IOP¹),
-**2 core-lib** (`random`, `count`), **8 reserved** (`on` `audience` `bridge` `bring`
-`builder` `mute` `unmute` `transform`), **1 cut** (`push`). 40 + 2 + 8 + 1 = **51**. ✅
+The lexer holds **60** keywords, and every one appears in a table above. Derive the number rather than
+trusting this line — the map holds TWO entries per source line, which is how 60 gets miscounted as 30:
 
-¹ core-IOP = `shape` `event` `shard` `target` `each` `tick` `settled` `folds` `mark` `unmark` `Entity`
-`attach` `unattach` `to` `from` `emit` `hear` `destroy` `chance` `sync` — plus the general-core rows
-that already existed in the lexer (`when` `else` are general core; `if`/`while` are adds, not counted
-in the 49). If a keyword is added to [Lexer.cs](../src/Vein.Compiler/Lexing/Lexer.cs), it **must** be
-added here in the same change.
+```bash
+sed -n '/Keywords = new/,/^    };/p' src/Vein.Compiler/Lexing/Lexer.cs | grep -o '\["[a-zA-Z]*"\]' | wc -l
+```
+
+If a keyword is added to [Lexer.cs](../src/Vein.Compiler/Lexing/Lexer.cs), it **must** be added here in
+the same change. That rule was in force while nine keywords went in without it — `fn` `type` `enum` `if`
+`while` `repeat` `break` `continue` `match`, all long since lexed and all still listed as "to ADD" until
+2026-08-31. A closure check nothing runs is a comment.
