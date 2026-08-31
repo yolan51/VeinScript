@@ -504,6 +504,12 @@ public class ServiceTests
         // One bundle = one entry point.
         var r = Compile("bundle B { start @A { } start @B { } event @A { } event @B { } }");
         Assert.False(r.Success);
+
+        // VS0219, not VS0210: that code means "unknown shape in an include" (ShapeIncludeTests, and
+        // LANGUAGE.md quotes it). One code cannot identify two unrelated conditions — a reader who
+        // looked VS0210 up got the wrong answer half the time.
+        Assert.Contains(r.Diagnostics, d => d.Code == "VS0219");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "VS0210");
     }
 
     [Fact]

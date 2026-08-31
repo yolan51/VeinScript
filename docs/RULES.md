@@ -110,7 +110,9 @@ both. In emitted C# the mark becomes `Marks.Enemy` and the shape `Enemy`.
 
 **16. A mark is a name unless declared.** `mark #Enemy` at bundle or publicator level declares it, and a
 bundle that declares *any* mark has its mark names checked — an undeclared one is **VS0218**. A bundle
-that declares none is unchecked, so a misspelling there is silently a new mark.
+that declares none is unchecked, so a misspelling there is silently a new mark. `shared("…")` exports a
+mark, and one reached through `use` counts as declared; the gate stays on the bundle's *own*
+declarations, so adding a `use` never starts checking a file that did not opt in.
 
 ---
 
@@ -119,10 +121,15 @@ that declares none is unchecked, so a misspelling there is silently a new mark.
 **17. Only `shared("…")` inside a `publicator` crosses a bundle boundary.** Everything else is
 bundle-private, and a qualified reference to it does not resolve.
 
+**17b. The qualified `*A.B.P.$Shape` / `#Mark` form is for INCLUDES and DISCOVERY, not use sites.**
+`target`, `mark`/`unmark`, `audience` and `match` take a **bare** `$Shape`/`#Mark` — the qualified form
+parses there and resolves to nothing. Reach it by `use`ing the owning bundle instead. `veinc symbols`
+lists what is exported.
+
 **18. `use` only WIDENS what a bare name may mean.** Precedence is local declaration → built-in → `use`
 fallback. A built-in wins and the shadowed member is reported as **VS0217** (`use Console` used to
 capture `spawn`, so `let e = spawn()` built no entity). Two used bundles exporting one name is
-**VS0216** — reach for the `*Author.Bundle.Publicator.member` path.
+**VS0216** — reach for the `*Author.Bundle.Publicator.member` path, where rule 17b allows one.
 
 **19. A bundle can span files, and FRAGMENTS MERGE BEFORE THE MAIN FILE.** `publicators/*.vein` is API,
 `shards/*.vein` is behaviour, and a fragment carrying an API declaration is **VS0321**. Member order is

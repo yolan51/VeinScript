@@ -35,7 +35,7 @@ Two consequences worth stating plainly:
 |----|------|-------|-----------|
 | M1 | Lexer | ✅ | `veinc tokens <f>` |
 | M2 | Parser / AST | ✅ | `veinc ast <f>`, `veinc ir <f>`; 8 golden IR trees |
-| M3 | Desugar + Semantics | **route not taken** — no `Semantics/`, no `veinc check`; diagnostics live in `Lower`/`Tooling`/`Project` | ~390 tests |
+| M3 | Desugar + Semantics | **route not taken** — no `Semantics/`, no `veinc check`; diagnostics live in `Lower`/`Tooling`/`Project` | 405 tests |
 | M4 | Lower to HIR | ✅ | `veinc ir <f> --ir=legacy`; `tools/check-ir.sh` |
 | M5 | C# backend → SECS | ✅ **identity half**; reactive half deferred by design | `veinc emit <f> -o <dir>`; `tools/check-backend.sh` + `tools/check-perf.sh` |
 | M6 | Game domain on ShardECS | **partial** — folds/query/lifecycle run, but in the net8 interpreter; the SECS path covers them via M5 | `veinc run samples/entities.vein --ticks 3` |
@@ -135,11 +135,16 @@ Ordered by how much each unblocks, not by milestone number.
    program changing.
 3. **`use X as Y`** — the alias parses and nothing consumes it, because `*Path.member` is the only
    qualified form and `Y.@Print` does not. Needs a syntax decision before it can mean anything.
-4. **Mark declarations, cross-bundle half** — a mark can now be DECLARED (`mark #Enemy`), and a bundle
-   that declares any has its mark names checked (VS0218, opt-in, additive). What is left is the
-   boundary: `shared` on a mark does not yet export it, `veinc symbols` never lists one, and
-   `*Author.Bundle.Pub.#Mark` does not resolve — `BundleIndex` has Shapes/Builders/Functions and no
-   Marks, and `SymbolKind` has no `Mark`. Mechanical, mirroring what Shapes already does end to end.
+4. **A qualified `#Mark` at a USE site** — `*Author.Bundle.Pub.#Enemy` parses (`MemberSigil.Mark` has
+   been in `ParseStarRef` all along) and resolves nowhere, because `target`/`mark`/`audience`/`match`
+   accept a bare `MarkRef` only.
+
+   This was filed as the mechanical remainder of the entry above, *"mirroring what Shapes already does
+   end to end"*. It is not: **shapes do not do this either.** `target $Shape` also takes only a bare
+   `ShapeRef`, and `*A.B.$Shape` exists solely for includes. Every mark and shape in the AST is a bare
+   `string` — `QueryStmt.Tags`, `MarkStmt.Mark`, carried, audience, match arms — so the work is
+   promoting both to a ref type through the AST, IR, interpreter and backend, and it should be done for
+   shapes and marks together or not at all. Sized accordingly: it touches the golden IR trees.
 5. **`SecsRuntime.Probe`** — the repo's one live `TODO`. It was the net8↔net9 linkage proof; M5 supersedes
    it, so it should either grow into the direct-materialisation path or be deleted.
 
@@ -160,6 +165,7 @@ closed it. `git log --grep` on the phrase finds the full account.
 | Fold commit off the `Secs` path | Four locked lookups per entity per frame became two, 175 → 109 ns/activation — and the tracker `ConcurrentBag` stopped growing every frame, since nothing drains it and no VeinScript program can subscribe to it. |
 | Marks are SECS identity tags | `mark e #Enemy` compiles to `World.MarkAs<Marks.Enemy>(e)`, not a string — type-checked, and visible to the engine as `GetEntitiesByIdentity<Marks.Enemy>()`. Tags nest in a `Marks` class so a shape and a mark may share a name; that case exposed a latent bug, since `Lower` deduped marks by name alone and a shape swallowed the mark. |
 | Mark declarations (in-bundle) | `mark #Enemy` declares a mark, and declaring any in a bundle opts it into checking — VS0218 names an undeclared one and lists what is known. Opt-in, so every existing file is untouched. Adding it found that a mark used ONLY by a `target` query never became a Tag, so the emitted C# referenced a `Marks.X` that did not exist. |
+| Marks cross a bundle | `shared("…") mark #Enemy` exports one: `veinc symbols` lists `*acme.Tags.Api.#Enemy`, and a mark reached through `use` counts as declared, so VS0218 and `use` can be switched on together. The export flag had been parsed and set the whole time — `Shared` is applied generically to every `Decl` — and simply read by nothing. Marks index in their OWN dictionary: `$Enemy` and `#Enemy` produce the same `Author.Bundle.Pub.Name` key, so sharing one would drop whichever the parser reached second. The opt-in gate deliberately stays on the bundle's own declarations, or adding a `use` would start checking a file that never asked. |
 
 ## Later
 
@@ -174,9 +180,9 @@ Four, and they guard different things:
 
 | Check | Guards |
 |---|---|
-| `dotnet test src/Vein.Tests` | behaviour — ~390 tests |
+| `dotnet test src/Vein.Tests` | behaviour — 405 tests |
 | `bash tools/check-ir.sh` | the IR's *shape* — 8 golden trees, so lowering regressions surface |
-| `bash tools/check-backend.sh` | the backend's *meaning* — emitted C# is compiled, run, and diffed against the interpreter, on five programs |
+| `bash tools/check-backend.sh` | the backend's *meaning* — emitted C# is compiled, run, and diffed against the interpreter, on six programs |
 | `bash tools/check-perf.sh` | the backend's *speed* — the number M5 is judged on, re-derived rather than remembered |
 
 A golden file of expected C# would pin the emitter's formatting; diffing a real run pins its meaning,
@@ -184,6 +190,10 @@ which is the thing that can be quietly wrong.
 
 `check-perf.sh` is the slowest of the four (it builds Release and runs four timed programs), so it is
 not part of the ordinary loop — run it when the emitter, the adapter or SECS changes. Its failure
-threshold is deliberately loose: it fails under 3×, well below the 6.6–7.3× measured, because a tight
+threshold is deliberately loose: it fails under 3×, far below the 10–18× steady state, because a tight
 bound on a laptop under load fails for reasons that have nothing to do with the code, and a check people
 learn to ignore guards nothing.
+
+(This paragraph used to justify the threshold as "well below the 6.6–7.3× measured" — 6.6× being the
+figure §M5 above shows is what you get by opening the window inside JIT warm-up. The threshold was right;
+its stated reason cited the number the section above it debunks.)

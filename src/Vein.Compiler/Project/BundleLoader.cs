@@ -159,6 +159,7 @@ public static class BundleLoader
                 {
                     case PublicatorDecl p: Walk(p.Members); break;
                     case ShapeDecl s: Check("$" + s.Name, s.Span); break;
+                    case MarkDecl mk: Check("#" + mk.Name, mk.Span); break;
                     case EventDecl e: Check("@" + e.Name, e.Span); break;
                     case BuilderDecl b: Check("&" + b.Name, b.Span); break;
                     case FuncDecl f: Check(f.Name + "()", f.Span); break;
@@ -173,6 +174,7 @@ public static class BundleLoader
     private static string Describe(Decl d) => d switch
     {
         ShapeDecl s => "$" + s.Name,
+        MarkDecl mk => "#" + mk.Name,
         EventDecl e => "@" + e.Name,
         BuilderDecl b => "&" + b.Name,
         PublicatorDecl p => "publicator " + p.Name,

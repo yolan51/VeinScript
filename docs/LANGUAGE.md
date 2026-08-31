@@ -232,10 +232,37 @@ and one that declares none behaves exactly as before. That is the same additive 
 new check must not change what an existing program means. The report is a **warning (VS0218)** naming
 what *is* known, the shape [VS0212](RUNTIME.md) already uses for console addresses.
 
-A declared mark exists whether or not the bundle uses it, so it can be `shared` and queried by name from
-elsewhere. Every place a `#Mark` can appear counts as a use: `mark`/`unmark`, a `target` tag, a `match`
-arm, an `audience` barrier, the marks a shard carries, and a mark in value position such as a console
-address.
+A declared mark exists whether or not the bundle uses it. Every place a `#Mark` can appear counts as a
+use: `mark`/`unmark`, a `target` tag, a `match` arm, an `audience` barrier, the marks a shard carries,
+and a mark in value position such as a console address.
+
+**Sharing a mark.** `shared("…")` inside a `publicator` exports it like any other declaration, and a
+bundle that `use`s the owner may then use the mark bare — it counts as declared, so VS0218 and `use` work
+together rather than against each other:
+
+```
+bundle Tags by acme {
+    publicator Api {
+        shared("An identity the rules treat as hostile.")
+        mark #Enemy
+    }
+}
+
+bundle Game by me {
+    use Tags
+    mark #Spent                          // declaring one opts THIS bundle into checking
+
+    shard S { settled { target $H #Enemy as self { mark self #Spent } } }   // both fine
+}
+```
+
+`use` widens what is *known*; it does not switch the check off. `#Ghost` above would still be VS0218, and
+a bundle that declares no marks of its own stays unchecked no matter what it uses. A mark exported by two
+used bundles is **VS0216**, like any other ambiguous bare name.
+
+`veinc symbols` lists an exported mark as `*acme.Tags.Api.#Enemy`. The qualified form is for *discovery*:
+writing `*acme.Tags.Api.#Enemy` at a `target` or `mark` site does not resolve — those take a bare `#Mark`,
+exactly as `target $Shape` takes a bare `$Shape`.
 
 ### 3.7 `event` — a message identities send
 

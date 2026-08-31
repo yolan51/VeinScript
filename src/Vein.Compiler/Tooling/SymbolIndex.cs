@@ -23,6 +23,9 @@ public static class SymbolIndex
                 case BundleDecl b: foreach (var m in b.Members) Decl(m); break;
                 case PublicatorDecl p: foreach (var m in p.Members) Decl(m); break;
                 case ShapeDecl s: shapes.Add(s.Name); break;
+                // A DECLARED mark, which the use-site walk below cannot see if nothing uses it yet —
+                // and offering it is the point of declaring one.
+                case MarkDecl mk: marks.Add(mk.Name); break;
                 case EventDecl e: events.Add(e.Name); break;
                 case ShardDecl sh: AddMarks(sh.CarriedMarks); foreach (var m in sh.Members) Member(m); break;
                 case ViewDecl vw: AddMarks(vw.CarriedMarks); foreach (var m in vw.Members) Member(m); break;

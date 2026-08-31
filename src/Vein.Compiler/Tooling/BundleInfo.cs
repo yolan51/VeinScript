@@ -3,8 +3,9 @@ using Vein.Compiler.Parsing;
 namespace Vein.Compiler.Tooling;
 
 // A quick structural summary of a bundle — the declaration counts shown in the Workbench's bundle
-// inspector. All counts are derived from the parsed AST (marks, which have no declaration form, are the
-// distinct marks *used* in the bundle, via SymbolIndex).
+// inspector. All counts are derived from the parsed AST. Marks are the odd one out: a mark may be
+// declared (`mark #Enemy`) or merely used, and the count is the distinct marks either way, via
+// SymbolIndex — an inspector wants the marks the bundle deals in, not just the ones it announced.
 public sealed record BundleInfo(
     string Name, string? Author,
     int Shapes, int Events, int Builders, int Shards, int Views, int Marks)
@@ -28,7 +29,7 @@ public sealed record BundleInfo(
         }
         Walk(bundle.Members);
 
-        // Marks have no declaration — count the distinct marks referenced in this bundle.
+        // Distinct marks this bundle deals in — declared, used, or both. SymbolIndex dedupes across the two.
         int marks = SymbolIndex.Collect(new CompilationUnit(new[] { bundle }, bundle.Span)).Marks.Count;
 
         return new BundleInfo(bundle.Name, bundle.Author, shapes, events, builders, shards, views, marks);

@@ -216,6 +216,93 @@ public class BundleIndexTests : IDisposable
         Assert.Contains("other.Kit.Api.hi", BundleIndex.For(dir).Functions.Keys);
     }
 
+    // ---- marks cross a bundle boundary --------------------------------------------------------
+
+    private const string AcmeTags = """
+        bundle Tags by acme {
+            publicator Api {
+                shared("An identity the rules treat as hostile.")
+                mark #Enemy
+
+                shared("The data a hostile carries.")
+                shape $Enemy { hp: int folds sum }
+            }
+        }
+        """;
+
+    [Fact]
+    public void A_shared_mark_is_indexed_separately_from_a_shape_of_the_same_name()
+    {
+        // `$Enemy` and `#Enemy` are different things, and this bundle declares both. They key identically
+        // under `Author.Bundle.Publicator.Name`, so a single dictionary would silently hold whichever the
+        // parser reached last — the same latent bug the in-bundle mark work already hit once, where
+        // Lower deduped marks by name alone and a shape swallowed the mark.
+        string dir = AppWithInstalledBundle("acme.Tags.vein", AcmeTags);
+        var index = BundleIndex.For(dir);
+
+        Assert.Contains("acme.Tags.Api.Enemy", index.Marks.Keys);
+        Assert.Contains("acme.Tags.Api.Enemy", index.Shapes.Keys);
+    }
+
+    [Fact]
+    public void A_shared_mark_is_listed_as_a_qualified_symbol()
+    {
+        // What `veinc symbols` prints. Before this a mark was absent from the table entirely, so there
+        // was no way to discover one across a boundary.
+        string dir = AppWithInstalledBundle("acme.Tags.vein", AcmeTags);
+
+        var sym = Assert.Single(BundleIndex.For(dir).Symbols,
+            s => s.Kind == SymbolKind.Mark && s.Name == "Enemy");
+        Assert.Equal("*acme.Tags.Api.#Enemy", sym.QualifiedName);
+    }
+
+    [Fact]
+    public void A_mark_reached_through_use_counts_as_declared()
+    {
+        // The point of the entry: this bundle opts into checking by declaring #Spent, and #Enemy is
+        // declared by a bundle it uses. Warning here would make `use` unusable with mark checking on.
+        string dir = AppWithInstalledBundle("acme.Tags.vein", AcmeTags);
+
+        var r = new VeinCompilerService().Compile(new CompileRequest("Demo.vein",
+            "bundle Demo by me { use Tags\n mark #Spent\n shape $H { hp: int folds sum }\n" +
+            " shard S { settled { target $H #Enemy as self { mark self #Spent } } } }",
+            ProjectDir: dir));
+
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "VS0218");
+    }
+
+    [Fact]
+    public void A_mark_declared_nowhere_is_still_reported_when_a_bundle_is_used()
+    {
+        // The other half. `use` widens what is KNOWN; it does not switch the check off, or the first
+        // `use` in a mark-declaring bundle would quietly disable VS0218 for everything.
+        string dir = AppWithInstalledBundle("acme.Tags.vein", AcmeTags);
+
+        var r = new VeinCompilerService().Compile(new CompileRequest("Demo.vein",
+            "bundle Demo by me { use Tags\n mark #Spent\n shape $H { hp: int folds sum }\n" +
+            " shard S { settled { target $H #Ghost as self { mark self #Spent } } } }",
+            ProjectDir: dir));
+
+        var hit = Assert.Single(r.Diagnostics, d => d.Code == "VS0218");
+        Assert.Contains("#Ghost", hit.Message);
+    }
+
+    [Fact]
+    public void Using_a_mark_declaring_bundle_does_not_switch_checking_on()
+    {
+        // The opt-in gate stays on THIS bundle's own declarations. A file that declares no marks stays
+        // unchecked even while using a bundle that declares several — otherwise adding a `use` would
+        // start warning about marks in a file that never asked to be checked.
+        string dir = AppWithInstalledBundle("acme.Tags.vein", AcmeTags);
+
+        var r = new VeinCompilerService().Compile(new CompileRequest("Demo.vein",
+            "bundle Demo by me { use Tags\n shape $H { hp: int folds sum }\n" +
+            " shard S { settled { target $H #Anything as self { mark self #Whatever } } } }",
+            ProjectDir: dir));
+
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "VS0218");
+    }
+
     // ---- regression: the existing no-ProjectDir path -----------------------------------------
 
     [Fact]

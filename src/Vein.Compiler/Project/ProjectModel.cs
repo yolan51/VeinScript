@@ -8,15 +8,18 @@ namespace Vein.Compiler.Project;
 // discovery/reference mechanism can list them and disambiguate name collisions between authors.
 // This is the surface + tooling layer: it does NOT link or run the bundles.
 
-public enum SymbolKind { Bundle, Publicator, Shape, Event, Builder, Shard, ShardView, Bridge, SF, Fn, Var }
+public enum SymbolKind { Bundle, Publicator, Shape, Mark, Event, Builder, Shard, ShardView, Bridge, SF, Fn, Var }
 
 /// One discoverable member, fully qualified. The canonical name is `*Author.Bundle[.Publicator].member`
-/// with the member carrying its sigil (`@`/`$`) where it has one.
+/// with the member carrying its sigil (`@`/`$`/`#`) where it has one.
 public sealed record QualifiedSymbol(
     string Author, string Bundle, string? Publicator,
     SymbolKind Kind, string Name, string? Type = null, string? Doc = null)
 {
-    public string Sigil => Kind switch { SymbolKind.Event => "@", SymbolKind.Shape => "$", SymbolKind.Builder => "&", _ => "" };
+    // `Shape` and `Mark` are separate kinds carrying separate sigils on purpose: `$Enemy` and `#Enemy`
+    // are different things and may both exist, so a symbol table keyed on the name alone would lose one.
+    public string Sigil => Kind switch
+    { SymbolKind.Event => "@", SymbolKind.Shape => "$", SymbolKind.Mark => "#", SymbolKind.Builder => "&", _ => "" };
 
     /// The owner path (author → bundle → publicator). The member is NOT part of it.
     public IReadOnlyList<string> PathSegments =>

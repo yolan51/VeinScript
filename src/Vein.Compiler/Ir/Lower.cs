@@ -134,7 +134,9 @@ public sealed class Lower
         // purely reactive bundle that only `hear`s events others emit). Null → @Request fallback.
         var startDecls = bundle.Members.OfType<StartDecl>().ToList();
         if (startDecls.Count > 1)
-            _diag.Error("VS0210", $"bundle '{bundle.Name}' has {startDecls.Count} `start` entries; a bundle has at most one entry point.", startDecls[1].Span);
+            // VS0219, not VS0210: that code already means "unknown shape in an include" (below, and in
+            // LANGUAGE.md), and one code cannot identify two unrelated conditions.
+            _diag.Error("VS0219", $"bundle '{bundle.Name}' has {startDecls.Count} `start` entries; a bundle has at most one entry point.", startDecls[1].Span);
         var startDecl = startDecls.FirstOrDefault();
         var start = startDecl is null ? null : new IrStart(
             startDecl.Event,
@@ -193,13 +195,16 @@ public sealed class Lower
     ///
     /// A warning, not an error, and it names what IS known — the shape VS0212 already uses for console
     /// addresses, which is the narrower version of this same check.
+    /// A mark shared by a `use`d bundle counts as declared. The gate above stays on THIS bundle's own
+    /// declarations — widening it would switch checking on for a file that never opted in, merely because
+    /// something it uses declares marks. Only what counts as *known* widens.
     private void CheckDeclaredMarks()
     {
         if (_declaredMarks.Count == 0) return;
 
         string known = string.Join(" ", _declaredMarks.Select(m => "#" + m));
         foreach (var (name, span) in _markUses)
-            if (!_declaredMarks.Contains(name))
+            if (!_declaredMarks.Contains(name) && ResolveUsed(Index.Marks, "#", name, span) is null)
                 _diag.Warning("VS0218",
                     $"Mark #{name} is not declared in this bundle. known: {known}", span);
     }

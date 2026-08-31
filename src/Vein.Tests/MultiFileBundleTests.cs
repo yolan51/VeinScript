@@ -231,6 +231,62 @@ public class MultiFileBundleTests : IDisposable
         Assert.DoesNotContain(r.Diagnostics, d => d.Code == "VS0213");
     }
 
+    // ---- marks take part in the merge checks --------------------------------------------------
+
+    [Fact]
+    public void A_mark_declared_in_a_fragment_and_the_main_file_is_a_duplicate()
+    {
+        // The duplicate walk keys on the sigilled name and had no MarkDecl case, so `#Enemy` in both a
+        // fragment and the main file merged silently while `$Enemy` in both was VS0320. Splitting a
+        // bundle across files is exactly when a name gets declared twice by accident.
+        string main = Bundle("Dup",
+            """
+            bundle Dup by me {
+                mark #Enemy
+                shape $H { hp: int }
+            }
+            """,
+            ("publicators/Tags.vein", "shared(\"d\")\nmark #Enemy\n"));
+
+        var r = CompileFile(main);
+        Assert.Contains(r.Diagnostics, d => d.Code == "VS0320" && d.Message.Contains("#Enemy"));
+    }
+
+    [Fact]
+    public void A_mark_and_a_shape_of_the_same_name_are_not_a_duplicate()
+    {
+        // The guard on the test above. `$Enemy` and `#Enemy` are different things, and the key carries
+        // the sigil so they cannot collide — samples/entities_marks.vein declares exactly this pair.
+        string main = Bundle("Pair",
+            """
+            bundle Pair by me {
+                mark #Enemy
+                shape $Enemy { hp: int }
+            }
+            """,
+            ("shards/S.vein", "shard S { each tick { target $Enemy #Enemy as self { } } }\n"));
+
+        var r = CompileFile(main);
+        Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "VS0320");
+    }
+
+    [Fact]
+    public void A_mark_in_a_shards_fragment_is_named_in_the_error()
+    {
+        // `shards/` is behaviour; a mark is API. The check already rejected it — the allow-list is
+        // shard/view/bridge/fn — but the message read "'MarkDecl' is API, not behaviour", naming a C#
+        // class instead of the declaration the author wrote.
+        string main = Bundle("Misplaced",
+            "bundle Misplaced by me { shape $H { hp: int } }",
+            ("shards/Tags.vein", "mark #Enemy\n"));
+
+        var r = CompileFile(main);
+        var hit = Assert.Single(r.Diagnostics, d => d.Code == "VS0321");
+        Assert.Contains("#Enemy", hit.Message);
+        Assert.DoesNotContain("MarkDecl", hit.Message);
+    }
+
     // ---- back-compat -------------------------------------------------------------------------
 
     [Fact]
