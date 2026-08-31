@@ -24,12 +24,12 @@ public class UseResolutionTests
         new VeinCompilerService().Compile(new CompileRequest("t.vein", src));
 
     /// Compile and run `src`, returning everything it printed.
-    private static string Run(string src)
+    private static string Run(string src, int ticks = 0)
     {
         var r = Compile(src);
         Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
         var sw = new StringWriter();
-        new Interp().Run(r.Modules[0], new StringReader(""), sw);
+        new Interp { Ticks = ticks }.Run(r.Modules[0], new StringReader(""), sw);
         return sw.ToString();
     }
 
@@ -110,6 +110,34 @@ public class UseResolutionTests
             "  shard S { run once { print(\"hi\") } }\n}");
 
         Assert.Equal("local:hi", output.Trim());
+    }
+
+    [Fact]
+    public void A_built_in_wins_over_a_used_one_and_says_so()
+    {
+        // The same precedence rule as the test above, one level down: a BUILT-IN already resolves, so
+        // `use` must not capture it either. `use Console` did — it exports `spawn(name, firsttext)`, a
+        // console-window launcher, which took over bare `spawn()`. The call then built no entity and
+        // reported nothing, so every `target` in the program matched an empty world and the symptom
+        // surfaced nowhere near the `use` line that caused it.
+        //
+        // Asserting on the ENTITY is the point: a test that only checked the warning would still pass if
+        // the call went back to launching console windows.
+        const string src =
+            "bundle T by me {\n" +
+            "  use Console\n" +
+            "  shape $Tag { n: int }\n" +
+            "  shard S {\n" +
+            "    run once { let e = spawn()\n" +
+            "               attach $Tag to e { n: 7 } }\n" +
+            "    settled { target $Tag as self { *Vein.Console.Io.print(\"found \" + self.Tag.n) } }\n" +
+            "  }\n}";
+
+        Assert.Equal("found 7", Run(src, ticks: 1).Trim());
+
+        var hits = Warnings(src, "VS0217").ToList();
+        Assert.Single(hits);
+        Assert.Contains("Vein.Console.Io.spawn", hits[0].Message);
     }
 
     // ---- ambiguity is reported, not guessed ------------------------------------------------------

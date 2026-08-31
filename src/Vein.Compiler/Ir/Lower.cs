@@ -707,6 +707,22 @@ public sealed class Lower
             case CallExpr { Callee: NameExpr n } c when !_localFuncs.Contains(n.Name)
                                                     && ResolveUsed(Index.Functions, "", n.Name, c.Span) is { } found:
             {
+                // A BUILT-IN already resolves, and `use` only ever WIDENS what a bare name may mean — it
+                // must never change one that already meant something. So the built-in wins here and the
+                // used bundle's member stays reachable by its qualified path.
+                //
+                // The silence was the bug. `use Console` bound bare `spawn` to *Vein.Console.Io.spawn —
+                // a two-parameter console launcher — so `let e = spawn()` built no entity, reported
+                // nothing, and every `target` in the program then matched an empty world. The symptom
+                // appeared nowhere near the cause, which is why this warns rather than quietly winning.
+                if (Interp.PrebuiltNames.Contains(n.Name))
+                {
+                    _diag.Warning("VS0217",
+                        $"'{n.Name}' is built in, so `use` cannot rebind it — '*{found.Key}' is shadowed here. " +
+                        $"Call it by its qualified path to reach it.", c.Span);
+                    return new IrCall(LowerExpr(c.Callee), c.Args.Select(LowerExpr).ToList());
+                }
+
                 var path = found.Key.Split('.')[..^1];
                 string? imported = ImportExternalFunction(path, n.Name, c.Span);
                 var args = c.Args.Select(LowerExpr).ToList();

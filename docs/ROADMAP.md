@@ -94,6 +94,14 @@ Ordered by how much each unblocks, not by milestone number.
 (builders, shapes, `fn`/`SF`), with local declarations winning and cross-bundle collisions reported as
 VS0216. Qualified `bring` turned out to have been done for some time; the entry was stale.
 
+**Recently closed:** `use` could capture a built-in. `use Console` bound bare `spawn` to
+`*Vein.Console.Io.spawn(name, firsttext)` — a console-window launcher — so `let e = spawn()` built no
+entity, reported nothing, and every `target` in the program then matched an empty world, with the symptom
+nowhere near the `use` line that caused it. A built-in already resolves and `use` only widens, so the
+built-in now wins and the shadowed member is reported as VS0217, reachable by its qualified path. The
+lowerer's own comment had claimed this behaviour ("a prebuilt like `spawn` is untouched") while the guard
+only checked local declarations.
+
 **Recently closed:** a fragment's shards ran *after* the main file's, which silently broke the one
 ordering idiom the language documents — "the kernel closes the phase, so declare it last". Move a route
 into `shards/` and the kernel's trigger was queued before the fragment's fragments, so the view assembled

@@ -851,6 +851,12 @@ public sealed class Interp
         finally { _callDepth--; }
     }
 
+    /// The names `Prebuilt` below answers to. Declared as a set because `Lower` needs the same list: a
+    /// built-in already resolves, so a `use`d bundle exporting the same name must not capture it (VS0217).
+    /// Keep the two in step — a name added below and not here is silently rebindable by `use`.
+    public static readonly IReadOnlySet<string> PrebuiltNames =
+        new HashSet<string>(StringComparer.Ordinal) { "spawn", "here", "pick", "len", "random", "join" };
+
     /// Prebuilt (built-in) functions that DO return a value — the only functions that return.
     ///
     /// `spawn()` is here rather than a keyword: `let e = spawn()` already parses and lowers, so creating

@@ -142,6 +142,14 @@ Two more the console runtime needs, same reasoning — ordinary calls, no new sy
 | `here() -> Mark` | **this** console's own address; `#Main` in the window the user launched. A spawned console re-runs the same program, so `here() == #Main` is how a program says "only the root does this". |
 | `pick(list)` | a random element of a list — the "send it to one of them" primitive. Uses the same seeded generator as `chance`, so a run stays reproducible. |
 
+**A built-in cannot be rebound by `use`.** The names the interpreter answers to directly — `spawn` `here`
+`pick` `len` `random` `join` (`Interp.PrebuiltNames`) — already resolve, and `use` only ever *widens*
+what a bare name may mean. A `use`d bundle exporting one of them is reported as **VS0217** and the
+built-in wins; reach the bundle's version by its qualified path. `*Vein.Console.Io.spawn(#Server, "hi")`
+is the live case: it launches a console window, and before this rule `use Console` silently made bare
+`spawn()` mean *that*, so `let e = spawn()` created no entity and every `target` matched an empty world.
+A **local** declaration still wins over both (it is checked first).
+
 ### 3.5 Fold reducers (operands of `folds` in a `shape`) {#35-fold-reducers}
 
 Identifiers resolved to built-in reducers — **not keywords**, so no new keywords needed. Used as
