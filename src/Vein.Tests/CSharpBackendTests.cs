@@ -94,7 +94,7 @@ public class CSharpBackendTests
             "  shape $H { hp: int folds sum }\n" +
             "  shard S { each tick { target $H #Live as self { self.H.hp -= 1 } } }");
 
-        Assert.Contains("foreach (var __e in World.Query<H>(\"Live\"))", code);
+        Assert.Contains("foreach (var __e in World.Query<H, Marks.Live>())", code);
         Assert.Contains("var __snap_H = World.Get<H>(__e);", code);
         Assert.Contains("var self_H = __snap_H;", code);    // struct copy — free, and no allocation
         Assert.Contains("World.Contribute(__e, __snap_H, self_H);", code);
@@ -112,7 +112,7 @@ public class CSharpBackendTests
             "  shape $S { sp: int folds sum }\n" +
             "  shard M { each tick { target $H $S #Live as self { self.H.hp -= 1\n      self.S.sp -= 2 } } }");
 
-        Assert.Contains("foreach (var __e in World.Query<H>(\"Live\"))", code);
+        Assert.Contains("foreach (var __e in World.Query<H, Marks.Live>())", code);
         Assert.Contains("if (!World.Has<S>(__e)) continue;", code);
 
         // Both components are bound AND both are handed back: writing back only the queried one would
@@ -161,7 +161,43 @@ public class CSharpBackendTests
             "  shape $H { hp: int }\n" +
             "  shard S { run once { let e = spawn()\n    mark e #Live } }");
 
-        Assert.Contains("World.Defer(() => World.Mark(e, \"Live\"))", code);
+        Assert.Contains("World.Defer(() => World.MarkAs<Marks.Live>(e))", code);
+    }
+
+    [Fact]
+    public void A_shape_and_a_mark_may_share_a_name()
+    {
+        // `$Enemy` and `#Enemy` are different things — different keyword, different sigil — and both are
+        // legal in one program. C# has no sigils, so both want the identifier `Enemy`; tags are emitted
+        // NESTED in `Marks`, and a nested type cannot collide with a top-level one.
+        //
+        // This case also caught a latent bug: `Lower` deduped marks by NAME ALONE, so a shape swallowed
+        // the mark and no Tag reached the IR at all. Harmless while marks compiled to strings; fatal the
+        // moment one has to become a type. Deduping is by name AND kind now.
+        var (code, _) = Emit(
+            "  shape $Enemy { hp: int folds sum }\n" +
+            "  shard S { run once { let e = spawn()\n    attach $Enemy to e { hp: 5 }\n    mark e #Enemy }\n" +
+            "    settled { target $Enemy #Enemy as self { self.Enemy.hp -= 1 } } }");
+
+        Assert.Contains("public struct Enemy : IVeinComponent<Enemy>", code);       // the shape
+        Assert.Contains("public readonly struct Enemy : IIdentityTag { }", code);   // the mark
+        Assert.Contains("World.Query<Enemy, Marks.Enemy>()", code);                 // and both at once
+    }
+
+    [Fact]
+    public void A_mark_is_emitted_as_a_SECS_identity_tag()
+    {
+        // The point of the change: a mark is a type, not a string. `Query<H>("Livee")` compiled and
+        // matched nothing; `Query<H, Marks.Livee>()` does not compile. It also makes marks visible to
+        // the engine — a string in a dictionary inside VeinWorld was reachable from nowhere else.
+        var (code, _) = Emit(
+            "  shape $H { hp: int folds sum }\n" +
+            "  shard S { each tick { target $H #Live as self { unmark self #Live } } }");
+
+        Assert.Contains("public static class Marks", code);
+        Assert.Contains("public readonly struct Live : IIdentityTag { }", code);
+        Assert.Contains("World.Defer(() => World.UnmarkAs<Marks.Live>(__e))", code);
+        Assert.DoesNotContain("\"Live\"", code);   // no mark survives as a string
     }
 
     [Fact]

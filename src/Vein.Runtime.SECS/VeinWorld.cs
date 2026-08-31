@@ -1,5 +1,6 @@
 using ShardECS.Contracts.Components;
 using ShardECS.SECS;
+using ShardECS.SECS.Systems;
 
 namespace Vein.Runtime.SECS;
 
@@ -26,9 +27,6 @@ public sealed class VeinWorld
     /// Live entities, ascending. SECS's Query returns store order; a VeinScript run must be reproducible,
     /// so iteration is always by id — the same reason EntityStore uses SortedSet throughout.
     private readonly SortedSet<int> _alive = new();
-
-    /// mark → entities carrying it. Marks are VeinScript identity, not SECS components.
-    private readonly Dictionary<string, SortedSet<int>> _marks = new(StringComparer.Ordinal);
 
     /// Structural changes queued during a phase and applied at the commit point, AFTER folds — so no
     /// unit in a phase can observe a half-changed world.
@@ -95,9 +93,29 @@ public sealed class VeinWorld
     public bool Has<T>(int entity) where T : struct, IVeinComponent<T> => _secs.Has<T>(entity);
     public T Get<T>(int entity) where T : struct, IVeinComponent<T> => _secs.Get<T>(entity);
 
-    public void Mark(int entity, string mark) { Tag(mark).Add(entity); _structuralVersion++; }
-    public void Unmark(int entity, string mark) { Tag(mark).Remove(entity); _structuralVersion++; }
-    public bool Marked(int entity, string mark) => _marks.TryGetValue(mark, out var s) && s.Contains(entity);
+    // ---- marks are SECS IDENTITY TAGS -------------------------------------
+    //
+    // A `#Mark` used to be a name in a `Dictionary<string, SortedSet<int>>` here, beside SECS rather than
+    // in it. That was VeinWorld modelling a concept the host runtime already has: `IIdentityTag :
+    // IComponent`, so an identity tag IS a zero-data component, and an entity carries as many as it likes.
+    //
+    // Emitting them as types instead of strings buys three things. A mistyped mark stops compiling rather
+    // than silently matching nothing — `Query<Health>("Mobb")` was legal and returned an empty list. The
+    // engine can see them: VeinScript marks were invisible outside this class, and are now reachable from
+    // engine-side C# as `GetEntitiesByIdentity<Mob>()`. And the query below can ask SECS about membership
+    // instead of consulting a private dictionary.
+    //
+    // Structs, not the `record` the SECS docs suggest: this backend made components structs precisely
+    // because class components cost 2 × entities × systems allocations a frame, and a tag is a component.
+    // A zero-field struct allocates nothing, and `where T : struct` satisfies the `new()` AddIdentity wants.
+
+    public void MarkAs<T>(int entity) where T : struct, IIdentityTag
+    { _secs.AddIdentity<T>(entity); _structuralVersion++; }
+
+    public void UnmarkAs<T>(int entity) where T : struct, IIdentityTag
+    { _secs.RemoveIdentity<T>(entity); _structuralVersion++; }
+
+    public bool MarkedAs<T>(int entity) where T : struct, IIdentityTag => _secs.HasIdentity<T>(entity);
 
     /// Queue a structural change for the commit point — applied immediately, it would let one unit see a
     /// world another unit had half-changed.
@@ -107,7 +125,7 @@ public sealed class VeinWorld
         Defer(() =>
         {
             _alive.Remove(entity);
-            foreach (var set in _marks.Values) set.Remove(entity);
+            // Marks go with the entity: they are components now, so DestroyEntity takes them too.
             _secs.DestroyEntity(entity);
 
             // SECS returns a destroyed id to a pool and hands it out again; EntityStore's ids are
@@ -132,25 +150,42 @@ public sealed class VeinWorld
     ///
     /// The result is a materialised array, so a body may spawn, mark or destroy mid-iteration with no
     /// dying-entity bookkeeping — the same guarantee EntityStore.Query gives.
-    public int[] Query<T>(params string[] marks) where T : struct, IVeinComponent<T>
+    /// One overload per mark count, because `ComponentBuckets` is generic-only — there is no
+    /// `Has(int, Type)`, so the tag has to be a type parameter to be testable at all. Filtering stays
+    /// INSIDE the query rather than in the emitted loop: the cache then holds the finished list, and a
+    /// frame that changes nothing structural pays nothing. Moving it to the loop would turn each tag
+    /// into a locked lookup per entity per frame. Same reason SECS spells its own `AddIdentity<T1…T4>`
+    /// this way.
+    public int[] Query<T>() where T : struct, IVeinComponent<T> =>
+        Cached<T>("", static (w, id) => true);
+
+    public int[] Query<T, M1>() where T : struct, IVeinComponent<T> where M1 : struct, IIdentityTag =>
+        Cached<T>(typeof(M1).Name, static (w, id) => w._secs.HasIdentity<M1>(id));
+
+    public int[] Query<T, M1, M2>() where T : struct, IVeinComponent<T>
+        where M1 : struct, IIdentityTag where M2 : struct, IIdentityTag =>
+        Cached<T>(typeof(M1).Name + "|" + typeof(M2).Name,
+                  static (w, id) => w._secs.HasIdentity<M1>(id) && w._secs.HasIdentity<M2>(id));
+
+    public int[] Query<T, M1, M2, M3>() where T : struct, IVeinComponent<T>
+        where M1 : struct, IIdentityTag where M2 : struct, IIdentityTag where M3 : struct, IIdentityTag =>
+        Cached<T>(typeof(M1).Name + "|" + typeof(M2).Name + "|" + typeof(M3).Name,
+                  static (w, id) => w._secs.HasIdentity<M1>(id) && w._secs.HasIdentity<M2>(id)
+                                 && w._secs.HasIdentity<M3>(id));
+
+    /// The shared body: scan live ids ascending, keep those carrying the component and passing `tags`.
+    /// `key` names the tag set — nested type names, so it cannot collide with a component's.
+    private int[] Cached<T>(string key, Func<VeinWorld, int, bool> tags) where T : struct, IVeinComponent<T>
     {
-        // A separator that cannot occur in a mark name, so two different mark lists cannot collide
-        // into one cache key.
-        var key = (typeof(T), marks.Length == 0 ? "" : string.Join("|", marks));
-        if (_queryCache.TryGetValue(key, out var hit) && hit.Version == _structuralVersion) return hit.Ids;
+        var cacheKey = (typeof(T), key);
+        if (_queryCache.TryGetValue(cacheKey, out var hit) && hit.Version == _structuralVersion) return hit.Ids;
 
         var result = new List<int>();
         foreach (int id in _alive)
-        {
-            if (!_secs.Has<T>(id)) continue;
-            bool ok = true;
-            foreach (var m in marks)
-                if (!Marked(id, m)) { ok = false; break; }
-            if (ok) result.Add(id);
-        }
+            if (_secs.Has<T>(id) && tags(this, id)) result.Add(id);
 
         var ids = result.ToArray();
-        _queryCache[key] = (_structuralVersion, ids);
+        _queryCache[cacheKey] = (_structuralVersion, ids);
         return ids;
     }
 
@@ -260,11 +295,6 @@ public sealed class VeinWorld
 
     public void Print(string text) => Out.WriteLine(text);
 
-    private SortedSet<int> Tag(string mark)
-    {
-        if (!_marks.TryGetValue(mark, out var s)) _marks[mark] = s = new SortedSet<int>();
-        return s;
-    }
 }
 
 /// Every generated component implements this. `Fold` is generated per shape, because which fields are

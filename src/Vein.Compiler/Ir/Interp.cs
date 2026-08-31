@@ -225,7 +225,13 @@ public sealed class Interp
     private void Setup(IrModule module)
     {
         _bundle = module.Name;
-        _types = module.Types.ToDictionary(t => t.Name, StringComparer.Ordinal);
+        // Tags are excluded, and that is not an optimisation. `$Enemy` and `#Enemy` are different things
+        // in VeinScript — different keyword, different sigil — so a module may legitimately hold a
+        // Component and a Tag under one name, and a flat name→type map cannot. Nothing reads a tag from
+        // here anyway: the three lookups below want an event or a component, marks live in the store's
+        // own sets. `EntityStore.Declare` has always filtered to components for the same reason.
+        _types = module.Types.Where(t => t.Kind != IrTypeKind.Tag)
+                             .ToDictionary(t => t.Name, StringComparer.Ordinal);
         _store.Declare(module.Types);   // field defaults + each field's fold reducer
 
         // Module-level `fn`/`SF` declarations, callable by name from any body. Shard-local ones are

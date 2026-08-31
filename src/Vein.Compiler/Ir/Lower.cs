@@ -122,9 +122,15 @@ public sealed class Lower
             startDecl.Fields.Select(f => (f.Name, LowerExpr(f.Value))).ToList(),
             startDecl.FillRest);
 
-        // Marks discovered while lowering become Tag types (deduped).
+        // Marks discovered while lowering become Tag types, deduped BY KIND AS WELL AS NAME.
+        //
+        // `$Enemy` and `#Enemy` are different things — different keyword, different sigil — and a program
+        // may use both. Deduping on the name alone let a shape swallow the mark: the Tag was never added,
+        // so anything reading the IR for marks simply did not see one. That was invisible while the
+        // backend emitted marks as strings and ignored Tag types entirely; it stops being invisible the
+        // moment a mark has to become a real type.
         foreach (var tag in _tags)
-            if (!types.Any(t => t.Name == tag))
+            if (!types.Any(t => t.Name == tag && t.Kind == IrTypeKind.Tag))
                 types.Add(new IrType(tag, IrTypeKind.Tag,
                     Array.Empty<IrField>(), Array.Empty<IrEnumCase>(), null,
                     new[] { IrAttr.Of("tag") }));

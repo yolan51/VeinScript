@@ -68,6 +68,11 @@ The first cut of the adapter was ≈6×. The changes below lifted it, and none a
 - **`Query` is cached** per (component, marks), invalidated by a structural version counter. Structural
   changes are deferred to the commit point, so a query cannot change underneath a phase — which is what
   makes the cache correct, not merely fast.
+- **marks are SECS identity tags**, not strings. `mark e #Enemy` emits `World.MarkAs<Marks.Enemy>(e)`,
+  and a query emits `World.Query<Health, Marks.Enemy>()`. Tags are `readonly struct … : IIdentityTag`,
+  nested in a `Marks` class so `$Enemy` and `#Enemy` — different keyword, different sigil, both legal in
+  one program — cannot collide on a C# identifier. A mistyped mark stops compiling instead of matching
+  nothing, and the engine can reach them via `GetEntitiesByIdentity<Marks.Enemy>()`.
 - **the fold commit writes to `Secs.Store` directly**, not through `Secs`. It was `Has` + `Get` + `Add`
   — four locked lookups per entity per component per frame, because `Secs.Add` repeats the `Has`
   internally to decide added-vs-changed. `TryGet` + `Add` on the store is two. Measured 175 → 109

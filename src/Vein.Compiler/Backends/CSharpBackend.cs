@@ -48,12 +48,14 @@ public sealed class CSharpBackend : IVeinBackend
         sb.AppendLine("// Do not edit: regenerate with `veinc build <file> --backend csharp`.");
         sb.AppendLine("using System;");
         sb.AppendLine("using System.Collections.Generic;");
+        sb.AppendLine("using ShardECS.SECS.Systems;");   // IIdentityTag — marks are identity tags
         sb.AppendLine("using Vein.Runtime.SECS;");
         sb.AppendLine();
         sb.AppendLine($"namespace Vein.Generated.{Ident(module.Name)};");
         sb.AppendLine();
 
         foreach (var t in module.Types) EmitType(sb, t);
+        EmitMarks(sb, module);
         foreach (var s in module.Shards) EmitShard(sb, s);
 
         EmitEntryPoint(sb, module);
@@ -69,9 +71,7 @@ public sealed class CSharpBackend : IVeinBackend
         {
             case IrTypeKind.Component: EmitComponent(sb, t); break;
 
-            // A mark is an identity, not data. The adapter keeps marks as named sets rather than empty
-            // component types, so a Tag needs no emitted declaration — only the name, which the call
-            // sites already carry.
+            // Marks are emitted together, in a nested `Marks` class — see EmitMarks.
             case IrTypeKind.Tag: break;
 
             case IrTypeKind.Enum:
@@ -93,6 +93,32 @@ public sealed class CSharpBackend : IVeinBackend
                            "emit/hear stays on the interpreter (Ir/Interp.cs).");
                 break;
         }
+    }
+
+    /// Every `#Mark` in the module, as SECS identity tags — `IIdentityTag : IComponent`, so a tag is a
+    /// zero-data component and an identity carries as many as it likes.
+    ///
+    /// NESTED in a `Marks` class, and that is the point of the nesting: `$Enemy` and `#Enemy` are
+    /// different things in VeinScript, told apart by keyword and sigil, and both are legal in one program.
+    /// C# has no sigils, so both would want the identifier `Enemy`. A nested type cannot collide with a
+    /// top-level one, so `Marks.Enemy` beside `Enemy` needs no mangling and still reads like the source.
+    ///
+    /// `readonly struct`, not the `record` SECS's own docs suggest: a tag is a component, and this backend
+    /// makes components structs because class components cost 2 × entities × systems allocations a frame.
+    /// A zero-field struct allocates nothing, and satisfies the `new()` that `AddIdentity<T>` requires.
+    private void EmitMarks(StringBuilder sb, IrModule module)
+    {
+        var marks = module.Types.Where(t => t.Kind == IrTypeKind.Tag).ToList();
+        if (marks.Count == 0) return;
+
+        sb.AppendLine("/// The module's `#Mark`s. Reachable from engine-side C# as");
+        sb.AppendLine("/// `secs.GetEntitiesByIdentity<Marks.Name>()`, which a string-keyed mark was not.");
+        sb.AppendLine("public static class Marks");
+        sb.AppendLine("{");
+        foreach (var m in marks)
+            sb.AppendLine($"    public readonly struct {Ident(m.Name)} : IIdentityTag {{ }}");
+        sb.AppendLine("}");
+        sb.AppendLine();
     }
 
     /// A component is a STRUCT. An activation needs a snapshot and a working value; as a class each is a
@@ -261,7 +287,20 @@ public sealed class CSharpBackend : IVeinBackend
         var comps = q.Components.Select(Ident).ToList();
         string comp = comps[0];
 
-        string marks = string.Join(", ", q.Tags.Select(t => "\"" + t + "\""));
+        // Marks are TYPE ARGUMENTS now, not strings: `Query<Health, Marks.Enemy>()`. A mistyped mark stops
+        // compiling instead of matching nothing, and the filter stays inside the query, so the cache holds
+        // the finished list rather than re-testing every tag per entity per frame.
+        //
+        // VeinWorld carries an overload per mark count, because `ComponentBuckets` is generic-only — there
+        // is no `Has(int, Type)` to loop over. Three covers every query in the samples; beyond that the
+        // note is honest rather than emitting something that will not compile.
+        if (q.Tags.Count > 3)
+        {
+            _notes.Add($"target on {q.Tags.Count} marks not emitted — VeinWorld.Query has overloads for up " +
+                       "to 3. Add another overload, or split the query.");
+            return;
+        }
+        string marks = q.Tags.Count == 0 ? "" : ", " + string.Join(", ", q.Tags.Select(t => "Marks." + Ident(t)));
         string prev = _selfComponent!;
         _selfComponent = comp;
 
@@ -271,7 +310,7 @@ public sealed class CSharpBackend : IVeinBackend
         // Emitting only the first was a real disagreement with the interpreter, not a missing feature: the
         // loop visited entities lacking the others, and the body then referenced a `self_<Other>` that was
         // never declared, so the generated C# did not even compile.
-        sb.AppendLine($"{pad}foreach (var __e in World.Query<{comp}>({marks}))");
+        sb.AppendLine($"{pad}foreach (var __e in World.Query<{comp}{marks}>())");
         sb.AppendLine(pad + "{");
         foreach (var c in comps.Skip(1))
             sb.AppendLine($"{pad}    if (!World.Has<{c}>(__e)) continue;");
@@ -376,10 +415,12 @@ public sealed class CSharpBackend : IVeinBackend
 
             // Structural changes are DEFERRED to the commit point, after the folds — so no unit in the
             // phase can observe a half-changed world. Same rule the interpreter applies.
-            case "AddTag":
-                return $"World.Defer(() => World.Mark({Expr(c.Args[0])}, {Expr(c.Args[1])}))";
-            case "RemoveTag":
-                return $"World.Defer(() => World.Unmark({Expr(c.Args[0])}, {Expr(c.Args[1])}))";
+            // The mark arrives as a TYPE NAME, so it becomes the generic argument — `Expr` would emit it
+            // as a string literal, which is what these used to be.
+            case "AddTag" when c.Args.Count > 1 && c.Args[1] is IrTypeNameExpr addTag:
+                return $"World.Defer(() => World.MarkAs<Marks.{Ident(addTag.Name)}>({Expr(c.Args[0])}))";
+            case "RemoveTag" when c.Args.Count > 1 && c.Args[1] is IrTypeNameExpr remTag:
+                return $"World.Defer(() => World.UnmarkAs<Marks.{Ident(remTag.Name)}>({Expr(c.Args[0])}))";
 
             case "DestroyEntity":
                 return $"World.Destroy({Expr(c.Args[0])})";

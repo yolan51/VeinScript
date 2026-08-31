@@ -1,0 +1,72 @@
+// entities_marks.vein — a `#Mark` is an identity tag, and a shape may share its name.
+//
+// `$Enemy` and `#Enemy` are different things: different keyword, different sigil. One is the data an
+// identity carries, the other is a tag it wears, and a program may legitimately use both names. This
+// file does, on purpose — it is the case that decides how marks can be compiled at all.
+//
+// The C# backend emits marks as SECS identity tags (`IIdentityTag : IComponent`, a zero-data component):
+//
+//     mark e #Enemy              →   World.MarkAs<Marks.Enemy>(e)
+//     unmark e #Enemy            →   World.UnmarkAs<Marks.Enemy>(e)
+//     target $Enemy #Enemy       →   World.Query<Enemy, Marks.Enemy>()
+//
+// C# has no sigils, so `$Enemy` and `#Enemy` would both want the identifier `Enemy`. Tags are emitted
+// NESTED in a `Marks` class, and a nested type cannot collide with a top-level one — so no mangling, and
+// the generated code still reads like the source.
+//
+// Marks used to be strings in a dictionary beside SECS. As tags they are type-checked (a mistyped mark
+// stops compiling instead of matching nothing) and visible to the engine, which can ask
+// `GetEntitiesByIdentity<Marks.Enemy>()` for them.
+//
+//   veinc run samples/entities_marks.vein --ticks 3
+//   bash tools/check-backend.sh          (the same program, emitted to C# and diffed against the above)
+
+bundle EntitiesMarks by you {
+
+    shape $Enemy { hp: int folds sum }
+
+    shard Seed {
+        run once {
+            repeat 3 {
+                let e = spawn()
+                attach $Enemy to e { hp: 3 }
+                mark e #Enemy          // the MARK — same name as the shape, different thing
+                mark e #Awake
+            }
+        }
+    }
+
+    // Two marks on one query, so the AND across tags is exercised as well as the shape.
+    shard Drain {
+        each tick {
+            target $Enemy #Enemy #Awake as self { self.Enemy.hp -= 1 }
+        }
+    }
+
+    // Marks change every frame here, which is the case a string-keyed mark set made slowest: any
+    // mark/unmark invalidates the query cache, so the next frame rescans. It is also the case that
+    // proves `unmark` really removes the tag — a spent enemy must leave the Drain query.
+    shard Reaper {
+        settled {
+            target $Enemy #Enemy as self {
+                emit *Vein.Console.Io.@Print { text: "enemy e" + Entity + " hp=" + self.Enemy.hp }
+                if self.Enemy.hp <= 0 {
+                    mark self #Spent
+                    unmark self #Awake
+                    unmark self #Enemy
+                    emit *Vein.Console.Io.@Print { text: "  e" + Entity + " spent" }
+                }
+            }
+        }
+    }
+
+    // The tag it kept. Nothing else matches #Spent, so this is the check that a mark added in an earlier
+    // frame is still there — tags persist on the identity, they are not per-frame state.
+    shard Ledger {
+        settled {
+            target $Enemy #Spent as self {
+                emit *Vein.Console.Io.@Print { text: "  ledger: e" + Entity + " is spent" }
+            }
+        }
+    }
+}

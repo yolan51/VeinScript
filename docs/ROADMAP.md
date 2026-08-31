@@ -45,9 +45,10 @@ Two consequences worth stating plainly:
 The original bar was "emits `Demo.g.cs` that compiles against the runtime and runs in the engine". A
 *wrong* translation clears that bar. The bar that means something is **agreeing with the runtime that
 already exists**, so [tools/check-backend.sh](../tools/check-backend.sh) emits, compiles, runs, and diffs
-against `veinc run`. Five samples are byte-identical — folds, phase order, death checks and ids
+against `veinc run`. Six samples are byte-identical — folds, phase order, death checks and ids
 (`entities`), multi-component AND queries (`entities_multi`), seeded `chance` draws (`entities_chance`),
-component attach/detach (`entities_detach`), and identity templates (`entities_template`).
+component attach/detach (`entities_detach`), identity templates (`entities_template`), and marks as
+identity tags with a shape sharing their name (`entities_marks`).
 
 Speed has a command now: **[tools/check-perf.sh](../tools/check-perf.sh)**. It was the one figure in this
 document with no way to re-derive it and no check to guard it, which for a *performance* milestone is the
@@ -135,6 +136,12 @@ Ordered by how much each unblocks, not by milestone number.
 3. **`use X as Y`** — the alias parses and nothing consumes it, because `*Path.member` is the only
    qualified form and `Y.@Print` does not. Needs a syntax decision before it can mean anything.
 4. **Mark declarations** — `#Mark` as a validated shared symbol instead of a naming convention.
+   The *backend* half is done: a mark compiles to a SECS identity tag (`Marks.Enemy : IIdentityTag`),
+   so it is a type rather than a string, and the engine can ask `GetEntitiesByIdentity<Marks.Enemy>()`
+   for it. What is left is the language side — a mark is still whatever you happened to type, so a
+   misspelling in the *source* is a new mark rather than an error, and no mark crosses a bundle
+   boundary as a `shared` symbol. Declaring them would close that, and the tag types give the
+   declaration something real to compile to.
 5. **`SecsRuntime.Probe`** — the repo's one live `TODO`. It was the net8↔net9 linkage proof; M5 supersedes
    it, so it should either grow into the direct-materialisation path or be deleted.
 
@@ -153,6 +160,7 @@ closed it. `git log --grep` on the phrase finds the full account.
 | Net in a linked app | A capability bundle binds the socket for the whole app (`samples/app_net`). The spoke's `audience #Hub` admits the reply, which only a frame signed as `#Hub` could do — one `_self` per runtime, as believed. |
 | The speed number | `tools/check-perf.sh`. The ≈10× baseline holds; measuring it *wrong* is easy in both directions (see M5 above). |
 | Fold commit off the `Secs` path | Four locked lookups per entity per frame became two, 175 → 109 ns/activation — and the tracker `ConcurrentBag` stopped growing every frame, since nothing drains it and no VeinScript program can subscribe to it. |
+| Marks are SECS identity tags | `mark e #Enemy` compiles to `World.MarkAs<Marks.Enemy>(e)`, not a string — type-checked, and visible to the engine as `GetEntitiesByIdentity<Marks.Enemy>()`. Tags nest in a `Marks` class so a shape and a mark may share a name; that case exposed a latent bug, since `Lower` deduped marks by name alone and a shape swallowed the mark. |
 
 ## Later
 
