@@ -95,9 +95,51 @@ public class CSharpBackendTests
             "  shard S { each tick { target $H #Live as self { self.H.hp -= 1 } } }");
 
         Assert.Contains("foreach (var __e in World.Query<H>(\"Live\"))", code);
-        Assert.Contains("var __snap = World.Get<H>(__e);", code);
-        Assert.Contains("var self_H = __snap;", code);      // struct copy — free, and no allocation
-        Assert.Contains("World.Contribute(__e, __snap, self_H);", code);
+        Assert.Contains("var __snap_H = World.Get<H>(__e);", code);
+        Assert.Contains("var self_H = __snap_H;", code);    // struct copy — free, and no allocation
+        Assert.Contains("World.Contribute(__e, __snap_H, self_H);", code);
+    }
+
+    [Fact]
+    public void A_multi_component_target_filters_the_rest_and_contributes_every_one()
+    {
+        // Several components are an AND, and `World.Query<T>` indexes on one — so the first drives the
+        // loop and the rest are per-entity tests. Emitting only the first was not a missing feature but a
+        // disagreement: the loop visited identities lacking $S, and the body then referenced a `self_S`
+        // that was never declared, so the generated C# did not compile at all.
+        var (code, notes) = Emit(
+            "  shape $H { hp: int folds sum }\n" +
+            "  shape $S { sp: int folds sum }\n" +
+            "  shard M { each tick { target $H $S #Live as self { self.H.hp -= 1\n      self.S.sp -= 2 } } }");
+
+        Assert.Contains("foreach (var __e in World.Query<H>(\"Live\"))", code);
+        Assert.Contains("if (!World.Has<S>(__e)) continue;", code);
+
+        // Both components are bound AND both are handed back: writing back only the queried one would
+        // drop the other's deltas, which a `folds sum` field would then silently under-count.
+        Assert.Contains("var self_H = __snap_H;", code);
+        Assert.Contains("var self_S = __snap_S;", code);
+        Assert.Contains("World.Contribute(__e, __snap_H, self_H);", code);
+        Assert.Contains("World.Contribute(__e, __snap_S, self_S);", code);
+
+        Assert.DoesNotContain(notes, n => n.Contains("multi-component"));
+    }
+
+    [Fact]
+    public void Unattach_and_seeded_random_are_emitted()
+    {
+        // Both used to be holes with opposite failure modes. `unattach` emitted nothing at all, and
+        // `random` emitted the constant 0.0 — which compiles, runs, and makes `chance 30%` mean ALWAYS
+        // (0.0 < 0.30). A constant is the worse of the two: only a diff against the interpreter shows it.
+        var (code, notes) = Emit(
+            "  shape $H { hp: int folds sum }\n" +
+            "  shard S { each tick { target $H as self { chance 30% { self.H.hp -= 1 }\n" +
+            "      unattach $H from self } } }");
+
+        Assert.Contains("World.Detach<H>(__e)", code);
+        Assert.Contains("World.Random()", code);
+        Assert.DoesNotContain("0.0 /*", code);
+        Assert.Empty(notes);
     }
 
     [Fact]

@@ -34,15 +34,29 @@ public sealed class VeinWorld
     /// unit in a phase can observe a half-changed world.
     private readonly List<Action> _commands = new();
 
-    /// Bumped whenever the set of entities or marks changes, which is the only thing that can invalidate
-    /// a cached query. Structural changes are deferred to commit, so within a phase this never moves —
-    /// which is exactly what makes caching a query safe for the whole phase.
+    /// Bumped whenever the set of entities, marks, or COMPONENTS changes — anything a `Query<T>(marks)`
+    /// matches on, since any of the three can invalidate a cached query. Structural changes are deferred
+    /// to commit, so within a phase this never moves — which is exactly what makes caching a query safe
+    /// for the whole phase.
     private int _structuralVersion;
 
     /// Where `@Print` goes. Settable so a test can capture it.
     public TextWriter Out { get; set; } = Console.Out;
 
     public IEnumerable<int> Alive => _alive;
+
+    /// The same generator the interpreter carries — `Interp._rng = new Random(0)`. `chance 30%` lowers
+    /// to a `random()` call, so a compiled run has to make the same draws in the same order or the two
+    /// disagree on any program that branches probabilistically. Seeded rather than time-based for the
+    /// same reason the interpreter is: a run has to be reproducible, and `tools/check-backend.sh` diffs
+    /// the two outputs literally.
+    ///
+    /// A seeded `System.Random` sequence is stable across .NET versions by design (the seeded
+    /// constructor keeps the legacy algorithm), which is what lets net8 and net9 agree here.
+    private readonly System.Random _rng = new(0);
+
+    /// One draw in [0,1). Named for what it is to a Vein program, not for the BCL method it wraps.
+    public double Random() => _rng.NextDouble();
 
     /// Allocate an entity id.
     ///
@@ -60,9 +74,23 @@ public sealed class VeinWorld
 
     public void Attach<T>(int entity, T component) where T : struct, IVeinComponent<T>
     {
+        // Bumps the structural version: `Query<T>` matches on component PRESENCE, so gaining one
+        // invalidates a cached query exactly as gaining a mark does. Attaching only ever happened before
+        // the first query ran, which is why the missing bump never showed.
+        _structuralVersion++;
         _secs.Add(entity, component);
         Of<T>().Touch(entity);
     }
+
+    /// `unattach $C from e`. DEFERRED, like every other structural change and like the interpreter's own
+    /// `RemoveComponent` — applied at the commit point so no unit in the phase sees a half-changed world.
+    ///
+    /// Ordering with folds is already right and worth stating: commands run AFTER the buckets commit, and
+    /// `Bucket.Commit` skips any entity that no longer has the component. So contributions made earlier in
+    /// the same phase reconcile onto the component and are then discarded with it — which is what the
+    /// interpreter does, rather than losing the writes or resurrecting the component.
+    public void Detach<T>(int entity) where T : struct, IVeinComponent<T> =>
+        Defer(() => { _secs.Remove<T>(entity); _structuralVersion++; });
 
     public bool Has<T>(int entity) where T : struct, IVeinComponent<T> => _secs.Has<T>(entity);
     public T Get<T>(int entity) where T : struct, IVeinComponent<T> => _secs.Get<T>(entity);

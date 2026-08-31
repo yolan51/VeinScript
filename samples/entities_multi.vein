@@ -1,0 +1,64 @@
+// entities_multi.vein — a target query over TWO components, which is an AND.
+//
+// `target $Health $Shield #Unit as self { … }` visits only identities carrying BOTH shapes and the mark.
+// The world below is built so that matters: one identity has both, one has only $Health, one only
+// $Shield. A query that honoured just the first component would visit two of them and read a component
+// the second does not carry.
+//
+// It also writes to both components inside one activation, so `folds` has to reconcile each of them —
+// a backend that wrote back only the component it queried on would silently drop the other's deltas.
+//
+//   veinc run samples/entities_multi.vein --ticks 2
+//   bash tools/check-backend.sh          (the same program, emitted to C# and diffed against the above)
+
+bundle EntitiesMulti by you {
+
+    shape $Health { hp: int folds sum }
+    shape $Shield { sp: int folds sum }
+
+    shard Seed {
+        run once {
+            // Carries both — the only identity the guarded query below should ever see.
+            let a = spawn()
+            attach $Health to a { hp: 10 }
+            attach $Shield to a { sp: 6 }
+            mark a #Unit
+
+            // Health only.
+            let b = spawn()
+            attach $Health to b { hp: 10 }
+            mark b #Unit
+
+            // Shield only.
+            let c = spawn()
+            attach $Shield to c { sp: 6 }
+            mark c #Unit
+        }
+    }
+
+    // One activation, two components written. Both are `folds sum`, so both must be handed back.
+    shard Wear {
+        each tick {
+            target $Health $Shield #Unit as self {
+                self.Health.hp -= 1
+                self.Shield.sp -= 2
+            }
+        }
+    }
+
+    shard Report {
+        settled {
+            // The AND: one line per tick, for the one identity carrying both.
+            target $Health $Shield as self {
+                emit *Vein.Console.Io.@Print { text: "both     e" + Entity + " hp=" + self.Health.hp + " sp=" + self.Shield.sp }
+            }
+
+            // The control: a single-component query still sees every identity carrying $Health, so the
+            // one that lost only its shield is still here. Without this, "the AND works" and "the query
+            // matches nothing" would look the same.
+            target $Health as self {
+                emit *Vein.Console.Io.@Print { text: "health   e" + Entity + " hp=" + self.Health.hp }
+            }
+        }
+    }
+}

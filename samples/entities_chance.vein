@@ -1,0 +1,46 @@
+// entities_chance.vein — `chance N%` under the identity runtime, and the reason it is seeded.
+//
+// `chance 30% { … }` lowers to `if random() < 0.30`, and `random` is drawn from ONE generator seeded at
+// 0 — the interpreter's `Interp._rng`. That is what makes a probabilistic program reproducible: the same
+// source and the same frame count print the same thing every run, so it can be diffed.
+//
+// It is also the whole point of this file as a backend case. A backend that emitted a constant for
+// `random` would compile, run, and quietly disagree — with 0.0 every `chance` fires, so the compiled
+// program would be strictly harsher than the interpreted one and only a diff would ever show it.
+//
+//   veinc run samples/entities_chance.vein --ticks 4
+//   bash tools/check-backend.sh          (the same program, emitted to C# and diffed against the above)
+
+bundle EntitiesChance by you {
+
+    shape $Health { hp: int folds sum }
+
+    shard Seed {
+        run once {
+            repeat 4 {
+                let e = spawn()
+                attach $Health to e { hp: 20 }
+                mark e #Mob
+            }
+        }
+    }
+
+    // Two independent draws per activation, so the ORDER of draws matters as well as their values: a
+    // generator that agreed on the sequence but was consulted in a different order would show up here.
+    shard Rot {
+        each tick {
+            target $Health #Mob as self {
+                chance 50% { self.Health.hp -= 1 }
+                chance 25% { self.Health.hp -= 3 }
+            }
+        }
+    }
+
+    shard Report {
+        settled {
+            target $Health #Mob as self {
+                emit *Vein.Console.Io.@Print { text: "mob e" + Entity + " hp=" + self.Health.hp }
+            }
+        }
+    }
+}

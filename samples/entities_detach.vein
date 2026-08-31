@@ -1,0 +1,71 @@
+// entities_detach.vein — components ARRIVING and LEAVING while the world runs.
+//
+// Two structural changes the identity runtime has to get right, and both are deferred to the commit
+// point so no unit in a phase can observe a half-changed world:
+//
+//   attach $Shield to e        — with no initialiser, so the fields take their declared zero
+//   unattach $Shield from e    — the component goes, and the identity stops matching queries for it
+//
+// The ordering that matters is between a fold and a removal in the SAME phase: contributions reconcile
+// FIRST, then the removal applies on top. So a shield written down to 0 and then dropped keeps its final
+// value right up to the moment it disappears, rather than losing the writes or surviving them.
+//
+//   veinc run samples/entities_detach.vein --ticks 4
+//   bash tools/check-backend.sh          (the same program, emitted to C# and diffed against the above)
+
+bundle EntitiesDetach by you {
+
+    shape $Health { hp: int folds sum }
+    shape $Shield { sp: int folds sum }
+
+    shard Seed {
+        run once {
+            repeat 3 {
+                let e = spawn()
+                attach $Health to e { hp: 9 }
+                // No initialiser: `sp` starts at its zero, then Boost raises it below.
+                attach $Shield to e
+                mark e #Mob
+            }
+        }
+    }
+
+    shard Boost {
+        each tick {
+            target $Health $Shield #Mob as self { self.Shield.sp += 2 }
+        }
+    }
+
+    shard Wear {
+        each tick {
+            target $Health $Shield #Mob as self {
+                self.Health.hp -= 1
+                self.Shield.sp -= 3
+            }
+        }
+    }
+
+    // Once the shield is spent it is removed — after this tick's folds have already reconciled onto it.
+    shard Shatter {
+        settled {
+            target $Health $Shield #Mob as self {
+                if self.Shield.sp <= 0 {
+                    emit *Vein.Console.Io.@Print { text: "shatter e" + Entity + " sp=" + self.Shield.sp }
+                    unattach $Shield from self
+                }
+            }
+        }
+    }
+
+    shard Report {
+        settled {
+            // Still shielded — shrinks as shields shatter, which is the removal being visible to a query.
+            target $Shield #Mob as self {
+                emit *Vein.Console.Io.@Print { text: "  shielded e" + Entity + " sp=" + self.Shield.sp }
+            }
+            target $Health #Mob as self {
+                emit *Vein.Console.Io.@Print { text: "  alive    e" + Entity + " hp=" + self.Health.hp }
+            }
+        }
+    }
+}

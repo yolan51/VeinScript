@@ -45,7 +45,9 @@ Two consequences worth stating plainly:
 The original bar was "emits `Demo.g.cs` that compiles against the runtime and runs in the engine". A
 *wrong* translation clears that bar. The bar that means something is **agreeing with the runtime that
 already exists**, so [tools/check-backend.sh](../tools/check-backend.sh) emits, compiles, runs, and diffs
-against `veinc run`. `samples/entities.vein` is byte-identical — folds, phase order, death checks, ids.
+against `veinc run`. Four samples are byte-identical — folds, phase order, death checks and ids
+(`entities`), multi-component AND queries (`entities_multi`), seeded `chance` draws (`entities_chance`),
+and component attach/detach (`entities_detach`).
 
 Measured at **≈10×** the interpreter on per-entity-per-frame work (~2.30 µs → ~0.23 µs per activation).
 Not the ~100× a compiled ECS should reach; the remaining cost is SECS's per-access `ReaderWriterLockSlim`
@@ -77,22 +79,30 @@ Ordered by how much each unblocks, not by milestone number.
 
 1. **Backend headroom** — the 10× → the remaining cost is inside SECS (locks + dictionary lookups per
    access). Needs bulk/unlocked access in the vendored SECS, or the adapter owning packed storage.
-2. **Backend coverage** — `target` over multiple components, component removal, seeded `random`. Each is
-   a note in the emitter today, so nothing is silently wrong; the notes are the to-do list.
-3. **Net inside a linked app** — a capability bundle doing `@Listen` *should* work (one queue, one
+2. **Net inside a linked app** — a capability bundle doing `@Listen` *should* work (one queue, one
    `_self`), but nothing has run it.
-4. **TLS for `Vein.Net.Peer`** — frames are encrypted under a pre-shared key, so there is no forward
+3. **TLS for `Vein.Net.Peer`** — frames are encrypted under a pre-shared key, so there is no forward
    secrecy and no certificate identity. The frames would ride inside an `SslStream` without any `.vein`
    program changing.
-5. **`use X as Y`** — the alias parses and nothing consumes it, because `*Path.member` is the only
+4. **`use X as Y`** — the alias parses and nothing consumes it, because `*Path.member` is the only
    qualified form and `Y.@Print` does not. Needs a syntax decision before it can mean anything.
-6. **Mark declarations** — `#Mark` as a validated shared symbol instead of a naming convention.
-7. **`SecsRuntime.Probe`** — the repo's one live `TODO`. It was the net8↔net9 linkage proof; M5 supersedes
+5. **Mark declarations** — `#Mark` as a validated shared symbol instead of a naming convention.
+6. **`SecsRuntime.Probe`** — the repo's one live `TODO`. It was the net8↔net9 linkage proof; M5 supersedes
    it, so it should either grow into the direct-materialisation path or be deleted.
 
 **Recently closed:** `use` resolution — a bare name now falls back to the bundles a file `use`s
 (builders, shapes, `fn`/`SF`), with local declarations winning and cross-bundle collisions reported as
 VS0216. Qualified `bring` turned out to have been done for some time; the entry was stale.
+
+**Recently closed:** backend coverage — `target` over multiple components, component removal, and seeded
+`random` all emit now, each with a sample in `tools/check-backend.sh`. Two of the three were not gaps but
+disagreements, which is the failure mode the contract exists to forbid: a multi-component `target` emitted
+only the first component, so the loop visited identities lacking the others and referenced a `self_<Other>`
+that was never declared (the generated C# did not compile); and `random` emitted the constant `0.0`, which
+compiled, ran, and made `chance 30%` mean ALWAYS. Adding the cases also surfaced a latent one in the
+adapter — `Attach` never bumped the structural version, so a component gained mid-run left the query cache
+stale. `attach` with no initialiser is emitted too, and reported rather than guessed at when the shape
+declares field defaults the emitted struct would zero.
 
 **Recently closed:** `use` could capture a built-in. `use Console` bound bare `spawn` to
 `*Vein.Console.Io.spawn(name, firsttext)` — a console-window launcher — so `let e = spawn()` built no
@@ -129,7 +139,7 @@ Three, and they guard different things:
 
 | Check | Guards |
 |---|---|
-| `dotnet test src/Vein.Tests` | behaviour — ~340 tests |
+| `dotnet test src/Vein.Tests` | behaviour — ~380 tests |
 | `bash tools/check-ir.sh` | the IR's *shape* — 8 golden trees, so lowering regressions surface |
 | `bash tools/check-backend.sh` | the backend's *meaning* — emitted C# is compiled, run, and diffed against the interpreter |
 
