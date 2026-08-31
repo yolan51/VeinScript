@@ -1078,6 +1078,8 @@ public partial class MainWindow : Window
         string? body = emit.Success ? EmitBody(ast, emit.Groups[1].Value)
                      : start.Success ? EmitBody(ast, start.Groups[1].Value)   // start payload = the event's fields
                      : BringBody(ast, bring.Groups[1].Value);
+        // `?` is documented for emit / start / bring — the sites that CONSTRUCT a payload. `hear` binds
+        // one instead, so there is nothing to fill; its fields surface through `<binding>.` completion.
         if (body is null) return;
 
         _editor.Document.Replace(q, 1, body);          // replace the '?' with the expansion
@@ -1085,19 +1087,23 @@ public partial class MainWindow : Window
         _editor.CaretOffset = q + (hole >= 0 ? hole : body.Length);
     }
 
-    private static string? EmitBody(CompilationUnit ast, string eventName)
+    // Both go through EventCatalog with the project dir, so `?` sees what the COMPILER sees — including
+    // the shared events and builders of `use`d bundles. The Workbench used to reach a builder through a
+    // private FindBuilder/BuilderParams pair that walked the local AST only, so `bring Button ?` against
+    // anything from `use Web` silently expanded to nothing: the one case a `?` is most wanted in.
+    private string? EmitBody(CompilationUnit ast, string eventName)
     {
-        var ev = EventCatalog.Catalog(ast).FirstOrDefault(e => e.Name == eventName);
+        var ev = EventCatalog.Catalog(ast, ProjectDir).FirstOrDefault(e => e.Name == eventName);
         if (ev is null) return null;
         var parts = ev.Fields.Select(f => $"{f.Name}: {(f.Required ? "?" : f.Default)}");
         return "{ " + string.Join(", ", parts) + " }";
     }
 
-    private static string? BringBody(CompilationUnit ast, string builderName)
+    private string? BringBody(CompilationUnit ast, string builderName)
     {
-        var b = FindBuilder(ast, builderName);
+        var b = EventCatalog.Builders(ast, ProjectDir).FirstOrDefault(x => x.Name == builderName);
         if (b is null) return null;
-        var parts = BuilderParams(ast, b).Select(p => $"? /* {p.Name}: {p.Type} */");
+        var parts = b.Fields.Select(p => $"? /* {p.Name}: {p.Type} */");
         return "(" + string.Join(", ", parts) + ")";
     }
 

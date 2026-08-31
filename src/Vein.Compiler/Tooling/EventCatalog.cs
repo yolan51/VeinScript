@@ -1,5 +1,6 @@
 using System.Text;
 using Vein.Compiler.Parsing;
+using Vein.Compiler.Project;
 
 namespace Vein.Compiler.Tooling;
 
@@ -35,9 +36,59 @@ public static class EventCatalog
         ("trail", "id[] — the full causation chain that led here"),
     };
 
-    public static List<EventEntry> Catalog(CompilationUnit unit)
+    /// The bundles this unit `use`s. `use` names a bundle, so a shared member of one is reachable by its
+    /// bare name — and the tooling has to see exactly what the compiler sees, or `bring Button ?` expands
+    /// to nothing for the very builders a project consumes most.
+    private static List<string> Uses(CompilationUnit unit)
+    {
+        var names = new List<string>();
+        void Walk(IEnumerable<Decl> ds)
+        {
+            foreach (var d in ds)
+                switch (d)
+                {
+                    case UseDecl u when !names.Contains(u.Name, StringComparer.Ordinal): names.Add(u.Name); break;
+                    case BundleDecl b: Walk(b.Members); break;
+                    case PublicatorDecl p: Walk(p.Members); break;
+                }
+        }
+        Walk(unit.Bundles);
+        return names;
+    }
+
+    /// Index entries whose bundle segment is one this unit `use`s. Keys are `Author.Bundle[.Pub].Name`,
+    /// the same suffix rule Lower.ResolveUsed applies.
+    private static IEnumerable<KeyValuePair<string, T>> FromUsed<T>(
+        IReadOnlyDictionary<string, T> index, IReadOnlyList<string> uses)
+    {
+        if (uses.Count == 0) yield break;
+        foreach (var kv in index)
+        {
+            var parts = kv.Key.Split('.');
+            if (parts.Length >= 3 && uses.Contains(parts[1], StringComparer.Ordinal)) yield return kv;
+        }
+    }
+
+    /// Local shapes, plus the shared shapes of `use`d bundles under their bare names. A local
+    /// declaration wins, which is `use` precedence — it only ever WIDENS what a bare name may mean.
+    private static Dictionary<string, List<FieldDecl>> ShapesInScope(
+        CompilationUnit unit, BundleIndex? index, IReadOnlyList<string> uses)
     {
         var shapes = Sig.Shapes(unit);
+        if (index is null) return shapes;
+        foreach (var kv in FromUsed(index.Shapes, uses))
+        {
+            string bare = kv.Key[(kv.Key.LastIndexOf('.') + 1)..];
+            if (!shapes.ContainsKey(bare)) shapes[bare] = kv.Value.Members.OfType<FieldDecl>().ToList();
+        }
+        return shapes;
+    }
+
+    public static List<EventEntry> Catalog(CompilationUnit unit, string? projectDir = null)
+    {
+        var index = projectDir is null ? null : BundleIndex.For(projectDir);
+        var uses = index is null ? new List<string>() : Uses(unit);
+        var shapes = ShapesInScope(unit, index, uses);
         var list = new List<EventEntry>();
         void Walk(IEnumerable<Decl> decls)
         {
@@ -56,6 +107,19 @@ public static class EventCatalog
                 }
         }
         Walk(unit.Bundles);
+
+        // Then the shared events of `use`d bundles, under their bare names. Local wins, so a name this
+        // unit declares is never displaced by an imported one.
+        if (index is not null)
+            foreach (var kv in FromUsed(index.Events, uses))
+            {
+                string bare = kv.Key[(kv.Key.LastIndexOf('.') + 1)..];
+                if (list.Any(e => e.Name == bare)) continue;
+                list.Add(new EventEntry(bare, true, Sig.Expand(kv.Value.Members, shapes)
+                    .Where(f => !Auto.Contains(f.Name))
+                    .Select(f => new EventField(f.Name, f.Type, f.Required, f.Default, f.OriginShape))
+                    .ToList()));
+            }
         return list;
     }
 
@@ -97,9 +161,11 @@ public static class EventCatalog
     ///
     /// A builder is where discovery matters most: a `shared` one is consumed from another bundle, so the
     /// declaration is not on the reader's screen and the include hides the field names one level down.
-    public static List<BuilderEntry> Builders(CompilationUnit unit)
+    public static List<BuilderEntry> Builders(CompilationUnit unit, string? projectDir = null)
     {
-        var shapes = Sig.Shapes(unit);
+        var index = projectDir is null ? null : BundleIndex.For(projectDir);
+        var uses = index is null ? new List<string>() : Uses(unit);
+        var shapes = ShapesInScope(unit, index, uses);
         var list = new List<BuilderEntry>();
         void Walk(IEnumerable<Decl> decls)
         {
@@ -108,26 +174,37 @@ public static class EventCatalog
                 {
                     case BundleDecl b: Walk(b.Members); break;
                     case PublicatorDecl p: Walk(p.Members); break;
-                    case BuilderDecl bd:
-                    {
-                        var output = bd.Members.OfType<FieldDecl>()
-                            .FirstOrDefault(f => f.Name is "markup" or "code" or "css" or "line");
-                        var marks = bd.Members.OfType<MarkMember>().SelectMany(m => m.Marks).ToList();
-                        var fields = Sig.Expand(bd.Members.Where(m => !ReferenceEquals(m, output)).ToList(), shapes)
-                            .Select(f => new EventField(f.Name, f.Type, f.Required, f.Default, f.OriginShape))
-                            .ToList();
-                        list.Add(new BuilderEntry(bd.Name, bd.Shared, fields, marks,
-                            marks.Count > 0 ? "an identity" : output?.Name switch
-                            {
-                                "code" => "@Script", "css" => "@Style", "line" => "@Print",
-                                "markup" => "@Html", _ => "@" + bd.Name
-                            }));
-                        break;
-                    }
+                    case BuilderDecl bd: list.Add(Entry(bd, bd.Name)); break;
                 }
         }
         Walk(unit.Bundles);
+
+        // Then the shared builders of `use`d bundles, under their bare names — which is exactly how
+        // `bring Button(…)` resolves, so `bring Button ?` must see the same one.
+        if (index is not null)
+            foreach (var kv in FromUsed(index.Builders, uses))
+            {
+                string bare = kv.Key[(kv.Key.LastIndexOf('.') + 1)..];
+                if (list.Any(b => b.Name == bare)) continue;   // local wins
+                list.Add(Entry(kv.Value, bare));
+            }
         return list;
+
+        BuilderEntry Entry(BuilderDecl bd, string name)
+        {
+            var output = bd.Members.OfType<FieldDecl>()
+                .FirstOrDefault(f => f.Name is "markup" or "code" or "css" or "line");
+            var marks = bd.Members.OfType<MarkMember>().SelectMany(m => m.Marks).ToList();
+            var fields = Sig.Expand(bd.Members.Where(m => !ReferenceEquals(m, output)).ToList(), shapes)
+                .Select(f => new EventField(f.Name, f.Type, f.Required, f.Default, f.OriginShape))
+                .ToList();
+            return new BuilderEntry(name, bd.Shared, fields, marks,
+                marks.Count > 0 ? "an identity" : output?.Name switch
+                {
+                    "code" => "@Script", "css" => "@Style", "line" => "@Print",
+                    "markup" => "@Html", _ => "@" + name
+                });
+        }
     }
 
     /// A ready-to-fill `bring`, which is what the `?` sigil stands for at a call site.

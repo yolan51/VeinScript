@@ -26,6 +26,7 @@ public sealed class BundleIndex
         IReadOnlyDictionary<string, BuilderDecl> Builders,
         IReadOnlyDictionary<string, ShapeDecl> Shapes,
         IReadOnlyDictionary<string, MarkDecl> Marks,
+        IReadOnlyDictionary<string, EventDecl> Events,
         IReadOnlyDictionary<string, FuncDecl> Functions,
         IReadOnlyDictionary<string, string> Owners);   // "Author.Bundle" → the file that declared it
 
@@ -44,6 +45,11 @@ public sealed class BundleIndex
     /// Shared marks, keyed like the rest. A `MarkDecl` carries no fields — the value is the declaration
     /// itself, so `ResolveUsed` can report WHERE a cross-bundle mark came from, not merely that it exists.
     public required IReadOnlyDictionary<string, MarkDecl> Marks { get; init; }
+
+    /// Shared events, with their field lists — so tooling can scaffold an `emit` payload for an event
+    /// this bundle never declared. `veinc scaffold` and the Workbench's `?` both need the fields, not
+    /// just the name, which is why the declaration is the value.
+    public required IReadOnlyDictionary<string, EventDecl> Events { get; init; }
     public required IReadOnlyDictionary<string, FuncDecl> Functions { get; init; }
 
     /// Declarations hidden because an earlier root declared the same qualified name.
@@ -64,6 +70,7 @@ public sealed class BundleIndex
         var builders = new Dictionary<string, BuilderDecl>(StringComparer.Ordinal);
         var shapes = new Dictionary<string, ShapeDecl>(StringComparer.Ordinal);
         var marks = new Dictionary<string, MarkDecl>(StringComparer.Ordinal);
+        var events = new Dictionary<string, EventDecl>(StringComparer.Ordinal);
         var functions = new Dictionary<string, FuncDecl>(StringComparer.Ordinal);
         var owners = new Dictionary<string, string>(StringComparer.Ordinal);
         var shadowed = new List<(string, string, string)>();
@@ -83,6 +90,7 @@ public sealed class BundleIndex
             Merge(folder.Builders, builders);
             Merge(folder.Shapes, shapes);
             Merge(folder.Marks, marks);
+            Merge(folder.Events, events);
             Merge(folder.Functions, functions);
             symbols.AddRange(folder.Symbols);
 
@@ -93,7 +101,7 @@ public sealed class BundleIndex
 
         var index = new BundleIndex
         {
-            Roots = roots, Symbols = symbols, Builders = builders, Shapes = shapes, Marks = marks, Functions = functions,
+            Roots = roots, Symbols = symbols, Builders = builders, Shapes = shapes, Marks = marks, Events = events, Functions = functions,
             Shadowed = shadowed, Duplicates = duplicates
         };
         _composites[key] = index;
@@ -185,6 +193,7 @@ public sealed class BundleIndex
         var builders = new Dictionary<string, BuilderDecl>(StringComparer.Ordinal);
         var shapes = new Dictionary<string, ShapeDecl>(StringComparer.Ordinal);
         var marks = new Dictionary<string, MarkDecl>(StringComparer.Ordinal);
+        var events = new Dictionary<string, EventDecl>(StringComparer.Ordinal);
         var functions = new Dictionary<string, FuncDecl>(StringComparer.Ordinal);
         var owners = new Dictionary<string, string>(StringComparer.Ordinal);
 
@@ -209,13 +218,13 @@ public sealed class BundleIndex
                 {
                     string author = b.Author ?? "local";
                     owners.TryAdd($"{author}.{b.Name}", file);
-                    Collect(b.Members, author, b.Name, null, symbols, builders, shapes, marks, functions);
+                    Collect(b.Members, author, b.Name, null, symbols, builders, shapes, marks, events, functions);
                 }
             }
             catch { /* skip a malformed file rather than fail the whole index */ }
         }
 
-        var index = new FolderIndex(folder, Stamp(folder), symbols, builders, shapes, marks, functions, owners);
+        var index = new FolderIndex(folder, Stamp(folder), symbols, builders, shapes, marks, events, functions, owners);
         _folders[folder] = index;
         return index;
     }
@@ -227,6 +236,7 @@ public sealed class BundleIndex
         Dictionary<string, BuilderDecl> builders,
         Dictionary<string, ShapeDecl> shapes,
         Dictionary<string, MarkDecl> marks,
+        Dictionary<string, EventDecl> events,
         Dictionary<string, FuncDecl> functions)
     {
         string Key(string name) => pub is null ? $"{author}.{bundle}.{name}" : $"{author}.{bundle}.{pub}.{name}";
@@ -235,7 +245,7 @@ public sealed class BundleIndex
         {
             if (m is PublicatorDecl p)
             {
-                Collect(p.Members, author, bundle, p.Name, symbols, builders, shapes, marks, functions);
+                Collect(p.Members, author, bundle, p.Name, symbols, builders, shapes, marks, events, functions);
                 continue;
             }
             if (!m.Shared) continue;
@@ -253,6 +263,7 @@ public sealed class BundleIndex
                     symbols.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Mark, md.Name, Doc: md.Doc));
                     break;
                 case EventDecl e:
+                    events[Key(e.Name)] = e;
                     symbols.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Event, e.Name, Doc: e.Doc));
                     break;
                 case BuilderDecl bl:

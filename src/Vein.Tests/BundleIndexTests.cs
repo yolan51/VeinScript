@@ -2,6 +2,8 @@ using Vein.Compiler.Diagnostics;
 using Vein.Compiler.Ir;
 using Vein.Compiler.Project;
 using Vein.Compiler.Service;
+using Vein.Compiler.Tooling;
+using Vein.Compiler.Parsing;
 using Xunit;
 
 namespace Vein.Tests;
@@ -368,6 +370,77 @@ public class BundleIndexTests : IDisposable
             "bundle Demo by me { shape $Pos { x: float } }", ProjectDir: dir));
 
         Assert.DoesNotContain(r.Diagnostics, d => d.Code == "VS0220");
+    }
+
+    // ---- `?` / scaffold sees what the compiler sees -------------------------------------------
+
+    /// The AST of `src`, for the catalog to read. Compiled rather than parsed directly so the unit is
+    /// the same shape the Workbench and CLI hand to EventCatalog.
+    private static CompilationUnit Parse(string src, string dir) =>
+        new VeinCompilerService().Compile(new CompileRequest("Demo.vein", src, ProjectDir: dir)).Ast!;
+
+    private const string AcmeKit = """
+        bundle Kit by acme {
+            publicator Api {
+                shared("A greeting event.")
+                event @Greet { who: string, loud: bool = false }
+
+                shared("A boxed label.")
+                shape $Box { label: string, width: int }
+
+                shared("Renders a boxed label.")
+                builder Box { $Box   markup = "<b>" + label + "</b>" }
+            }
+        }
+        """;
+
+    [Fact]
+    public void A_used_bundles_builder_can_be_scaffolded()
+    {
+        // `bring Box(…)` resolves through `use Kit`, so `bring Box ?` has to expand the same builder.
+        // It walked the local AST only, so the one case `?` is most wanted in — a builder you did not
+        // write and cannot see — silently produced nothing.
+        string dir = AppWithInstalledBundle("acme.Kit.vein", AcmeKit);
+        var unit = Parse("bundle Demo by me { use Kit\n shard S { run once { bring Box(\"hi\", 3) } } }", dir);
+
+        var b = Assert.Single(EventCatalog.Builders(unit, dir), x => x.Name == "Box");
+        Assert.Equal(new[] { "label", "width" }, b.Fields.Select(f => f.Name).ToArray());
+        Assert.Contains("bring Box(", EventCatalog.Scaffold(b));
+    }
+
+    [Fact]
+    public void A_used_bundles_event_can_be_scaffolded()
+    {
+        // The same for `emit @Greet ?`, defaults included — `loud` is optional, `who` is not.
+        string dir = AppWithInstalledBundle("acme.Kit.vein", AcmeKit);
+        var unit = Parse("bundle Demo by me { use Kit }", dir);
+
+        var e = Assert.Single(EventCatalog.Catalog(unit, dir), x => x.Name == "Greet");
+        Assert.Equal(new[] { "who", "loud" }, e.Fields.Select(f => f.Name).ToArray());
+        Assert.True(e.Fields[0].Required);
+        Assert.False(e.Fields[1].Required);
+    }
+
+    [Fact]
+    public void A_local_declaration_wins_over_a_used_one_of_the_same_name()
+    {
+        // `use` WIDENS what a bare name may mean; it never displaces a local declaration. The catalog
+        // has to agree with that, or `?` would scaffold the imported payload for a local event.
+        string dir = AppWithInstalledBundle("acme.Kit.vein", AcmeKit);
+        var unit = Parse("bundle Demo by me { use Kit\n event @Greet { mine: int } }", dir);
+
+        var e = Assert.Single(EventCatalog.Catalog(unit, dir), x => x.Name == "Greet");
+        Assert.Equal(new[] { "mine" }, e.Fields.Select(f => f.Name).ToArray());
+    }
+
+    [Fact]
+    public void Without_a_project_dir_the_catalog_is_local_only()
+    {
+        // The parameter is optional and every existing caller omits it, so the old behaviour has to be
+        // exactly what it was — `veinc events` on one file still lists that file's events.
+        var unit = Parse("bundle Demo by me { use Kit\n event @Mine { a: int } }", TempDir());
+
+        Assert.Equal(new[] { "Mine" }, EventCatalog.Catalog(unit).Select(e => e.Name).ToArray());
     }
 
     // ---- regression: the existing no-ProjectDir path -----------------------------------------

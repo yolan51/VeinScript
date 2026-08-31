@@ -260,7 +260,7 @@ switch (command)
         var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
         if (!diagnostics.HasErrors)
         {
-            var events = EventCatalog.Catalog(unit);
+            var events = EventCatalog.Catalog(unit, projectDir);
             if (args.Contains("--json"))
                 Console.WriteLine(JsonSerializer.Serialize(events, new JsonSerializerOptions { WriteIndented = true }));
             else
@@ -279,8 +279,8 @@ switch (command)
         var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
         if (!diagnostics.HasErrors)
         {
-            var events = raw.StartsWith('&') ? new List<EventEntry>() : EventCatalog.Catalog(unit);
-            var builders = raw.StartsWith('@') ? new List<BuilderEntry>() : EventCatalog.Builders(unit);
+            var events = raw.StartsWith('&') ? new List<EventEntry>() : EventCatalog.Catalog(unit, projectDir);
+            var builders = raw.StartsWith('@') ? new List<BuilderEntry>() : EventCatalog.Builders(unit, projectDir);
 
             var ev = events.FirstOrDefault(e => string.Equals(e.Name, want, StringComparison.Ordinal));
             var bl = builders.FirstOrDefault(b => string.Equals(b.Name, want, StringComparison.Ordinal));
