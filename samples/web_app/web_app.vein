@@ -125,6 +125,11 @@ bundle WebApp by you {
     // `veinc scaffold samples/web_app/web_app.vein '&Btn'` prints the slots with the shape each came from.
     builder Btn { $Element $Handler   mark #Screen #Button }
 
+    // The readout: an element with no behaviour of its own. `as out` names the identity it builds, so
+    // the handler bodies below can address it — without that, `bring` spawns into a local the program
+    // never sees and there would be nothing to pass to `domId`.
+    builder Readout { $Element   mark #Screen }
+
     // ---- the stylesheet ----------------------------------------------------------------------------
     // Emitted on EVERY request, before any page decides what it contains. A 404 still collects the CSS
     // and still answers 404, because the view keys "is there a page" off the HTML, not off the styles.
@@ -230,16 +235,13 @@ bundle WebApp by you {
     // find nothing to wire — the entities it wanted do not exist until the phase ends.
     shard CounterSeed {
         run once {
-            // The readout is the one thing that still needs a `spawn`: the three handler bodies address
-            // it by id, so its identity has to exist as a value before they can be written. Everything
-            // that nothing points back at is a one-line `bring`.
-            let out = spawn()
-            attach $Element to out { tag: "div", cls: "count", text: "0" }
-            mark out #Screen
+            // Three builders, five brings, no `spawn` in sight. `as out` is what makes the readout a
+            // template like the rest: it names the identity so the handler bodies can address it.
+            bring Readout("div", "count", "0") as out
 
-            // Each button IS its own handler — one identity carrying $Element and $Handler both. That is
-            // what removed the three `let inc = spawn()` blocks that used to sit here: with no separate
-            // handler entity there is nothing to refer to, and `bring` never has to hand anything back.
+            // Each button IS its own handler — one identity carrying $Element and $Handler both, so
+            // nothing points at anything and `fnName(Entity)` names the same function from the markup
+            // and from the @Script fragment.
             //
             // `domId(out)` is the only place the readout's id is written, and it is computed rather than
             // typed, so the string 'n' has no equivalent anywhere in this file.

@@ -76,6 +76,12 @@ bring Unit(10, 6)     ==     let e = spawn()
                              mark e #Unit
 ```
 
+**7b. `bring X(…) as name` binds what a template built.** `bring` is a statement and the identity it
+spawns lives in a local the program never sees, so anything that must REFER to it needed a hand-written
+`spawn`/`attach`/`mark`. `as` fixes that, and means what it means in `target … as self`. Only an
+identity template can be bound — `as` on a fragment builder is **VS0221** — and a count cannot be
+combined with it (**VS0222**), since the name would bind only the last one.
+
 **8. A `$Shape` include is a COMPILE-TIME field expansion, and `bring` attaches nothing.** The include
 copies the shape's fields into the signature; it does not make the built thing carry the component. So:
 

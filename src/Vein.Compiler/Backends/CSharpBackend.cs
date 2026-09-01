@@ -202,6 +202,14 @@ public sealed class CSharpBackend : IVeinBackend
 
     private void EmitBlock(StringBuilder sb, IrBlock block, int depth)
     {
+        // A transparent block introduces no scope — `bring … as x` declares `x` for the statements that
+        // FOLLOW it. Bracing here would make the emitted C# disagree with the interpreter, where an
+        // IrBlock has always shared its parent's locals.
+        if (block.Transparent)
+        {
+            foreach (var s in block.Statements) EmitStmt(sb, s, depth);
+            return;
+        }
         string pad = new string(' ', depth * 4);
         sb.AppendLine(pad + "{");
         foreach (var s in block.Statements) EmitStmt(sb, s, depth + 1);
@@ -495,7 +503,25 @@ public sealed class CSharpBackend : IVeinBackend
         _ => Ident(t.Name)
     };
 
-    private static string Ident(string name) => name.Replace('.', '_');
+    /// C# reserved words. A VeinScript name is not constrained by C#'s grammar, so `let out = …` is
+    /// ordinary source here and `var out = …` is not valid C# — the `@` prefix is exactly the escape
+    /// hatch C# provides for it. Latent until `bring … as out` made user-chosen names easy to reach.
+    private static readonly HashSet<string> CsKeywords = new(StringComparer.Ordinal)
+    {
+        "abstract","as","base","bool","break","byte","case","catch","char","checked","class","const",
+        "continue","decimal","default","delegate","do","double","else","enum","event","explicit","extern",
+        "false","finally","fixed","float","for","foreach","goto","if","implicit","in","int","interface",
+        "internal","is","lock","long","namespace","new","null","object","operator","out","override",
+        "params","private","protected","public","readonly","ref","return","sbyte","sealed","short",
+        "sizeof","stackalloc","static","string","struct","switch","this","throw","true","try","typeof",
+        "uint","ulong","unchecked","unsafe","ushort","using","virtual","void","volatile","while"
+    };
+
+    private static string Ident(string name)
+    {
+        string s = name.Replace('.', '_');
+        return CsKeywords.Contains(s) ? "@" + s : s;
+    }
 
     // ---- entry point -----------------------------------------------------
 

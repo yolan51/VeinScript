@@ -848,7 +848,11 @@ public sealed class Parser
                 }
             Expect(TokenKind.RParen, "')'");
         }
-        return new BringStmt(count, name, args, fill, s) { BuilderPath = path };
+        // `as name` binds the identity this builds, so a later statement can refer to it. `as` already
+        // means exactly this in `target … as self` and `hear … as e`; `bring` stays a statement.
+        string? bind = Match(TokenKind.KwAs) ? ExpectName("a name after 'as'").Text : null;
+
+        return new BringStmt(count, name, args, fill, s) { BuilderPath = path, Bind = bind };
     }
 
     private Stmt ParseAssignOrExpr()

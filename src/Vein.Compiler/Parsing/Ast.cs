@@ -203,6 +203,11 @@ public sealed record BringStmt(Expr? Count, string Builder, IReadOnlyList<Expr> 
     /// A `*Author.Bundle.Publicator` qualifier on the builder (`bring *Vein.Console.Io.&Console(…)`);
     /// empty ⇒ a bare/local `&`-builder resolved in this bundle.
     public IReadOnlyList<string> BuilderPath { get; init; } = Array.Empty<string>();
+
+    /// `bring Readout(…) as out` — the name the built IDENTITY is bound to, so later statements can
+    /// refer to it. Only an identity template (a builder with a `mark` member) has anything to bind; a
+    /// fragment builder emits an event and produces no value, which is VS0221.
+    public string? Bind { get; init; }
 }
 
 // ---- expressions --------------------------------------------------------

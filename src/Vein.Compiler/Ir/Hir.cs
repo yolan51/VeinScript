@@ -63,7 +63,11 @@ public sealed record IrAttr(string Name, IReadOnlyList<object?> Args)
 
 public abstract record IrStmt;
 
-public sealed record IrBlock(IReadOnlyList<IrStmt> Statements) : IrStmt;
+/// A statement sequence. `Transparent` means it introduces NO scope: the interpreter never did (an
+/// IrBlock shares its parent's locals), but the C# backend emits `{ … }`, so a `let` inside would be
+/// invisible afterwards there and visible here. `bring … as x` lowers to a block declaring `x`, so it
+/// has to be emitted without braces or the two runtimes would disagree about whether `x` exists.
+public sealed record IrBlock(IReadOnlyList<IrStmt> Statements, bool Transparent = false) : IrStmt;
 public sealed record IrLet(string Name, IrTypeRef? Type, IrExpr? Init, bool Mutable) : IrStmt;
 public sealed record IrAssign(IrExpr Target, IrExpr Value) : IrStmt;
 public sealed record IrIf(IrExpr Cond, IrBlock Then, IrBlock? Else) : IrStmt;

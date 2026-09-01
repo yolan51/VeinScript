@@ -1,0 +1,63 @@
+// entities_bind.vein — `bring … as name`, which hands back the identity a template just built.
+//
+// A `mark` member makes a builder an identity template (entities_template.vein). But `bring` is a
+// STATEMENT, and the identity it spawns lives in a local the program never sees — so anything that had
+// to REFER to what it built kept a hand-written spawn/attach/mark:
+//
+//     let hub = spawn()                    bring Node("hub") as hub
+//     attach $Node to hub { name: "hub" }  bring Link("a", hub)
+//     mark hub #Node
+//
+// `as` already means "bind this to a name" in `target … as self` and `hear … as e`, so `bring` keeps
+// its place as a statement and simply names what it made.
+//
+// Two things it refuses. A fragment builder constructs nothing, so `as` has no identity to name — that
+// is VS0221. And `bring 3 X(…) as n` would rebind on every iteration, leaving the name meaning only the
+// last one, which is VS0222 rather than a silent surprise.
+//
+//   veinc run samples/entities_bind.vein --ticks 2
+//   bash tools/check-backend.sh          (the same program, emitted to C# and diffed against the above)
+
+bundle EntitiesBind by you {
+
+    shape $Node { name: string }
+    shape $Edge { to: Entity, weight: int folds sum }
+
+    mark #Node
+    mark #Edge
+
+    builder Node { $Node   mark #Node }
+    builder Edge { $Edge   mark #Edge }
+
+    shard Seed {
+        run once {
+            // Each node is named, so the edges below can point at it. Nothing here spawns by hand.
+            bring Node("hub")  as hub
+            bring Node("leaf") as leaf
+
+            // `hub` and `leaf` are ordinary Entity values — passable as arguments, storable in a shape.
+            bring Edge(hub,  1)
+            bring Edge(leaf, 2)
+            bring Edge(hub,  3)
+        }
+    }
+
+    // The edges are readable as data, which is the proof the binding held: each carries the entity the
+    // template returned, not a zero or a copy.
+    shard Report {
+        settled {
+            target $Edge #Edge as e {
+                emit *Vein.Console.Io.@Print { text: "edge e" + Entity + " -> e" + e.Edge.to + " w=" + e.Edge.weight }
+            }
+        }
+    }
+
+    // And the nodes are still ordinary identities.
+    shard Nodes {
+        settled {
+            target $Node #Node as n {
+                emit *Vein.Console.Io.@Print { text: "node e" + Entity + " " + n.Node.name }
+            }
+        }
+    }
+}

@@ -705,7 +705,19 @@ public sealed class Lower
     private IrStmt LowerIdentityBring(BringStmt br, BuilderDecl b, string? ownerKey)
     {
         var stmts = new List<IrStmt>();
-        string ent = "__ent" + _identityDepth++;
+
+        // `bring X(…) as out` names the identity instead of hiding it in a generated local. A count
+        // rebinds on every iteration, so the name would mean only the last one — refused rather than
+        // silently kept.
+        if (br.Bind is not null && br.Count is not null)
+            _diag.Error("VS0222",
+                $"`bring {b.Name}(…) as {br.Bind}` cannot take a count — the name would bind only the last one.",
+                br.Span);
+
+        // Only the GENERATED name consumes a depth slot; `as` names it instead. Decrementing
+        // unconditionally at the end drove the counter negative and produced `__ent-1`.
+        bool generated = br.Bind is null;
+        string ent = generated ? "__ent" + _identityDepth++ : br.Bind;
         stmts.Add(new IrLet(ent, null, new IrCall(new IrLocalRef("spawn"), Array.Empty<IrExpr>()), false));
 
         int arg = 0;
@@ -766,8 +778,9 @@ public sealed class Lower
         if (arg < br.Args.Count && !br.FillRest)
             _diag.Error("VS0204", $"Builder '{b.Name}' takes {arg} param(s), got {br.Args.Count}.", br.Span);
 
-        _identityDepth--;
-        var body = new IrBlock(stmts);
+        if (generated) _identityDepth--;
+        // Transparent when it binds a name: the C# backend braces a block, and `out` must outlive it.
+        var body = new IrBlock(stmts, Transparent: br.Bind is not null);
         return br.Count is null ? body
              : new IrLoop(IrLoopKind.Repeat, null, null, null, null, LowerExpr(br.Count), body);
     }
@@ -812,6 +825,14 @@ public sealed class Lower
         //     attach $Shield to e { sp: 6 }
         //     mark e #Unit
         if (b.Members.OfType<MarkMember>().Any()) return LowerIdentityBring(br, b, ownerKey);
+
+        // Past here the builder emits a FRAGMENT or an event — it constructs no identity, so there is
+        // nothing for `as` to name. Silently ignoring the binding would leave a name that reads like an
+        // entity and holds nothing.
+        if (br.Bind is not null)
+            _diag.Error("VS0221",
+                $"`as {br.Bind}` needs an identity to bind, and builder '{b.Name}' builds a fragment. "
+                + "Only a builder with a `mark` member constructs an identity.", br.Span);
 
         // Otherwise a builder either has a fragment output channel (markup/code/css/line — emits that one
         // field to @Html/@Script/@Style/@Print) OR no channel at all, in which case it constructs and emits

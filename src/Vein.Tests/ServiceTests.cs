@@ -698,6 +698,74 @@ public class ServiceTests
 
         Assert.DoesNotContain(r.Diagnostics, d => d.Code == "VS0218");
     }
+    // ---- `bring … as name` (VS0221 / VS0222) ---------------------------------------------------
+
+    [Fact]
+    public void Bring_as_binds_the_identity_it_built()
+    {
+        // Without this, an identity template spawns into a generated local the program never sees, so
+        // anything that has to REFER to what it built kept a hand-written spawn/attach/mark.
+        var r = Compile(
+            "bundle T by me {\n" +
+            "  shape $E { tag: string }\n" +
+            "  shape $Ref { of: Entity }\n" +
+            "  mark #Thing\n" +
+            "  builder Thing { $E   mark #Thing }\n" +
+            "  builder Link  { $Ref mark #Thing }\n" +
+            "  shard S { run once { bring Thing(\"div\") as out\n bring Link(out) } }\n}");
+
+        Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
+    }
+
+    [Fact]
+    public void Bring_as_runs_and_the_binding_is_the_new_entity()
+    {
+        // The binding has to be the entity the template just spawned, not a copy or a zero — and it must
+        // outlive the block the bring lowers to.
+        var r = Compile(
+            "bundle T by me {\n" +
+            "  shape $E { tag: string }\n" +
+            "  mark #Thing\n" +
+            "  builder Thing { $E   mark #Thing }\n" +
+            "  shard S { run once { bring Thing(\"a\") as one\n bring Thing(\"b\") as two\n" +
+            "    emit *Vein.Console.Io.@Print { text: \"one=\" + one + \" two=\" + two } } }\n}");
+
+        Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
+        var sw = new StringWriter();
+        new Interp().Run(r.Modules[0], new StringReader(""), sw);
+        Assert.Contains("one=1 two=2", sw.ToString());
+    }
+
+    [Fact]
+    public void Bring_as_on_a_fragment_builder_is_an_error()
+    {
+        // A fragment builder emits an event and constructs nothing, so there is no identity to name.
+        // Ignoring the binding would leave a name that reads like an entity and holds nothing.
+        var r = Compile(
+            "bundle T by me {\n" +
+            "  shape $E { tag: string }\n" +
+            "  builder Frag { $E   markup = \"<\" + tag + \">\" }\n" +
+            "  shard S { run once { bring Frag(\"div\") as f } }\n}");
+
+        var hit = Assert.Single(r.Diagnostics, d => d.Code == "VS0221");
+        Assert.Contains("Frag", hit.Message);
+    }
+
+    [Fact]
+    public void Bring_as_with_a_count_is_an_error()
+    {
+        // `bring 3 Thing(…) as t` would rebind each iteration, so the name would mean only the last —
+        // a silent surprise, so it is refused instead.
+        var r = Compile(
+            "bundle T by me {\n" +
+            "  shape $E { tag: string }\n" +
+            "  mark #Thing\n" +
+            "  builder Thing { $E   mark #Thing }\n" +
+            "  shard S { run once { bring 3 Thing(\"div\") as t } }\n}");
+
+        Assert.Contains(r.Diagnostics, d => d.Code == "VS0222");
+    }
+
 
     [Fact]
     public void A_declared_mark_exists_even_when_nothing_uses_it()
