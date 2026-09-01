@@ -1,80 +1,65 @@
 // dom_rewire.vein — a shard cycling through elements and OVERRIDING the function attached to each.
 //
-// The companion to /counter in samples/web_app: there, handlers and elements become identities so no
-// name is ever typed twice. Here is what that buys — because the wiring is data on an identity rather
-// than characters inside a markup string, a shard can walk every button and repoint it.
+// The companion to /counter in samples/web_app: there, elements and their behaviour become identities
+// so no name is ever typed twice. Here is what that buys — because behaviour is a COMPONENT on an
+// identity rather than characters inside a markup string, a shard can walk every button and replace it.
 //
 //   veinc run samples/dom_rewire.vein --ticks 2
 //
 // WHY A TICK LOOP AND NOT A WEB REQUEST. Structural changes commit per EVENT (Interp.Drain), so a
-// handler attached during one event is invisible until the next. Inside a single `hear @Request` a
+// component attached during one event is invisible until the next. Inside a single `hear @Request` a
 // wiring shard and a rendering shard therefore cannot see each other, and `veinc serve` gives every
 // request a fresh interpreter — so there is no later request to carry the change either. Ticks ARE
 // successive events, which is where an override is observable at all.
 
 bundle DomRewire by you {
 
-    // The same three shapes /counter uses. `$OnClick` is separate from `$Element` on purpose: repointing
-    // a button is then an `attach` of one component, and the element itself is untouched.
+    // The same two shapes /counter uses. A button carries BOTH: an element that holds its own $Handler
+    // *is* its handler, so there is no second identity and nothing to point at. Overriding what a
+    // button does is then re-attaching one component to the button itself.
     shape $Element { tag: string, text: string }
     shape $Handler { body: string }
-    shape $OnClick { handler: Entity }
 
     mark #Button
 
     // The function's name IS its identity — nothing stores a name, so nothing can disagree about one.
     fn fnName(e: Entity) -> string { return "h" + e }
 
+    // One line per button, because a `mark` member makes this an identity template:
+    //   bring Btn("button", "one", "…")  ==  spawn + attach $Element + attach $Handler + mark #Button
+    builder Btn { $Element $Handler   mark #Button }
+
     shard Seed {
         run once {
-            // Spawning and the default wiring share this block: `run once` commits a single time for
-            // every shard, so a separate wiring shard would find nothing yet to wire.
-            let quiet = spawn()
-            attach $Handler to quiet { body: "console.log('click')" }
-
-            let a = spawn()
-            attach $Element to a { tag: "button", text: "one" }
-            attach $OnClick to a { handler: quiet }
-            mark a #Button
-
-            let b = spawn()
-            attach $Element to b { tag: "button", text: "two" }
-            attach $OnClick to b { handler: quiet }
-            mark b #Button
-
-            let c = spawn()
-            attach $Element to c { tag: "button", text: "three" }
-            attach $OnClick to c { handler: quiet }
-            mark c #Button
+            bring Btn("button", "one",   "console.log('one')")
+            bring Btn("button", "two",   "console.log('two')")
+            bring Btn("button", "three", "console.log('three')")
         }
     }
 
-    // Declared BEFORE Rewire, and in the same phase, so it reads the state the last frame left behind —
-    // a change made this tick has not committed yet. On the first tick that is the seeded wiring, which
+    // Declared BEFORE Rewire and in the same phase, so it reads what the last frame left behind — a
+    // change made this tick has not committed yet. On the first tick that is the seeded behaviour, which
     // is the only place the "before" is visible at all.
     shard Before {
         each tick {
-            target $Element $OnClick #Button as btn {
+            target $Element $Handler #Button as b {
                 emit *Vein.Console.Io.@Print {
-                    text: "  before: '" + btn.Element.text + "' -> " + fnName(btn.OnClick.handler) + "()"
+                    text: "  before  " + fnName(Entity) + "  " + b.Handler.body
                 }
             }
         }
     }
 
     // THE POINT. Every button, walked, and the function attached to each replaced — without naming a
-    // single one of them. A page built from markup strings could not express this at all: the buttons
-    // would be characters, not identities.
+    // single one of them. A page built from markup strings could not express this: the buttons would be
+    // characters, not identities.
     //
-    // A fresh handler per button rather than one shared: it shows that the override is per-element, and
-    // that a handler is an ordinary identity a shard may create. It also re-runs each tick, which is
-    // visible in the output below and is what makes the change observable.
+    // The button's identity does not change, so `fnName` stays put and the markup that calls it never
+    // needs rewriting. Only the BODY moves.
     shard Rewire {
         each tick {
-            target $Element #Button as btn {
-                let h = spawn()
-                attach $Handler to h { body: "alert('" + btn.Element.text + " was rewired')" }
-                attach $OnClick to btn { handler: h }
+            target $Element #Button as b {
+                attach $Handler to b { body: "alert('" + b.Element.text + " was rewired')" }
             }
         }
     }
@@ -83,9 +68,9 @@ bundle DomRewire by you {
     // the tick's changes have committed.
     shard Show {
         settled {
-            target $Element $OnClick #Button as btn {
+            target $Element $Handler #Button as b {
                 emit *Vein.Console.Io.@Print {
-                    text: "button '" + btn.Element.text + "' -> " + fnName(btn.OnClick.handler) + "()"
+                    text: "  after   " + fnName(Entity) + "  " + b.Handler.body
                 }
             }
         }

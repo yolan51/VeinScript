@@ -62,11 +62,6 @@ bundle WebApp by you {
     // `Define("inc", …)` and once in `onclick='inc()'` — is now written zero times.
     shape $Handler { body: string }
 
-    // The wiring, deliberately its OWN shape rather than a field on $Element. Overriding what a button
-    // does is then an `attach` of one component — the element itself is untouched, and the old handler
-    // identity stays alive for anything else still pointing at it.
-    shape $OnClick { handler: Entity }
-
     mark #Screen    // an element that belongs to the counter page, rendered in spawn order
     mark #Button
 
@@ -78,10 +73,9 @@ bundle WebApp by you {
     // The names the browser sees, both DERIVED from the identity — so they exist in exactly one place
     // each, and a rename moves every reference with it because there are no other references.
     //
-    // Deriving the handler's name (rather than storing one) is also what keeps rendering a FLAT query:
-    // a button holds its handler as an `Entity`, and turning that into `h7()` is a function call. Were
-    // the name a field on $Handler, the button would have to look it up through a second, nested
-    // `target` — which today silently reads empty, see the note in RULES.md.
+    // Deriving both (rather than storing names) is what keeps every render loop FLAT — see RULES.md 12c,
+    // where a nested `target` silently reads empty from the outer binding. A button IS its handler, so
+    // naming its function is `fnName(Entity)` — no lookup, no second loop, nothing that can disagree.
     fn domId(e: Entity)  -> string { return "e" + e }
     fn fnName(e: Entity) -> string { return "h" + e }
 
@@ -107,6 +101,29 @@ bundle WebApp by you {
     builder Card    { $Card     markup = "<div class='card'><h3>" + title + "</h3><p>" + body + "</p></div>" }
     builder Hero    { $Hero     markup = "<header class='hero'><h1>" + title + "</h1><p>" + sub + "</p></header>" }
     builder Footer  { $Footer   markup = "<footer>" + note + "</footer>" }
+
+    // ---- identity templates: the same builders, building things instead of markup -------------------
+    //
+    // A `mark` member is the discriminator. It makes `bring Featured("a", "b")` mean exactly
+    //
+    //     let e = spawn()   attach $Card to e { title: "a", body: "b" }   mark e #Featured
+    //
+    // so seeding a world is one line per thing rather than three. `&Card` above and `&Featured` here
+    // include the SAME `$Card`: one shape, rendered by one and attached by the other, which is what
+    // makes the home grid a query rather than four hard-coded lines.
+    //
+    // Note a builder does ONE of these — a `mark` member short-circuits before the output channel is
+    // considered — so `&Card` cannot both attach and render, and the two names are two builders.
+    builder Featured { $Card   mark #Featured }
+
+    // A button carries BOTH shapes, and that is what removes the last back-reference: an element that
+    // holds its own `$Handler` *is* its handler, so there is no second identity to point at and nothing
+    // to hand back out of a `bring`. `fnName(Entity)` names the same function from the button's markup
+    // and from the @Script fragment, because both are the same identity.
+    //
+    // Arguments bind positionally ACROSS includes, in declaration order: (tag, cls, text, body).
+    // `veinc scaffold samples/web_app/web_app.vein '&Btn'` prints the slots with the shape each came from.
+    builder Btn { $Element $Handler   mark #Screen #Button }
 
     // ---- the stylesheet ----------------------------------------------------------------------------
     // Emitted on EVERY request, before any page decides what it contains. A 404 still collects the CSS
@@ -171,26 +188,13 @@ bundle WebApp by you {
     // literal `bring` lines could express none of that.
     shard Catalog {
         run once {
-            let a = spawn()
-            attach $Card to a { title: "Shapes", body: "Data lives in $Shape — identity components with folds." }
-            mark a #Featured
-
-            let b = spawn()
-            attach $Card to b { title: "Shards", body: "Behaviour reacts: hear an event, emit more." }
-            mark b #Featured
-
-            let c = spawn()
-            attach $Card to c { title: "Builders", body: "A builder's output field picks its channel: markup, css or code." }
-            mark c #Featured
-
-            let d = spawn()
-            attach $Card to d { title: "One page", body: "These four cards are four separate @Html fragments." }
-            mark d #Featured
-            
-            
-            let e = spawn()
-            attach $Card to e { title: "where are we ", body: "LOST IN THE FRAGMENt OF THE WORLD" }
-            mark e #Featured
+            // One line per card. Nothing here needs the identity back, so the whole spawn/attach/mark
+            // trio collapses into the template — which is what an identity builder is for.
+            bring Featured("Shapes",   "Data lives in $Shape — identity components with folds.")
+            bring Featured("Shards",   "Behaviour reacts: hear an event, emit more.")
+            bring Featured("Builders", "A builder's output field picks its channel: markup, css or code.")
+            bring Featured("One page", "These four cards are four separate @Html fragments.")
+            bring Featured("where are we ", "LOST IN THE FRAGMENt OF THE WORLD")
         }
     }
 
@@ -226,44 +230,25 @@ bundle WebApp by you {
     // find nothing to wire — the entities it wanted do not exist until the phase ends.
     shard CounterSeed {
         run once {
-            // The readout first, because the handlers below need its identity to address it.
+            // The readout is the one thing that still needs a `spawn`: the three handler bodies address
+            // it by id, so its identity has to exist as a value before they can be written. Everything
+            // that nothing points back at is a one-line `bring`.
             let out = spawn()
             attach $Element to out { tag: "div", cls: "count", text: "0" }
             mark out #Screen
 
-            // Three functions, three identities. `domId(out)` is the ONLY place the readout's id is
-            // written, and it is computed rather than typed — the string 'n' has no equivalent here.
-            let inc = spawn()
-            attach $Handler to inc {
-                body: "var e=document.getElementById('" + domId(out) + "');e.innerText=(+e.innerText)+1" }
-
-            let dec = spawn()
-            attach $Handler to dec {
-                body: "var e=document.getElementById('" + domId(out) + "');e.innerText=(+e.innerText)-1" }
-
-            let zero = spawn()
-            attach $Handler to zero {
-                body: "document.getElementById('" + domId(out) + "').innerText='0'" }
-
-            // A button carries its label as an element, and its behaviour as a REFERENCE to a handler.
-            // Nothing here names a function in a string.
-            let plus = spawn()
-            attach $Element to plus { tag: "button", cls: "", text: "+1" }
-            attach $OnClick to plus { handler: inc }
-            mark plus #Screen
-            mark plus #Button
-
-            let minus = spawn()
-            attach $Element to minus { tag: "button", cls: "", text: "-1" }
-            attach $OnClick to minus { handler: dec }
-            mark minus #Screen
-            mark minus #Button
-
-            let rst = spawn()
-            attach $Element to rst { tag: "button", cls: "", text: "reset" }
-            attach $OnClick to rst { handler: zero }
-            mark rst #Screen
-            mark rst #Button
+            // Each button IS its own handler — one identity carrying $Element and $Handler both. That is
+            // what removed the three `let inc = spawn()` blocks that used to sit here: with no separate
+            // handler entity there is nothing to refer to, and `bring` never has to hand anything back.
+            //
+            // `domId(out)` is the only place the readout's id is written, and it is computed rather than
+            // typed, so the string 'n' has no equivalent anywhere in this file.
+            bring Btn("button", "", "+1",
+                      "var e=document.getElementById('" + domId(out) + "');e.innerText=(+e.innerText)+1")
+            bring Btn("button", "", "-1",
+                      "var e=document.getElementById('" + domId(out) + "');e.innerText=(+e.innerText)-1")
+            bring Btn("button", "", "reset",
+                      "document.getElementById('" + domId(out) + "').innerText='0'")
         }
     }
 
@@ -290,11 +275,12 @@ bundle WebApp by you {
                     }
 
                     bring OpenAs("div", "row")
-                        // A button's onclick is derived from the identity it points at — the same
-                        // derivation the @Script fragments below use, so the two cannot disagree.
-                        target $Element $OnClick #Button as b {
+                        // A button and its function are ONE identity, so `fnName(Entity)` here and in
+                        // the @Script loop below name the same thing by construction — there is no
+                        // reference between them that could go stale.
+                        target $Element $Handler #Button as b {
                             bring Raw("<button id='" + domId(Entity) + "' onclick='" +
-                                      fnName(b.OnClick.handler) + "()'>" + b.Element.text + "</button>")
+                                      fnName(Entity) + "()'>" + b.Element.text + "</button>")
                         }
                     bring Close("div")
 
