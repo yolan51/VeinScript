@@ -33,6 +33,11 @@ this language is words, because `and`/`or`/`not` are the operators
 ([D12](SYNTAX-DECISIONS.md#not)) — which is also the general rule: a C-family construct is not adopted
 here just for being familiar.
 
+**2b. `} else {` goes on ONE line.** A newline after `}` ends the statement (rule 1), so an `else`
+beginning its own line is orphaned and reports **VS0104: Unexpected 'else' in expression**. A `match`
+arm may sit on its own line — `ParseMatch` reads `else` explicitly — which is why
+`samples/console_roles.vein` appears to contradict this and does not.
+
 **3. A string literal is one line.** `\n \t \r \\ \"` are the escapes; a literal newline inside quotes is
 VS0003. To emit a multi-line string, use `\n` and wrap the source with trailing `+` per rule 1.
 
@@ -98,6 +103,20 @@ commit point, after the folds. That is what stops one unit seeing a world anothe
 
 **12. A structural change is invisible inside the event that made it.** Attach in a `hear` handler and a
 `target` in that same handler will not see it; the next event will. Seed worlds in `run once`.
+
+**12b. …but the NEXT event sees it, because commit is per EVENT.** `Drain` commits after every event's
+handlers, not once per drain: *"handlers run sequentially, so the next event sees what the last one
+built"* ([Interp.cs](../src/Vein.Compiler/Ir/Interp.cs)). So wiring written in one event is readable in
+the next, and that is the only way to arrange *change it, then read it* — see `samples/dom_rewire.vein`.
+Two consequences: **`run once` commits once for ALL shards**, so one shard cannot wire what another just
+spawned; and within a single `hear @Request` a wiring shard and a rendering shard cannot see each other,
+which (with rule 22) is why a web page cannot wire-then-render in one request.
+
+**12c. A nested `target` reads EMPTY from the outer binding — silently.** Inside
+`target $A as x { target $B as y { … } }`, `x.A.field` yields empty rather than `x`'s value: Lower emits
+a nameless `IrSelfRef` for every target binding and the interpreter resolves it to `_targetBinds[^1]`,
+the innermost loop. Indistinguishable from correct in a single loop. Keep queries flat — carry what the
+inner loop needs as a value (an `Entity` field plus a `fn`), as `samples/web_app` does for handler names.
 
 **13. `folds` reconciles concurrent writes; `settled` is where the reconciled value is readable.** Two
 shards doing `hp -= 1` in one tick give `hp - 2`, because each contributes a *delta* from its own

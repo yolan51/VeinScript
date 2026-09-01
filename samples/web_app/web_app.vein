@@ -42,6 +42,49 @@ bundle WebApp by you {
     shape $Hero   { title: string, sub: string }
     shape $Footer { note: string }
 
+    // ---- the browser half, as identities ------------------------------------------------------------
+    //
+    // /counter used to be six literal strings: three <button onclick='inc()'> and three
+    // Define("inc", "…getElementById('n')…"). The id 'n' appeared FOUR times and the name 'inc' twice,
+    // and nothing checked either — they are characters inside a string, invisible to the compiler and
+    // to every shard.
+    //
+    // As identities the names stop being typed at all. A DOM id is DERIVED from the entity (`domId`
+    // below), so there is no literal to keep in sync, and a button is something a shard can walk.
+
+    // One shape for every element, not one per tag. `target` binds a single shape and cannot ask an
+    // entity what else it carries, so a page rebuilt by query has to be uniform — the same constraint
+    // that keeps /docs a literal sequence. `tag` carries the difference instead.
+    shape $Element { tag: string, cls: string, text: string }
+
+    // A JavaScript function as an identity. It carries only a BODY: the function's name is derived from
+    // the identity itself (`fnName` below), so the thing that used to be written twice — once in
+    // `Define("inc", …)` and once in `onclick='inc()'` — is now written zero times.
+    shape $Handler { body: string }
+
+    // The wiring, deliberately its OWN shape rather than a field on $Element. Overriding what a button
+    // does is then an `attach` of one component — the element itself is untouched, and the old handler
+    // identity stays alive for anything else still pointing at it.
+    shape $OnClick { handler: Entity }
+
+    mark #Screen    // an element that belongs to the counter page, rendered in spawn order
+    mark #Button
+
+    // Declaring ANY mark opts this bundle into VS0218, so the two that were already in use have to be
+    // declared as well. That is the check working: they were only ever spelled at their use sites.
+    mark #Featured  // a card the home grid shows
+    mark #Doc       // a /docs section (used by shards/Reference.vein, which merges into this bundle)
+
+    // The names the browser sees, both DERIVED from the identity — so they exist in exactly one place
+    // each, and a rename moves every reference with it because there are no other references.
+    //
+    // Deriving the handler's name (rather than storing one) is also what keeps rendering a FLAT query:
+    // a button holds its handler as an `Entity`, and turning that into `h7()` is a function call. Were
+    // the name a field on $Handler, the button would have to look it up through a second, nested
+    // `target` — which today silently reads empty, see the note in RULES.md.
+    fn domId(e: Entity)  -> string { return "e" + e }
+    fn fnName(e: Entity) -> string { return "h" + e }
+
     // One section of the reference at /docs. The BODY of that page cannot be a query — `target` binds
     // one shape per loop and there is no way to ask an entity which shape it carries, so a document
     // that interleaves headings, prose, lists and code in reading order stays an ordered sequence.
@@ -143,6 +186,11 @@ bundle WebApp by you {
             let d = spawn()
             attach $Card to d { title: "One page", body: "These four cards are four separate @Html fragments." }
             mark d #Featured
+            
+            
+            let e = spawn()
+            attach $Card to e { title: "where are we ", body: "LOST IN THE FRAGMENt OF THE WORLD" }
+            mark e #Featured
         }
     }
 
@@ -173,27 +221,92 @@ bundle WebApp by you {
 
     // ---- JavaScript, which is where the third channel earns its place -------------------------------
 
-    shard Counter {
+    // The elements and their behaviour, seeded ONCE. Spawning and the default wiring share this block
+    // deliberately: `run once` commits a single time for every shard, so a separate wiring shard would
+    // find nothing to wire — the entities it wanted do not exist until the phase ends.
+    shard CounterSeed {
+        run once {
+            // The readout first, because the handlers below need its identity to address it.
+            let out = spawn()
+            attach $Element to out { tag: "div", cls: "count", text: "0" }
+            mark out #Screen
+
+            // Three functions, three identities. `domId(out)` is the ONLY place the readout's id is
+            // written, and it is computed rather than typed — the string 'n' has no equivalent here.
+            let inc = spawn()
+            attach $Handler to inc {
+                body: "var e=document.getElementById('" + domId(out) + "');e.innerText=(+e.innerText)+1" }
+
+            let dec = spawn()
+            attach $Handler to dec {
+                body: "var e=document.getElementById('" + domId(out) + "');e.innerText=(+e.innerText)-1" }
+
+            let zero = spawn()
+            attach $Handler to zero {
+                body: "document.getElementById('" + domId(out) + "').innerText='0'" }
+
+            // A button carries its label as an element, and its behaviour as a REFERENCE to a handler.
+            // Nothing here names a function in a string.
+            let plus = spawn()
+            attach $Element to plus { tag: "button", cls: "", text: "+1" }
+            attach $OnClick to plus { handler: inc }
+            mark plus #Screen
+            mark plus #Button
+
+            let minus = spawn()
+            attach $Element to minus { tag: "button", cls: "", text: "-1" }
+            attach $OnClick to minus { handler: dec }
+            mark minus #Screen
+            mark minus #Button
+
+            let rst = spawn()
+            attach $Element to rst { tag: "button", cls: "", text: "reset" }
+            attach $OnClick to rst { handler: zero }
+            mark rst #Screen
+            mark rst #Button
+        }
+    }
+
+    // Rendering is a query, exactly as the home grid is: the page shows whatever the world holds, in
+    // spawn order. Adding a button is an `attach` in the shard above, not an edit here.
+    shard CounterPage {
         hear @Request as r {
             if r.path == "/counter" {
                 bring Nav()
                 bring Hero("Counter", "The page reacts in the browser, not on the server.")
                 bring Open("main")
-                    bring Raw("<div class='count' id='n'>0</div>")
-                    bring Raw("<div class='row'>" +
-                              "<button onclick='inc()'>+1</button>" +
-                              "<button onclick='dec()'>-1</button>" +
-                              "<button onclick='reset()'>reset</button>" +
-                              "</div>")
+                    // Every element is a `$Element` rather than a shape per kind, because `target` binds
+                    // one shape and cannot ask an entity what else it carries — a page rebuilt by query
+                    // has to be uniform. The MARK is what separates them: the readout wears #Screen
+                    // alone, a button wears #Screen #Button, so each loop below is flat.
+                    //
+                    // Two loops rather than one because the buttons need a wrapper around them and the
+                    // readout must stay outside it. Both are ordered by entity id, which is spawn order.
+                    target $Element #Screen as e {
+                        if e.Element.tag == "div" {
+                            bring Raw("<div class='" + e.Element.cls + "' id='" + domId(Entity) + "'>" +
+                                      e.Element.text + "</div>")
+                        }
+                    }
+
+                    bring OpenAs("div", "row")
+                        // A button's onclick is derived from the identity it points at — the same
+                        // derivation the @Script fragments below use, so the two cannot disagree.
+                        target $Element $OnClick #Button as b {
+                            bring Raw("<button id='" + domId(Entity) + "' onclick='" +
+                                      fnName(b.OnClick.handler) + "()'>" + b.Element.text + "</button>")
+                        }
+                    bring Close("div")
+
                     bring 2 JumpLine()
                     bring Link("/", "back home")
                 bring Close("main")
 
-                // Page behaviour, written straight onto the @Script channel — the theme has no opinion
-                // about what a counter does. Same shape as a CSS rule or a paragraph, different field.
-                bring Define("inc", "var e=document.getElementById('n');e.innerText=(+e.innerText)+1")
-                bring Define("dec", "var e=document.getElementById('n');e.innerText=(+e.innerText)-1")
-                bring Define("reset", "document.getElementById('n').innerText='0'")
+                // Every handler in the world becomes an @Script fragment. Same shape as a CSS rule or a
+                // paragraph, different channel — and now also a thing a shard can find. The name comes
+                // from the identity, so it matches the `onclick` above by construction.
+                target $Handler as h { bring Define(fnName(Entity), h.Handler.body) }
+
                 bring Footer("Three functions, three @Script fragments")
             }
         }
