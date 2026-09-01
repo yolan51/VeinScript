@@ -243,8 +243,8 @@ bundle WebApp by you {
             // the long concatenation used to spell by hand, but the pieces are named functions the
             // editor can complete (`*Vein.Web.Js.`) and hover — and the element id still comes from the
             // identity, so nothing is typed twice.
-            bring Btn("button", "", "+1",    addNumber(domId(out),  1))
-            bring Btn("button", "", "-1",    addNumber(domId(out), -1))
+            bring Btn("button", "", "+1",    addNumber(domId(out),  2))
+            bring Btn("button", "", "-1",    addNumber(domId(out), -2))
             bring Btn("button", "", "reset", text(domId(out), "0"))
         }
     }
@@ -291,6 +291,35 @@ bundle WebApp by you {
                 target $Handler as h { bring Define(fnName(Entity), h.Handler.body) }
 
                 bring Footer("Three functions, three @Script fragments")
+            }
+        }
+    }
+
+
+    // ---- just for fun: the elements change colour every 2 seconds -----------------------------------
+    //
+    // In the BROWSER, not on the server, and that distinction is the whole lesson. `every 2` is a
+    // wall-clock schedule that runs where a real clock lives — `veinc run`, a built .exe. `veinc serve`
+    // builds a fresh interpreter per request and starts no timers, so a server-side `every 2` would
+    // never fire, and even if it did, the next request would begin from a world that never saw it.
+    //
+    // What CAN change a page after it is served is the page itself. So this shard walks the same
+    // identities the page rendered and ships one interval per element — behaviour composed from
+    // `*Vein.Web.Js`, not a hand-written blob.
+    shard Tint {
+        hear @Request as r {
+            if r.path == "/counter" {
+                // The palette, once. `raw` is the escape hatch for the bit the vocabulary has no word
+                // for — declaring a JavaScript variable.
+                bring Js(raw("var tint=['#e2504a','#3fb27f','#4a7fe2','#e0a33c'];"))
+
+                // One interval per element, phase-shifted by the ENTITY ID so they do not all change
+                // together — the identity is doing real work here, not just naming a DOM node.
+                target $Element #Screen as e {
+                    bring Js(everyMs(2000,
+                             setStyleExpr(domId(Entity), "color",
+                                          "tint[((Date.now()/2000|0)+" + Entity + ")%tint.length]")))
+                }
             }
         }
     }

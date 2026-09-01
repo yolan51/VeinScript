@@ -262,6 +262,21 @@ bundle Web by Vein {
 
         shared("Write a literal message to the browser console.")
         fn log(message: string) -> string { return "console.log('" + message + "');" }
+
+        shared("Run a body of JavaScript every N milliseconds, forever.")
+        fn everyMs(ms: int, body: string) -> string {
+            return "setInterval(function(){" + body + "}," + ms + ");"
+        }
+
+        shared("Set one CSS property on an element to a literal value.")
+        fn setStyle(id: string, prop: string, value: string) -> string {
+            return "document.getElementById('" + id + "').style." + prop + "='" + value + "';"
+        }
+
+        shared("Set one CSS property on an element to the value of a JavaScript expression.")
+        fn setStyleExpr(id: string, prop: string, js: string) -> string {
+            return "document.getElementById('" + id + "').style." + prop + "=" + js + ";"
+        }
     }
 
     // --- no behaviour here ---------------------------------------------------------------------------
