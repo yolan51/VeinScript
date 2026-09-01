@@ -716,8 +716,12 @@ public sealed class Lower
 
         // Only the GENERATED name consumes a depth slot; `as` names it instead. Decrementing
         // unconditionally at the end drove the counter negative and produced `__ent-1`.
+        //
+        // `??` rather than a ternary on `generated`: the compiler cannot tie that flag back to the null
+        // check, so the ternary read as `string? → string` (CS8600/CS8604). The right-hand side still
+        // only evaluates — and so only bumps the depth — when there is no name.
         bool generated = br.Bind is null;
-        string ent = generated ? "__ent" + _identityDepth++ : br.Bind;
+        string ent = br.Bind ?? ("__ent" + _identityDepth++);
         stmts.Add(new IrLet(ent, null, new IrCall(new IrLocalRef("spawn"), Array.Empty<IrExpr>()), false));
 
         int arg = 0;
