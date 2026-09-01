@@ -990,8 +990,11 @@ public partial class MainWindow : Window
         if (_hoverModel.Events.ContainsKey(word)) return $"event @{word}";
         if (FindBuilder(_hoverAst, word) is { } bd)
             return $"builder {BuilderKind(bd)} {word}(" + string.Join(", ", BuilderParams(_hoverAst, bd).Select(p => $"{p.Name}: {p.Type}")) + ")";
+        if (FuncIndex.Find(_hoverAst, word, ProjectDir) is { Fn: not null } hit)
+            return FuncIndex.Signature(hit.Fn, hit.Owner);
         return null;
     }
+
 
     // A builder's parameters = its members minus the output-channel field, $Shape expanded. Keep in sync
     // with Lower.OutputFields (a channel-less builder has no output field → all members are params).

@@ -698,6 +698,54 @@ public class ServiceTests
 
         Assert.DoesNotContain(r.Diagnostics, d => d.Code == "VS0218");
     }
+    // ---- function signatures (what hover shows) ------------------------------------------------
+
+    [Fact]
+    public void A_local_function_signature_is_found_by_bare_name()
+    {
+        // Composing behaviour from small functions only helps if the signatures are visible. This is the
+        // logic behind hover; it lives in Tooling rather than the Workbench precisely so it can be tested.
+        var r = Compile("bundle T by me { fn addNumber(id: string, delta: int) -> string { return id } }");
+
+        var hit = FuncIndex.Find(r.Ast!, "addNumber", null);
+        Assert.NotNull(hit.Fn);
+        Assert.Null(hit.Owner);                                   // local, so no qualified path
+        Assert.Equal("fn addNumber(id: string, delta: int) -> string", FuncIndex.Signature(hit.Fn!, hit.Owner));
+    }
+
+    [Fact]
+    public void An_SF_is_shown_as_SF_not_fn()
+    {
+        // The distinction is the point: an SF is behaviour, a fn is computation.
+        var r = Compile("bundle T by me { SF shout(text: string) { } }");
+
+        var hit = FuncIndex.Find(r.Ast!, "shout", null);
+        Assert.Equal("SF shout(text: string)", FuncIndex.Signature(hit.Fn!, hit.Owner));
+    }
+
+    [Fact]
+    public void A_used_bundles_function_is_found_and_carries_its_path()
+    {
+        // `use Web` makes `addNumber(…)` resolve bare, so hover has to reach the same one — and say
+        // where it came from, since its declaration is in another file entirely.
+        var r = Compile("bundle T by me { use Web\n shard S { run once { } } }");
+
+        var hit = FuncIndex.Find(r.Ast!, "addNumber", null);
+        Assert.NotNull(hit.Fn);
+        Assert.Equal("Vein.Web.Js.addNumber", hit.Owner);
+        Assert.Contains("fn addNumber(id: string, delta: int) -> string", FuncIndex.Signature(hit.Fn!, hit.Owner));
+    }
+
+    [Fact]
+    public void A_function_of_a_bundle_that_is_not_used_is_not_found()
+    {
+        // `use` is the gate here as everywhere: without it the name does not resolve, and hover must not
+        // claim otherwise.
+        var r = Compile("bundle T by me { shard S { run once { } } }");
+
+        Assert.Null(FuncIndex.Find(r.Ast!, "addNumber", null).Fn);
+    }
+
     // ---- `bring … as name` (VS0221 / VS0222) ---------------------------------------------------
 
     [Fact]

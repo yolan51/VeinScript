@@ -199,6 +199,71 @@ bundle Web by Vein {
         builder Js { text: string   code = text }
     }
 
+    // Behaviour, composed rather than quoted. A handler body used to be one long concatenation —
+    //
+    //     "var e=document.getElementById('" + domId(out) + "');e.innerText=(+e.innerText)+1"
+    //
+    // which the editor cannot help with, the compiler cannot check, and a reader has to parse as
+    // JavaScript in their head. These are the same fragments as named functions: each returns a JS
+    // STATEMENT, so they nest and concatenate, and `veinc symbols` lists every one.
+    //
+    //     addNumber(domId(out), 1)          ==  the line above
+    //     seq(text(domId(x), "hi"), show(domId(y)))
+    //
+    // Each takes an element ID, not a JS expression, for two reasons: the id is what an identity
+    // yields (`domId(e)`), and binding it to a local once emits tighter JS than nesting
+    // `document.getElementById` into every position that needs it.
+    //
+    // LIMIT, stated rather than hidden: a `text`/`alert`/`log` value is wrapped in single quotes and
+    // NOT escaped, so a value containing `'` produces broken JavaScript. `raw` is the way out, and a
+    // real escape needs a string function the language does not have yet.
+    publicator Js {
+        shared("The statements a and b, in order.")
+        fn seq(a: string, b: string) -> string { return a + b }
+
+        shared("JavaScript written out as-is — the escape hatch when the vocabulary has no word for it.")
+        fn raw(js: string) -> string { return js }
+
+        shared("Set an element's text to a literal string.")
+        fn text(id: string, value: string) -> string {
+            return "document.getElementById('" + id + "').innerText='" + value + "';"
+        }
+
+        shared("Set an element's text to the value of a JavaScript expression.")
+        fn expr(id: string, js: string) -> string {
+            return "document.getElementById('" + id + "').innerText=" + js + ";"
+        }
+
+        shared("Add to an element's text read as a number. A negative delta subtracts.")
+        fn addNumber(id: string, delta: int) -> string {
+            return "var e=document.getElementById('" + id + "');e.innerText=(+e.innerText)+(" + delta + ");"
+        }
+
+        shared("Add or remove a class on an element.")
+        fn addClass(id: string, cls: string) -> string {
+            return "document.getElementById('" + id + "').classList.add('" + cls + "');"
+        }
+
+        shared("Remove a class from an element.")
+        fn removeClass(id: string, cls: string) -> string {
+            return "document.getElementById('" + id + "').classList.remove('" + cls + "');"
+        }
+
+        shared("Toggle a class on an element.")
+        fn toggleClass(id: string, cls: string) -> string {
+            return "document.getElementById('" + id + "').classList.toggle('" + cls + "');"
+        }
+
+        shared("Navigate to a url.")
+        fn goto(url: string) -> string { return "location.href='" + url + "';" }
+
+        shared("A browser alert, for a literal message.")
+        fn alert(message: string) -> string { return "alert('" + message + "');" }
+
+        shared("Write a literal message to the browser console.")
+        fn log(message: string) -> string { return "console.log('" + message + "');" }
+    }
+
     // --- no behaviour here ---------------------------------------------------------------------------
     // A shard cannot be `shared`, so a router or page view declared here would not be API — it would be
     // invisible behaviour handed to everyone who only wanted a `&Button`. The routing + assembly demo

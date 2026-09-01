@@ -235,22 +235,17 @@ bundle WebApp by you {
     // find nothing to wire — the entities it wanted do not exist until the phase ends.
     shard CounterSeed {
         run once {
-            // Three builders, five brings, no `spawn` in sight. `as out` is what makes the readout a
-            // template like the rest: it names the identity so the handler bodies can address it.
+            // Three builders, four brings, no `spawn`. `as out` names the identity so the handler
+            // bodies can address it.
             bring Readout("div", "count", "0") as out
 
-            // Each button IS its own handler — one identity carrying $Element and $Handler both, so
-            // nothing points at anything and `fnName(Entity)` names the same function from the markup
-            // and from the @Script fragment.
-            //
-            // `domId(out)` is the only place the readout's id is written, and it is computed rather than
-            // typed, so the string 'n' has no equivalent anywhere in this file.
-            bring Btn("button", "", "+1",
-                      "var e=document.getElementById('" + domId(out) + "');e.innerText=(+e.innerText)+1")
-            bring Btn("button", "", "-1",
-                      "var e=document.getElementById('" + domId(out) + "');e.innerText=(+e.innerText)-1")
-            bring Btn("button", "", "reset",
-                      "document.getElementById('" + domId(out) + "').innerText='0'")
+            // The bodies are COMPOSED, not quoted. `addNumber(domId(out), 1)` is the same JavaScript
+            // the long concatenation used to spell by hand, but the pieces are named functions the
+            // editor can complete (`*Vein.Web.Js.`) and hover — and the element id still comes from the
+            // identity, so nothing is typed twice.
+            bring Btn("button", "", "+1",    addNumber(domId(out),  1))
+            bring Btn("button", "", "-1",    addNumber(domId(out), -1))
+            bring Btn("button", "", "reset", text(domId(out), "0"))
         }
     }
 
