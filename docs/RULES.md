@@ -146,9 +146,17 @@ only its section index is a query.
 id, ids are handed out by `spawn`, and `bring` spawns — so `query order == spawn order == the order you
 called bring`. Both runtimes: `EntityStore.Query` ends `.OrderBy(e => e)`, and the backend's `VeinWorld`
 iterates a `SortedSet<int>`. There is **no `order by`** anywhere in the language, so an `ord`/`rank` field
-can be stored and will be ignored — which is the trap, because it looks like it should work. Order at the
-SOURCE instead: `ORDER BY` in SQL, or emit rows in the order you want them. See
-`samples/rows_in_order.vein`.
+can be stored and no query will consult it — which is the trap, because it looks like it should work.
+
+Two ways to get an order anyway, both in `samples/rows_in_order.vein`: **order at the source** (`ORDER BY`
+in SQL, or emit rows in the order you want), or **one pass per key** —
+
+```
+repeat 3 as i { target $Row #Row as r { if r.Row.rank == i + 1 { … } } }
+```
+
+which sorts by a field using only `repeat` and `if`. It costs a scan per key value, so it fits a small
+dense integer range (menu slots, columns, priorities) and nothing wider.
 
 **15. `$Enemy` and `#Enemy` are different things.** Different keyword, different sigil; a program may use
 both. In emitted C# the mark becomes `Marks.Enemy` and the shape `Enemy`.

@@ -240,8 +240,10 @@ somewhere that can sort, that is where sorting belongs: a served page rebuilds i
 `ORDER BY` uses an index the language cannot.
 
 The cost is that a `rank` field is inert — stored and never consulted — which is a sharp edge, so
-[RULES.md 14b](RULES.md) states it and `samples/rows_in_order.vein` demonstrates it rather than leaving
-it to be discovered.
+[RULES.md 14b](RULES.md) states it and `samples/rows_in_order.vein` shows the two ways to order anyway:
+at the source, or one pass per key (`repeat n as i` around a filtered query), which sorts by a field
+using only what the language has. The pass technique costs a scan per key value, which is why it is a
+technique rather than a reason not to add `order by` eventually.
 
 *Revisit when either of these turns up:* **merging two fetches** into one display order, which SQL cannot
 do across separate queries without a UNION; or **re-sorting a persistent world** without re-fetching,

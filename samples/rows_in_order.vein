@@ -8,13 +8,18 @@
 // on both runtimes — `EntityStore.Query` ends `.OrderBy(e => e)`, and the C# backend's `VeinWorld`
 // iterates a `SortedSet<int>`.
 //
-// THERE IS NO SORT. No `order by`, nothing in the stdlib. A `rank` field can be stored and will be
-// ignored, which is the trap: it looks like it ought to work. This file stores one and then prints the
-// rows out of rank order to prove it does nothing.
+// THERE IS NO SORT built into a query. No `order by`, nothing in the stdlib. A `rank` field can be
+// stored and no `target` will consult it — which is the trap, because it looks like it ought to work.
+// This file stores one, prints the rows out of rank order to prove it does nothing, and then shows the
+// two ways to actually get an order:
 //
-// So: ORDER AT THE SOURCE. `ORDER BY` in SQL, or emit the rows in the order you want them. For a served
-// page that is also the cheaper answer — `veinc serve` builds a fresh interpreter per request, so the
-// query runs again anyway and the database has the index.
+//   1. ORDER AT THE SOURCE — `ORDER BY` in SQL, or emit the rows in the order you want them. Spawn
+//      order becomes display order, and for a served page this is also the cheaper answer: `veinc serve`
+//      builds a fresh interpreter per request, so the query runs again anyway and the database has the
+//      index.
+//   2. ONE PASS PER KEY — `repeat n as i` around a query filtered to `i`. Ordering by a key the language
+//      cannot sort on, using only what the language has. Costs a scan per key value, so it suits a small
+//      dense integer range (menu slots, columns, priorities) and nothing else. `shard ByRank` below.
 //
 //   veinc run samples/rows_in_order.vein --ticks 1
 //
@@ -75,7 +80,35 @@ bundle RowsInOrder by you {
                 }
             }
             emit *Vein.Console.Io.@Print {
-                text: "ranks read 3, 1, 2 — `rank` is stored and IGNORED. Sort at the source instead."
+                text: "ranks read 3, 1, 2 — no query sorts on `rank`. The next shard shows what does."
+            }
+        }
+    }
+
+    // ---- and here is how you DO order by a field ------------------------------------------------------
+    //
+    // One pass per rank value, each pass a flat query filtered to that value. The query still yields
+    // spawn order; running it N times in key order is what produces key order. Nothing was added to the
+    // language for this — `repeat n as i` (D3) and an `if` are enough.
+    //
+    // The cost is honest: this is O(rows × range), one full scan per possible key. For a menu, a set of
+    // columns, or priority levels — a small dense integer range — that is nothing. For a timestamp, a
+    // name, or an unbounded key it is the wrong tool, and the answer there is still to order at the
+    // source, where an index exists.
+    shard ByRank {
+        settled {
+            emit *Vein.Console.Io.@Print { text: "the same rows, ordered by rank:" }
+
+            // `repeat n as i` counts 0…n-1, so the ranks 1…3 are `i + 1`. The range has to be KNOWN —
+            // that is the real constraint on this technique, not the cost.
+            repeat 3 as i {
+                target $Row #Row as r {
+                    if r.Row.rank == i + 1 {
+                        emit *Vein.Console.Io.@Print {
+                            text: "   e" + Entity + "  " + r.Row.title + "  (rank " + r.Row.rank + ")"
+                        }
+                    }
+                }
             }
         }
     }
