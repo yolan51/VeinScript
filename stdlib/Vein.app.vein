@@ -6,6 +6,7 @@
 app Vein {
     load "Core.vein"
     load "Math.vein"
+    load "Filter.vein"
     load "Transform.vein"
     load "Input.vein"
     load "UI.vein"

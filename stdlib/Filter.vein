@@ -1,0 +1,64 @@
+// stdlib/Filter.vein — VeinScript Standard Library : Vein.Filter
+// Predicates for narrowing a query: whole-number tests you call inside an `if`, so a `target` loop can
+// keep some of what it iterates and skip the rest.
+// Discover:  veinc symbols stdlib/Filter.vein
+//
+// WHAT THIS IS NOT. There is no `filter(collection, predicate)`, because VeinScript has no function
+// values — a predicate cannot be passed anywhere. Filtering is always an `if` inside a loop, and these
+// are the conditions that go in it:
+//
+//     target $Row #Row as r {
+//         if between(r.Row.rank, 2, 4) { bring Card(r.Row.title) }
+//     }
+//
+// PAIRS WITH `Index`. The loop counter (RULES.md 14c) is an int like any other, so the same predicates
+// narrow by POSITION rather than by value — `firstN(Index, 3)` for a cutoff, `even(Index)` for striping.
+//
+// ONE SET SERVES INT AND FLOAT. Parameter types are not enforced (`IrExpr.ResolvedType` is never
+// assigned — there is no semantics pass), and arithmetic preserves int-ness when both operands are ints,
+// so `between(2.5, 1.0, 3.0)` works and returns what you would expect. The `int` annotations say what
+// these are FOR, not what the compiler checks.
+
+bundle Filter by Vein {
+
+    // Range — is a value inside or outside a span. Both ends INCLUDED, which is the convention that
+    // makes `between(v, 1, 3)` read as "1, 2 or 3" rather than needing the reader to check.
+    publicator Range {
+        shared("True when v lies in lo..hi, both ends included.")
+        fn between(v: int, lo: int, hi: int) -> bool { return v >= lo and v <= hi }
+
+        shared("True when v lies outside lo..hi — the exact complement of between.")
+        fn outside(v: int, lo: int, hi: int) -> bool { return v < lo or v > hi }
+
+        // Named for the 0-based counter it is meant for: `firstN(Index, 3)` keeps positions 0, 1 and 2.
+        // Spelled out rather than left as `Index < n` because the off-by-one is the whole question, and
+        // a name can carry the answer where a bare `<` cannot.
+        shared("True for the first n positions of a 0-based counter, such as Index.")
+        fn firstN(i: int, n: int) -> bool { return i < n }
+    }
+
+    // Whole — parity and divisibility. `even(Index)` is the striping case; `divisible` is the general
+    // one, and `every nth` is what it means at a call site.
+    publicator Whole {
+        shared("True when v divides evenly by n. Note `by` is a keyword, so the parameter is `n`.")
+        fn divisible(v: int, n: int) -> bool { return v % n == 0 }
+
+        shared("True when v is even. Striping a list is `even(Index)`.")
+        fn even(v: int) -> bool { return v % 2 == 0 }
+
+        shared("True when v is odd.")
+        fn odd(v: int) -> bool { return not (v % 2 == 0) }
+
+        shared("-1, 0 or 1 as v is negative, zero or positive.")
+        fn sign(v: int) -> int {
+            if v < 0 { return -1 }
+            if v > 0 { return 1 }
+            return 0
+        }
+    }
+
+    // --- no behaviour here ---------------------------------------------------------------------------
+    // A shard cannot be `shared`, so anything declared here would be invisible behaviour handed to every
+    // consumer. These are leaf functions: a qualified call imports the declaration at compile time, so
+    // `*Vein.Filter.Range.between(…)` runs in the caller's module with no link step.
+}

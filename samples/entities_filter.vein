@@ -1,0 +1,116 @@
+// entities_filter.vein — narrowing a query with `*Vein.Filter`.
+//
+// A `target` yields everything that matches its shapes and marks. Keeping only some of that is an `if`
+// inside the loop, and `Vein.Filter` is the vocabulary for the condition — there is no
+// `filter(collection, predicate)`, because VeinScript has no function values to pass one.
+//
+// The predicates narrow by VALUE (`between(r.Row.rank, 2, 4)`) or, given the loop counter, by POSITION
+// (`firstN(Index, 3)`, `even(Index)`). Same functions either way: `Index` is an int like any other.
+//
+// The last block ORDERS by rank, which filtering cannot do on its own — a query yields spawn order and
+// nothing sorts it. Walking the key space with `repeat` and filtering to one value per pass is what puts
+// zeta (rank -2) first, where spawn order had it last.
+//
+//   veinc run samples/entities_filter.vein --ticks 1
+//   bash tools/check-backend.sh          (the same program, emitted to C# and diffed against the above)
+//
+// This file is in check-backend for a reason beyond the predicates: it is the first sample to call a
+// STDLIB `fn` from compiled code. A qualified or `use`d call imports the declaration into the caller's
+// module at compile time, so the backend emits it as an ordinary function — proven here rather than
+// assumed.
+
+bundle EntitiesFilter by you {
+
+    use Filter
+
+    shape $Row { title: string, rank: int }
+    mark #Row
+
+    builder Row { $Row   mark #Row }
+
+    shard Seed {
+        run once {
+            *Vein.OrderedByInt($Row.rank) {
+                bring Row("alpha",   1)
+                bring Row("beta",    2)
+                bring Row("gamma",   3)
+                bring Row("delta",   4)
+                bring Row("epsilon", 5)
+                bring Row("zeta",   -2)
+            }
+
+            bring Row("alpha",   1)
+            bring Row("beta",    2)
+            bring Row("gamma",   3)
+            bring Row("delta",   4)
+            bring Row("epsilon", 5)
+            bring Row("zeta",   -2)
+        }
+    }
+
+    shard Show {
+        settled {
+            // By VALUE. Both ends included, so 2..4 is beta, gamma, delta.
+            emit *Vein.Console.Io.@Print { text: "-- rank between 2 and 4 --" }
+            target $Row #Row as r {
+                if between(r.Row.rank, 2, 4) {
+                    emit *Vein.Console.Io.@Print { text: "   " + r.Row.title + " rank " + r.Row.rank }
+                }
+            }
+
+            // The complement, which is what `outside` is for — no `not` around the call.
+            emit *Vein.Console.Io.@Print { text: "-- and the ones outside it --" }
+            target $Row #Row as r {
+                if outside(r.Row.rank, 2, 4) {
+                    emit *Vein.Console.Io.@Print { text: "   " + r.Row.title + " rank " + r.Row.rank }
+                }
+            }
+
+            // By POSITION. The same predicates, given `Index` instead of a field.
+            emit *Vein.Console.Io.@Print { text: "-- first three positions --" }
+            target $Row #Row as r {
+                if firstN(Index, 3) { emit *Vein.Console.Io.@Print { text: "   " + Index + " " + r.Row.title } }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "-- striped: even positions --" }
+            target $Row #Row as r {
+                if even(Index) { emit *Vein.Console.Io.@Print { text: "   " + Index + " " + r.Row.title } }
+            }
+
+            // `sign` is the one that is not a predicate, and the one that is genuinely awkward to write
+            // inline — an `if` chain returning -1, 0 or 1.
+            emit *Vein.Console.Io.@Print { text: "-- negative ranks --" }
+            target $Row #Row as r {
+                if sign(r.Row.rank) < 0 {
+                    emit *Vein.Console.Io.@Print { text: "   " + r.Row.title + " rank " + r.Row.rank }
+                }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "-- ranks divisible by 2 --" }
+            target $Row #Row as r {
+                if divisible(r.Row.rank, 2) {
+                    emit *Vein.Console.Io.@Print { text: "   " + r.Row.title + " rank " + r.Row.rank }
+                }
+            }
+
+            // ---- ORDERING, which filtering cannot do on its own ---------------------------------------
+            //
+            // A query yields spawn order and nothing sorts it (RULES.md 14b) — `rank` is stored and no
+            // `target` consults it. To walk a key instead of a position, walk the KEY SPACE outside the
+            // query and filter to one value per pass. `repeat` is the only construct that can: `Index`
+            // counts iterations of the loop you already have, so it cannot reorder anything.
+            //
+            // Ranks here run -2..5, so eight passes with an offset — and the offset is the honest cost.
+            // The range has to be known, which is why "order at the source" is the better answer whenever
+            // you control the source. See samples/rows_in_order.vein for that side of it.
+            emit *Vein.Console.Io.@Print { text: "-- by rank, ascending --" }
+            repeat 8 as pass {
+                target $Row #Row as r {
+                    if r.Row.rank == pass - 2 {
+                        emit *Vein.Console.Io.@Print { text: "   rank " + r.Row.rank + "  " + r.Row.title }
+                    }
+                }
+            }
+        }
+    }
+}

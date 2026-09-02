@@ -36,6 +36,11 @@ public sealed class CSharpBackend : IVeinBackend
 
     /// The C# name `Index` resolves to in the loop being emitted. Tracked and restored like
     /// `_selfComponent`, and made unique per depth: C# forbids a nested local shadowing an outer one
+
+    /// Module-level `fn`/`SF` names, so a call to one is emitted qualified. Without this the backend
+    /// emitted the call and never the function — CS0103 at every call site, which no backend-checked
+    /// sample hit because none of them used a function.
+    private readonly HashSet<string> _functions = new(StringComparer.Ordinal);
     /// (CS0136), so a fixed name would refuse to compile the moment two loops nested.
     private string _indexVar = "0";
     private int _loopDepth;
@@ -45,6 +50,8 @@ public sealed class CSharpBackend : IVeinBackend
         _notes.Clear();
         _components.Clear();
         _componentTypes.Clear();
+        _functions.Clear();
+        foreach (var f in module.Functions) _functions.Add(f.Name);
         foreach (var t in module.Types)
             if (t.Kind == IrTypeKind.Component) { _components.Add(t.Name); _componentTypes[t.Name] = t; }
 
@@ -62,6 +69,7 @@ public sealed class CSharpBackend : IVeinBackend
 
         foreach (var t in module.Types) EmitType(sb, t);
         EmitMarks(sb, module);
+        EmitFunctions(sb, module);
         foreach (var s in module.Shards) EmitShard(sb, s);
 
         EmitEntryPoint(sb, module);
@@ -169,6 +177,32 @@ public sealed class CSharpBackend : IVeinBackend
     }
 
     // ---- shards ----------------------------------------------------------
+
+    /// Module-level functions as one static class. `fn` bodies compile as they read; an `SF` emits
+    /// events, and emit stays on the interpreter, so its body comes out empty with a note — the same
+    /// reactive-half exclusion the rest of the backend makes, rather than a silent difference.
+    ///
+    /// A cross-bundle call is already imported into `module.Functions` under its mangled name by Lower,
+    /// so `*Vein.Filter.Range.between(…)` lands here as `Vein_Filter_Range_between` and needs nothing
+    /// special: a stdlib function compiles into the consumer exactly like a local one.
+    private void EmitFunctions(StringBuilder sb, IrModule module)
+    {
+        if (module.Functions.Count == 0) return;
+
+        sb.AppendLine("/// Module functions. Static because a `fn` closes over nothing — it takes its");
+        sb.AppendLine("/// inputs as parameters and returns a value.");
+        sb.AppendLine("public static class Fns");
+        sb.AppendLine("{");
+        foreach (var f in module.Functions)
+        {
+            string ps = string.Join(", ", f.Params.Select(p => $"{Cs(p.Type)} {Ident(p.Name)}"));
+            sb.AppendLine($"    public static {Cs(f.Return)} {Ident(f.Name)}({ps})");
+            EmitBlock(sb, f.Body, 1);
+            sb.AppendLine();
+        }
+        sb.AppendLine("}");
+        sb.AppendLine();
+    }
 
     private void EmitShard(StringBuilder sb, IrShard shard)
     {
@@ -396,6 +430,9 @@ public sealed class CSharpBackend : IVeinBackend
         // only the desugared statements (Emit/AddTag/…) take that path. Route it by name, or it emits as
         // a call to a C# method that does not exist.
         IrCall { Callee: IrLocalRef p } c when IsPrebuilt(p.Name) => RuntimeCall(new IrRuntimeCall(p.Name, c.Args)),
+        // A module function is qualified; anything else is emitted as written.
+        IrCall { Callee: IrLocalRef fnRef } fc when _functions.Contains(fnRef.Name)
+            => $"Fns.{Ident(fnRef.Name)}({string.Join(", ", fc.Args.Select(Expr))})",
         IrCall c => $"{Expr(c.Callee)}({string.Join(", ", c.Args.Select(Expr))})",
         IrList l => $"new object[] {{ {string.Join(", ", l.Items.Select(Expr))} }}",
         _ => Unsupported(e)

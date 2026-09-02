@@ -115,7 +115,7 @@ Ten platform-independent bundles authored `by Vein`. A bundle has two layers:
 
 - **Publicators = the shared API** (`shared` shapes/events/builders/functions), reachable across bundles
   as `*Vein.Bundle.Publicator.member` and listed by `veinc symbols stdlib/Vein.app.vein`. Totals:
-  **36 shapes · 39 events · 36 builders · 17 fn · 11 SF**, in **29 publicators** (re-derive with `veinc symbols stdlib/Vein.app.vein`, do not trust this line). Four of those names are
+  **36 shapes · 39 events · 36 builders · 27 fn · 11 SF**, in **31 publicators** (re-derive with `veinc symbols stdlib/Vein.app.vein`, do not trust this line). Four of those names are
   declared twice on purpose — `Vein.Net.Peer` re-declares Console's `@Send`/`@Message`/`@Undelivered`/`send`
   so a headless program need not name "Console" to reach the network. `veinc symbols` flags them as
   collisions and says to qualify with the **bundle**, since both bundles share the author `Vein`.
@@ -140,6 +140,7 @@ runtime auto-attaches a provenance envelope (`from`, `origin`, `id`, `cause`, `t
 |---|---|---|
 | **Core** | `Lifecycle` (`@Spawned`/`@Destroyed`/`@Enabled`/`@Disabled {entity}`) · `Meta` (`$Name` `$Tag` `$Layer`) · `Quantity` (`$Pool{current folds sum, max}` `$Counter{value folds sum}`) · `Relations` (`$Parent{of:Entity}` `$Owner{by:Entity}`) | `Reaper` |
 | **Math** | `Values` (`$Vec2` `$Vec3` `$Vec4` `$Color` `$Rect`) | — |
+| **Filter** | `Range` (`between` `outside` `firstN`) · `Whole` (`divisible` `even` `odd` `sign`) | — |
 | **Transform** | `Spatial` (`$Position` `$Rotation` `$Scale` `$Velocity{x,y,z folds sum}`) · `Motion` (`@Moved{entity,x,y,z}`) | `Integrator` |
 | **Input** | `Mouse` (`@MouseDown`/`@MouseUp{x,y,button}` `@MouseMove{x,y}`) · `Keyboard` (`@KeyDown`/`@KeyUp{key}` `@TextInput{text}`) | — |
 | **UI** | `Widgets` (`$Text` `$Button` `$Field` `$Image`) · `Interaction` (`@Clicked`/`@Focused`/`@Blurred`/`@Hovered {target:Entity}`) | — |
