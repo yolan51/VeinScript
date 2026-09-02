@@ -27,9 +27,11 @@ bundle EntitiesBringOrder by you {
 
     shard Seed {
         run once {
-            // Written in neither rank nor title order. `rank` names a PARAMETER of `&Row` — the same
-            // name the builder's `$Row` include contributes — and a builder without it is VS0224.
-            ordered by &Row.rank {
+            // Written in neither rank nor title order. The key is fully qualified: the `rank` parameter
+            // of builder `&Row`, contributed by its `$Row` include. Both qualifiers are optional — see
+            // the header — but a builder including two shapes that BOTH carry `rank` needs the middle
+            // segment, and refuses to guess without it (VS0226).
+            ordered by &Row.$Row.rank {
                 bring Row("delta",   4)
                 bring Row("alpha",   1)
                 bring Row("Zeta",   -2)

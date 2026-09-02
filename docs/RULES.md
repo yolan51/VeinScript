@@ -176,23 +176,32 @@ with two components the interpreter filters before iterating while the emitted C
 loop, so the counter has to be bumped after those guards or the backend numbers entities the interpreter
 never sees.
 
-**14d. `ordered by &Builder.param { bring … }` sorts the BRINGS — the other place an order comes from.**
-Rule 14b sorts a *query*, which needs identities to query. A `bring` on a FRAGMENT builder emits its
-`@Html` the instant it runs and leaves no identity behind — so its call order IS the output order, and
-nothing can sort it afterwards. That is most of a web page.
+**14d. `ordered by &Builder.$Shape.param { bring … }` sorts the BRINGS — the other place an order comes
+from.** Rule 14b sorts a *query*, which needs identities to query. A `bring` on a FRAGMENT builder emits
+its `@Html` the instant it runs and leaves no identity behind — so its call order IS the output order,
+and nothing can sort it afterwards. That is most of a web page.
 
 ```
-ordered by &Card.rank {
+ordered by &Card.$Card.rank {
     bring Card("delta", 4)      // emitted second
     bring Card("Zeta", -2)      // emitted first
 }
 ```
 
-The key names a **parameter** of the builder, with `$Shape` includes expanded — that is what a `bring`
-supplies. Two spellings: **`&Builder.param` says which builder's parameter is meant**, and every bring in
-the block must be that builder (**VS0225**); the bare `param` resolves per bring instead, so one block may
-hold several builders that each have it. A builder lacking the parameter is **VS0224**; a non-`bring`
-statement in the block is **VS0223**.
+The key is a builder **parameter** (`$Shape` includes expanded) — that is what a `bring` supplies, and a
+builder may also have loose parameters belonging to no shape. Both qualifiers are optional and each
+narrows one step:
+
+| written | means |
+|---|---|
+| `param` | resolved per bring, so a block may mix builders that each have it |
+| `&Builder.param` | that builder's parameter; every bring must be it, else **VS0225** |
+| `&Builder.$Shape.param` | and contributed by that include |
+
+The middle segment is not decoration: `builder Both { $A $B }` with `rank` in **both** shapes gives two
+parameters of that name, and the bare form refuses to guess between them (**VS0226**, which names the
+candidates and spells the fix). A parameter that does not exist is **VS0224**; a non-`bring` statement in
+the block is **VS0223**.
 
 Keys are all evaluated BEFORE any body runs, so a bring cannot change a key that has not been read yet.
 Same comparer as an ordered query: numbers numerically, strings ordinally, stable so ties keep the

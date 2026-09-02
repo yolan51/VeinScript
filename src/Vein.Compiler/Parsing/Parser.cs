@@ -694,11 +694,20 @@ public sealed class Parser
         // `&Row.rank` names the builder the key belongs to; a bare `rank` resolves per bring, which is
         // what lets one block hold several builders that each have that parameter. Qualifying says
         // WHICH builder's parameter is meant, and is checked against every bring in the block.
-        string? builder = null;
+        string? builder = null, shape = null;
         if (Check(TokenKind.BuilderRef))
         {
             builder = Advance().Text;
             Expect(TokenKind.Dot, "'.' after the builder name");
+
+            // `&Row.$Row.rank` — the optional middle segment says WHICH include contributed the
+            // parameter. It earns its place: `builder Both { $A $B }` where both shapes carry `rank`
+            // gives two parameters of that name, and without this there is no way to say which.
+            if (Check(TokenKind.ShapeRef))
+            {
+                shape = Advance().Text;
+                Expect(TokenKind.Dot, "'.' after the shape name");
+            }
         }
         string key = ExpectName("the argument name to order by").Text;
 
@@ -717,7 +726,7 @@ public sealed class Parser
             SkipTerms();
         }
         Expect(TokenKind.RBrace, "'}'");
-        return new OrderedStmt(key, brings, s) { Builder = builder };
+        return new OrderedStmt(key, brings, s) { Builder = builder, Shape = shape };
     }
     private RepeatStmt ParseRepeat()
     {

@@ -282,9 +282,11 @@ ordered by &Card.rank {
 }
 ```
 
-The key may be written `&Builder.param`, which says WHICH builder's parameter is meant and requires every
-bring in the block to be that builder (VS0225); the bare `param` resolves per bring, so a block may mix
-builders that each have it.
+The key may be written `&Builder.param` — which builder's parameter is meant, requiring every
+bring in the block to be it (VS0225) — or `&Builder.$Shape.param`, narrowing further to the include that
+contributed it. That last segment earns its place: two includes may each carry a field of the same name,
+giving two parameters so called, and the shorter forms refuse to guess between them (VS0226). The bare
+`param` resolves per bring, so a block may mix builders that each have it.
 
 `ordered` is **contextual**, recognised only at statement position with `by` following, so it stays a
 name a program may use — the same treatment `run once` and `every N` get, and no keyword count changes.

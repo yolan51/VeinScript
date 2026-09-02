@@ -210,6 +210,10 @@ public sealed record OrderedStmt(string Key, IReadOnlyList<BringStmt> Brings, So
     /// `ordered by &Row.rank` — the builder the key belongs to. Null for the bare `ordered by rank`
     /// form, which resolves the parameter per bring and so allows a block of mixed builders.
     public string? Builder { get; init; }
+
+    /// `&Row.$Row.rank` — which include contributed the parameter. Null unless spelled, and only
+    /// meaningful alongside a builder: it disambiguates two includes carrying the same field name.
+    public string? Shape { get; init; }
 }
 
 public sealed record BringStmt(Expr? Count, string Builder, IReadOnlyList<Expr> Args, bool FillRest, SourceSpan Span) : Stmt(Span)

@@ -321,13 +321,17 @@ public sealed class Lower
     /// `ownerKey` names the bundle this body was IMPORTED from, and is null for a body declared here.
     /// It matters because a bare include means "a shape beside me", and for an imported builder that is
     /// its bundle's shapes rather than the consumer's.
-    private List<(string Name, TypeRef? Type, Expr? Default)> ExpandMembers(
+    /// `From` is the `$Shape` an include contributed the parameter, null for one declared inline. Needed
+    /// because two includes may each contribute a field of the same NAME — `builder Both { $A $B }` with
+    /// `rank` in both gives two parameters called `rank` — and picking the first silently would be a
+    /// wrong answer no output would reveal.
+    private List<(string Name, TypeRef? Type, Expr? Default, string? From)> ExpandMembers(
         IEnumerable<Node> members, string? ownerKey = null)
     {
-        var list = new List<(string, TypeRef?, Expr?)>();
+        var list = new List<(string, TypeRef?, Expr?, string?)>();
         foreach (var m in members)
         {
-            if (m is FieldDecl f) list.Add((f.Name, f.Type, f.Default));
+            if (m is FieldDecl f) list.Add((f.Name, f.Type, f.Default, null));
             else if (m is ShapeInclude si)
             {
                 // A qualified include reaches another bundle's SHARED shapes. A bare one resolves beside
@@ -343,10 +347,10 @@ public sealed class Lower
                     if (si.Field is not null)
                     {
                         var one = fs.FirstOrDefault(x => x.Name == si.Field);
-                        if (one is not null) list.Add((one.Name, one.Type, si.Default ?? one.Default));
+                        if (one is not null) list.Add((one.Name, one.Type, si.Default ?? one.Default, si.Shape));
                         else _diag.Warning("VS0211", $"Shape '{RefText(si)}' has no field '{si.Field}'.", si.Span);
                     }
-                    else foreach (var sf in fs) list.Add((sf.Name, sf.Type, sf.Default));
+                    else foreach (var sf in fs) list.Add((sf.Name, sf.Type, sf.Default, si.Shape));
                 }
                 else _diag.Warning("VS0210", $"Unknown shape '{RefText(si)}' in include.", si.Span);
             }
@@ -667,12 +671,30 @@ public sealed class Lower
                     if (_builders.TryGetValue(b.Builder, out var bd))
                     {
                         var prms = ExpandMembers(bd.Members.Where(m => !(m is FieldDecl f && OutputFields.Contains(f.Name))), null);
-                        int at = prms.FindIndex(p => p.Name == os.Key);
-                        if (at < 0)
+
+                        // `&Row.$Row.rank` narrows to the include that contributed it. Without the
+                        // shape segment a name matching TWICE is refused rather than guessed at: two
+                        // includes can each carry `rank`, and taking the first would be a wrong answer
+                        // with nothing in the output to show for it.
+                        var hits = new List<(string? From, int At)>();
+                        for (int i = 0; i < prms.Count; i++)
+                            if (prms[i].Name == os.Key && (os.Shape is null || prms[i].From == os.Shape))
+                                hits.Add((prms[i].From, i));
+
+                        if (hits.Count == 0)
                             _diag.Error("VS0224",
-                                $"builder '{b.Builder}' has no parameter '{os.Key}' to order by. It takes: " +
-                                string.Join(", ", prms.Select(p => p.Name)) + ".", b.Span);
-                        else if (at < b.Args.Count) key = LowerExpr(b.Args[at]);
+                                os.Shape is null
+                                    ? $"builder '{b.Builder}' has no parameter '{os.Key}' to order by. It takes: " +
+                                      string.Join(", ", prms.Select(p => p.Name)) + "."
+                                    : $"builder '{b.Builder}' has no parameter '{os.Key}' from ${os.Shape}. It takes: " +
+                                      string.Join(", ", prms.Select(p => p.From is null ? p.Name : "$" + p.From + "." + p.Name)) + ".",
+                                b.Span);
+                        else if (hits.Count > 1)
+                            _diag.Error("VS0226",
+                                $"'{os.Key}' is ambiguous in builder '{b.Builder}' — it comes from " +
+                                string.Join(" and ", hits.Select(h => "$" + (h.From ?? "?"))) +
+                                $". Say which: `ordered by &{b.Builder}.${hits[0].From}.{os.Key}`.", b.Span);
+                        else if (hits[0].At < b.Args.Count) key = LowerExpr(b.Args[hits[0].At]);
                         else
                             _diag.Error("VS0224",
                                 $"`bring {b.Builder}` does not supply '{os.Key}', so there is nothing to order it by.",
@@ -900,7 +922,7 @@ public sealed class Lower
         var stmts = new List<IrStmt>();
         for (int i = 0; i < prms.Count; i++)
         {
-            var (name, type, def) = prms[i];
+            var (name, type, def, _) = prms[i];
             IrExpr value = i < br.Args.Count ? LowerExpr(br.Args[i])
                          : def is not null ? LowerExpr(def)
                          : br.FillRest ? ZeroLiteral(type?.Name ?? "string")
