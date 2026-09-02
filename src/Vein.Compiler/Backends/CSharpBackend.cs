@@ -495,6 +495,14 @@ public sealed class CSharpBackend : IVeinBackend
         // only the desugared statements (Emit/AddTag/…) take that path. Route it by name, or it emits as
         // a call to a C# method that does not exist.
         IrCall { Callee: IrLocalRef p } c when IsPrebuilt(p.Name) => RuntimeCall(new IrRuntimeCall(p.Name, c.Args)),
+
+        // A built-in the backend does not implement. It is emitted AS WRITTEN, so the generated C# names
+        // a function that does not exist and fails to compile — deliberately. Substituting a placeholder
+        // would produce code that compiles and computes something else, which is the one failure the
+        // backend contract forbids. The note says which one and why, so the compile error has a reason.
+        IrCall { Callee: IrLocalRef np } nc when Interp.PrebuiltNames.Contains(np.Name)
+            => UnimplementedPrebuilt(np.Name, nc),
+
         // A module function is qualified; anything else is emitted as written.
         IrCall { Callee: IrLocalRef fnRef } fc when _functions.Contains(fnRef.Name)
             => $"Fns.{Ident(fnRef.Name)}({string.Join(", ", fc.Args.Select(Expr))})",
@@ -522,6 +530,16 @@ public sealed class CSharpBackend : IVeinBackend
     }
 
     /// Names the interpreter answers as prebuilts rather than user functions (Interp's prebuilt switch).
+
+    /// Names a built-in the backend has no emission for, and explains the consequence rather than
+    /// leaving a bare CS0103 for someone to work out.
+    private string UnimplementedPrebuilt(string name, IrCall call)
+    {
+        _notes.Add($"built-in {name}() has no C# emission — it stays on the interpreter, so this file " +
+                   "will not compile. Move that work into a shard the backend covers, or keep the " +
+                   "program on `veinc run`.");
+        return $"{Ident(name)}({string.Join(", ", call.Args.Select(Expr))})";
+    }
     private static bool IsPrebuilt(string name) => name is "spawn" or "random";
 
     private string RuntimeCall(IrRuntimeCall c)

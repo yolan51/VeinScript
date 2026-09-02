@@ -1,0 +1,89 @@
+// json_roundtrip.vein — JSON in, identities out; identities in, JSON out.
+//
+// Two builtins, `fromJson` and `toJson`, and between them a payload that arrived over the wire becomes
+// a world you can query, and a world you queried becomes a payload you can send back.
+//
+//   veinc run samples/json_roundtrip.vein --ticks 1
+//
+// WHY THEY ARE BUILTINS AND NOT A STDLIB BUNDLE. VeinScript cannot look at a character — there is no
+// `s[i]` on a string, no comparison of one char to another — so neither parsing nor escaping can be
+// written in the language. `toJson` also has to escape a tab or a newline inside a value, and a program
+// has no way to find one.
+//
+// THE READ DIRECTION NEEDED NO LANGUAGE CHANGE AT ALL. An object parses to a dictionary, and field
+// access already resolves against a dictionary, so `row.title` below is the ordinary `.` — the same one
+// that reads an event payload. An array parses to a list, which `target … as x` already iterates and
+// `len` already measures. Both were true before this file existed.
+//
+// WHAT toJson TAKES IS A SHAPE, NOT AN ENTITY. `toJson(r.Row)` serialises the fields `$Row` declares.
+// `toJson(someEntity)` cannot work and is not offered: nothing can ask an identity which shapes it
+// carries (RULES.md 14), so there would be no way to know what to write.
+//
+// INTERPRETER ONLY, and it fails LOUDLY rather than quietly. Neither builtin has a C# emission, so
+// `veinc emit` on this file prints
+//
+//     note: built-in fromJson() has no C# emission — it stays on the interpreter, so this file will
+//           not compile.
+//
+// and the generated code then does not compile. That is deliberate: substituting a placeholder value
+// would produce C# that compiles and computes something DIFFERENT, which is the one failure the backend
+// contract forbids. A compile error with a note beats a program that quietly disagrees with itself.
+
+bundle JsonRoundtrip by you {
+
+    shape $Row { title: string, rank: int, done: bool }
+    mark #Row
+
+    builder Row { $Row   mark #Row }
+
+    shard Ingest {
+        run once {
+            // Standing in for a request body or a file. One string, three records, unordered.
+            let payload = "{\"rows\":[" +
+                          "{\"title\":\"delta\",\"rank\":4,\"done\":false}," +
+                          "{\"title\":\"alpha\",\"rank\":1,\"done\":true}," +
+                          "{\"title\":\"Zeta\",\"rank\":-2,\"done\":false}]}"
+
+            let doc = fromJson(payload)
+
+            // `.rows` is a plain field access on the parsed object, and the result is a list — so the
+            // collection form of `target` walks it with no conversion step.
+            emit *Vein.Console.Io.@Print { text: "parsed " + len(doc.rows) + " rows" }
+
+            target doc.rows as row {
+                bring Row(row.title, row.rank, row.done)
+            }
+        }
+    }
+
+    shard Report {
+        settled {
+            // Sorted on the way out, by the rank that arrived as JSON — the payload's order is not the
+            // display order, and does not have to be.
+            emit *Vein.Console.Io.@Print { text: "-- as identities, by rank --" }
+            target $Row #Row by Row.rank as r {
+                emit *Vein.Console.Io.@Print {
+                    text: "   " + r.Row.rank + "  " + r.Row.title + "  done=" + r.Row.done
+                }
+            }
+
+            // And back out. `toJson(r.Row)` writes every field `$Row` declares, in declaration order,
+            // so this is the same record that arrived — a genuine round trip rather than a re-print.
+            emit *Vein.Console.Io.@Print { text: "-- serialised back --" }
+            target $Row #Row by Row.rank as r {
+                emit *Vein.Console.Io.@Print { text: "   " + toJson(r.Row) }
+            }
+
+            // Types survive the trip: 4 comes back as 4 and not "4" or 4.0, and false stays a bool.
+            // An integral number parses as an int precisely so `rank` stays orderable and printable.
+            emit *Vein.Console.Io.@Print { text: "-- values are typed, not text --" }
+            target $Row #Row as r {
+                if r.Row.rank == 1 {
+                    emit *Vein.Console.Io.@Print {
+                        text: "   rank+1 = " + (r.Row.rank + 1) + ", and done is " + r.Row.done
+                    }
+                }
+            }
+        }
+    }
+}

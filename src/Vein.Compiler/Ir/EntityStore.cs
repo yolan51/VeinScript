@@ -172,6 +172,11 @@ public sealed class EntityStore
     }
 
     /// A field read: the activation's own pending write if there is one, else the committed value.
+    /// The fields a component type declares, so a caller can walk a whole component rather than naming
+    /// each field — `toJson(r.Row)` needs the list, and nothing else exposes it.
+    public IReadOnlyList<IrField>? FieldsOf(string shape) =>
+        _types.TryGetValue(shape, out var t) ? t.Fields : null;
+
     public object? Read(long entity, string shape, string field)
     {
         var cell = new Cell(entity, shape, field);

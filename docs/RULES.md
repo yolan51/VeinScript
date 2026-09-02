@@ -279,6 +279,22 @@ like a route that did not match.
 | `bash tools/check-backend.sh` | the backend's *meaning* — emitted C# compiled, run, diffed against the interpreter |
 | `bash tools/check-perf.sh` | the backend's *speed* |
 
+**24b. JSON crosses the boundary: `fromJson(text)` and `toJson(shape)`.** A parsed object is a
+dictionary and a parsed array is a list, both of which the language already handles — field access
+resolves against a dictionary, `target … as x` iterates a list, `len` measures either — so
+`fromJson(body).rows` and `row.title` are the ordinary `.` with nothing added.
+
+An integral number parses as an **int**, not a float, so `rank + 1` is integer arithmetic and prints `2`
+rather than `2.0`. Malformed input is `null`, not a crash.
+
+`toJson` takes a SHAPE ON an identity (`toJson(r.Row)`), never an identity: nothing can ask an entity
+which shapes it carries (rule 14), so there would be nothing to write. Fields come out in declaration
+order, so a round trip is stable.
+
+Both are **interpreter-only**, and `veinc emit` says so before the generated C# fails to compile — a
+value-returning builtin cannot be stubbed, because code that compiles and computes something else is
+worse than code that does not compile. `samples/json_roundtrip.vein`.
+
 **25. Measuring the backend: Release on both sides, and past JIT warm-up.** Timing the Debug CLI against
 a Release backend inflates the ratio ~1.4×. And the generated code keeps getting faster for several
 hundred frames — a window opening at frame 100 reports 6.6× where the steady state is 10–18×. Both

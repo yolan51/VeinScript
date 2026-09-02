@@ -795,6 +795,21 @@ public sealed class Interp
     /// An entity + component pair, produced by `self.Health` so `self.Health.hp` can resolve.
     private readonly record struct ComponentRef(long Entity, string Shape);
 
+    /// A ComponentRef is a handle, not a value — `toJson` has to read the shape's fields through the
+    /// store to see anything. Field ORDER follows the declaration, so a round trip is stable.
+    /// Anything else passes through: a dictionary, a list, or a scalar is already what it looks like.
+    private object? Expand(object? v)
+    {
+        if (v is not ComponentRef cr) return v;
+
+        var fields = _store.FieldsOf(cr.Shape);
+        if (fields is null) return null;
+
+        var map = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var f in fields) map[f.Name] = _store.Read(cr.Entity, cr.Shape, f.Name);
+        return map;
+    }
+
     // ---- expressions ----------------------------------------------------
 
     private object? Eval(IrExpr e, Instance self, Dictionary<string, object?> locals)
@@ -890,7 +905,7 @@ public sealed class Interp
     /// built-in already resolves, so a `use`d bundle exporting the same name must not capture it (VS0217).
     /// Keep the two in step — a name added below and not here is silently rebindable by `use`.
     public static readonly IReadOnlySet<string> PrebuiltNames =
-        new HashSet<string>(StringComparer.Ordinal) { "spawn", "here", "pick", "len", "random", "join" };
+        new HashSet<string>(StringComparer.Ordinal) { "spawn", "here", "pick", "len", "random", "join", "toJson", "fromJson" };
 
     /// Prebuilt (built-in) functions that DO return a value — the only functions that return.
     ///
@@ -909,6 +924,15 @@ public sealed class Interp
         "len" => (long)(args.Count > 0 ? args[0] switch { System.Collections.ICollection c => c.Count, string s => s.Length, _ => 0 } : 0),
         "random" => _rng.NextDouble(),
         "join" => args.Count > 1 && args[0] is System.Collections.IEnumerable e ? string.Join(Str(args[1]), e.Cast<object?>().Select(Str)) : "",
+
+        // A whole COMPONENT serialises, not just a scalar: `toJson(r.Row)` reads every field the shape
+        // declares. An entity cannot — nothing can ask an identity which shapes it carries (RULES.md 14)
+        // — so the thing you name is always a shape on one.
+        "toJson" => Json.Write(args.Count > 0 ? Expand(args[0]) : null),
+
+        // An object comes back as a dictionary, and field access already resolves against one, so
+        // `fromJson(body).title` needs nothing further. Malformed input is null rather than a crash.
+        "fromJson" => Json.Parse(args.Count > 0 ? Str(args[0]) : ""),
         _ => null
     };
 
