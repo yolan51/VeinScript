@@ -69,6 +69,7 @@ bundle WebApp by you {
     // declared as well. That is the check working: they were only ever spelled at their use sites.
     mark #Featured  // a card the home grid shows
     mark #Doc       // a /docs section (used by shards/Reference.vein, which merges into this bundle)
+    mark #Nav       // one link in the site nav
 
     // The names the browser sees, both DERIVED from the identity — so they exist in exactly one place
     // each, and a rename moves every reference with it because there are no other references.
@@ -87,15 +88,38 @@ bundle WebApp by you {
     // hold only behaviour — a shape there is VS0321.
     shape $Section { title: string, ord: int }
 
-    builder Nav {
-        markup = "<nav>" +
-                 "<a href='/'>home</a>" +
-                 "<a href='/docs'>docs</a>" +
-                 "<a href='/counter'>counter</a>" +
-                 "<a href='/greet'>greet</a>" +
-                 "<span class='clock' id='clk' style='margin-left:auto'></span>" +
-                 "<button onclick='theme()'>theme</button>" +
-                 "</nav>"
+    // ---- the nav: a query, not a literal -------------------------------------------------------------
+    //
+    // It used to be one builder emitting a fixed `<nav>` with four hard-coded <a> tags, so adding a
+    // route meant editing markup — and the nav could not know which page it was on, because a builder
+    // sees only its own parameters.
+    //
+    // As identities the links are data: `bring NavItem(…)` adds one, and the SF below renders whatever
+    // the world holds. `path` is compared per item, which is what makes the current page bold.
+    shape $NavItem { href: string, label: string }
+
+    builder NavItem { $NavItem   mark #Nav }
+
+    // An SF, not a builder, and the reason is ordering. A builder cannot hold statements, so it cannot
+    // run a query; a shard hearing its own event would drain AFTER the route's fragments and land the
+    // nav at the bottom of the page. An SF runs INLINE at the call site, so its `bring`s queue exactly
+    // where `bring Nav()` used to — first.
+    //
+    // It also has to stay opt-in per route: an unrouted path emits no @Html at all, and that is how the
+    // view tells a 404 from a page. A shard on `hear @Request` would give every 404 a nav and a 200.
+    SF navBar(path: string) {
+        bring Open("nav")
+        target $NavItem #Nav as i {
+            // The current page is not a link to itself.
+            if path == i.NavItem.href {
+                bring Raw("<b>" + i.NavItem.label + "</b>")
+            } else {
+                bring Link(i.NavItem.href, i.NavItem.label)
+            }
+        }
+        bring Raw("<span class='clock' id='clk' style='margin-left:auto'></span>")
+        bring Raw("<button onclick='theme()'>theme</button>")
+        bring Close("nav")
     }
 
     builder Card    { $Card     markup = "<div class='card'><h3>" + title + "</h3><p>" + body + "</p></div>" }
@@ -193,6 +217,12 @@ bundle WebApp by you {
     // literal `bring` lines could express none of that.
     shard Catalog {
         run once {
+            // The nav, in order. Adding a route is one line here — the SF renders whatever it finds.
+            bring NavItem("/",        "home")
+            bring NavItem("/docs",    "docs")
+            bring NavItem("/counter", "counter")
+            bring NavItem("/greet",   "greet")
+
             // One line per card. Nothing here needs the identity back, so the whole spawn/attach/mark
             // trio collapses into the template — which is what an identity builder is for.
             bring Featured("Shapes",   "Data lives in $Shape — identity components with folds.")
@@ -206,7 +236,7 @@ bundle WebApp by you {
     shard Home {
         hear @Request as r {
             if r.path == "/" {
-                bring Nav()
+                navBar(r.path)
                 bring Hero("VeinScript", "A website assembled entirely from events.")
                 bring Open("main")
                     bring OpenAs("div", "grid")
@@ -254,7 +284,7 @@ bundle WebApp by you {
     shard CounterPage {
         hear @Request as r {
             if r.path == "/counter" {
-                bring Nav()
+                navBar(r.path)
                 bring Hero("Counter", "The page reacts in the browser, not on the server.")
                 bring Open("main")
                     // Every element is a `$Element` rather than a shape per kind, because `target` binds
@@ -329,7 +359,7 @@ bundle WebApp by you {
     shard Greet {
         hear @Request as r {
             if r.path == "/greet" {
-                bring Nav()
+                navBar(r.path)
 
                 if r.method == "GET" {
                     bring Hero("Greet", "A form, posted back to the same path.")

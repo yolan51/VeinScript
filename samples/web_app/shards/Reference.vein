@@ -105,7 +105,7 @@ shard ReferenceIndex {
 shard Reference {
     hear @Request as r {
         if r.path == "/docs" {
-            bring Nav()
+            navBar(r.path)
             bring Hero("Language Reference", "Every keyword, shape and event, as one page.")
             bring Open("main")
                 bring Open("article")

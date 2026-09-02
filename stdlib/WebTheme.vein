@@ -83,6 +83,9 @@ bundle WebTheme by Vein {
                   "nav a{color:var(--muted);text-decoration:none;font-weight:550;font-size:.95rem;" +
                   "transition:color .15s ease}" +
                   "nav a:hover{color:var(--brand)}" +
+                  // The current page renders as <b> rather than a link to itself, so it needs the
+                  // same metrics as its siblings plus the emphasis that says "you are here".
+                  "nav b{color:var(--brand);font-weight:700;font-size:.95rem}" +
                   ".clock{font-variant-numeric:tabular-nums;color:var(--muted);font-size:.9rem}"
         }
 
