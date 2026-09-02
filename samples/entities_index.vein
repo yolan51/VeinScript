@@ -1,21 +1,22 @@
-// entities_index.vein — `Index`, the nearest loop's 0-based iteration counter.
+// entities_index.vein — `Index`, the nearest loop's 0-based iteration counter, and what it is for.
 //
-// `Entity` is WHICH identity an activation is running for. `Index` is WHICH ITERATION it is. Same shape
-// of thing — an implicit binding, no new syntax — and the pair covers what a list needs: numbering,
-// striping, first/last, a "top N" cutoff.
-//
-//     target $Row #Row as r { bring Item(Index + 1, r.Row.title) }    // 1. 2. 3.
-//     if Index == 0 { … }                                            // the first one
+// `Entity` is WHICH identity an activation runs for. `Index` is WHICH ITERATION it is. Same shape of
+// thing — a keyword and an implicit binding, no new syntax — and between them they cover what a list
+// needs: numbering, a cutoff, striping, the first one.
 //
 // IT DOES NOT SORT. `Index` counts position in the order the loop already yields, which is spawn order
-// (RULES.md 14b) — so `if r.rank == Index + 1` compares a key to a position and matches nothing except
-// by luck. Ordering by a key is one pass per key value; see samples/rows_in_order.vein.
+// (RULES.md 14b). So `if r.rank == Index + 1` compares a key against a position and matches nothing
+// except by luck. Ordering BY a key is one pass per key value — samples/rows_in_order.vein.
 //
-// THE CASE THAT COULD HAVE DIVERGED, and the reason this file is in check-backend: with two components,
-// the interpreter's `Query` filters both BEFORE iterating, while the emitted C# drives the loop from one
+// THE LAST ONE IS NOT EXPRESSIBLE. `Index == 0` is the first; there is no `Count`, so "the last" cannot
+// be tested — `count` is a reserved keyword with no implementation. A cutoff from the front (`Index < 3`)
+// is the shape that works.
+//
+// THE CASE THAT COULD HAVE DIVERGED, and why this file is in check-backend: with two components the
+// interpreter's `Query` filters both BEFORE iterating, while the emitted C# drives the loop from one
 // component and `continue`s on the rest. Count at the top of that loop and the backend numbers entities
-// the interpreter never sees. The counter is therefore bumped after the guards, and the second block
-// below prints 0,1 rather than 1,2 — which is what this check pins.
+// the interpreter never sees. The counter is bumped after the guards instead, so the `$Row $Wide` block
+// below counts 0,1,2 over three rows rather than 1,2,4 over six.
 //
 //   veinc run samples/entities_index.vein --ticks 1
 //   bash tools/check-backend.sh
@@ -27,36 +28,60 @@ bundle EntitiesIndex by you {
 
     mark #Row
 
+    // Two templates over the same `$Row`, so seeding is one line per thing. `&Wide` includes a second
+    // shape, which is what makes half these rows match the two-component query further down; arguments
+    // bind positionally across both includes, so it takes (title, extra).
+    builder Row  { $Row         mark #Row }
+    builder Wide { $Row $Wide   mark #Row }
+
     shard Seed {
         run once {
-            let a = spawn()  attach $Row to a { title: "alpha" }  mark a #Row
-            let b = spawn()  attach $Row to b { title: "beta"  }  mark b #Row
-            attach $Wide to b { extra: 1 }
-            let c = spawn()  attach $Row to c { title: "gamma" }  mark c #Row
-            attach $Wide to c { extra: 2 }
+            bring Row("alpha")
+            bring Wide("beta",    1)
+            bring Wide("gamma",   2)
+            bring Row("delta")
+            bring Wide("epsilon", 3)
+            bring Row("zeta")
         }
     }
 
     shard Numbered {
         settled {
-            // The everyday use: a numbered list, without a counter the program has to carry itself.
+            // The everyday use: a numbered list, with no counter the program has to carry itself.
+            emit *Vein.Console.Io.@Print { text: "-- all six, numbered --" }
             target $Row #Row as r {
                 emit *Vein.Console.Io.@Print { text: (Index + 1) + ". " + r.Row.title }
             }
 
-            // First and last, both expressible now and neither expressible before.
+            // A cutoff. `Index` is 0-based, so "the first three" is `< 3`.
+            emit *Vein.Console.Io.@Print { text: "-- top 3 --" }
+            target $Row #Row as r {
+                if Index < 3 { emit *Vein.Console.Io.@Print { text: "   " + r.Row.title } }
+            }
+
+            // Striping — the every-other-row case a table needs. `%` on the counter, nothing else.
+            emit *Vein.Console.Io.@Print { text: "-- even positions --" }
+            target $Row #Row as r {
+                if Index % 2 == 0 { emit *Vein.Console.Io.@Print { text: "   " + Index + " " + r.Row.title } }
+            }
+
+            // The first one, which is the only end of the list that can be tested. See the header.
             target $Row #Row as r {
                 if Index == 0 { emit *Vein.Console.Io.@Print { text: "first is " + r.Row.title } }
             }
 
-            // Two components: `alpha` carries no $Wide, so it is not in this query at all and does not
-            // consume an index. 0,1 — not 1,2.
+            // Two components. Three of the six carry `$Wide`, and the other three are not in this query
+            // at all — so the counter runs 0,1,2 over the matches, not 1,2,4 over the positions they
+            // happen to occupy in the full list. That distinction is what check-backend pins.
+            emit *Vein.Console.Io.@Print { text: "-- only the wide ones --" }
             target $Row $Wide #Row as r {
-                emit *Vein.Console.Io.@Print { text: "wide " + Index + " " + r.Row.title }
+                emit *Vein.Console.Io.@Print {
+                    text: "   " + Index + " " + r.Row.title + " extra=" + r.Wide.extra
+                }
             }
 
             // `repeat n as i` and `Index` name the same number, so both spellings agree.
-            repeat 3 as i {
+            repeat 2 as i {
                 emit *Vein.Console.Io.@Print { text: "repeat i=" + i + " Index=" + Index }
             }
         }
