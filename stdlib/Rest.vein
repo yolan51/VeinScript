@@ -101,22 +101,44 @@ bundle Rest by Vein {
     // hand-rolled service that authenticates the same way — see the file header for why nothing here
     // names a vendor).
     //
-    // WHY A BUILDER AND NOT AN IDENTITY. The natural shape for "declare this once, use it from more than
-    // one shard" is docs/RULES.md rule 7 — a `mark` member, so `bring` builds an identity and later code
-    // reaches it with `target`. That does not work HERE: only *leaf* primitives resolve across a bundle
-    // boundary today (STDLIB.md §1) — a `fn`/`SF`/builder gets imported into the consumer's module at
-    // compile time, but a `$Shape` pulled in only through a builder's include is never registered as a
-    // component TYPE in that module, and `target`/field-read (`c.Connection.base`) needs exactly that
-    // registration to find the row instead of silently reading empty strings. Confirmed against this
-    // tree's own interpreter before writing it down this way rather than the identity-template form.
+    // TWO WAYS TO DECLARE ONE, because they answer different questions.
     //
-    // So `Connect` stays an EVENT builder (no `mark`, no output field — docs/LANGUAGE.md §3.9's third
-    // form): `bring` still declares the connection in one line, and it still fans out to as many shards
-    // as `hear *Vein.Rest.Db.@Connect` — no entity, no `target`, nothing that depends on the gap above.
-    // `get`/`post` below don't need a bring at all; call them directly wherever `base`/`key` are in scope.
+    //   bring *Vein.Rest.Db.&Connection(base, key)     — an IDENTITY. It persists, so any shard in any
+    //     later phase reaches it with `target $Connection #Connection as c` and reads `c.Connection.base`.
+    //     This is docs/RULES.md rule 7, and it is the one to reach for: the credentials become a thing
+    //     the program HAS rather than a value that was passed around once.
+    //
+    //   bring *Vein.Rest.Db.&Connect(base, key)        — an EVENT. It fans out to every
+    //     `hear *Vein.Rest.Db.@Connect` and is then gone. Right when the point is to REACT to the
+    //     connection being declared — kick off queries at boot — and wrong when a later phase needs to
+    //     look the credentials up, because there is nothing left to look at.
+    //
+    // A program can use both: `Connection` to hold them, `Connect` to announce them.
+    //
+    // THIS USED TO BE A REAL LIMIT AND IS NOT ANY MORE. A `$Shape` reaching a consumer only through a
+    // builder's include was never registered as a component TYPE in that module, and a field access
+    // resolves to a component only when the module declares one of that name (Interp.IsComponent). So
+    // the attach worked, `target` matched the entity, and `c.Connection.base` came back as the empty
+    // string with no diagnostic anywhere. Lower now records a non-local shape that something attaches
+    // and adds its type to the module — see `RegisterImportedShape`.
+    //
+    // `$Connection` also earns its keep as an INCLUDE: `base`/`key` are declared once and reused rather
+    // than retyped, the same reason `Vein.Input`'s pointer events reuse `Vein.Math`'s `$Vec2`
+    // (STDLIB.md §1). It is NOT a parameter type: `fn`/`SF` parameters take `name: type`, and a `$Shape`
+    // is not a `type` there (`SF f($Shape)` is VS0100). `$Include` works inside an `event`/`builder`
+    // signature, which is what both builders below are.
     publicator Db {
+        shared("The base URL and key any keyed REST connection needs — $Include this into your own shape, event, or builder rather than retyping base/key.")
+        shape $Connection { base: string, key: string }
+
+        shared("Marks an endpoint this program talks to.")
+        mark #Connection
+
+        shared("Hold a connection as an identity: bring Connection(\"https://xyz.supabase.co\", \"anon-key\"), then reach it from any later shard with target $Connection #Connection as c.")
+        builder Connection { $Connection   mark #Connection }
+
         shared("Announce a connection: bring Connect(\"https://xyz.supabase.co\", \"anon-key\") — hear *Vein.Rest.Db.@Connect in your own shard(s) to react, or skip bring and call get/post directly with the same two values.")
-        builder Connect { base: string, key: string }
+        builder Connect { $Connection }
 
         shared("GET base+path, with the paired apikey/bearer headers built from key.")
         SF get(base: string, key: string, path: string) {

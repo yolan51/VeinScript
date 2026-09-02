@@ -2,9 +2,10 @@
 //
 // Supabase's REST API is PostgREST: every table is a URL, a row is a JSON object, and a filter is a
 // query parameter. Nothing here is Supabase-shaped except the two auth headers and the `?select=` —
-// point `base()` at any PostgREST service, or at any JSON API at all, and the rest is the same program.
+// point the Connection in shard Boot at any PostgREST service, or at any JSON API at all, and the rest
+// is the same program.
 //
-//   1. Put your project URL and anon key in `base()` and `key()` below.
+//   1. Put your project URL and anon key in the `bring Connection(…)` in shard Boot below.
 //   2. Make a table:  create table tasks (id bigserial primary key, title text, rank int, done bool);
 //   3. veinc run samples/db_supabase.vein
 //
@@ -31,14 +32,20 @@ bundle DbSupabase by you {
 
     // ---- configuration ---------------------------------------------------------------------------
     //
-    // Plain functions rather than constants, because a `fn` is the only thing here that a shard, an SF
-    // and another `fn` can all call. Replace the two bodies and nothing else in the file changes.
-
-    fn base() -> string { return "https://YOUR-PROJECT.supabase.co" }
-    fn key() -> string { return "PASTE-YOUR-ANON-KEY" }
+    // The credentials are an IDENTITY, not two functions returning strings. `bring Connection(…)` in
+    // shard Boot below attaches *Vein.Rest.Db's `$Connection` and marks it #Connection, so any shard in
+    // any later phase reaches them with a query:
+    //
+    //     target $Connection #Connection as c { … c.Connection.base … }
+    //
+    // That is docs/RULES.md rule 7, and it is worth the two extra lines: the credentials become
+    // something the program HAS rather than a value threaded through every call. A shard added later
+    // asks for them instead of having them passed in, and swapping projects is one `bring`.
+    //
+    // The paths below stay plain functions, because they are LITERALS rather than data — nothing
+    // attaches them, nothing queries them, and there is no second copy to keep in step.
 
     fn tablePath() -> string { return "/rest/v1/tasks" }
-    fn table() -> string { return base() + tablePath() }
 
     // `order=rank.asc` is the FIRST place to impose an order, and the cheapest: Postgres has an index and
     // this program does not. `by Task.rank` on the query below is the second place, and it is here as
@@ -55,7 +62,6 @@ bundle DbSupabase by you {
     // It is not used here because `order=rank.asc` already did the work, on a machine with an index.
     // See docs/SYNTAX-DECISIONS.md D14.
     fn selectPath() -> string { return tablePath() + "?select=id,title,rank,done&order=rank.asc" }
-    fn selectUrl() -> string { return base() + selectPath() }
 
     // NO QUERY PARAMETER IS BUILT FROM DATA HERE, and that is a rule rather than a convenience. There is
     // no percent-encoding in VeinScript — the language cannot look at a character — so a filter built
@@ -67,7 +73,7 @@ bundle DbSupabase by you {
     //
     // *Vein.Rest.Db.get/post carry the double-header auth (apikey + Authorization: Bearer, the classic
     // "sent only one, got a 401 that names neither" mistake) and, for post, `Prefer: return=representation`
-    // — see stdlib/Rest.vein for why both exist. `base()`/`key()` are the only two things this program
+    // — see stdlib/Rest.vein for why both exist. The connection identity is the only thing this program
     // supplies; everything past the colon is the same for any PostgREST-style API.
 
     // ---- what a row is ---------------------------------------------------------------------------
@@ -88,20 +94,47 @@ bundle DbSupabase by you {
     // Raised once the rows from the SELECT are committed, so anything that needs to QUERY them has an
     // event to hang off. Not decoration: `bring` inside a `hear` commits at the END of that event, so a
     // target loop in the same handler would see nothing (docs/RULES.md 12b).
-    event @Loaded { count: int }
+    //
+    // It carries the connection by INCLUDING the stdlib's shape rather than re-declaring `base`/`key`,
+    // which is what `$Include` is for — one declaration, expanded into this event's fields at compile
+    // time, so a change there reaches here. That also solves a real constraint: shard Write below needs
+    // the credentials AND a `target $Draft` loop, and a `target` nested inside another silently reads
+    // the OUTER binding as empty (docs/RULES.md 12c). Handing them along on the event means Write needs
+    // only one loop.
+    event @Loaded { count: int, *Vein.Rest.Db.$Connection }
 
-    // ---- read ------------------------------------------------------------------------------------
+    // ---- the connection --------------------------------------------------------------------------
+    //
+    // BOTH of *Vein.Rest.Db's builders, because they answer different questions and this program asks
+    // both. `Connection` is the identity: it persists, so the insert phase further down can look the
+    // credentials up long after this shard has finished. `Connect` is the event: it fans out once and
+    // is gone, which is exactly right for "start the first query now".
+    //
+    // The kickoff is an EVENT and not a `settled` block on purpose. `veinc run` defaults to `--ticks 0`,
+    // so `settled` would never run at all and the program would sit there having asked nothing.
 
-    shard Load {
+    shard Boot {
         run once {
-            emit *Vein.Console.Io.@Print { text: "GET " + selectUrl() }
-            *Vein.Rest.Db.get(base(), key(), selectPath())
+            bring *Vein.Rest.Db.&Connection("https://YOUR-PROJECT.supabase.co", "PASTE-YOUR-ANON-KEY")
+            bring *Vein.Rest.Db.&Connect("https://YOUR-PROJECT.supabase.co", "PASTE-YOUR-ANON-KEY")
         }
     }
 
     // One draft, brought at boot so it is committed long before the insert wants to read it.
     shard Compose {
         run once { bring Draft("write the docs", 9, false) }
+    }
+
+    // ---- read ------------------------------------------------------------------------------------
+
+    shard Load {
+        // The event carries the credentials in its own payload, so this reads `c.base` — a plain field
+        // on the event — rather than querying for them. No `target` needed when the announcement itself
+        // is what woke you up.
+        hear *Vein.Rest.Db.@Connect as c {
+            emit *Vein.Console.Io.@Print { text: "GET " + c.base + selectPath() }
+            *Vein.Rest.Db.get(c.base, c.key, selectPath())
+        }
     }
 
     // ---- the replies -----------------------------------------------------------------------------
@@ -121,28 +154,35 @@ bundle DbSupabase by you {
                 emit *Vein.Console.Io.@Print { text: "   " + f.body }
                 if *Vein.Rest.Status.clientError(f.status) {
                     emit *Vein.Console.Io.@Print {
-                        text: "   a 401 here almost always means base()/key() are still placeholders,"
+                        text: "   a 401 here almost always means the Connection in shard Boot is still"
                     }
                     emit *Vein.Console.Io.@Print {
-                        text: "   and a 404 means the table is not named `tasks`."
+                        text: "   the placeholder, and a 404 means the table is not named `tasks`."
                     }
                 }
             } else {
-                if f.url == selectUrl() {
-                    // PostgREST answers a select with a bare JSON ARRAY, which `fromJson` returns as a
-                    // list — the same thing `target … as x` already walks and `len` already measures.
-                    // No conversion step, and no shape declared for the wire format.
-                    let rows = fromJson(f.body)
-                    emit *Vein.Console.Io.@Print { text: "read " + len(rows) + " rows" }
+                // WHICH request was this? The select and the insert both land here, so the handler asks
+                // the connection identity what the select's URL was. This is the payoff of holding the
+                // credentials rather than passing them: a shard that was never handed them can still
+                // reconstruct the URL. A `hear` binding stays readable inside a `target` loop, so `f`
+                // means what it says in here.
+                target $Connection #Connection as c {
+                    if f.url == c.Connection.base + selectPath() {
+                        // PostgREST answers a select with a bare JSON ARRAY, which `fromJson` returns as
+                        // a list — the same thing `target … as x` already walks and `len` already
+                        // measures. No conversion step, and no shape declared for the wire format.
+                        let rows = fromJson(f.body)
+                        emit *Vein.Console.Io.@Print { text: "read " + len(rows) + " rows" }
 
-                    target rows as row {
-                        bring Task(row.id, row.title, row.rank, row.done)
+                        target rows as row {
+                            bring Task(row.id, row.title, row.rank, row.done)
+                        }
+
+                        // Handed on rather than listed here: the brings above are not committed yet.
+                        emit @Loaded { count: len(rows), base: c.Connection.base, key: c.Connection.key }
+                    } else {
+                        emit *Vein.Console.Io.@Print { text: "wrote: " + f.body }
                     }
-
-                    // Handed on rather than listed here, because the brings above are not committed yet.
-                    emit @Loaded { count: len(rows) }
-                } else {
-                    emit *Vein.Console.Io.@Print { text: "wrote: " + f.body }
                 }
             }
         }
@@ -177,8 +217,8 @@ bundle DbSupabase by you {
             // the object goes inside brackets.
             target $Draft #Draft as d {
                 let payload = "[" + toJson(d.Draft) + "]"
-                emit *Vein.Console.Io.@Print { text: "POST " + table() + " " + payload }
-                *Vein.Rest.Db.post(base(), key(), tablePath(), payload)
+                emit *Vein.Console.Io.@Print { text: "POST " + l.base + tablePath() + " " + payload }
+                *Vein.Rest.Db.post(l.base, l.key, tablePath(), payload)
             }
         }
     }

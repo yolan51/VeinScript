@@ -261,6 +261,16 @@ bundle-private, and a qualified reference to it does not resolve.
 parses there and resolves to nothing. Reach it by `use`ing the owning bundle instead. `veinc symbols`
 lists what is exported.
 
+**17c. An IMPORTED `$Shape` becomes a real component here the moment something attaches it.** A
+qualified include (`builder Conn { *Vein.Rest.Db.$Connection  mark #Conn }`, or a stdlib builder you
+`bring`) used to expand FIELDS only, and a field access resolves to a component solely when the module
+declares one of that name. So the attach landed, `target $Connection #Conn` matched the entity, and
+`c.Connection.base` read as **the empty string** — no diagnostic, anywhere. `Lower.RegisterImportedShape`
+now adds the type to the module, and rule 17b still holds at the use site: `target` takes the **bare**
+`$Connection`. A mark riding in on an imported builder likewise no longer needs a local `mark` line —
+it is declared in the bundle that owns the builder, and reporting **VS0218** for it pointed the author
+at a span in stdlib source.
+
 **18. `use` only WIDENS what a bare name may mean.** Precedence is local declaration → built-in → `use`
 fallback. A built-in wins and the shadowed member is reported as **VS0217** (`use Console` used to
 capture `spawn`, so `let e = spawn()` built no entity). Two used bundles exporting one name is

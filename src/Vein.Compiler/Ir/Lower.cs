@@ -74,6 +74,11 @@ public sealed class Lower
 
     /// Record a mark use: it becomes a Tag type, and it is a candidate for the declared-mark check.
     /// Every place a `#Mark` can appear routes through here, which is what keeps the two in step.
+    /// Marks that arrived with an IMPORTED builder — `bring *Vein.Rest.Db.&Connection(…)` carries that
+    /// bundle's `mark #Connection`, which this bundle never wrote and should not be asked to declare.
+    /// Without this VS0218 fired on a correct program and pointed the author at a line in stdlib source.
+    private readonly HashSet<string> _importedMarks = new(StringComparer.Ordinal);
+
     private void UseMark(string name, SourceSpan span)
     {
         _tags.Add(name);
@@ -169,6 +174,11 @@ public sealed class Lower
 
         // Cross-bundle functions reached by a qualified call, resolved while lowering the bodies above.
         funcs.AddRange(_imported.Values.Where(f => f is not null));
+
+        // …and cross-bundle SHAPES this bundle attaches, for the same reason: the include expanded the
+        // fields into a bring, but the component type has to exist here or reading it back finds nothing.
+        foreach (var t in _importedShapes.Values)
+            if (!types.Any(x => x.Name == t.Name && x.Kind == IrTypeKind.Component)) types.Add(t);
 
         return new IrModule(bundle.Name, types, funcs, shards) { Start = start };
     }
@@ -271,7 +281,8 @@ public sealed class Lower
 
         string known = string.Join(" ", _declaredMarks.Select(m => "#" + m));
         foreach (var (name, span) in _markUses)
-            if (!_declaredMarks.Contains(name) && ResolveUsed(Index.Marks, "#", name, span) is null)
+            if (!_declaredMarks.Contains(name) && !_importedMarks.Contains(name)
+                && ResolveUsed(Index.Marks, "#", name, span) is null)
                 _diag.Warning("VS0218",
                     $"Mark #{name} is not declared in this bundle. known: {known}", span);
     }
@@ -290,6 +301,28 @@ public sealed class Lower
     }
 
     // ---- data -----------------------------------------------------------
+
+    /// Component types for shapes this bundle ATTACHES but did not declare — a `$Shape` reaching it from
+    /// the standard library or another bundle through a builder's include.
+    ///
+    /// Without this the attach worked and the read did not, which is the worst shape a bug can take. The
+    /// entity spawned, `target $Connection #Conn` matched it, and `c.Connection.base` came back as the
+    /// empty string — because a field access resolves to a component only when the module declares a
+    /// component of that name (Interp.IsComponent), and an include EXPANDS FIELDS rather than importing
+    /// a type. No diagnostic fired anywhere along that path.
+    private readonly Dictionary<string, IrType> _importedShapes = new(StringComparer.Ordinal);
+
+    /// Record a non-local shape that something here attaches, so the module carries its type. A local
+    /// declaration always wins — this only fills a gap, and never shadows a shape the bundle owns.
+    private void RegisterImportedShape(string name, List<FieldDecl> fields)
+    {
+        if (_shapeFields.ContainsKey(name) || _importedShapes.ContainsKey(name)) return;
+
+        _importedShapes[name] = new IrType(
+            name, IrTypeKind.Component,
+            fields.Select(f => new IrField(f.Name, Ty(f.Type), ParseFold(f.Fold, f.Span), LowerDefault(f.Default))).ToList(),
+            Array.Empty<IrEnumCase>(), null, new[] { IrAttr.Of("component") });
+    }
 
     private IEnumerable<IrType> LowerShape(ShapeDecl s)
     {
@@ -766,6 +799,12 @@ public sealed class Lower
                         continue;
                     }
 
+                    // This bring ATTACHES the shape, so the module needs its type — otherwise the write
+                    // lands and every later read of it comes back empty. Registered from the FULL field
+                    // list, not `take` below: a `$Shape.field` include narrows what this bring supplies,
+                    // not what the component is.
+                    RegisterImportedShape(si.Shape, fields);
+
                     // `$Shape.field` includes ONE field; the rest of the shape keeps its declared default.
                     var take = si.Field is null ? fields : fields.Where(f => f.Name == si.Field).ToList();
                     var init = new List<(string, IrExpr)>();
@@ -786,6 +825,10 @@ public sealed class Lower
                 case MarkMember mm:
                     foreach (var tag in mm.Marks)
                     {
+                        // A mark on an imported builder belongs to the bundle that DECLARED the builder.
+                        // Counting it as this bundle's own use would demand a `mark #X` line for a name
+                        // the author never wrote — and report it at a span inside the other bundle.
+                        if (ownerKey is not null) _importedMarks.Add(tag);
                         UseMark(tag, mm.Span);
                         stmts.Add(new IrExprStmt(new IrRuntimeCall("AddTag",
                             new IrExpr[] { new IrLocalRef(ent), new IrTypeNameExpr(tag) })));

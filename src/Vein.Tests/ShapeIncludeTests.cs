@@ -142,4 +142,70 @@ public class ShapeIncludeTests
         while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "stdlib"))) dir = dir.Parent;
         return dir?.FullName ?? throw new DirectoryNotFoundException("repo root with stdlib/ not found");
     }
+
+    // ---- an IMPORTED shape has to become a component here, not just a set of fields --------------
+    //
+    // An include EXPANDS FIELDS. That is enough for an event or a builder signature, and it stopped
+    // being enough the moment a builder ATTACHED the shape: a field access resolves to a component only
+    // when the module declares one of that name (Interp.IsComponent), and nothing registered an imported
+    // one. The failure was silent in the worst way — the entity spawned, `target` matched it, and every
+    // field read came back as the empty string with no diagnostic anywhere along the path.
+
+    private static string RunProgram(string src)
+    {
+        var r = new VeinCompilerService().Compile(new CompileRequest("t.vein", src));
+        Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
+        var sw = new StringWriter();
+        new Vein.Compiler.Ir.Interp { Ticks = 1 }.Run(r.Modules[0], new StringReader(""), sw);
+        return sw.ToString();
+    }
+
+    [Fact]
+    public void A_stdlib_shape_attached_by_a_local_builder_reads_back()
+    {
+        var output = RunProgram(
+            "bundle T by me {\n" +
+            "  mark #Conn\n" +
+            "  builder Conn { *Vein.Rest.Db.$Connection   mark #Conn }\n" +
+            "  shard Boot { run once { bring Conn(\"https://x.test\", \"k\") } }\n" +
+            "  shard Read { settled { target $Connection #Conn as c {\n" +
+            "    emit *Vein.Console.Io.@Print { text: \"[\" + c.Connection.base + \"|\" + c.Connection.key + \"]\" } } } }\n" +
+            "}");
+
+        Assert.Contains("[https://x.test|k]", output);
+    }
+
+    [Fact]
+    public void A_stdlib_identity_builder_reads_back_through_its_own_mark()
+    {
+        // The same thing one step further out: the builder, the shape AND the mark all come from the
+        // standard library, and the consumer only says `bring`.
+        var output = RunProgram(
+            "bundle T by me {\n" +
+            "  shard Boot { run once { bring *Vein.Rest.Db.&Connection(\"https://y.test\", \"k2\") } }\n" +
+            "  shard Read { settled { target $Connection #Connection as c {\n" +
+            "    emit *Vein.Console.Io.@Print { text: \"[\" + c.Connection.base + \"]\" } } } }\n" +
+            "}");
+
+        Assert.Contains("[https://y.test]", output);
+    }
+
+    [Fact]
+    public void A_mark_that_came_in_with_an_imported_builder_is_not_reported_undeclared()
+    {
+        // VS0218 asks a bundle that declares marks to declare the ones it uses. A mark riding in on an
+        // imported builder was never written by this author, and reporting it pointed them at a span
+        // inside stdlib source — an error about a file they did not write and cannot fix.
+        var r = Compile(
+            "bundle T by me {\n" +
+            "  mark #Local\n" +
+            "  shape $Thing { n: int }\n" +
+            "  builder Thing { $Thing   mark #Local }\n" +
+            "  shard Boot { run once {\n" +
+            "    bring Thing(1)\n" +
+            "    bring *Vein.Rest.Db.&Connection(\"https://z.test\", \"k\") } }\n" +
+            "}");
+
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "VS0218");
+    }
 }
