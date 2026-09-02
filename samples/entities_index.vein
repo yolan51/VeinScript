@@ -77,11 +77,11 @@ bundle EntitiesIndex by you {
             // NUMBER of lines, not just the numbers in them — which is what check-backend pins.
             emit *Vein.Console.Io.@Print { text: "-- first two of the wide ones --" }
             target $Row $Wide #Row as r {
-                if Index < 2 {
+                
                     emit *Vein.Console.Io.@Print {
                         text: "   " + Index + " " + r.Row.title + " extra=" + r.Wide.extra
                     }
-                }
+                
             }
         }
     }
