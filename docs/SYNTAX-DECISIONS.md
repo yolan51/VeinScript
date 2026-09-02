@@ -220,6 +220,38 @@ argument.
 
 ---
 
+## D13 — Query order is SPAWN order; no `order by` {#order}
+
+**DECIDED (for now).** `target` yields entities ascending by id, which is the order `spawn` — and so
+`bring` — created them. No order key, no sort, no comparator:
+
+```
+target $Row #Row as r { … }      // arrival order, always
+
+shape $Row { title: string, rank: int }
+target $Row #Row by Row.rank     // NOT syntax; considered and not added
+```
+
+*Rationale:* the ordering is a real guarantee on both runtimes rather than an accident —
+`EntityStore.Query` ends `.OrderBy(e => e)`, and `VeinWorld` iterates a `SortedSet<int>` — so it can be
+relied on, and `samples/web_app` already does for its nav, cards and counter. Where the data comes from
+somewhere that can sort, that is where sorting belongs: a served page rebuilds its world per request
+(`veinc serve` constructs a fresh interpreter each time), so the database is queried again anyway and
+`ORDER BY` uses an index the language cannot.
+
+The cost is that a `rank` field is inert — stored and never consulted — which is a sharp edge, so
+[RULES.md 14b](RULES.md) states it and `samples/rows_in_order.vein` demonstrates it rather than leaving
+it to be discovered.
+
+*Revisit when either of these turns up:* **merging two fetches** into one display order, which SQL cannot
+do across separate queries without a UNION; or **re-sorting a persistent world** without re-fetching,
+which needs a long-lived server interpreter that does not exist yet. An ordered query would then be
+`target … by Shape.field`, touching parser → IR → interpreter → backend, and would need a
+`check-backend` case, because two runtimes sorting differently is exactly the divergence that check
+exists to catch. A list type ([D9](#d9)) plus a sort function is the other route to the same place.
+
+---
+
 ## Reserved-word disposition
 
 Every keyword currently in [Lexer.cs](../src/Vein.Compiler/Lexing/Lexer.cs) `Keywords`, classified.

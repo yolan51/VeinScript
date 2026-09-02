@@ -1,0 +1,82 @@
+// rows_in_order.vein — what decides the order things appear in, when they arrive from a data source.
+//
+// The short answer, and it is a GUARANTEE rather than an accident: a `target` query yields entities
+// ascending by id, ids are handed out in `spawn` order, and `bring` spawns. So
+//
+//     query order  ==  spawn order  ==  the order you called `bring`
+//
+// on both runtimes — `EntityStore.Query` ends `.OrderBy(e => e)`, and the C# backend's `VeinWorld`
+// iterates a `SortedSet<int>`.
+//
+// THERE IS NO SORT. No `order by`, nothing in the stdlib. A `rank` field can be stored and will be
+// ignored, which is the trap: it looks like it ought to work. This file stores one and then prints the
+// rows out of rank order to prove it does nothing.
+//
+// So: ORDER AT THE SOURCE. `ORDER BY` in SQL, or emit the rows in the order you want them. For a served
+// page that is also the cheaper answer — `veinc serve` builds a fresh interpreter per request, so the
+// query runs again anyway and the database has the index.
+//
+//   veinc run samples/rows_in_order.vein --ticks 1
+//
+// INTERPRETER ONLY. Rows arrive through `emit`/`hear`, which the C# backend deliberately skips — it
+// covers the identity half (run once / each tick / settled). Emitting this prints a note per skipped
+// construct rather than going quiet:
+//
+//     note: event @RowArrived not emitted — the C# backend covers the identity half only;
+//           emit/hear stays on the interpreter (Ir/Interp.cs).
+//
+// so it is not in tools/check-backend.sh, for the same reason samples/entities_tree.vein is not.
+
+bundle RowsInOrder by you {
+
+    // No list type exists — D9 is open and the lexer has no `[` `]` — so a result set cannot arrive as
+    // one value. One event per row is the shape that IS expressible, and it happens to be what a
+    // streaming fetch looks like anyway.
+    event @RowArrived { title: string, rank: int }
+
+    shape $Row { title: string, rank: int }
+    mark #Row
+
+    builder Row { $Row   mark #Row }
+
+    shard Source {
+        run once {
+            // Standing in for a query result, deliberately NOT in rank order — because a real source
+            // hands you whatever its own ordering produced.
+            emit @RowArrived { title: "gamma", rank: 3 }
+            emit @RowArrived { title: "alpha", rank: 1 }
+            emit @RowArrived { title: "beta",  rank: 2 }
+        }
+    }
+
+    shard Ingest {
+        hear @RowArrived as r {
+            emit *Vein.Console.Io.@Print { text: "ingesting " + r.title }
+            bring Row(r.title, r.rank)
+
+            // THE TRAP, and it is not about ordering. Commit happens per EVENT, so this query sees every
+            // row committed by EARLIER events and never the one this handler just brought. Read the
+            // output below: ingesting gamma shows nothing, ingesting alpha shows gamma, ingesting beta
+            // shows gamma and alpha. A count taken here would be short by one, every time.
+            target $Row #Row as x {
+                emit *Vein.Console.Io.@Print { text: "   visible now: " + x.Row.title }
+            }
+        }
+    }
+
+    // A later phase, so the commit that ended each @RowArrived has happened. `settled` carries no weight
+    // here — there are no folds — but it is a phase after the events, which is what this needs.
+    shard Listing {
+        settled {
+            emit *Vein.Console.Io.@Print { text: "rows, in the order they were brought:" }
+            target $Row #Row as r {
+                emit *Vein.Console.Io.@Print {
+                    text: "   e" + Entity + "  " + r.Row.title + "  (rank " + r.Row.rank + ")"
+                }
+            }
+            emit *Vein.Console.Io.@Print {
+                text: "ranks read 3, 1, 2 — `rank` is stored and IGNORED. Sort at the source instead."
+            }
+        }
+    }
+}
