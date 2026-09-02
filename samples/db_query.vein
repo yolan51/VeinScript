@@ -1,0 +1,175 @@
+// db_query.vein — the PostgREST query format, which is how you ask Supabase for a subset.
+//
+// samples/db_supabase.vein reads a whole table and inserts a row. This one is about the URL: filtering,
+// set membership, OR across columns, paging, and pulling a related table in with the parent. In
+// PostgREST there is no query language and no request body — the whole question is the query string, so
+// learning the format IS learning the API.
+//
+//   1. Put your project URL and anon key in base() and key() below.
+//   2. Two tables:
+//        create table tasks (id bigserial primary key, title text, rank int, done bool);
+//        create table comments (id bigserial primary key, task_id bigint references tasks, body text);
+//   3. veinc run samples/db_query.vein
+//
+// THE CONNECTION IS DECLARED ONCE. `bring *Vein.Rest.Db.&Connect(base(), key())` announces it, and every
+// shard that cares hears @Connect and reads `c.base`/`c.key` off the event. That is the point of the
+// builder: the two values are written in one place, and a shard added later needs no argument threaded
+// to it. Nothing forces this — Db.get takes base and key directly — but a program with several query
+// shards would otherwise repeat them in each.
+//
+// FILTER VALUES HERE ARE ALL LITERALS, and that is a rule. VeinScript cannot look at a character, so it
+// cannot percent-encode: a value from a search box containing a space, an `&` or a `#` would silently
+// produce a different query than the one you meant. Interpolate only values you control; filter
+// anything user-supplied in the `if` inside the target loop instead, where no encoding is involved.
+//
+// WHAT YOU CANNOT READ BACK. `Prefer: count=exact` makes PostgREST report the total row count in a
+// `Content-Range` RESPONSE header — and @Fetched carries url, status and body, not headers. So the
+// count is unreachable from here, and paging below is "give me this window" without a total to page
+// against. That is a real limit of the event, not of the service.
+//
+// INTERPRETER ONLY, like every emit/hear program: `veinc emit` prints a note per skipped construct and
+// this file is not in tools/check-backend.sh. It is covered by NetHttpTests, which answers each query
+// through NetHttp.Hook and asserts the exact paths this file asks for.
+
+bundle DbQuery by you {
+
+    fn base() -> string { return "https://YOUR-PROJECT.supabase.co" }
+    fn key() -> string { return "PASTE-YOUR-ANON-KEY" }
+
+    fn tasks() -> string { return "/rest/v1/tasks" }
+
+    // ---- the query format, one idea per function -------------------------------------------------
+    //
+    // Every path is `?column=operator.value`, joined with `&`. The operator is part of the VALUE, not a
+    // separate symbol — `rank=gte.3`, never `rank>=3` — which is what lets the whole query survive as an
+    // ordinary URL with no escaping of its own.
+
+    // `select` picks columns. Asking for `*` when you want three of them is the most common waste in a
+    // PostgREST app: the row still crosses the network in full. `order` is the cheapest place to sort,
+    // because Postgres has an index and this program does not.
+    fn qBasic() -> string {
+        return tasks() + "?select=id,title,rank&order=rank.asc"
+    }
+
+    // Comparison operators: eq, neq, gt, gte, lt, lte. Several filters on one URL are ANDed.
+    fn qFilter() -> string {
+        return tasks() + "?select=id,title,rank&rank=gte.3&done=is.false&order=rank.asc"
+    }
+
+    // `in.(…)` is set membership, and `not.` negates any operator — so `rank=not.in.(1,2)` is the
+    // complement of this. Note the parentheses are literal and need no encoding.
+    fn qInSet() -> string {
+        return tasks() + "?select=id,title,rank&rank=in.(1,3)&order=rank.asc"
+    }
+
+    // OR is not a filter on a column, so it does not follow the `column=` shape: it is its own parameter
+    // holding a comma-separated list of conditions. `and=(…)` exists too, for nesting inside an or.
+    fn qOr() -> string {
+        return tasks() + "?select=id,title,rank&or=(rank.eq.1,done.is.true)&order=rank.asc"
+    }
+
+    // Paging. ORDER IS NOT OPTIONAL HERE, even though the syntax allows leaving it out: without it
+    // Postgres may return rows in any order it likes, so page 2 can repeat or skip rows from page 1.
+    // A limit without an order is a bug that only shows up under load.
+    fn qPage() -> string {
+        return tasks() + "?select=id,title,rank&order=rank.asc&limit=2&offset=1"
+    }
+
+    // The join. A related table goes INSIDE the select as `table(columns)`, and PostgREST answers with
+    // the child rows nested in each parent as an array — which `fromJson` gives back as a list, so
+    // `target row.comments as cm` walks it with no unpacking step. The foreign key is what makes this
+    // work; there is no `on` clause to write.
+    fn qEmbed() -> string {
+        return tasks() + "?select=id,title,comments(id,body)&order=rank.asc"
+    }
+
+    fn embedUrl() -> string { return base() + qEmbed() }
+
+    // ---- announce the connection -----------------------------------------------------------------
+
+    shard Boot {
+        run once {
+            bring *Vein.Rest.Db.&Connect(base(), key())
+        }
+    }
+
+    // ---- ask ---------------------------------------------------------------------------------------
+
+    shard Queries {
+        hear *Vein.Rest.Db.@Connect as c {
+            // Six requests, all in flight at once. They complete in whatever order the service answers,
+            // which is why every reply carries the url that caused it — see below.
+            *Vein.Rest.Db.get(c.base, c.key, qBasic())
+            *Vein.Rest.Db.get(c.base, c.key, qFilter())
+            *Vein.Rest.Db.get(c.base, c.key, qInSet())
+            *Vein.Rest.Db.get(c.base, c.key, qOr())
+            *Vein.Rest.Db.get(c.base, c.key, qPage())
+            *Vein.Rest.Db.get(c.base, c.key, qEmbed())
+        }
+    }
+
+    // ---- read the flat answers ---------------------------------------------------------------------
+
+    shard Rows {
+        hear *Vein.Net.Http.@Fetched as f {
+
+            // A 4xx or 5xx arrives HERE, not on @Failed — the service answered, and what it answered is
+            // this program's business. PostgREST error bodies are unusually good: a bad column name
+            // comes back as a message naming the column, so printing the body is worth more than
+            // printing the status.
+            if not *Vein.Rest.Status.ok(f.status) {
+                emit *Vein.Console.Io.@Print { text: "" }
+                emit *Vein.Console.Io.@Print { text: f.status + " on " + f.url }
+                emit *Vein.Console.Io.@Print { text: "   " + f.body }
+            } else {
+                // The embedded query has nested rows and gets its own reader below. `f.url` is how one
+                // handler tells six requests apart — the reply names the question, because several are
+                // outstanding and they do not come back in the order they were sent.
+                if not (f.url == embedUrl()) {
+                    let rows = fromJson(f.body)
+                    emit *Vein.Console.Io.@Print { text: "" }
+                    emit *Vein.Console.Io.@Print { text: f.url }
+                    emit *Vein.Console.Io.@Print { text: "   " + len(rows) + " rows" }
+                    target rows as row {
+                        emit *Vein.Console.Io.@Print {
+                            text: "     " + row.id + "  rank " + row.rank + "  " + row.title
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- read the joined answer --------------------------------------------------------------------
+
+    shard Embedded {
+        hear *Vein.Net.Http.@Fetched as f {
+            if f.url == embedUrl() {
+                if *Vein.Rest.Status.ok(f.status) {
+                    let rows = fromJson(f.body)
+                    emit *Vein.Console.Io.@Print { text: "" }
+                    emit *Vein.Console.Io.@Print { text: "-- tasks with their comments --" }
+                    target rows as row {
+                        emit *Vein.Console.Io.@Print { text: "   " + row.id + "  " + row.title }
+                        // `comments` is a list on the parent row, nested by the service. A task with
+                        // none gets an empty array rather than a missing field, so this loop simply
+                        // runs zero times — no null check to write.
+                        target row.comments as cm {
+                            emit *Vein.Console.Io.@Print { text: "        " + cm.id + ": " + cm.body }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- and when there was no answer at all -------------------------------------------------------
+
+    shard Trouble {
+        hear *Vein.Net.Http.@Failed as f {
+            // A different thing from a 4xx: nothing replied. Bad host, refused connection, timeout.
+            // There is no body to read and no status to branch on — retrying is the only response.
+            emit *Vein.Console.Io.@Print { text: "no answer from " + f.url + ": " + f.reason }
+        }
+    }
+}

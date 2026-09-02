@@ -319,6 +319,127 @@ public class NetHttpTests : IDisposable
         Assert.DoesNotContain("read ", output);
     }
 
+    // ---- the query sample: the URLs it builds, and Db.Connect ------------------------------------
+    //
+    // samples/db_query.vein is about the PostgREST query string, so what is worth asserting is the
+    // string. A wrong operator, a missing `order` beside a `limit`, an `or=` written as a column filter
+    // — none of those fail loudly. The service answers 200 with the wrong rows.
+
+    private static string QuerySamplePath()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "stdlib"))) dir = dir.Parent;
+        return Path.Combine(dir!.FullName, "samples", "db_query.vein");
+    }
+
+    private static string RunQuerySample()
+    {
+        string path = QuerySamplePath();
+        var r = new VeinCompilerService().Compile(new CompileRequest(
+            Path.GetFileName(path), File.ReadAllText(path), SourcePath: path));
+        Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
+        var sw = new StringWriter();
+        new Interp().Run(r.Modules[0], new StringReader(""), sw);
+        return sw.ToString();
+    }
+
+    [Fact]
+    public void The_query_sample_builds_every_postgrest_form()
+    {
+        var asked = new List<string>();
+        NetHttp.Hook = (url, method, body, headers) =>
+        {
+            asked.Add(url);
+            return new NetHttp.Result(200, "[]", null);
+        };
+
+        RunQuerySample();
+
+        // Paths only — the host is a placeholder and says nothing.
+        var paths = asked.Select(u => u.Replace("https://YOUR-PROJECT.supabase.co", "")).ToList();
+
+        Assert.Equal(new[]
+        {
+            "/rest/v1/tasks?select=id,title,rank&order=rank.asc",
+            "/rest/v1/tasks?select=id,title,rank&rank=gte.3&done=is.false&order=rank.asc",
+            "/rest/v1/tasks?select=id,title,rank&rank=in.(1,3)&order=rank.asc",
+            "/rest/v1/tasks?select=id,title,rank&or=(rank.eq.1,done.is.true)&order=rank.asc",
+            "/rest/v1/tasks?select=id,title,rank&order=rank.asc&limit=2&offset=1",
+            "/rest/v1/tasks?select=id,title,comments(id,body)&order=rank.asc",
+        }, paths);
+    }
+
+    [Fact]
+    public void A_limit_never_goes_out_without_an_order()
+    {
+        // Not style. Postgres may return rows in any order it likes without an ORDER BY, so a paged
+        // query lacking one can repeat or skip rows between pages — a bug that appears under load and
+        // not in a test with four rows. Asserted so the sample cannot teach it wrong.
+        var asked = new List<string>();
+        NetHttp.Hook = (url, method, body, headers) => { asked.Add(url); return new NetHttp.Result(200, "[]", null); };
+
+        RunQuerySample();
+
+        Assert.All(asked.Where(u => u.Contains("limit=", StringComparison.Ordinal)),
+                   u => Assert.Contains("order=", u, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Db_Connect_carries_the_credentials_to_every_query()
+    {
+        // The point of the Connect builder: base and key are written once, in one `bring`, and the
+        // query shard reads them off the event. If the fanout silently delivered nothing, the URLs
+        // would come out starting at "/rest/v1/..." with no host, and every request would carry an
+        // empty key — which is exactly what this asserts against.
+        var seen = new List<(string Url, string Headers)>();
+        NetHttp.Hook = (url, method, body, headers) => { seen.Add((url, headers)); return new NetHttp.Result(200, "[]", null); };
+
+        RunQuerySample();
+
+        Assert.Equal(6, seen.Count);
+        Assert.All(seen, s => Assert.StartsWith("https://YOUR-PROJECT.supabase.co/", s.Url));
+        Assert.All(seen, s => Assert.Contains("apikey: PASTE-YOUR-ANON-KEY", s.Headers));
+        Assert.All(seen, s => Assert.Contains("Authorization: Bearer PASTE-YOUR-ANON-KEY", s.Headers));
+    }
+
+    [Fact]
+    public void An_embedded_resource_comes_back_nested_and_is_walked_in_place()
+    {
+        // The join. PostgREST nests the child rows inside each parent as an array, `fromJson` returns
+        // that as a list, and `target row.comments as cm` walks it — no unpacking step, and a parent
+        // with no children gets an empty array rather than a missing field.
+        NetHttp.Hook = (url, method, body, headers) =>
+        {
+            if (url.Contains("comments(id,body)", StringComparison.Ordinal))
+                return new NetHttp.Result(200,
+                    "[{\"id\":1,\"title\":\"write it\",\"comments\":[{\"id\":7,\"body\":\"nearly\"},{\"id\":8,\"body\":\"ship\"}]}," +
+                    " {\"id\":2,\"title\":\"quiet one\",\"comments\":[]}]", null);
+            return new NetHttp.Result(200, "[]", null);
+        };
+
+        var output = RunQuerySample();
+
+        Assert.Contains("-- tasks with their comments --", output);
+        Assert.Contains("7: nearly", output);
+        Assert.Contains("8: ship", output);
+        // The childless parent still prints, and its loop simply runs zero times.
+        Assert.Contains("quiet one", output);
+    }
+
+    [Fact]
+    public void The_query_sample_prints_a_postgrest_error_body_rather_than_just_its_status()
+    {
+        // A bad column name is a 400 whose body names the column. Printing the status alone would throw
+        // away the only part of the reply that says what to fix.
+        NetHttp.Hook = (url, method, body, headers) =>
+            new NetHttp.Result(400, "{\"message\":\"column tasks.rnk does not exist\"}", null);
+
+        var output = RunQuerySample();
+
+        Assert.Contains("column tasks.rnk does not exist", output);
+        Assert.Contains("400 on https://YOUR-PROJECT.supabase.co/", output);
+    }
+
     // ---- the transport's own rules, with no server involved ---------------------------------------
 
     [Fact]
