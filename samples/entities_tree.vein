@@ -11,7 +11,7 @@
 //
 // Two decks of the SAME KIND is the case worth showing. One deck could have been done with a mark.
 //
-//   veinc run samples/entities_tree.vein --ticks 2
+//   veinc run samples/entities_tree.vein --ticks 1
 //
 // INTERPRETER ONLY, and the compiler says so rather than going quiet — emitting this to C# prints
 //
@@ -31,7 +31,14 @@
 
 bundle EntitiesTree by you {
 
-    shape $Deck { title: string }
+    // A deck counts its own children WITHOUT knowing about them: each card contributes 1 to its parent's
+    // `count`, and `folds sum` reconciles the five concurrent writes. The deck holds no list of children.
+    //
+    // `folds sum` ACCUMULATES onto the existing value — it does not recompute one. Run this with
+    // `--ticks 3` and the counts read 2,3 then 4,6 then 6,9, because every tick contributes again. A
+    // field that should hold "how many right now" has to be zeroed before the contributions land, and
+    // `folds sum` will not do that for you. One tick is the honest reading here.
+    shape $Deck { title: string, count: int folds sum }
     shape $Card { title: string }
 
     // Declared locally with EXACTLY the fields of `Vein.Core.Relations.$Parent`, and both halves of that
@@ -56,8 +63,8 @@ bundle EntitiesTree by you {
         run once {
             // `as` names what the template built — without it the identity lives in a local the program
             // never sees, and there would be nothing to hand to the cards.
-            bring Deck("Ship")    as ship
-            bring Deck("Backlog") as backlog
+            bring Deck("Ship",    0) as ship
+            bring Deck("Backlog", 0) as backlog
 
             bring Card("nav is a query",   ship)
             bring Card("bring … as",       ship)
@@ -86,6 +93,37 @@ bundle EntitiesTree by you {
         }
     }
 
+
+    // ---- what `settled` is FOR, and why this sample needs it -----------------------------------------
+    //
+    // Five cards write two counters in the same tick. A field with `folds` collects each write as a
+    // CONTRIBUTION from the writer's own snapshot; the reconciled value does not exist until the phase
+    // commits. Read it during the tick and every deck still reads 0 — measured, not assumed:
+    //
+    //     during tick: Ship = 0        Backlog = 0
+    //     settled:     Ship = 2        Backlog = 3
+    //
+    // That is rule 13 with a reason to care. Without folds this shard could have been `each tick` and
+    // nothing would have differed, which is why the earlier version of this sample used `settled` for
+    // no reason at all.
+    //
+    // ONE tick, deliberately: see the note on $Deck above — a second tick contributes again.
+    shard Count {
+        each tick {
+            // A child writing its PARENT's component — `c.Parent.of` is an Entity, and an entity plus a
+            // component name is a handle, so the write lands on the deck rather than on the card. The
+            // deck holds no list of children and needs none.
+            target $Card $Parent as c { c.Parent.of.Deck.count += 1 }
+        }
+    }
+
+    shard Tally {
+        settled {
+            target $Deck #Deck as d {
+                emit *Vein.Console.Io.@Print { text: d.Deck.title + " holds " + d.Deck.count + " card(s)" }
+            }
+        }
+    }
     // The same relationship as raw data rather than grouped output, so it is visible that nothing is
     // stored twice: a card knows its parent, and a deck knows nothing about its children.
     shard Links {

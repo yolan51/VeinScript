@@ -131,6 +131,12 @@ the nav in `samples/web_app` bold the current page. The bug is target-inside-tar
 shards doing `hp -= 1` in one tick give `hp - 2`, because each contributes a *delta* from its own
 snapshot. Reading `hp` during the tick sees an unreconciled value — death checks belong in `settled`.
 
+**13b. `folds` ACCUMULATES across ticks — it does not recompute.** A `folds sum` field keeps its value
+and each tick's contributions land on top: a per-tick "count my children" reads 2, then 4, then 6.
+Deriving a quantity fresh means zeroing it first; the fold will not. And a child can write its PARENT's
+component — `c.Parent.of.Deck.count += 1` — because an entity plus a component name is a handle, which
+is how `samples/entities_tree.vein` aggregates without the parent holding a list of children.
+
 **14. `target` binds ONE shape per loop, and nothing can ask an identity which shapes it carries.**
 Several shapes are an AND (`target $A $B`). There is no dispatch — a heterogeneous ordered sequence
 cannot be rebuilt by query, which is why `/docs` in `samples/web_app` renders from a literal sequence and
