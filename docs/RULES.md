@@ -124,6 +124,9 @@ a nameless `IrSelfRef` for every target binding and the interpreter resolves it 
 the innermost loop. Indistinguishable from correct in a single loop. Keep queries flat — carry what the
 inner loop needs as a value (an `Entity` field plus a `fn`), as `samples/web_app` does for handler names.
 
+A `hear` binding is NOT affected — `r.path` read inside a `target` loop is correct, which is what lets
+the nav in `samples/web_app` bold the current page. The bug is target-inside-target only.
+
 **13. `folds` reconciles concurrent writes; `settled` is where the reconciled value is readable.** Two
 shards doing `hp -= 1` in one tick give `hp - 2`, because each contributes a *delta* from its own
 snapshot. Reading `hp` during the tick sees an unreconciled value — death checks belong in `settled`.
@@ -177,6 +180,12 @@ a `hear` in another, and a capability bundle can bind the socket the whole app a
 ---
 
 ## 5. Running, and measuring
+
+**20b. An SF runs INLINE; a shard hearing an event does not.** That is the difference between a helper
+whose `bring`s land where you called it and one whose fragments arrive after everything already queued.
+`navBar(r.path)` in `samples/web_app` is an SF for exactly this reason — plus a shard on `hear @Request`
+would emit for EVERY path, and an unrouted path emitting no `@Html` is how the view tells a 404 from a
+page. A builder cannot hold statements at all, so it can never run a query.
 
 **21. `bring` and `emit` QUEUE — they do not write.** The queue drains only after every handler of the
 current event has finished. So a view that answered on `@Request` would always see an empty page, and an

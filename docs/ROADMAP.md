@@ -145,7 +145,38 @@ Ordered by how much each unblocks, not by milestone number.
    `string` — `QueryStmt.Tags`, `MarkStmt.Mark`, carried, audience, match arms — so the work is
    promoting both to a ref type through the AST, IR, interpreter and backend, and it should be done for
    shapes and marks together or not at all. Sized accordingly: it touches the golden IR trees.
-5. **`SecsRuntime.Probe`** — the repo's one live `TODO`. It was the net8↔net9 linkage proof; M5 supersedes
+5. **A nested `target` reads EMPTY from the outer binding** — silently, which makes it the worst kind.
+   `target $A as x { target $B as y { … } }` gives `x.A.field` the value of `y`'s row, because
+   [Lower.cs](../src/Vein.Compiler/Ir/Lower.cs) emits a nameless `IrSelfRef` for every target binding and
+   the interpreter resolves it to `_targetBinds[^1]` — the innermost loop. Indistinguishable from correct
+   in a single loop, so nothing caught it until a page tried to render a button's handler through a second
+   query.
+
+   The fix is to give `IrSelfRef` a name and resolve it from `locals`, which the loop already populates
+   (`locals[lp.Var] = entity`). Touches Hir, Lower, Interp and the C# backend, and regenerates the golden
+   IR. Note the bind stack in Lower already carries the comment *"A stack, because targets nest"* —
+   nesting was anticipated; the name simply never reached the IR node.
+
+   **This gates the hierarchy work below**, which is why it is filed above it.
+6. **A parent/child model, so a UI is a tree of identities rather than markup** — the direction
+   `samples/web_app` keeps pointing at. Every page element is already an identity; what is missing is
+   depth. `Vein.Core.Meta.$Parent { of: Entity }` already exists and needs no new concept: today's
+   `$OnClick { handler: Entity }` and `entities_bind`'s `$Edge { to: Entity }` prove a shape carrying an
+   Entity is a working relationship.
+
+   What it buys is a UI abstraction that is NOT html: the same `Window → Panel → Button` tree rendered by
+   a web backend as divs, by a desktop backend as native widgets, by a console backend as a TUI. HTML
+   becomes one target rather than the model.
+
+   Three things to settle before building it:
+   - **Rendering a tree is a nested walk**, so item 5 is a prerequisite, not a nicety.
+   - **A builder emits ONE fragment and cannot wrap**, which is why `&Open`/`&Close` are two halves. A
+     `Window` that renders `<div>` … children … `</div>` needs the renderer to emit the halves around a
+     subtree walk, not a nesting builder. Builder-inside-builder is not the answer and would not parse:
+     a builder body is `ParseSigBody()`, which holds no statements.
+   - **Ordering among siblings** is entity id, i.e. spawn order. That works today and should stay the
+     rule rather than growing an explicit index.
+7. **`SecsRuntime.Probe`** — the repo's one live `TODO`. It was the net8↔net9 linkage proof; M5 supersedes
    it, so it should either grow into the direct-materialisation path or be deleted.
 
 ### Recently closed
