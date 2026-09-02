@@ -1,0 +1,100 @@
+// entities_tree.vein — parent and child as an identity RELATIONSHIP, not a container.
+//
+// A mark says what something IS. `#Card` cannot say whose card it is, so the moment there are two decks
+// the mark runs out: both decks' cards wear it. A link is what separates them —
+//
+//     shape $Parent { of: Entity }
+//
+// and that is an ordinary shape carrying an ordinary Entity. Nothing new was added to the language for
+// this; `$OnClick { handler: Entity }` in samples/web_app and `$Edge { to: Entity }` in
+// samples/entities_bind.vein are the same mechanism wearing different names.
+//
+// Two decks of the SAME KIND is the case worth showing. One deck could have been done with a mark.
+//
+//   veinc run samples/entities_tree.vein --ticks 2
+//
+// INTERPRETER ONLY, and the compiler says so rather than going quiet — emitting this to C# prints
+//
+//     note: emit @Show not emitted — the reactive half stays on the interpreter.
+//     note: Show.hear_Show: 'hear' not emitted — the backend covers run once / each tick / settled.
+//
+// so `shard Show` never runs there and the grouped output disappears. That is the deliberate M5 split
+// (ROADMAP.md), not a defect. It does mean this sample cannot join tools/check-backend.sh, because the
+// only way to carry a parent into a later phase today is an event. `shard Links` below would be
+// checkable alone, but samples/entities_bind.vein already covers an Entity stored in a shape.
+//
+// DEPTH 1, AND WHY. Listing decks generically — "for each deck, list its children" — is a `target`
+// inside a `target`, and the outer binding reads EMPTY there today (RULES.md 12c, roadmap item 5). So
+// the parent has to reach the query as a VALUE rather than as an enclosing loop variable, which is what
+// the @Show event below does. When that bug is fixed, `shard Show` collapses into one nested walk and
+// the per-deck emit goes away.
+
+bundle EntitiesTree by you {
+
+    shape $Deck { title: string }
+    shape $Card { title: string }
+
+    // Declared locally with EXACTLY the fields of `Vein.Core.Relations.$Parent`, and both halves of that
+    // matter. Only a locally declared shape becomes a component — a `use`d one is a compile-time field
+    // expansion and cannot be attached (RULES.md 15b) — but components unify by BARE NAME, so at link
+    // time this is Core's `$Parent` (publicator `Relations`, not `Meta` — checked). VS0220 stays quiet only because the fields agree; change `of` to
+    // anything else and the check fires, which is the point of it.
+    shape $Parent { of: Entity }
+
+    mark #Deck
+    mark #Card
+
+    builder Deck { $Deck          mark #Deck }
+    builder Card { $Card $Parent  mark #Card }
+
+    // Carries the parent ENTITY, which is how a later phase gets hold of it: `run once` commits a single
+    // time for every shard, so Seed cannot query what it just spawned, and its locals are gone by the
+    // next event.
+    event @Show { deck: Entity, title: string }
+
+    shard Seed {
+        run once {
+            // `as` names what the template built — without it the identity lives in a local the program
+            // never sees, and there would be nothing to hand to the cards.
+            bring Deck("Ship")    as ship
+            bring Deck("Backlog") as backlog
+
+            bring Card("nav is a query",   ship)
+            bring Card("bring … as",       ship)
+            bring Card("packed ECS",       backlog)
+            bring Card("TLS for peers",    backlog)
+            bring Card("a JS backend",     backlog)
+
+            // One emit per deck. This is the line item 5 removes: with a working nested walk, a single
+            // `target $Deck #Deck as d { target $Card … }` would do it for however many decks exist.
+            emit @Show { deck: ship,    title: "Ship" }
+            emit @Show { deck: backlog, title: "Backlog" }
+        }
+    }
+
+    shard Show {
+        hear @Show as d {
+            emit *Vein.Console.Io.@Print { text: "== " + d.title }
+
+            // ONE flat loop, filtered against `d.deck` — a HEAR binding, which reads correctly inside a
+            // `target` loop. An outer TARGET binding would not; that asymmetry is 12c exactly.
+            target $Card $Parent as c {
+                if c.Parent.of == d.deck {
+                    emit *Vein.Console.Io.@Print { text: "   - " + c.Card.title }
+                }
+            }
+        }
+    }
+
+    // The same relationship as raw data rather than grouped output, so it is visible that nothing is
+    // stored twice: a card knows its parent, and a deck knows nothing about its children.
+    shard Links {
+        settled {
+            target $Card $Parent as c {
+                emit *Vein.Console.Io.@Print {
+                    text: "card e" + Entity + " '" + c.Card.title + "' -> parent e" + c.Parent.of
+                }
+            }
+        }
+    }
+}

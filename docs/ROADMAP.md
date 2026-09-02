@@ -160,9 +160,14 @@ Ordered by how much each unblocks, not by milestone number.
    **This gates the hierarchy work below**, which is why it is filed above it.
 6. **A parent/child model, so a UI is a tree of identities rather than markup** — the direction
    `samples/web_app` keeps pointing at. Every page element is already an identity; what is missing is
-   depth. `Vein.Core.Meta.$Parent { of: Entity }` already exists and needs no new concept: today's
+   depth. `Vein.Core.Relations.$Parent { of: Entity }` already exists and needs no new concept: today's
    `$OnClick { handler: Entity }` and `entities_bind`'s `$Edge { to: Entity }` prove a shape carrying an
    Entity is a working relationship.
+
+   **Depth 1 already works** — `samples/entities_tree.vein` shows two decks of the same kind, each
+   listing its own cards, which is the case a mark cannot express. It also shows the shape of the
+   limit: the parent has to arrive as a VALUE (an event payload) rather than as an enclosing loop
+   variable, so there is one `emit` per deck. Item 5 is what replaces that with a walk.
 
    What it buys is a UI abstraction that is NOT html: the same `Window → Panel → Button` tree rendered by
    a web backend as divs, by a desktop backend as native widgets, by a console backend as a TUI. HTML
