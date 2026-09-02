@@ -189,12 +189,18 @@ bundle WebTheme by Vein {
 
         // The field is `id` and not `target` because `target` is a keyword — the query form a shard uses
         // to reach identities. A shape field cannot borrow it.
+        //
+        // And the SHAPE is `$ClockElement`, not `$Clock`, because *Vein.Time.Clock already declares a
+        // `$Clock { now: float, delta: float }` — the wall clock itself. Components unify by NAME
+        // (docs/RULES.md 15b), so an app loading both bundles got one component meaning two unrelated
+        // things: a time source and a DOM element id. That is what these two are — the time and the
+        // place a clock is drawn — and only one of them has any claim on the bare word.
         shared("Which element a clock writes itself into.")
-        shape $Clock { id: string }
+        shape $ClockElement { id: string }
 
         shared("A ticking clock written into the element with the given id — bring Clock(\"clk\").")
         builder Clock {
-            $Clock
+            $ClockElement
             code = "function tick(){var e=document.getElementById('" + id + "');" +
                    "if(e)e.innerText=new Date().toLocaleTimeString()}" +
                    "tick();setInterval(tick,1000);"

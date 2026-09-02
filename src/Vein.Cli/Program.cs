@@ -92,6 +92,14 @@ switch (command)
             {
                 var roots = new AstTree(unit, opts.FullStrings).Roots(unit);
                 Console.Write(IrTreeRenderer.Render(path.Replace('\\', '/'), roots, opts));
+
+                // The tree above is rendered from the AST, so nothing here had run the semantic pass —
+                // and almost every VS02xx is raised by Lower. `veinc ir` therefore reported a clean file
+                // that `veinc graph` called out, which is a worse failure than not checking at all: it
+                // looks like an answer. Lower for the DIAGNOSTICS and throw the module away; the tree
+                // printed is still the AST one, unchanged.
+                var checker = new Lower(diagnostics, projectDir);
+                foreach (var bundle in unit.Bundles) checker.LowerBundle(bundle);
             }
         }
         break;

@@ -1,3 +1,4 @@
+using Vein.Compiler.Diagnostics;
 using Vein.Compiler.Project;
 using Vein.Compiler.Service;
 using Xunit;
@@ -42,6 +43,31 @@ public class SamplesTests
         var result = new VeinCompilerService().Compile(new CompileRequest(
             Path.GetFileName(path), File.ReadAllText(path), SourcePath: path));
         Assert.True(result.Success, $"{relative}:\n  " + string.Join("\n  ", result.Diagnostics.Select(d => d.ToString())));
+    }
+
+    /// Every warning every shipped .vein file produces, as one report.
+    ///
+    /// `Sample_compiles` above asserts `result.Success`, which is ERRORS only — so a warning has never
+    /// failed anything here. And `veinc ir` does not show them either: its default renderer walks the
+    /// AST and never calls `Lower`, which is where almost every VS02xx is raised. Between the two, a
+    /// warning could sit in the tree indefinitely with nothing pointing at it.
+    [Fact]
+    public void No_shipped_vein_file_produces_a_warning()
+    {
+        var svc = new VeinCompilerService();
+        var found = new List<string>();
+
+        foreach (var path in VeinFiles("samples").Concat(VeinFiles("stdlib")))
+        {
+            if (IsFragment(path)) continue;
+            var result = svc.Compile(new CompileRequest(
+                Path.GetFileName(path), File.ReadAllText(path), SourcePath: path));
+
+            foreach (var d in result.Diagnostics.Where(d => d.Severity == Severity.Warning))
+                found.Add($"{Path.GetRelativePath(RepoRoot(), path).Replace('\\', '/')}: {d.Code} {d.Message}");
+        }
+
+        Assert.True(found.Count == 0, $"{found.Count} warning(s):\n  " + string.Join("\n  ", found));
     }
 
     [Fact]

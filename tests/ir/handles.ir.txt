@@ -21,7 +21,7 @@ Bundle App
 |    |--- Shape $Fn
 |    |    |--- Field name: string
 |    |    `--- Field body: string
-|    `--- Shape $Button
+|    `--- Shape $Control
 |         |--- Field id: Id
 |         |--- Field class: Class
 |         |--- Field onclick: Fn
@@ -36,7 +36,7 @@ Bundle App
 |         |--- Ref initial
 |         `--- Str "</span>"
 |--- Builder Button  kind=html
-|    |--- Field b: Button
+|    |--- Field b: Control
 |    `--- Field markup = Concat
 |         |--- Str "<button id=\""
 |         |--- Path b.id.name
@@ -83,7 +83,7 @@ Bundle App
 |         |    |--- Arg = Ref counter
 |         |    `--- Arg = Str "0"
 |         |--- Bring Button
-|         |    `--- Arg = New $Button
+|         |    `--- Arg = New $Control
 |         |         |--- Arg id = Ref counter
 |         |         |--- Arg class = Ref primary
 |         |         |--- Arg onclick = Ref inc

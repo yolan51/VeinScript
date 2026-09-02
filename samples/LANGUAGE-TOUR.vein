@@ -360,7 +360,7 @@ bundle App {
         shape $Fn    { name: string, body: string }
 
         // Element data references handles instead of loose strings:
-        shape $Button { id: Id, class: Class, onclick: Fn, label: string }
+        shape $Control { id: Id, class: Class, onclick: Fn, label: string }
     }
 
     // Builders: params… then an output field (markup/code/css) whose value is the template.
@@ -370,7 +370,7 @@ bundle App {
         markup = "<span id=\"" + slot.name + "\">" + initial + "</span>"
     }
     builder Button {
-        b: Button
+        b: Control
         markup = "<button id=\"" + b.id.name + "\" class=\"" + b.class.name + "\" onclick=\"" + b.onclick.name + "()\">" + b.label + "</button>"
     }
     builder Define {
@@ -392,7 +392,7 @@ bundle App {
 
             bring Rule(primary, "cursor:pointer;font-weight:bold")
             bring Display(counter, "0")
-            bring Button(Button { id: counter, class: primary, onclick: inc, label: "+1" })
+            bring Button(Control { id: counter, class: primary, onclick: inc, label: "+1" })
             bring Define(inc)
         }
     }
