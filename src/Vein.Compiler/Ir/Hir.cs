@@ -68,6 +68,8 @@ public abstract record IrStmt;
 /// IrBlock shares its parent's locals), but the C# backend emits `{ … }`, so a `let` inside would be
 /// invisible afterwards there and visible here. `bring … as x` lowers to a block declaring `x`, so it
 /// has to be emitted without braces or the two runtimes would disagree about whether `x` exists.
+public sealed record IrOrdered(IReadOnlyList<(IrExpr Key, IrBlock Body)> Items) : IrStmt;
+
 public sealed record IrBlock(IReadOnlyList<IrStmt> Statements, bool Transparent = false) : IrStmt;
 public sealed record IrLet(string Name, IrTypeRef? Type, IrExpr? Init, bool Mutable) : IrStmt;
 public sealed record IrAssign(IrExpr Target, IrExpr Value) : IrStmt;

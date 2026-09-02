@@ -643,6 +643,37 @@ public sealed class Lower
 
             case BringStmt br: return LowerBring(br);
 
+            // `ordered by k { bring … }` — each bring keeps its own lowering; what changes is the ORDER
+            // they run in. The key is the argument named `k` in that bring's builder, found by expanding
+            // the builder's params exactly as the binding does, so `$Shape` includes are seen through.
+            case OrderedStmt os:
+            {
+                var items = new List<(IrExpr, IrBlock)>();
+                foreach (var b in os.Brings)
+                {
+                    IrExpr key = new IrLiteral(0L, IrLiteralKind.Int);
+                    if (_builders.TryGetValue(b.Builder, out var bd))
+                    {
+                        var prms = ExpandMembers(bd.Members.Where(m => !(m is FieldDecl f && OutputFields.Contains(f.Name))), null);
+                        int at = prms.FindIndex(p => p.Name == os.Key);
+                        if (at < 0)
+                            _diag.Error("VS0224",
+                                $"builder '{b.Builder}' has no parameter '{os.Key}' to order by. It takes: " +
+                                string.Join(", ", prms.Select(p => p.Name)) + ".", b.Span);
+                        else if (at < b.Args.Count) key = LowerExpr(b.Args[at]);
+                        else
+                            _diag.Error("VS0224",
+                                $"`bring {b.Builder}` does not supply '{os.Key}', so there is nothing to order it by.",
+                                b.Span);
+                    }
+                    else _diag.Error("VS0203", $"Unknown builder '{b.Builder}'.", b.Span);
+
+                    var lowered = LowerBring(b);
+                    items.Add((key, lowered as IrBlock ?? new IrBlock(new[] { lowered })));
+                }
+                return new IrOrdered(items);
+            }
+
             default:
                 _diag.Error("VS0201", $"Cannot lower statement {s.GetType().Name}.", s.Span);
                 return new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));

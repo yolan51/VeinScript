@@ -265,6 +265,41 @@ hold them:
 Still absent: descending order, and sorting by anything but one component field. `by` takes a shape and
 a field explicitly rather than inferring, because a multi-shape query has more than one candidate.
 
+
+---
+
+## D14 — Two places to impose an order: the query, and the brings {#bringorder}
+
+**DECIDED.** [D13](#order) added `by Shape.field` to a query. That sorts identities at read time, which
+is right when there are identities — but a `bring` on a FRAGMENT builder emits its `@Html` the instant it
+runs and leaves nothing behind to query. Its call order IS the output order, and no later sort can reach
+it. That case is most of a web page, so a second form exists:
+
+```
+ordered by rank {
+    bring Card("delta",   4)
+    bring Card("Zeta",   -2)     // emitted first
+}
+```
+
+`ordered` is **contextual**, recognised only at statement position with `by` following, so it stays a
+name a program may use — the same treatment `run once` and `every N` get, and no keyword count changes.
+
+*Rationale for a second form rather than one general one:* they sort different things. A query sorts what
+EXISTS; this sorts what is about to HAPPEN. Neither subsumes the other — an ordered query cannot touch a
+fragment that left no identity, and ordered brings cannot re-sort rows already spawned.
+
+The key names a **parameter** of each builder in the block, with `$Shape` includes expanded, because that
+is what a `bring` supplies. A builder without that parameter is VS0224; a non-`bring` statement in the
+block is VS0223, since the block does nothing but reorder brings.
+
+Keys are all evaluated before any body runs — otherwise an earlier bring could change a key a later one
+has not read, and the order would depend on itself. Both runtimes share the comparer semantics of D13:
+numbers numerically, strings ORDINALLY, stable. The C# backend emits the comparer INTO the generated
+file rather than taking it from the runtime, so the ordering travels with the code that depends on it.
+
+Used on an identity template it bakes the order into the entity ids, so later queries need no `by` at
+all — `samples/entities_bring_order.vein`.
 ---
 
 ## Reserved-word disposition

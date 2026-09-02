@@ -130,7 +130,7 @@ public sealed class EntityStore
     /// strings ORDINALLY — never by culture, because the C# backend must produce the same sequence and
     /// a culture-sensitive comparison differs by machine. Numbers sort before strings when a field
     /// somehow holds both; nulls sort first.
-    private sealed class OrderKey : IComparer<object?>
+    internal sealed class OrderKey : IComparer<object?>
     {
         public static readonly OrderKey Instance = new();
 

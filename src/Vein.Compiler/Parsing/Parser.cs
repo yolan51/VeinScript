@@ -594,6 +594,9 @@ public sealed class Parser
             case TokenKind.KwIf: return ParseIf();
             case TokenKind.KwWhile: return ParseWhile();
             case TokenKind.KwTarget: return ParseTargetOrQuery();
+            // `ordered by k { … }` — contextual, like `run once` and `every N`, so `ordered` stays a
+            // name a program may use. Recognised only when `by` follows it at statement position.
+            case TokenKind.Ident when Cur.Text == "ordered" && Peek(1).Kind == TokenKind.KwBy: return ParseOrdered();
             case TokenKind.KwRepeat: return ParseRepeat();
             case TokenKind.KwMatch: return ParseMatch();
             case TokenKind.KwReturn:
@@ -676,6 +679,36 @@ public sealed class Parser
         return new TargetStmt(src, b, ParseBlock(), s);
     }
 
+
+    /// `ordered by rank { bring A(…)  bring B(…) }` — run the brings sorted by one of their arguments,
+    /// rather than in the order written.
+    ///
+    /// This is for the case an ordered QUERY cannot reach: a `bring` that emits a fragment produces its
+    /// @Html the moment it runs, with no identity to query later, so the call order IS the output order.
+    /// Sorting identities does nothing for it.
+    private OrderedStmt ParseOrdered()
+    {
+        var s = Here; Advance();                       // 'ordered'
+        Expect(TokenKind.KwBy, "'by'");
+        string key = ExpectName("the argument name to order by").Text;
+
+        Expect(TokenKind.LBrace, "'{'");
+        var brings = new List<BringStmt>();
+        SkipTerms();
+        while (!Check(TokenKind.RBrace) && !AtEnd)
+        {
+            if (!Check(TokenKind.KwBring))
+            {
+                _diag.Error("VS0223", "`ordered by` holds only `bring` statements — it reorders them, " +
+                                      "and anything else has no place in that order.", Here);
+                throw new ParseError();
+            }
+            brings.Add(ParseBring());
+            SkipTerms();
+        }
+        Expect(TokenKind.RBrace, "'}'");
+        return new OrderedStmt(key, brings, s);
+    }
     private RepeatStmt ParseRepeat()
     {
         var s = Here; Advance();

@@ -666,6 +666,17 @@ public sealed class Interp
         switch (s)
         {
             case IrBlock b: Exec(b, self, locals); break;
+
+            // `ordered by k` — every key is evaluated FIRST, then the bodies run sorted. Evaluating as
+            // we went would let an earlier bring change what a later key reads, and the order would
+            // depend on itself. Same comparer as an ordered query, so both spell "sorted" identically.
+            case IrOrdered ord:
+            {
+                var keyed = ord.Items.Select(i => (Key: Eval(i.Key, self, locals), i.Body)).ToList();
+                foreach (var (_, body) in keyed.OrderBy(k => k.Key, EntityStore.OrderKey.Instance))
+                    Exec(body, self, locals);
+                break;
+            }
             case IrLet l: locals[l.Name] = l.Init is null ? null : Eval(l.Init, self, locals); break;
             case IrAssign a: DoAssign(a, self, locals); break;
             case IrIf i:

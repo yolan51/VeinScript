@@ -176,6 +176,26 @@ with two components the interpreter filters before iterating while the emitted C
 loop, so the counter has to be bumped after those guards or the backend numbers entities the interpreter
 never sees.
 
+**14d. `ordered by k { bring … }` sorts the BRINGS, which is the other place an order can come from.**
+Rule 14b sorts a *query*, and that needs identities to query. A `bring` on a FRAGMENT builder emits its
+`@Html` the instant it runs and leaves no identity behind — so its call order IS the output order, and
+nothing can sort it afterwards. That is most of a web page.
+
+```
+ordered by rank {
+    bring Card("delta", 4)      // emitted second
+    bring Card("Zeta", -2)      // emitted first
+}
+```
+
+`rank` names a PARAMETER of each builder in the block (includes expanded), not a shape field — a builder
+lacking it is **VS0224**, and a non-`bring` statement inside the block is **VS0223**. Keys are all
+evaluated BEFORE any body runs, so a bring cannot change a key that has not been read yet. Same comparer
+as an ordered query: numbers numerically, strings ordinally, stable so ties keep the written order.
+
+On an identity template it bakes the order into the ENTITY IDS, so every later query gets it free
+without a `by` clause — `samples/entities_bring_order.vein`.
+
 **15. `$Enemy` and `#Enemy` are different things.** Different keyword, different sigil; a program may use
 both. In emitted C# the mark becomes `Marks.Enemy` and the shape `Enemy`.
 

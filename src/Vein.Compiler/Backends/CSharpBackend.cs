@@ -45,12 +45,18 @@ public sealed class CSharpBackend : IVeinBackend
     private string _indexVar = "0";
     private int _loopDepth;
 
+    /// Set when an `ordered by` block is emitted, so the comparer class is appended to the file. It is
+    /// emitted INTO the generated file rather than taken from the runtime, so the ordering semantics
+    /// travel with the code that depends on them.
+    private bool _needsOrder;
+
     public BackendResult Emit(IrModule module)
     {
         _notes.Clear();
         _components.Clear();
         _componentTypes.Clear();
         _functions.Clear();
+        _needsOrder = false;
         foreach (var f in module.Functions) _functions.Add(f.Name);
         foreach (var t in module.Types)
             if (t.Kind == IrTypeKind.Component) { _components.Add(t.Name); _componentTypes[t.Name] = t; }
@@ -74,6 +80,28 @@ public sealed class CSharpBackend : IVeinBackend
         foreach (var s in module.Shards) EmitShard(sb, s);
 
         EmitEntryPoint(sb, module);
+
+        // The comparer for `ordered by`, emitted only when used and identical to the interpreter's
+        // EntityStore.OrderKey: numbers numerically, strings ORDINALLY — never by culture, or the two
+        // runtimes would order differently on a machine with a different locale.
+        if (_needsOrder)
+        {
+            sb.AppendLine();
+            sb.AppendLine("internal sealed class __VeinOrder : IComparer<object>");
+            sb.AppendLine("{");
+            sb.AppendLine("    public static readonly __VeinOrder Instance = new();");
+            sb.AppendLine("    public int Compare(object a, object b)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        if (a is null) return b is null ? 0 : -1;");
+            sb.AppendLine("        if (b is null) return 1;");
+            sb.AppendLine("        bool na = a is long or int or double, nb = b is long or int or double;");
+            sb.AppendLine("        if (na && nb) return Convert.ToDouble(a).CompareTo(Convert.ToDouble(b));");
+            sb.AppendLine("        if (na) return -1;");
+            sb.AppendLine("        if (nb) return 1;");
+            sb.AppendLine("        return string.CompareOrdinal(a.ToString(), b.ToString());");
+            sb.AppendLine("    }");
+            sb.AppendLine("}");
+        }
 
         return new BackendResult(true, new[] { new EmittedFile(Ident(module.Name) + ".g.cs", sb.ToString()) }, _notes);
     }
@@ -299,6 +327,26 @@ public sealed class CSharpBackend : IVeinBackend
                 break;
 
             case IrLoop { Kind: IrLoopKind.Target } t: EmitTarget(sb, t, depth); break;
+
+            // `ordered by k` — every key is evaluated into a list FIRST, then the bodies run sorted, so a
+            // body cannot influence a key that has not been read yet. Bodies become lambdas because a
+            // statement sequence cannot otherwise be deferred and replayed in a different order.
+            case IrOrdered ord:
+            {
+                _needsOrder = true;
+                string list = "__ord" + _loopDepth++;
+                sb.AppendLine(pad + "{");
+                sb.AppendLine($"{pad}    var {list} = new List<(object Key, Action Body)>();");
+                foreach (var (key, body) in ord.Items)
+                {
+                    sb.AppendLine($"{pad}    {list}.Add(({Expr(key)}, () =>");
+                    EmitBlock(sb, body, depth + 2);
+                    sb.AppendLine($"{pad}    ));");
+                }
+                sb.AppendLine($"{pad}    foreach (var __i in {list}.OrderBy(__k => __k.Key, __VeinOrder.Instance)) __i.Body();");
+                sb.AppendLine(pad + "}");
+                break;
+            }
 
             case IrExprStmt es:
                 {

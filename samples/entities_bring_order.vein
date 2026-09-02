@@ -1,0 +1,60 @@
+// entities_bring_order.vein — `ordered by k { bring … }`, sorting the BRINGS themselves.
+//
+// There are two places an order can be imposed, and they solve different problems:
+//
+//   target $Row #Row by Row.rank as r { … }   — sorts a QUERY. Needs identities to query.
+//   ordered by rank { bring Card(…) … }       — sorts the BRINGS. Needs nothing.
+//
+// The second exists for the case the first cannot reach: a `bring` on a FRAGMENT builder emits its
+// @Html the instant it runs and leaves no identity behind, so the call order IS the output order and
+// there is nothing to sort later. That is most of a web page.
+//
+// It works on identity templates too, which is what this file uses so check-backend can diff it —
+// the rows come out with ids in rank order, because the brings ran in rank order.
+//
+// Every key is evaluated BEFORE any body runs. Sorting as it went would let an earlier bring change
+// what a later key reads, and the order would depend on itself.
+//
+//   veinc run samples/entities_bring_order.vein --ticks 1
+//   bash tools/check-backend.sh
+
+bundle EntitiesBringOrder by you {
+
+    shape $Row { title: string, rank: int }
+    mark #Row
+
+    builder Row { $Row   mark #Row }
+
+    shard Seed {
+        run once {
+            // Written in neither rank nor title order. `rank` names a PARAMETER of `&Row` — the same
+            // name the builder's `$Row` include contributes — and a builder without it is VS0224.
+            ordered by rank {
+                bring Row("delta",   4)
+                bring Row("alpha",   1)
+                bring Row("Zeta",   -2)
+                bring Row("charlie", 3)
+                bring Row("bravo",   1)
+            }
+        }
+    }
+
+    shard Show {
+        settled {
+            // NOT an ordered query — plain spawn order. It comes out sorted because the brings were
+            // sorted, which is the whole point: the order is baked in at creation, so every later
+            // reader gets it for free.
+            emit *Vein.Console.Io.@Print { text: "-- spawn order, which is now rank order --" }
+            target $Row #Row as r {
+                emit *Vein.Console.Io.@Print { text: "   e" + Entity + "  " + r.Row.rank + "  " + r.Row.title }
+            }
+
+            // alpha and bravo share rank 1 and keep the order they were written in — the sort is
+            // stable, so ties fall back to source order rather than to whichever the comparer saw first.
+            emit *Vein.Console.Io.@Print { text: "-- ties keep the written order --" }
+            target $Row #Row as r {
+                if r.Row.rank == 1 { emit *Vein.Console.Io.@Print { text: "   " + r.Row.title } }
+            }
+        }
+    }
+}
