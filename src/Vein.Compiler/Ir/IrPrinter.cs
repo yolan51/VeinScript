@@ -71,6 +71,14 @@ public static class IrPrinter
                 sb.AppendLine($"{Ind(ind)}loop {LoopHeader(lp)}");
                 PrintBlock(sb, lp.Body, ind + 1);
                 break;
+            case IrOrdered ord:
+                sb.AppendLine($"{Ind(ind)}ordered");
+                PrintBlock(sb, ord.Collect, ind + 1);
+                break;
+            case IrOrderedBring ob:
+                sb.AppendLine($"{Ind(ind)}ordered-bring key={E(ob.Key)}");
+                PrintBlock(sb, ob.Body, ind + 1);
+                break;
             case IrMatch m:
                 sb.AppendLine($"{Ind(ind)}match {E(m.Subject)}");
                 foreach (var arm in m.Arms) { sb.AppendLine($"{Ind(ind + 1)}when {arm.CaseName}"); PrintBlock(sb, arm.Body, ind + 2); }

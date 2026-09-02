@@ -34,16 +34,28 @@ public sealed class CSharpBackend : IVeinBackend
     /// The component the innermost `target` bound, so `self.Health.hp` knows which local to read.
     private string? _selfComponent;
 
-    /// The C# name `Index` resolves to in the loop being emitted. Tracked and restored like
-    /// `_selfComponent`, and made unique per depth: C# forbids a nested local shadowing an outer one
-
     /// Module-level `fn`/`SF` names, so a call to one is emitted qualified. Without this the backend
     /// emitted the call and never the function — CS0103 at every call site, which no backend-checked
     /// sample hit because none of them used a function.
     private readonly HashSet<string> _functions = new(StringComparer.Ordinal);
+
+    /// The C# name `Index` resolves to in the loop being emitted. Tracked and restored like
+    /// `_selfComponent`, and made unique per depth: C# forbids a nested local shadowing an outer one
     /// (CS0136), so a fixed name would refuse to compile the moment two loops nested.
     private string _indexVar = "0";
     private int _loopDepth;
+
+    /// The list the enclosing `ordered by` is collecting into, or "" outside one. A deferred bring adds
+    /// itself to this; nested blocks save and restore it, so the inner one takes its own brings.
+    private string _orderList = "";
+
+    /// What IrSelfRef — the nameless innermost `target` binding (docs/RULES.md 12c) — emits as.
+    ///
+    /// `__e` for an identity query, whose loop variable this backend names itself. A COLLECTION loop
+    /// (`target xs as row`) names its variable after the binding instead, and emitting `__e` there was a
+    /// straight CS0103: the name did not exist. It went unseen because no backend-checked program had
+    /// referenced a collection binding until samples/entities_bring_rows.vein did.
+    private string _selfBind = "__e";
 
     /// Set when an `ordered by` block is emitted, so the comparer class is appended to the file. It is
     /// emitted INTO the generated file rather than taken from the runtime, so the ordering semantics
@@ -57,6 +69,8 @@ public sealed class CSharpBackend : IVeinBackend
         _componentTypes.Clear();
         _functions.Clear();
         _needsOrder = false;
+        _orderList = "";
+        _selfBind = "__e";
         foreach (var f in module.Functions) _functions.Add(f.Name);
         foreach (var t in module.Types)
             if (t.Kind == IrTypeKind.Component) { _components.Add(t.Name); _componentTypes[t.Name] = t; }
@@ -335,15 +349,41 @@ public sealed class CSharpBackend : IVeinBackend
             {
                 _needsOrder = true;
                 string list = "__ord" + _loopDepth++;
+                string prevList = _orderList;
+                _orderList = list;
                 sb.AppendLine(pad + "{");
                 sb.AppendLine($"{pad}    var {list} = new List<(object Key, Action Body)>();");
-                foreach (var (key, body) in ord.Items)
-                {
-                    sb.AppendLine($"{pad}    {list}.Add(({Expr(key)}, () =>");
-                    EmitBlock(sb, body, depth + 2);
-                    sb.AppendLine($"{pad}    ));");
-                }
+                // The collect block is emitted VERBATIM — loops and ifs included — because the brings
+                // inside it are already IrOrderedBring and know to add themselves to the list rather
+                // than run. That is the same shape the interpreter uses, which is the point.
+                foreach (var s in ord.Collect.Statements) EmitStmt(sb, s, depth + 1);
+                // OrderBy is stable in LINQ, matching the interpreter, so ties keep collection order.
                 sb.AppendLine($"{pad}    foreach (var __i in {list}.OrderBy(__k => __k.Key, __VeinOrder.Instance)) __i.Body();");
+                sb.AppendLine(pad + "}");
+                _orderList = prevList;
+                break;
+            }
+
+            // One deferred bring. The key is evaluated NOW, in the loop iteration that reached it; the
+            // body becomes a lambda, because a statement sequence cannot otherwise be replayed later in
+            // a different order.
+            case IrOrderedBring ob:
+            {
+                if (_orderList.Length == 0) { EmitBlock(sb, ob.Body, depth); break; }
+
+                sb.AppendLine(pad + "{");
+                // `Index` is a counter DECLARED OUTSIDE its loop and bumped inside (see EmitTarget), so
+                // a lambda capturing it directly would read the final value once the loop had finished.
+                // Copying it into a per-iteration local is what makes the closure see this row's own
+                // position — the same thing Deferred.Index does in the interpreter.
+                string prevIdx = _indexVar;
+                string cap = "__ordIdx" + _loopDepth++;
+                sb.AppendLine($"{pad}    long {cap} = {_indexVar};");
+                _indexVar = cap;
+                sb.AppendLine($"{pad}    {_orderList}.Add(({Expr(ob.Key)}, () =>");
+                EmitBlock(sb, ob.Body, depth + 2);
+                sb.AppendLine($"{pad}    ));");
+                _indexVar = prevIdx;
                 sb.AppendLine(pad + "}");
                 break;
             }
@@ -386,13 +426,20 @@ public sealed class CSharpBackend : IVeinBackend
                 // Same counter discipline as the query form, so `Index` means the same thing in both.
                 string prevC = _indexVar;
                 _indexVar = "__idx" + _loopDepth++;
+                string bind = Ident(loop.Var ?? "__x");
+                // The binding is nameless in the IR — `row` in the source lowers to IrSelfRef, not to a
+                // local — so the emitter has to say what it is called HERE. Leaving this at `__e` (the
+                // query form's variable) emitted a name nothing declared.
+                string prevBind = _selfBind;
+                _selfBind = bind;
                 sb.AppendLine($"{pad}long {_indexVar} = -1;");
-                sb.AppendLine($"{pad}foreach (var {Ident(loop.Var ?? "__x")} in {Expr(loop.Source)})");
+                sb.AppendLine($"{pad}foreach (var {bind} in {Expr(loop.Source)})");
                 sb.AppendLine(pad + "{");
                 sb.AppendLine($"{pad}    {_indexVar}++;");
                 foreach (var s in loop.Body.Statements) EmitStmt(sb, s, depth + 1);
                 sb.AppendLine(pad + "}");
                 _indexVar = prevC;
+                _selfBind = prevBind;
                 return;
             }
             _notes.Add("target with no query and no source not emitted.");
@@ -418,6 +465,10 @@ public sealed class CSharpBackend : IVeinBackend
         string marks = q.Tags.Count == 0 ? "" : ", " + string.Join(", ", q.Tags.Select(t => "Marks." + Ident(t)));
         string prev = _selfComponent!;
         _selfComponent = comp;
+        // An identity query names its own loop variable, whatever loop it sits inside — so a query
+        // nested in a collection loop has to take `__e` back rather than inherit the outer binding.
+        string prevSelf = _selfBind;
+        _selfBind = "__e";
 
         // Several components are an AND. `World.Query<T>` indexes on ONE, so the first drives the loop and
         // the rest are tested per entity — the entity is skipped unless it carries all of them.
@@ -472,7 +523,32 @@ public sealed class CSharpBackend : IVeinBackend
         sb.AppendLine(pad + "}");
 
         _selfComponent = prev;
+        _selfBind = prevSelf;
         _indexVar = prevIdx;
+    }
+
+    /// A list literal. `object[]` is the general answer and it is a poor one for the common case: the
+    /// interpreter is dynamically typed, C# is not, so `target [1,2,3] as n { if n > 0 … }` emitted a
+    /// comparison of `object` to `int` and did not compile. When every element is a literal of one kind
+    /// the array takes that type instead, and the binding is usable as the number or string it is.
+    ///
+    /// A mixed or computed list still emits `object[]`, which is honest: nothing here knows what a call
+    /// or a field access will return, and guessing would produce a cast that fails at runtime rather
+    /// than a compile error that says so.
+    private string ListLiteral(IrList l)
+    {
+        string items = string.Join(", ", l.Items.Select(Expr));
+        if (l.Items.Count == 0) return $"new object[] {{ {items} }}";
+
+        bool allInt = l.Items.All(i => i is IrLiteral { Kind: IrLiteralKind.Int }
+                                    || i is IrUnary { Op: IrUnOp.Neg, Operand: IrLiteral { Kind: IrLiteralKind.Int } });
+        if (allInt) return $"new long[] {{ {items} }}";
+
+        if (l.Items.All(i => i is IrLiteral { Kind: IrLiteralKind.Float })) return $"new double[] {{ {items} }}";
+        if (l.Items.All(i => i is IrLiteral { Kind: IrLiteralKind.String })) return $"new string[] {{ {items} }}";
+        if (l.Items.All(i => i is IrLiteral { Kind: IrLiteralKind.Bool })) return $"new bool[] {{ {items} }}";
+
+        return $"new object[] {{ {items} }}";
     }
 
     // ---- expressions -----------------------------------------------------
@@ -484,7 +560,7 @@ public sealed class CSharpBackend : IVeinBackend
         IrLocalRef r => Ident(r.Name),
         IrEntityRef => "__e",
         IrLoopIndexRef => _indexVar,
-        IrSelfRef => "__e",
+        IrSelfRef => _selfBind,
         IrTypeNameExpr t => "\"" + t.Name + "\"",
         IrFieldAccess f => FieldAccess(f),
         IrBinary b => $"({Expr(b.Left)} {Op(b.Op)} {Expr(b.Right)})",
@@ -507,7 +583,7 @@ public sealed class CSharpBackend : IVeinBackend
         IrCall { Callee: IrLocalRef fnRef } fc when _functions.Contains(fnRef.Name)
             => $"Fns.{Ident(fnRef.Name)}({string.Join(", ", fc.Args.Select(Expr))})",
         IrCall c => $"{Expr(c.Callee)}({string.Join(", ", c.Args.Select(Expr))})",
-        IrList l => $"new object[] {{ {string.Join(", ", l.Items.Select(Expr))} }}",
+        IrList l => ListLiteral(l),
         _ => Unsupported(e)
     };
 

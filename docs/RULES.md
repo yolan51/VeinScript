@@ -200,13 +200,38 @@ narrows one step:
 
 The middle segment is not decoration: `builder Both { $A $B }` with `rank` in **both** shapes gives two
 parameters of that name, and the bare form refuses to guess between them (**VS0226**, which names the
-candidates and spells the fix). A parameter that does not exist is **VS0224**; a non-`bring` statement in
-the block is **VS0223**.
+candidates and spells the fix). A parameter that does not exist is **VS0224**; a statement other than
+`bring` or `target` at the top of the block is **VS0223**.
 
 Keys are all evaluated BEFORE any body runs, so a bring cannot change a key that has not been read yet.
 Same comparer as an ordered query: numbers numerically, strings ordinally, stable so ties keep the
-written order. On an identity template it bakes the order into the ENTITY IDS, so every later query gets
-it free without a `by` clause — `samples/entities_bring_order.vein`.
+order they were reached in. On an identity template it bakes the order into the ENTITY IDS, so every
+later query gets it free without a `by` clause — `samples/entities_bring_order.vein`.
+
+**14e. `ordered by` takes a `target` loop, which is how DATA gets ordered.** Rule 14d's block of literal
+brings only sorts what you typed out. Rows from JSON or a database arrive as a *list*, and one written
+`bring` inside a loop becomes N of them — a count nothing knows until the list is in hand.
+
+```
+ordered by rank {
+    bring Row("literal", 0)              // literals and loops mix; they are the same kind of thing
+    target doc.rows as row {
+        if row.rank > 0 {                // filtering is why they are collected, not counted ahead
+            bring Row(row.title, row.rank)
+        }
+    }
+}
+```
+
+Only `bring` is reordered. An `emit` or a `let` inside the loop runs where it stands, in the order the
+loop reaches it — the brings are set aside with their keys and replayed once the loop has finished.
+
+`Index` inside a deferred bring is the SOURCE position, not the sorted one, and it survives the wait:
+the body runs after the loop has ended, so the counter, the `target` binding and the current entity are
+all captured per row and put back before it runs. Getting that wrong is silent — the fields come out
+blank rather than wrong — because `row` lowers to the nameless `IrSelfRef` (rule 12c) and reads a bind
+stack, not a local. `samples/entities_bring_rows.vein`, and `samples/json_roundtrip.vein` for the JSON
+case.
 
 **15. `$Enemy` and `#Enemy` are different things.** Different keyword, different sigil; a program may use
 both. In emitted C# the mark becomes `Marks.Enemy` and the shape `Enemy`.

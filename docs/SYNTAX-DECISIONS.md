@@ -296,8 +296,37 @@ EXISTS; this sorts what is about to HAPPEN. Neither subsumes the other — an or
 fragment that left no identity, and ordered brings cannot re-sort rows already spawned.
 
 The key names a **parameter** of each builder in the block, with `$Shape` includes expanded, because that
-is what a `bring` supplies. A builder without that parameter is VS0224; a non-`bring` statement in the
-block is VS0223, since the block does nothing but reorder brings.
+is what a `bring` supplies. A builder without that parameter is VS0224.
+
+### The block also takes a `target` loop
+
+**Added after the first form shipped, because the first form only reached brings you had typed out.** The
+ordering people actually need is over *data*: rows from JSON or a database arrive as a list, one written
+`bring` inside a loop becomes one per row, and how many there are lives in the data. Restricting the
+block to literal brings meant `ordered by` could sort a menu you wrote and nothing you fetched.
+
+```
+ordered by rank {
+    bring Row("literal", 0)
+    target doc.rows as row {
+        if row.rank > 0 { bring Row(row.title, row.rank) }
+    }
+}
+```
+
+So VS0223 now admits `bring` and `target` at the top of the block, and refuses everything else. Inside a
+loop anything goes — but only `bring` is reordered; an `emit` there runs where it stands.
+
+*Why a deferral and not a pre-sort of the list:* the key is one of the **bring's own arguments**, not a
+field of the source row. `bring Card(title, rank * 2)` orders by the computed value, and a list sorted
+beforehand could not know it. It also keeps one spelling for both cases instead of a second concept.
+
+The cost is that the body runs **outside the loop it was written in**, so everything the loop bound has
+to be carried with it: the named binding, the nameless `target` bind stack that `row` actually reads
+(RULES.md 12c), the `Index` counter, and the current entity. Restoring only some of them is silent —
+the brought fields come out blank rather than wrong. The C# backend has the same obligation and a
+sharper version of it, since `Index` there is a variable declared outside its loop: a lambda capturing
+it directly reads the final value, so it is copied into a per-iteration local first.
 
 Keys are all evaluated before any body runs — otherwise an earlier bring could change a key a later one
 has not read, and the order would depend on itself. Both runtimes share the comparer semantics of D13:
@@ -305,7 +334,8 @@ numbers numerically, strings ORDINALLY, stable. The C# backend emits the compare
 file rather than taking it from the runtime, so the ordering travels with the code that depends on it.
 
 Used on an identity template it bakes the order into the entity ids, so later queries need no `by` at
-all — `samples/entities_bring_order.vein`.
+all — `samples/entities_bring_order.vein` for the literal block, `samples/entities_bring_rows.vein` for
+the loop, and `samples/json_roundtrip.vein` for a payload arriving unsorted.
 ---
 
 ## Reserved-word disposition

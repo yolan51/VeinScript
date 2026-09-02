@@ -645,6 +645,7 @@ public sealed class Lower
                         new IrLiteral(c.Probability, IrLiteralKind.Percent)),
                     LowerBlock(c.Body), null);
 
+            case BringStmt br when _ordering is not null: return LowerOrderedBring(br, _ordering);
             case BringStmt br: return LowerBring(br);
 
             // `ordered by k { bring … }` — each bring keeps its own lowering; what changes is the ORDER
@@ -652,60 +653,19 @@ public sealed class Lower
             // the builder's params exactly as the binding does, so `$Shape` includes are seen through.
             case OrderedStmt os:
             {
-                var items = new List<(IrExpr, IrBlock)>();
-                foreach (var b in os.Brings)
+                // The block is lowered NORMALLY — loops, ifs and all — with `_ordering` set. That flag is
+                // what turns every `bring` reached along the way into an IrOrderedBring, however deep it
+                // sits, so `target … { if … { bring … } }` orders the brings it actually performs. Doing
+                // it any other way would mean re-implementing statement lowering here.
+                var prevOrder = _ordering;
+                _ordering = os;
+                try
                 {
-                    // A qualified key names ONE builder, so every bring in the block must be that
-                    // builder — otherwise the key means nothing for the others and their order would be
-                    // silently arbitrary. The bare form has no such constraint: it resolves per bring.
-                    if (os.Builder is { } want && !string.Equals(b.Builder, want, StringComparison.Ordinal))
-                    {
-                        _diag.Error("VS0225",
-                            $"`ordered by &{want}.{os.Key}` names {want}'s parameter, but this brings " +
-                            $"'{b.Builder}'. Qualify with the builder each bring uses, or drop the " +
-                            $"`&{want}.` and order by the bare name '{os.Key}'.", b.Span);
-                        continue;
-                    }
-
-                    IrExpr key = new IrLiteral(0L, IrLiteralKind.Int);
-                    if (_builders.TryGetValue(b.Builder, out var bd))
-                    {
-                        var prms = ExpandMembers(bd.Members.Where(m => !(m is FieldDecl f && OutputFields.Contains(f.Name))), null);
-
-                        // `&Row.$Row.rank` narrows to the include that contributed it. Without the
-                        // shape segment a name matching TWICE is refused rather than guessed at: two
-                        // includes can each carry `rank`, and taking the first would be a wrong answer
-                        // with nothing in the output to show for it.
-                        var hits = new List<(string? From, int At)>();
-                        for (int i = 0; i < prms.Count; i++)
-                            if (prms[i].Name == os.Key && (os.Shape is null || prms[i].From == os.Shape))
-                                hits.Add((prms[i].From, i));
-
-                        if (hits.Count == 0)
-                            _diag.Error("VS0224",
-                                os.Shape is null
-                                    ? $"builder '{b.Builder}' has no parameter '{os.Key}' to order by. It takes: " +
-                                      string.Join(", ", prms.Select(p => p.Name)) + "."
-                                    : $"builder '{b.Builder}' has no parameter '{os.Key}' from ${os.Shape}. It takes: " +
-                                      string.Join(", ", prms.Select(p => p.From is null ? p.Name : "$" + p.From + "." + p.Name)) + ".",
-                                b.Span);
-                        else if (hits.Count > 1)
-                            _diag.Error("VS0226",
-                                $"'{os.Key}' is ambiguous in builder '{b.Builder}' — it comes from " +
-                                string.Join(" and ", hits.Select(h => "$" + (h.From ?? "?"))) +
-                                $". Say which: `ordered by &{b.Builder}.${hits[0].From}.{os.Key}`.", b.Span);
-                        else if (hits[0].At < b.Args.Count) key = LowerExpr(b.Args[hits[0].At]);
-                        else
-                            _diag.Error("VS0224",
-                                $"`bring {b.Builder}` does not supply '{os.Key}', so there is nothing to order it by.",
-                                b.Span);
-                    }
-                    else _diag.Error("VS0203", $"Unknown builder '{b.Builder}'.", b.Span);
-
-                    var lowered = LowerBring(b);
-                    items.Add((key, lowered as IrBlock ?? new IrBlock(new[] { lowered })));
+                    var stmts = new List<IrStmt>();
+                    foreach (var st in os.Body) stmts.Add(LowerStmt(st));
+                    return new IrOrdered(new IrBlock(stmts));
                 }
-                return new IrOrdered(items);
+                finally { _ordering = prevOrder; }
             }
 
             default:
@@ -856,6 +816,77 @@ public sealed class Lower
 
     /// Nesting depth of identity templates being lowered, so two in one scope get distinct entity locals.
     private int _identityDepth;
+
+    /// The enclosing `ordered by`, or null. Set for the whole of an ordered block's lowering so that a
+    /// `bring` anywhere inside it — nested in a `target`, in an `if`, in both — becomes a deferred one.
+    private OrderedStmt? _ordering;
+
+    /// One `bring` inside an `ordered by`, paired with the argument that decides its position.
+    ///
+    /// The key is one of the bring's OWN ARGUMENTS, found by name among the builder's parameters. That is
+    /// what makes this work on data: the same written statement inside a loop yields a different key per
+    /// row, because the argument expression is re-evaluated each time round.
+    private IrStmt LowerOrderedBring(BringStmt b, OrderedStmt os)
+    {
+        // A qualified key names ONE builder, so every bring in the block must be that builder —
+        // otherwise the key means nothing for the others and their order would be silently arbitrary.
+        // The bare form has no such constraint: it resolves per bring.
+        if (os.Builder is { } want && !string.Equals(b.Builder, want, StringComparison.Ordinal))
+        {
+            _diag.Error("VS0225",
+                $"`ordered by &{want}.{os.Key}` names {want}'s parameter, but this brings " +
+                $"'{b.Builder}'. Qualify with the builder each bring uses, or drop the " +
+                $"`&{want}.` and order by the bare name '{os.Key}'.", b.Span);
+            return LowerBringDirect(b);
+        }
+
+        IrExpr key = new IrLiteral(0L, IrLiteralKind.Int);
+        if (_builders.TryGetValue(b.Builder, out var bd))
+        {
+            var prms = ExpandMembers(bd.Members.Where(m => !(m is FieldDecl f && OutputFields.Contains(f.Name))), null);
+
+            // `&Row.$Row.rank` narrows to the include that contributed it. Without the shape segment a
+            // name matching TWICE is refused rather than guessed at: two includes can each carry `rank`,
+            // and taking the first would be a wrong answer with nothing in the output to show for it.
+            var hits = new List<(string? From, int At)>();
+            for (int i = 0; i < prms.Count; i++)
+                if (prms[i].Name == os.Key && (os.Shape is null || prms[i].From == os.Shape))
+                    hits.Add((prms[i].From, i));
+
+            if (hits.Count == 0)
+                _diag.Error("VS0224",
+                    os.Shape is null
+                        ? $"builder '{b.Builder}' has no parameter '{os.Key}' to order by. It takes: " +
+                          string.Join(", ", prms.Select(p => p.Name)) + "."
+                        : $"builder '{b.Builder}' has no parameter '{os.Key}' from ${os.Shape}. It takes: " +
+                          string.Join(", ", prms.Select(p => p.From is null ? p.Name : "$" + p.From + "." + p.Name)) + ".",
+                    b.Span);
+            else if (hits.Count > 1)
+                _diag.Error("VS0226",
+                    $"'{os.Key}' is ambiguous in builder '{b.Builder}' — it comes from " +
+                    string.Join(" and ", hits.Select(h => "$" + (h.From ?? "?"))) +
+                    $". Say which: `ordered by &{b.Builder}.${hits[0].From}.{os.Key}`.", b.Span);
+            else if (hits[0].At < b.Args.Count) key = LowerExpr(b.Args[hits[0].At]);
+            else
+                _diag.Error("VS0224",
+                    $"`bring {b.Builder}` does not supply '{os.Key}', so there is nothing to order it by.",
+                    b.Span);
+        }
+        else _diag.Error("VS0203", $"Unknown builder '{b.Builder}'.", b.Span);
+
+        var lowered = LowerBringDirect(b);
+        return new IrOrderedBring(key, lowered as IrBlock ?? new IrBlock(new[] { lowered }));
+    }
+
+    /// LowerBring with the ordering context suspended, so the bring itself lowers to a plain bring rather
+    /// than recursing back into LowerOrderedBring through any nested statement lowering it does.
+    private IrStmt LowerBringDirect(BringStmt br)
+    {
+        var prev = _ordering;
+        _ordering = null;
+        try { return LowerBring(br); }
+        finally { _ordering = prev; }
+    }
 
     private IrStmt LowerBring(BringStmt br)
     {

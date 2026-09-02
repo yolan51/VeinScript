@@ -1,0 +1,76 @@
+// entities_bring_rows.vein — `ordered by` over a `target` loop: ordering brings you did not write.
+//
+// samples/entities_bring_order.vein sorts a handful of brings typed out by hand. That is the easy half.
+// The half that matters is this one: rows arrive from a database or a JSON body as a LIST, one written
+// `bring` inside a loop becomes N brings, and N lives in the data. A block that admitted only literal
+// brings could sort a menu you typed and nothing you fetched.
+//
+//   veinc run samples/entities_bring_rows.vein --ticks 1
+//   bash tools/check-backend.sh
+//
+// WHY THE BRING ORDER AND NOT THE QUERY ORDER. `target $Row #Row by Row.rank` sorts what you READ, and
+// for a console listing that is enough. It is not enough for a page: a `bring` on a fragment builder
+// emits its @Html the instant it runs and leaves no identity behind, so the call order IS the output
+// order and there is nothing left to sort. Ordering at the bring is the only place that reaches it.
+//
+// WHAT IS REORDERED IS `bring`, AND ONLY `bring`. Anything else inside the loop — an `emit`, a `let` —
+// runs where it stands, in the order the loop reaches it. The brings are put aside with their keys and
+// replayed sorted once the loop has finished.
+
+bundle EntitiesBringRows by you {
+
+    shape $Row { title: string, rank: int }
+    mark #Row
+
+    builder Row { $Row   mark #Row }
+
+    shard Seed {
+        run once {
+            // Standing in for a result set: the source's own order, which is nobody's display order.
+            let ranks = [4, 1, -2, 3, 1]
+
+            ordered by rank {
+                // A literal bring and a loop in ONE block, sorted together. They are the same kind of
+                // thing — a bring with a key — so nothing makes them separate.
+                bring Row("literal", 0)
+
+                target ranks as r {
+                    // The `if` is why the brings are collected rather than counted in advance: how many
+                    // there will be is not known until the loop has run. `Index` is the SOURCE position,
+                    // and it survives the deferral — the body runs after the loop has finished, so the
+                    // counter has to be captured per row rather than read later.
+                    if r > -2 {
+                        bring Row("src" + Index, r)
+                    }
+                }
+            }
+        }
+    }
+
+    shard Show {
+        settled {
+            // A PLAIN query — no `by` — so this is spawn order. It comes out sorted because the brings
+            // were sorted, which is the whole point: the order is baked in at creation and every later
+            // reader gets it for nothing.
+            emit *Vein.Console.Io.@Print { text: "-- spawn order, which is now rank order --" }
+            target $Row #Row as r {
+                emit *Vein.Console.Io.@Print { text: "   e" + Entity + "  rank " + r.Row.rank + "  " + r.Row.title }
+            }
+
+            // src1 and src4 both have rank 1 and keep their source positions, in that order: the sort is
+            // stable, so a tie falls back to the order the loop reached them rather than to whichever
+            // the comparer happened to see first. Rows tie constantly — any rank column with a repeat —
+            // so an unstable sort here would shuffle a page on every run for no visible reason.
+            emit *Vein.Console.Io.@Print { text: "-- ties keep the order the rows arrived in --" }
+            target $Row #Row as r {
+                if r.Row.rank == 1 { emit *Vein.Console.Io.@Print { text: "   " + r.Row.title } }
+            }
+
+            // -2 was filtered out before it ever became a bring, so there are 5 ranks and 4 rows.
+            emit *Vein.Console.Io.@Print { text: "-- the filtered row never arrived --" }
+            target $Row #Row as r {
+                if r.Row.rank < 0 { emit *Vein.Console.Io.@Print { text: "   should not appear: " + r.Row.title } }
+            }
+        }
+    }
+}

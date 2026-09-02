@@ -50,18 +50,29 @@ bundle JsonRoundtrip by you {
             // collection form of `target` walks it with no conversion step.
             emit *Vein.Console.Io.@Print { text: "parsed " + len(doc.rows) + " rows" }
 
-            target doc.rows as row {
-                bring Row(row.title, row.rank, row.done)
+            // ORDERED AT THE BRING, not just at the read. The payload arrived 4, 1, -2 and the brings
+            // run -2, 1, 4, so the identities are SPAWNED in rank order and every later reader gets that
+            // for free — including one that cannot sort, which is the case this exists for: a `bring` on
+            // a fragment builder emits its @Html the moment it runs and leaves nothing to query.
+            //
+            // The block holds the loop rather than the brings, because how many brings there are lives
+            // in the data: one written `bring` inside `target` becomes one per row.
+            ordered by rank {
+                target doc.rows as row {
+                    bring Row(row.title, row.rank, row.done)
+                }
             }
         }
     }
 
     shard Report {
         settled {
-            // Sorted on the way out, by the rank that arrived as JSON — the payload's order is not the
-            // display order, and does not have to be.
-            emit *Vein.Console.Io.@Print { text: "-- as identities, by rank --" }
-            target $Row #Row by Row.rank as r {
+            // A PLAIN query — no `by` — and it still comes out in rank order, because `ordered by`
+            // above spawned them that way. That is the difference between the two places an order can
+            // be imposed: sorting the read fixes one reader, sorting the brings fixes every reader,
+            // including the ones that cannot sort at all.
+            emit *Vein.Console.Io.@Print { text: "-- as identities, in the order they were brought --" }
+            target $Row #Row as r {
                 emit *Vein.Console.Io.@Print {
                     text: "   " + r.Row.rank + "  " + r.Row.title + "  done=" + r.Row.done
                 }

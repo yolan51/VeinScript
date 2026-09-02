@@ -712,21 +712,27 @@ public sealed class Parser
         string key = ExpectName("the argument name to order by").Text;
 
         Expect(TokenKind.LBrace, "'{'");
-        var brings = new List<BringStmt>();
+        var body = new List<Stmt>();
         SkipTerms();
         while (!Check(TokenKind.RBrace) && !AtEnd)
         {
-            if (!Check(TokenKind.KwBring))
+            // `target` is admitted alongside `bring` because the ordering people actually need is over
+            // data, and data arrives as a list: one written `bring` inside a loop becomes N brings, and
+            // the count is not known until the list is. Restricting this block to literal brings meant
+            // `ordered by` could sort a menu you typed out and nothing you fetched.
+            if (Check(TokenKind.KwBring)) body.Add(ParseBring());
+            else if (Check(TokenKind.KwTarget)) body.Add(ParseTargetOrQuery());
+            else
             {
-                _diag.Error("VS0223", "`ordered by` holds only `bring` statements — it reorders them, " +
-                                      "and anything else has no place in that order.", Here);
+                _diag.Error("VS0223", "`ordered by` holds `bring` statements and the `target` loops that " +
+                                      "produce them — it reorders brings, and anything else at this level " +
+                                      "has no place in that order.", Here);
                 throw new ParseError();
             }
-            brings.Add(ParseBring());
             SkipTerms();
         }
         Expect(TokenKind.RBrace, "'}'");
-        return new OrderedStmt(key, brings, s) { Builder = builder, Shape = shape };
+        return new OrderedStmt(key, body, s) { Builder = builder, Shape = shape };
     }
     private RepeatStmt ParseRepeat()
     {

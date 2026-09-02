@@ -43,6 +43,15 @@ bundle DbSupabase by you {
     // this program does not. `by Task.rank` on the query below is the second place, and it is here as
     // well — deliberately, because the two guard different things. The URL decides which rows arrive; the
     // query decides what this program does with them, and it stays right if the URL is ever edited.
+    //
+    // There is a third, for when the source cannot sort — a fixed JSON body, a service with no `order`
+    // parameter, or a key the database does not have a column for. Wrap the ingest loop:
+    //
+    //     ordered by rank { target rows as row { bring Task(row.id, row.title, row.rank, row.done) } }
+    //
+    // That sorts the BRINGS, so the identities are spawned in order and even a reader that cannot sort
+    // — a fragment builder emitting @Html — comes out right. See samples/entities_bring_rows.vein.
+    // It is not used here because `order=rank.asc` already did the work, on a machine with an index.
     // See docs/SYNTAX-DECISIONS.md D14.
     fn selectUrl() -> string { return table() + "?select=id,title,rank,done&order=rank.asc" }
 

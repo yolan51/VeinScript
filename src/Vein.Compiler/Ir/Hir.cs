@@ -68,7 +68,18 @@ public abstract record IrStmt;
 /// IrBlock shares its parent's locals), but the C# backend emits `{ … }`, so a `let` inside would be
 /// invisible afterwards there and visible here. `bring … as x` lowers to a block declaring `x`, so it
 /// has to be emitted without braces or the two runtimes would disagree about whether `x` exists.
-public sealed record IrOrdered(IReadOnlyList<(IrExpr Key, IrBlock Body)> Items) : IrStmt;
+/// `ordered by k { … }` — run `Collect`, gathering every IrOrderedBring it reaches instead of executing
+/// it, then run the gathered bodies sorted by their keys.
+///
+/// It is a BLOCK rather than a list of items because the brings are not all known at lowering time: a
+/// `target` loop inside contributes one per row, and the row count lives in the data. The static case
+/// (a handful of literal brings) is the same shape with no loop, so there is one execution path and not
+/// two that could drift apart.
+public sealed record IrOrdered(IrBlock Collect) : IrStmt;
+
+/// One deferred `bring` inside an `ordered by`. `Key` is evaluated where the bring STANDS — inside the
+/// loop, with that iteration's bindings — and `Body` is what runs later, in sorted position.
+public sealed record IrOrderedBring(IrExpr Key, IrBlock Body) : IrStmt;
 
 public sealed record IrBlock(IReadOnlyList<IrStmt> Statements, bool Transparent = false) : IrStmt;
 public sealed record IrLet(string Name, IrTypeRef? Type, IrExpr? Init, bool Mutable) : IrStmt;

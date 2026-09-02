@@ -65,6 +65,22 @@ public sealed class Interp
     /// resolution, so one phase has exactly one point where the world changes.
     private readonly List<Action> _commands = new();
 
+    /// One `bring` put aside by an `ordered by`, with everything needed to run it somewhere else later.
+    ///
+    /// It carries FOUR things because a loop binding lives in four places, and a deferred body that
+    /// restored only some of them read blanks: `Locals` for a named binding, `Binds` because `target …
+    /// as row` also pushes onto the nameless bind stack that IrSelfRef reads (docs/RULES.md 12c),
+    /// `Index` for the loop counter, and `Entity` for an identity query's current entity. All are
+    /// COPIES: the loop keeps reassigning them, so a reference would leave every deferred body looking
+    /// at the last row.
+    private sealed record Deferred(
+        object? Key, IrBlock Body, Dictionary<string, object?> Locals,
+        List<object?> Binds, long Index, long Entity);
+
+    /// The `ordered by` blocks currently collecting. A stack because they nest — the inner one takes the
+    /// brings, and the outer keeps whatever it had already gathered.
+    private readonly Stack<List<Deferred>> _orderFrames = new();
+
     /// Seeded so a program using `chance` is reproducible; without this there is no golden run test.
     private readonly Random _rng = new(0);
 
@@ -670,14 +686,54 @@ public sealed class Interp
         {
             case IrBlock b: Exec(b, self, locals); break;
 
-            // `ordered by k` — every key is evaluated FIRST, then the bodies run sorted. Evaluating as
-            // we went would let an earlier bring change what a later key reads, and the order would
-            // depend on itself. Same comparer as an ordered query, so both spell "sorted" identically.
+            // `ordered by k` — the block runs FIRST with every bring deferred, then the deferred bodies
+            // run sorted. Executing as we went would let an earlier bring change what a later key reads,
+            // and the order would depend on itself. Same comparer as an ordered query, so both spell
+            // "sorted" identically.
             case IrOrdered ord:
             {
-                var keyed = ord.Items.Select(i => (Key: Eval(i.Key, self, locals), i.Body)).ToList();
-                foreach (var (_, body) in keyed.OrderBy(k => k.Key, EntityStore.OrderKey.Instance))
-                    Exec(body, self, locals);
+                var frame = new List<Deferred>();
+                _orderFrames.Push(frame);
+                try { Exec(ord.Collect, self, locals); }
+                finally { _orderFrames.Pop(); }
+
+                // OrderBy is a STABLE sort, so brings that tie keep the order they were reached in —
+                // which for a `target` loop is the order the rows arrived. Ties are common (a rank
+                // column with duplicates), and arbitrary tie-breaking would make the output depend on
+                // the sort's internals.
+                long prevIndex = _currentIndex, prevEntity = _currentEntity;
+                var prevBinds = new List<object?>(_targetBinds);
+                foreach (var d in frame.OrderBy(d => d.Key, EntityStore.OrderKey.Instance))
+                {
+                    // RESTORED, not merely saved. The body runs OUTSIDE the loop it was written in, and
+                    // the loop has since moved on: `Index` would read the counter's final value, and
+                    // `row.title` would read an empty bind stack and come back blank. Putting the
+                    // bindings back is what makes a deferred bring mean what it says where it stands.
+                    _currentIndex = d.Index;
+                    _currentEntity = d.Entity;
+                    _targetBinds.Clear();
+                    _targetBinds.AddRange(d.Binds);
+                    Exec(d.Body, self, d.Locals);
+                }
+                _currentIndex = prevIndex;
+                _currentEntity = prevEntity;
+                _targetBinds.Clear();
+                _targetBinds.AddRange(prevBinds);
+                break;
+            }
+
+            // A `bring` inside an `ordered by`. The key is read HERE, with this iteration's bindings; the
+            // body is put aside with a copy of them, because by the time it runs the loop has moved on.
+            case IrOrderedBring ob:
+            {
+                if (_orderFrames.Count == 0) { Exec(ob.Body, self, locals); break; }
+                _orderFrames.Peek().Add(new Deferred(
+                    Eval(ob.Key, self, locals),
+                    ob.Body,
+                    new Dictionary<string, object?>(locals, locals.Comparer),
+                    new List<object?>(_targetBinds),
+                    _currentIndex,
+                    _currentEntity));
                 break;
             }
             case IrLet l: locals[l.Name] = l.Init is null ? null : Eval(l.Init, self, locals); break;
