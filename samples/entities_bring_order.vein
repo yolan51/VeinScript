@@ -1,9 +1,9 @@
-// entities_bring_order.vein — `ordered by k { bring … }`, sorting the BRINGS themselves.
+// entities_bring_order.vein — `ordered by &Builder.param { bring … }`, sorting the BRINGS themselves.
 //
 // There are two places an order can be imposed, and they solve different problems:
 //
 //   target $Row #Row by Row.rank as r { … }   — sorts a QUERY. Needs identities to query.
-//   ordered by rank { bring Card(…) … }       — sorts the BRINGS. Needs nothing.
+//   ordered by &Card.rank { bring Card(…) … }  — sorts the BRINGS. Needs nothing.
 //
 // The second exists for the case the first cannot reach: a `bring` on a FRAGMENT builder emits its
 // @Html the instant it runs and leaves no identity behind, so the call order IS the output order and
@@ -29,7 +29,7 @@ bundle EntitiesBringOrder by you {
         run once {
             // Written in neither rank nor title order. `rank` names a PARAMETER of `&Row` — the same
             // name the builder's `$Row` include contributes — and a builder without it is VS0224.
-            ordered by rank {
+            ordered by &Row.rank {
                 bring Row("delta",   4)
                 bring Row("alpha",   1)
                 bring Row("Zeta",   -2)

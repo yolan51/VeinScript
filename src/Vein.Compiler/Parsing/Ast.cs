@@ -205,7 +205,12 @@ public sealed record AttachStmt(bool Remove, string Shape, Expr Target, IReadOnl
 public sealed record ChanceStmt(double Probability, Block Body, SourceSpan Span) : Stmt(Span);
 /// `bring [Count] Builder(args)` — instantiate a builder (optionally Count times). FillRest (`?`)
 /// fills any params not supplied with typed zero placeholders.
-public sealed record OrderedStmt(string Key, IReadOnlyList<BringStmt> Brings, SourceSpan Span) : Stmt(Span);
+public sealed record OrderedStmt(string Key, IReadOnlyList<BringStmt> Brings, SourceSpan Span) : Stmt(Span)
+{
+    /// `ordered by &Row.rank` — the builder the key belongs to. Null for the bare `ordered by rank`
+    /// form, which resolves the parameter per bring and so allows a block of mixed builders.
+    public string? Builder { get; init; }
+}
 
 public sealed record BringStmt(Expr? Count, string Builder, IReadOnlyList<Expr> Args, bool FillRest, SourceSpan Span) : Stmt(Span)
 {

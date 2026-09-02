@@ -651,6 +651,18 @@ public sealed class Lower
                 var items = new List<(IrExpr, IrBlock)>();
                 foreach (var b in os.Brings)
                 {
+                    // A qualified key names ONE builder, so every bring in the block must be that
+                    // builder — otherwise the key means nothing for the others and their order would be
+                    // silently arbitrary. The bare form has no such constraint: it resolves per bring.
+                    if (os.Builder is { } want && !string.Equals(b.Builder, want, StringComparison.Ordinal))
+                    {
+                        _diag.Error("VS0225",
+                            $"`ordered by &{want}.{os.Key}` names {want}'s parameter, but this brings " +
+                            $"'{b.Builder}'. Qualify with the builder each bring uses, or drop the " +
+                            $"`&{want}.` and order by the bare name '{os.Key}'.", b.Span);
+                        continue;
+                    }
+
                     IrExpr key = new IrLiteral(0L, IrLiteralKind.Int);
                     if (_builders.TryGetValue(b.Builder, out var bd))
                     {

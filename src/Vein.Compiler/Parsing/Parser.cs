@@ -690,6 +690,16 @@ public sealed class Parser
     {
         var s = Here; Advance();                       // 'ordered'
         Expect(TokenKind.KwBy, "'by'");
+
+        // `&Row.rank` names the builder the key belongs to; a bare `rank` resolves per bring, which is
+        // what lets one block hold several builders that each have that parameter. Qualifying says
+        // WHICH builder's parameter is meant, and is checked against every bring in the block.
+        string? builder = null;
+        if (Check(TokenKind.BuilderRef))
+        {
+            builder = Advance().Text;
+            Expect(TokenKind.Dot, "'.' after the builder name");
+        }
         string key = ExpectName("the argument name to order by").Text;
 
         Expect(TokenKind.LBrace, "'{'");
@@ -707,7 +717,7 @@ public sealed class Parser
             SkipTerms();
         }
         Expect(TokenKind.RBrace, "'}'");
-        return new OrderedStmt(key, brings, s);
+        return new OrderedStmt(key, brings, s) { Builder = builder };
     }
     private RepeatStmt ParseRepeat()
     {
