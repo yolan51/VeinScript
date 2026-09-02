@@ -257,7 +257,6 @@ public sealed class CSharpBackend : IVeinBackend
                 _indexVar = prevR;
                 break;
             }
-                break;
 
             case IrLoop { Kind: IrLoopKind.While } w:
                 sb.AppendLine($"{pad}while ({Expr(w.Cond)})");
@@ -311,7 +310,6 @@ public sealed class CSharpBackend : IVeinBackend
                 foreach (var s in loop.Body.Statements) EmitStmt(sb, s, depth + 1);
                 sb.AppendLine(pad + "}");
                 _indexVar = prevC;
-                return;
                 return;
             }
             _notes.Add("target with no query and no source not emitted.");
