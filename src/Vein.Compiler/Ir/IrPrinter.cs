@@ -98,6 +98,7 @@ public static class IrPrinter
         IrLocalRef r => r.Name,
         IrSelfRef => "self",
         IrEntityRef => "Entity",
+        IrLoopIndexRef => "Index",
         IrScopeRef s => $"{s.Module}::{s.Name}",
         IrTypeNameExpr t => t.Name,
         IrFieldAccess f => $"{E(f.Receiver)}.{f.Field}",

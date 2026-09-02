@@ -34,6 +34,12 @@ public sealed class CSharpBackend : IVeinBackend
     /// The component the innermost `target` bound, so `self.Health.hp` knows which local to read.
     private string? _selfComponent;
 
+    /// The C# name `Index` resolves to in the loop being emitted. Tracked and restored like
+    /// `_selfComponent`, and made unique per depth: C# forbids a nested local shadowing an outer one
+    /// (CS0136), so a fixed name would refuse to compile the moment two loops nested.
+    private string _indexVar = "0";
+    private int _loopDepth;
+
     public BackendResult Emit(IrModule module)
     {
         _notes.Clear();
@@ -238,8 +244,19 @@ public sealed class CSharpBackend : IVeinBackend
                 break;
 
             case IrLoop { Kind: IrLoopKind.Repeat } r:
-                sb.AppendLine($"{pad}for (long __i = 0; __i < {Expr(r.Count)}; __i++)");
-                EmitBlock(sb, r.Body, depth);
+            {
+                // `repeat n as i` binds `i`; `Index` names the same counter, so both spellings work and
+                // agree. Unique per depth for the same CS0136 reason as the query loop.
+                string prevR = _indexVar;
+                _indexVar = "__i" + _loopDepth++;
+                sb.AppendLine($"{pad}for (long {_indexVar} = 0; {_indexVar} < {Expr(r.Count)}; {_indexVar}++)");
+                sb.AppendLine(pad + "{");
+                if (r.Var is not null) sb.AppendLine($"{pad}    var {Ident(r.Var)} = {_indexVar};");
+                foreach (var s in r.Body.Statements) EmitStmt(sb, s, depth + 1);
+                sb.AppendLine(pad + "}");
+                _indexVar = prevR;
+                break;
+            }
                 break;
 
             case IrLoop { Kind: IrLoopKind.While } w:
@@ -284,8 +301,17 @@ public sealed class CSharpBackend : IVeinBackend
             // `target <collection> as x` is a plain iteration, not an entity query.
             if (loop.Source is not null)
             {
+                // Same counter discipline as the query form, so `Index` means the same thing in both.
+                string prevC = _indexVar;
+                _indexVar = "__idx" + _loopDepth++;
+                sb.AppendLine($"{pad}long {_indexVar} = -1;");
                 sb.AppendLine($"{pad}foreach (var {Ident(loop.Var ?? "__x")} in {Expr(loop.Source)})");
-                EmitBlock(sb, loop.Body, depth);
+                sb.AppendLine(pad + "{");
+                sb.AppendLine($"{pad}    {_indexVar}++;");
+                foreach (var s in loop.Body.Statements) EmitStmt(sb, s, depth + 1);
+                sb.AppendLine(pad + "}");
+                _indexVar = prevC;
+                return;
                 return;
             }
             _notes.Add("target with no query and no source not emitted.");
@@ -318,10 +344,18 @@ public sealed class CSharpBackend : IVeinBackend
         // Emitting only the first was a real disagreement with the interpreter, not a missing feature: the
         // loop visited entities lacking the others, and the body then referenced a `self_<Other>` that was
         // never declared, so the generated C# did not even compile.
+        // The counter is declared OUTSIDE the loop and bumped INSIDE, after the `continue` guards below.
+        // Incrementing at the top would count entities this loop skips, and the interpreter never sees
+        // them at all — its `Query` filters every component before iterating. Same numbers, or the two
+        // runtimes disagree on `Index`.
+        string prevIdx = _indexVar;
+        _indexVar = "__idx" + _loopDepth++;
+        sb.AppendLine($"{pad}long {_indexVar} = -1;");
         sb.AppendLine($"{pad}foreach (var __e in World.Query<{comp}{marks}>())");
         sb.AppendLine(pad + "{");
         foreach (var c in comps.Skip(1))
             sb.AppendLine($"{pad}    if (!World.Has<{c}>(__e)) continue;");
+        sb.AppendLine($"{pad}    {_indexVar}++;");
 
         // Two struct copies per component, both free. `Get` returns by value, and assigning it again gives
         // the working copy — so an activation reads its own pending writes while every other unit still
@@ -341,6 +375,7 @@ public sealed class CSharpBackend : IVeinBackend
         sb.AppendLine(pad + "}");
 
         _selfComponent = prev;
+        _indexVar = prevIdx;
     }
 
     // ---- expressions -----------------------------------------------------
@@ -351,6 +386,7 @@ public sealed class CSharpBackend : IVeinBackend
         IrLiteral l => Literal(l),
         IrLocalRef r => Ident(r.Name),
         IrEntityRef => "__e",
+        IrLoopIndexRef => _indexVar,
         IrSelfRef => "__e",
         IrTypeNameExpr t => "\"" + t.Name + "\"",
         IrFieldAccess f => FieldAccess(f),

@@ -1,0 +1,64 @@
+// entities_index.vein — `Index`, the nearest loop's 0-based iteration counter.
+//
+// `Entity` is WHICH identity an activation is running for. `Index` is WHICH ITERATION it is. Same shape
+// of thing — an implicit binding, no new syntax — and the pair covers what a list needs: numbering,
+// striping, first/last, a "top N" cutoff.
+//
+//     target $Row #Row as r { bring Item(Index + 1, r.Row.title) }    // 1. 2. 3.
+//     if Index == 0 { … }                                            // the first one
+//
+// IT DOES NOT SORT. `Index` counts position in the order the loop already yields, which is spawn order
+// (RULES.md 14b) — so `if r.rank == Index + 1` compares a key to a position and matches nothing except
+// by luck. Ordering by a key is one pass per key value; see samples/rows_in_order.vein.
+//
+// THE CASE THAT COULD HAVE DIVERGED, and the reason this file is in check-backend: with two components,
+// the interpreter's `Query` filters both BEFORE iterating, while the emitted C# drives the loop from one
+// component and `continue`s on the rest. Count at the top of that loop and the backend numbers entities
+// the interpreter never sees. The counter is therefore bumped after the guards, and the second block
+// below prints 0,1 rather than 1,2 — which is what this check pins.
+//
+//   veinc run samples/entities_index.vein --ticks 1
+//   bash tools/check-backend.sh
+
+bundle EntitiesIndex by you {
+
+    shape $Row  { title: string }
+    shape $Wide { extra: int }
+
+    mark #Row
+
+    shard Seed {
+        run once {
+            let a = spawn()  attach $Row to a { title: "alpha" }  mark a #Row
+            let b = spawn()  attach $Row to b { title: "beta"  }  mark b #Row
+            attach $Wide to b { extra: 1 }
+            let c = spawn()  attach $Row to c { title: "gamma" }  mark c #Row
+            attach $Wide to c { extra: 2 }
+        }
+    }
+
+    shard Numbered {
+        settled {
+            // The everyday use: a numbered list, without a counter the program has to carry itself.
+            target $Row #Row as r {
+                emit *Vein.Console.Io.@Print { text: (Index + 1) + ". " + r.Row.title }
+            }
+
+            // First and last, both expressible now and neither expressible before.
+            target $Row #Row as r {
+                if Index == 0 { emit *Vein.Console.Io.@Print { text: "first is " + r.Row.title } }
+            }
+
+            // Two components: `alpha` carries no $Wide, so it is not in this query at all and does not
+            // consume an index. 0,1 — not 1,2.
+            target $Row $Wide #Row as r {
+                emit *Vein.Console.Io.@Print { text: "wide " + Index + " " + r.Row.title }
+            }
+
+            // `repeat n as i` and `Index` name the same number, so both spellings agree.
+            repeat 3 as i {
+                emit *Vein.Console.Io.@Print { text: "repeat i=" + i + " Index=" + Index }
+            }
+        }
+    }
+}

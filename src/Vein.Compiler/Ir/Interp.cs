@@ -53,6 +53,10 @@ public sealed class Interp
     private readonly EntityStore _store = new();               // entities, components, marks, folds
     private long _currentEntity;                               // the nearest entity in scope; 0 = none
 
+    /// `Index` — the nearest enclosing loop's 0-based iteration counter, saved and restored exactly as
+    /// `_currentEntity` is, so a nested loop shadows and then hands back. -1 outside any loop.
+    private long _currentIndex = -1;
+
     /// The values bound by enclosing `target … as <bind>` statements. IrSelfRef means "the innermost
     /// one" — an entity id for a `target $Shape #Mark` query, an arbitrary element for `target <expr>`.
     private readonly List<object?> _targetBinds = new();
@@ -699,7 +703,14 @@ public sealed class Interp
                 break;
             case IrLoopKind.Repeat:
                 { long n = AsLong(Eval(lp.Count!, self, locals));
-                  for (long i = 0; i < n; i++) { if (lp.Var is not null) locals[lp.Var] = i; Exec(lp.Body, self, locals); } }
+                  long prevIdx = _currentIndex;
+                  for (long i = 0; i < n; i++)
+                  {
+                      _currentIndex = i;                       // `Index` works here too; `as i` names the same number
+                      if (lp.Var is not null) locals[lp.Var] = i;
+                      Exec(lp.Body, self, locals);
+                  }
+                  _currentIndex = prevIdx; }
                 break;
 
             case IrLoopKind.Target:
@@ -708,10 +719,12 @@ public sealed class Interp
                 // each gets its own overlay and its writes become independent fold contributions.
                 if (lp.Query is { } q)
                 {
+                    long idx = -1, prevIdx = _currentIndex;
                     foreach (long entity in _store.Query(q.Components, q.Tags))
                     {
                         long previous = _currentEntity;
                         _currentEntity = entity;
+                        _currentIndex = ++idx;
                         _targetBinds.Add(entity);
                         if (lp.Var is not null) locals[lp.Var] = entity;
 
@@ -724,17 +737,21 @@ public sealed class Interp
                             _currentEntity = previous;
                         }
                     }
+                    _currentIndex = prevIdx;
                 }
                 // `target <expr> as x { … }` — iterate a collection. Not an identity query, so no overlay.
                 else if (lp.Source is not null && Eval(lp.Source, self, locals) is System.Collections.IEnumerable src and not string)
                 {
+                    long idx = -1, prevIdx = _currentIndex;
                     foreach (var item in src.Cast<object?>().ToList())
                     {
+                        _currentIndex = ++idx;
                         _targetBinds.Add(item);
                         if (lp.Var is not null) locals[lp.Var] = item;
                         try { Exec(lp.Body, self, locals); }
                         finally { _targetBinds.RemoveAt(_targetBinds.Count - 1); }
                     }
+                    _currentIndex = prevIdx;
                 }
                 break;
             }
@@ -784,6 +801,7 @@ public sealed class Interp
             // for a collection `target` too, so this is an element there and an entity id in a query.
             case IrSelfRef: return _targetBinds.Count > 0 ? _targetBinds[^1] : self.Name;
             case IrEntityRef: return _currentEntity;   // `Entity` — nearest entity's int id (0 = none)
+            case IrLoopIndexRef: return _currentIndex; // `Index` — nearest loop's 0-based counter
             case IrFieldAccess f:
             {
                 var recv = Eval(f.Receiver, self, locals);

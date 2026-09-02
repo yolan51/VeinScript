@@ -234,6 +234,7 @@ public sealed class AstTree
                 };
             case NameExpr n: return ("Ref", n.Name, New());
             case EntityExpr: return ("Ref", "Entity", New());
+            case LoopIndexExpr: return ("Ref", "Index", New());
             case StarRefExpr sr: return ("Ref", AstPrinter.StarText(sr), New());
             case MemberExpr or IndexExpr: return ("Path", Path(e), New());
             case ShapeRefExpr r: return ("Ref", "$" + r.Name, New());

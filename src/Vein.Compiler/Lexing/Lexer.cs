@@ -40,6 +40,7 @@ public sealed class Lexer
         ["break"] = TokenKind.KwBreak,         ["continue"] = TokenKind.KwContinue,
         ["match"] = TokenKind.KwMatch,         ["ShardView"] = TokenKind.KwShardView,
         ["Entity"] = TokenKind.KwEntity,       ["app"] = TokenKind.KwApp,
+        ["Index"] = TokenKind.KwIndex,
     };
 
     private readonly string _src;

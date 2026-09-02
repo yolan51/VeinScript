@@ -28,6 +28,7 @@ public enum TokenKind
     KwFn, KwType, KwEnum, KwIf, KwWhile, KwRepeat, KwBreak, KwContinue, KwMatch,
     KwShardView,    // output-assembly construct: hears fragment events, concatenates a page
     KwEntity,       // the ECS entity type; as an expression, the nearest entity's int id
+    KwIndex,        // as an expression, the nearest loop's 0-based iteration counter
     KwApp,          // app manifest: the set of bundles that compose a project
 
     // punctuation

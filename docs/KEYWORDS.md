@@ -13,7 +13,7 @@ dialect. There is no general `class`.
 
 ---
 
-## 1. Keywords currently in the lexer (closure — all 60)
+## 1. Keywords currently in the lexer (closure — all 61)
 
 ### General core
 
@@ -65,6 +65,7 @@ dialect. There is no general `class`.
 | `chance` | `chance 30% { … }` | probabilistic branch | `if random() < 0.30 { … }` |
 | `sync` | `sync` | shard scheduling hint | `@sync` metadata |
 | `ShardView` | `ShardView N { … }` | a First-Class object that ASSEMBLES — hears fragments and emits the finished artifact | `IrShard` (kind `view`) |
+| `Index` | `Index` (in `target` / `repeat`) | the nearest loop's 0-based iteration counter, the way `Entity` is the nearest identity. Does NOT sort — it counts position in the order the loop already yields ([RULES.md 14c](RULES.md)) | `IrLoopIndexRef` → a loop counter |
 
 > **Field mutation is not a keyword.** A shard changes a field with core compound assignment
 > (`self.Health.hp -= 1` → `self.Health.hp += -1`). When several shards write one field in a tick, the
@@ -171,7 +172,7 @@ Identifiers resolved to built-in reducers — **not keywords**, so no new keywor
 
 ## 4. Closure check
 
-The lexer holds **60** keywords, and every one appears in a table above. Derive the number rather than
+The lexer holds **61** keywords, and every one appears in a table above. Derive the number rather than
 trusting this line — the map holds TWO entries per source line, which is how 60 gets miscounted as 30:
 
 ```bash

@@ -41,7 +41,7 @@ arm may sit on its own line — `ParseMatch` reads `else` explicitly — which i
 **3. A string literal is one line.** `\n \t \r \\ \"` are the escapes; a literal newline inside quotes is
 VS0003. To emit a multi-line string, use `\n` and wrap the source with trailing `+` per rule 1.
 
-**4. All 60 lexer keywords are reserved, including as parameter and field names.** `target` is a keyword,
+**4. All 61 lexer keywords are reserved, including as parameter and field names.** `target` is a keyword,
 so `builder Clock { target: string }` is a parse error — it was renamed to `id`. Check the map before
 choosing a name; do not count entries by line, because the table holds two per line.
 
@@ -157,6 +157,19 @@ repeat 3 as i { target $Row #Row as r { if r.Row.rank == i + 1 { … } } }
 
 which sorts by a field using only `repeat` and `if`. It costs a scan per key value, so it fits a small
 dense integer range (menu slots, columns, priorities) and nothing wider.
+
+**14c. `Index` is the nearest loop's 0-based counter, and it does NOT sort.** The parallel to `Entity`:
+that names WHICH identity, this names WHICH ITERATION. Works in `target` (query and collection) and in
+`repeat`, where it is the same number `as i` binds. Use it for numbering, striping, first/last, a top-N
+cutoff — `bring Item(Index + 1, …)`.
+
+It counts position in the order the loop already yields, which is spawn order (14b), so
+`if r.rank == Index + 1` compares a key against a position and matches only by luck. To order by a key,
+use one pass per key value. Nested loops shadow and restore, like `Entity`.
+`samples/entities_index.vein` is in `check-backend` because the two runtimes could easily have disagreed:
+with two components the interpreter filters before iterating while the emitted C# `continue`s inside the
+loop, so the counter has to be bumped after those guards or the backend numbers entities the interpreter
+never sees.
 
 **15. `$Enemy` and `#Enemy` are different things.** Different keyword, different sigil; a program may use
 both. In emitted C# the mark becomes `Marks.Enemy` and the shape `Enemy`.

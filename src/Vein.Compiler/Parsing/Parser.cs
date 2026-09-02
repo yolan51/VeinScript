@@ -973,6 +973,7 @@ public sealed class Parser
             case TokenKind.EventRef: return new EventRefExpr(Advance().Text, s);
             case TokenKind.MarkRef: return new MarkRefExpr(Advance().Text, s);
             case TokenKind.KwEntity: { Advance(); return new EntityExpr(s); }
+            case TokenKind.KwIndex:  { Advance(); return new LoopIndexExpr(s); }
             case TokenKind.Star: return ParseStarRef();
             // Parentheses re-open struct literals: the `}` that closes one cannot be mistaken for the
             // attach init, because the `)` has to come first.

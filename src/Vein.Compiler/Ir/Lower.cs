@@ -928,6 +928,7 @@ public sealed class Lower
             case NameExpr n when IsTargetBind(n.Name): return new IrSelfRef();
             case NameExpr n: return new IrLocalRef(n.Name);
             case EntityExpr: return new IrEntityRef();
+            case LoopIndexExpr: return new IrLoopIndexRef();
             // `*` qualified cross-bundle ref. Not linked/resolved at runtime yet (surface + tooling
             // pass): lower to a scope ref carrying the dotted path + sigil'd member so the IR is
             // representable; project tooling does the real resolution/collision checks.

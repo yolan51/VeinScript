@@ -218,6 +218,7 @@ public enum LiteralKind { Int, Float, Percent, String, Bool }
 public sealed record LiteralExpr(object? Value, LiteralKind Kind, SourceSpan Span) : Expr(Span);
 public sealed record NameExpr(string Name, SourceSpan Span) : Expr(Span);
 public sealed record EntityExpr(SourceSpan Span) : Expr(Span);                          // Entity — nearest entity's id
+public sealed record LoopIndexExpr(SourceSpan Span) : Expr(Span);                       // Index — nearest loop's 0-based counter
 
 /// The sigil of the final member of a `*` qualified path.
 public enum MemberSigil { Event, Shape, Mark, None }

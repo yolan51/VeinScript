@@ -156,14 +156,27 @@ a fold contribution (see [IR-SPEC](IR-SPEC.md), [BACKEND-CONTRACT](BACKEND-CONTR
 
 ---
 
-## D9 — Collections and indexing need `[` `]` tokens *(OPEN)* {#d9}
+## D9 — Collections and indexing: brackets, option (a) {#d9}
 
-**OPEN.** The lexer has **no `[` `]` tokens**. Options:
+**DECIDED — and already implemented**, which this entry claimed for a long time was not the case. It read
+*"The lexer has **no `[` `]` tokens**"* and listed (a) and (b) as open options. The lexer has had them for
+some time (`case '['`, `case ']'` in `Lexer.cs`; `LBracket`/`RBracket` in `TokenKind`), the parser builds
+an `IndexExpr` for `a[i]`, and all of this works today:
 
-- **(a, recommended)** Add `LBracket`/`RBracket`; `list<T>`, `[1,2,3]` literals, `a[i]` indexing.
-- **(b)** No brackets; `list<T>` with `a.at(i)` / `a.set(i,x)` and a `list(…)` constructor.
+```
+let xs = [3, 1, 2]
+len(xs)                          // 3
+xs[0]                            // 3
+target xs as x { … }             // iterates, and `Index` counts the positions
+```
 
-Specs assume **(a)**; flag if you prefer (b).
+So option **(a)** is what exists. What is still missing is a `list<T>` TYPE — a list is a value you can
+build, index, measure and iterate, but not declare as a field type — and any mutation: no append, no
+sort. `pick` and `join` are the only other operations, both builtins.
+
+*Rationale for recording it now:* the stale text was believed and repeated. It was quoted as fact in
+`samples/rows_in_order.vein` ("no list type exists — the lexer has no `[` `]`"), which was wrong on the
+second half, and it shaped a design conversation about how database rows could arrive.
 
 ---
 
@@ -264,6 +277,7 @@ Full detail in [KEYWORDS.md](KEYWORDS.md).
 | `bundle` `use` `publicator` `shared` | **core** | module / import / export / doc |
 | `app` | **core** | the manifest that composes bundles (`app N { load "…" }`) |
 | `Entity` | **core (IOP)** | the identity handle a `spawn()` returns |
+| `Index` | **core (IOP)** | the nearest loop's 0-based counter; `Entity` names which identity, `Index` which iteration |
 | `let` `var` `SF` `return` | **core** | bindings, pure fn, return |
 | `true` `false` `and` `or` `not` `as` | **core** | literals, logic, binding/alias |
 | `map` `count` `random` | **core / core-lib** | collection type; `count`/`random` become stdlib |

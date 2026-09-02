@@ -34,7 +34,8 @@
 
 bundle RowsInOrder by you {
 
-    // No list type exists — D9 is open and the lexer has no `[` `]` — so a result set cannot arrive as
+    // A list VALUE exists (`[1,2,3]`, `xs[0]`, `len`, and `target xs as x`), but there is no list TYPE, so
+    // a shape or an event payload cannot declare one — a result set cannot arrive as
     // one value. One event per row is the shape that IS expressible, and it happens to be what a
     // streaming fetch looks like anyway.
     event @RowArrived { title: string, rank: int }
