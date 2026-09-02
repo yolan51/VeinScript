@@ -388,7 +388,7 @@ public sealed class Interp
         _log.Add($"linked {name} at {at}");
     }
 
-    /// `@Fetch { url, method, body }` — the one asymmetric call in Vein.Net, answered by @Fetched (the
+    /// `@Fetch { url, method, body, headers }` — the one asymmetric call in Vein.Net, answered by @Fetched (the
     /// service replied, whatever the status) or @Failed (it never replied at all).
     ///
     /// Where the waiting happens depends on who owns the clock. A live console must not block its event
@@ -400,12 +400,15 @@ public sealed class Interp
         string url = Str(payload.GetValueOrDefault("url"));
         string method = Str(payload.GetValueOrDefault("method"));
         string body = Str(payload.GetValueOrDefault("body"));
+        // Absent in every program written before headers existed, and `GetValueOrDefault` makes that the
+        // empty string rather than a crash — so `@Fetch { url, method, body }` still means what it did.
+        string headers = Str(payload.GetValueOrDefault("headers"));
 
-        if (_inbox is not { } box) { Deliver(url, NetHttp.Fetch(url, method, body)); return; }
+        if (_inbox is not { } box) { Deliver(url, NetHttp.Fetch(url, method, body, headers)); return; }
 
         new Thread(() =>
         {
-            var result = NetHttp.Fetch(url, method, body);
+            var result = NetHttp.Fetch(url, method, body, headers);
             try { box.Add(() => { Deliver(url, result); Drain(); }); } catch { /* the run ended */ }
         })
         { IsBackground = true, Name = "vein-fetch" }.Start();

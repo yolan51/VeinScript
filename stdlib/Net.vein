@@ -60,8 +60,16 @@ bundle Net by Vein {
         // answered is the program's business. Only a request that never got a reply at all — bad host,
         // refused connection, timeout — becomes @Failed. That is the same line @Undelivered draws for
         // Peer: "no answer" and "an answer you dislike" are different events.
-        shared("Request a URL. `method` defaults to GET; a non-empty `body` is sent as JSON.")
-        event @Fetch { url: string, method: string, body: string }
+        // `headers` is ONE string, `Name: Value` per line — the HTTP wire format itself. It is not a map
+        // because an event payload field has a scalar type and the language has no map literal; it is not
+        // a list because a list is a VALUE with no type to declare. A newline-joined string is the shape
+        // VeinScript can already build, and *Vein.Rest exists so you rarely write one by hand.
+        //
+        // Blank lines are skipped, a line with no colon is skipped, and a name or value containing a
+        // control character is DROPPED — a CR smuggled in from data would otherwise append headers of its
+        // own. Content-Type, if you set it, replaces the default application/json.
+        shared("Request a URL. `method` defaults to GET; a non-empty `body` is sent as JSON; `headers` is one \"Name: Value\" per line.")
+        event @Fetch { url: string, method: string, body: string, headers: string }
 
         shared("The service replied — `status` is its HTTP status, whatever it was.")
         event @Fetched { url: string, status: int, body: string }
@@ -70,10 +78,22 @@ bundle Net by Vein {
         event @Failed { url: string, reason: string }
 
         shared("GET a URL.")
-        SF get(url: string) { emit @Fetch { url: url, method: "GET", body: "" } }
+        SF get(url: string) { emit @Fetch { url: url, method: "GET", body: "", headers: "" } }
 
         shared("POST a body to a URL.")
-        SF post(url: string, body: string) { emit @Fetch { url: url, method: "POST", body: body } }
+        SF post(url: string, body: string) { emit @Fetch { url: url, method: "POST", body: body, headers: "" } }
+
+        // The authenticated forms. Kept as separate names rather than extra parameters on `get`/`post`
+        // because VeinScript has no default arguments — a fifth positional "" at every unauthenticated
+        // call site would be worse than two more names.
+        shared("GET a URL with headers — see *Vein.Rest for building them.")
+        SF getWith(url: string, headers: string) { emit @Fetch { url: url, method: "GET", body: "", headers: headers } }
+
+        shared("POST a body to a URL with headers.")
+        SF postWith(url: string, body: string, headers: string) { emit @Fetch { url: url, method: "POST", body: body, headers: headers } }
+
+        shared("Any method, body and headers — the general form the others are shorthand for.")
+        SF request(url: string, method: string, body: string, headers: string) { emit @Fetch { url: url, method: method, body: body, headers: headers } }
     }
 
     // --- no behaviour here ---------------------------------------------------------------------------

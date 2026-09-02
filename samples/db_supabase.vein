@@ -1,0 +1,185 @@
+// db_supabase.vein — a database read and write, against a real Supabase project.
+//
+// Supabase's REST API is PostgREST: every table is a URL, a row is a JSON object, and a filter is a
+// query parameter. Nothing here is Supabase-shaped except the two auth headers and the `?select=` —
+// point `base()` at any PostgREST service, or at any JSON API at all, and the rest is the same program.
+//
+//   1. Put your project URL and anon key in `base()` and `key()` below.
+//   2. Make a table:  create table tasks (id bigserial primary key, title text, rank int, done bool);
+//   3. veinc run samples/db_supabase.vein
+//
+// It stays open after printing — `veinc run` pumps stdin until EOF, and the reply arrives on that loop.
+// Ctrl-C, or Ctrl-Z then Enter, ends it. `--ticks` does nothing useful here: ticks run back to back with
+// no delay, so no number of them waits for a network reply.
+//
+// THE KEY IN THIS FILE IS A PLACEHOLDER AND SHOULD STAY ONE. An anon key is public by design — it is
+// safe in a browser — but it is public only in combination with the row-level security policies you set
+// on the table. Committing a real one to a repo alongside a table with RLS off publishes the table. The
+// service_role key is never safe to commit anywhere.
+//
+// WHY THIS IS ONE PROGRAM AND NOT A DRIVER. There is no database connection here, no pool, no
+// transaction: the whole conversation is `@Fetch` and `@Fetched`, the events stdlib/Net.vein already
+// declares. That is the shape a REST service actually has, and it is why the same three shards below
+// would talk to Stripe or GitHub with a different URL and a different header.
+//
+// INTERPRETER ONLY. `emit`/`hear` is the half the C# backend deliberately skips, so `veinc emit` on this
+// file prints a note per skipped construct. It is not in tools/check-backend.sh, for the same reason
+// samples/rows_in_order.vein is not. What IS checked is NetHttpTests, which drives this exact request
+// shape through NetHttp.Hook with no network — see `Vein_Rest_composes_the_header_string`.
+
+bundle DbSupabase by you {
+
+    // ---- configuration ---------------------------------------------------------------------------
+    //
+    // Plain functions rather than constants, because a `fn` is the only thing here that a shard, an SF
+    // and another `fn` can all call. Replace the two bodies and nothing else in the file changes.
+
+    fn base() -> string { return "https://YOUR-PROJECT.supabase.co" }
+    fn key() -> string { return "PASTE-YOUR-ANON-KEY" }
+
+    fn table() -> string { return base() + "/rest/v1/tasks" }
+
+    // `order=rank.asc` is the FIRST place to impose an order, and the cheapest: Postgres has an index and
+    // this program does not. `by Task.rank` on the query below is the second place, and it is here as
+    // well — deliberately, because the two guard different things. The URL decides which rows arrive; the
+    // query decides what this program does with them, and it stays right if the URL is ever edited.
+    // See docs/SYNTAX-DECISIONS.md D14.
+    fn selectUrl() -> string { return table() + "?select=id,title,rank,done&order=rank.asc" }
+
+    // NO QUERY PARAMETER IS BUILT FROM DATA HERE, and that is a rule rather than a convenience. There is
+    // no percent-encoding in VeinScript — the language cannot look at a character — so a filter built
+    // from a title, a search box or a name would break on the first space or `&`. Filter in the `if`
+    // inside the target loop, or add the encoded parameter from the host. stdlib/Rest.vein says the same
+    // thing, and refuses to offer a `query(url, key, value)` for exactly this reason.
+
+    // ---- headers ---------------------------------------------------------------------------------
+    //
+    // Supabase wants the key TWICE: `apikey` is how the gateway routes to your project, and
+    // `Authorization` is the identity row-level security evaluates. Sending only one is the classic
+    // first failure — the reply is a 401 whose body names neither header.
+
+    fn auth() -> string {
+        return *Vein.Rest.Headers.also(
+                   *Vein.Rest.Auth.apiKey("apikey", key()),
+                   "Authorization", "Bearer " + key())
+    }
+
+    // `Prefer: return=representation` makes an insert answer with the rows it wrote, including the id
+    // Postgres generated. Without it the reply is 201 and an empty body, and the new row's id is lost.
+    fn writeHeaders() -> string {
+        return *Vein.Rest.Headers.also(auth(), "Prefer", "return=representation")
+    }
+
+    // ---- what a row is ---------------------------------------------------------------------------
+
+    shape $Task { id: int, title: string, rank: int, done: bool }
+    mark #Task
+
+    builder Task { $Task   mark #Task }
+
+    // A DRAFT IS A DIFFERENT SHAPE, and the missing `id` is the whole reason. Postgres assigns the id, so
+    // a row on its way IN does not have one — and `toJson` writes every field its shape declares, so
+    // reusing $Task would post `"id": 0` and either collide with an existing row or be rejected.
+    shape $Draft { title: string, rank: int, done: bool }
+    mark #Draft
+
+    builder Draft { $Draft   mark #Draft }
+
+    // Raised once the rows from the SELECT are committed, so anything that needs to QUERY them has an
+    // event to hang off. Not decoration: `bring` inside a `hear` commits at the END of that event, so a
+    // target loop in the same handler would see nothing (docs/RULES.md 12b).
+    event @Loaded { count: int }
+
+    // ---- read ------------------------------------------------------------------------------------
+
+    shard Load {
+        run once {
+            emit *Vein.Console.Io.@Print { text: "GET " + selectUrl() }
+            *Vein.Net.Http.getWith(selectUrl(), auth())
+        }
+    }
+
+    // One draft, brought at boot so it is committed long before the insert wants to read it.
+    shard Compose {
+        run once { bring Draft("write the docs", 9, false) }
+    }
+
+    // ---- the replies -----------------------------------------------------------------------------
+    //
+    // @Fetched fires for EVERY request this program makes, so the handler has to say which one it is
+    // looking at. `f.url` is on the reply for exactly this — several requests can be in flight and they
+    // complete out of order.
+
+    shard Replies {
+        hear *Vein.Net.Http.@Fetched as f {
+
+            // The guard that is easy to forget: a 401, a 404 and a 500 all arrive here as @Fetched,
+            // because the service ANSWERED. Parsing without checking would hand `fromJson` an error
+            // object and quietly produce zero rows.
+            if not *Vein.Rest.Status.ok(f.status) {
+                emit *Vein.Console.Io.@Print { text: "-- " + f.status + " --" }
+                emit *Vein.Console.Io.@Print { text: "   " + f.body }
+                if *Vein.Rest.Status.clientError(f.status) {
+                    emit *Vein.Console.Io.@Print {
+                        text: "   a 401 here almost always means base()/key() are still placeholders,"
+                    }
+                    emit *Vein.Console.Io.@Print {
+                        text: "   and a 404 means the table is not named `tasks`."
+                    }
+                }
+            } else {
+                if f.url == selectUrl() {
+                    // PostgREST answers a select with a bare JSON ARRAY, which `fromJson` returns as a
+                    // list — the same thing `target … as x` already walks and `len` already measures.
+                    // No conversion step, and no shape declared for the wire format.
+                    let rows = fromJson(f.body)
+                    emit *Vein.Console.Io.@Print { text: "read " + len(rows) + " rows" }
+
+                    target rows as row {
+                        bring Task(row.id, row.title, row.rank, row.done)
+                    }
+
+                    // Handed on rather than listed here, because the brings above are not committed yet.
+                    emit @Loaded { count: len(rows) }
+                } else {
+                    emit *Vein.Console.Io.@Print { text: "wrote: " + f.body }
+                }
+            }
+        }
+
+        // @Failed is the OTHER outcome, and it is a different thing entirely: no reply at all — bad host,
+        // refused connection, timeout. Nothing to parse, and retrying is the only sensible response.
+        hear *Vein.Net.Http.@Failed as f {
+            emit *Vein.Console.Io.@Print { text: "no answer from " + f.url + ": " + f.reason }
+        }
+    }
+
+    // ---- what arrived ----------------------------------------------------------------------------
+
+    shard Listing {
+        hear @Loaded as l {
+            emit *Vein.Console.Io.@Print { text: "-- " + l.count + " tasks, by rank --" }
+            target $Task #Task by Task.rank as t {
+                emit *Vein.Console.Io.@Print {
+                    text: "   " + t.Task.rank + "  " + t.Task.title + "  done=" + t.Task.done
+                }
+            }
+        }
+    }
+
+    // ---- write -----------------------------------------------------------------------------------
+
+    shard Write {
+        hear @Loaded as l {
+            // `toJson` of a COMPONENT, not of hand-written JSON. It escapes what JSON requires — a
+            // quote, a newline, a tab inside a title — and a program concatenating its own braces cannot,
+            // because VeinScript cannot find a character to escape. PostgREST takes an array of rows, so
+            // the object goes inside brackets.
+            target $Draft #Draft as d {
+                let payload = "[" + toJson(d.Draft) + "]"
+                emit *Vein.Console.Io.@Print { text: "POST " + table() + " " + payload }
+                *Vein.Net.Http.postWith(table(), payload, writeHeaders())
+            }
+        }
+    }
+}

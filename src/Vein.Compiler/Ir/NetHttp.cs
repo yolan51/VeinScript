@@ -17,8 +17,10 @@ public static class NetHttp
         new HttpClient { Timeout = TimeSpan.FromSeconds(30) });
 
     /// Test/host seam: when set, answers instead of touching the network. Mirrors ConsoleBus.Hook and
-    /// NetBus.Hook, so a test can assert what a program requested with no server anywhere.
-    public static Func<string, string, string, Result>? Hook;
+    /// NetBus.Hook, so a test can assert what a program requested with no server anywhere. Headers are
+    /// the fourth argument precisely so a test can assert THEM: an API key that never left the program
+    /// is the failure a status-only assertion cannot see.
+    public static Func<string, string, string, string, Result>? Hook;
 
     /// A completed request. `Error` is null on success; when it is set, status/body are meaningless and
     /// the caller raises @Failed instead of @Fetched.
@@ -27,14 +29,22 @@ public static class NetHttp
     /// Perform one request and wait for it. Callers decide whether that wait happens on the event loop
     /// (one-shot render, where determinism matters more than latency) or on a worker thread that posts
     /// the result back to the inbox (a live session, where blocking the loop would freeze the console).
-    public static Result Fetch(string url, string method, string body)
+    public static Result Fetch(string url, string method, string body, string headers)
     {
-        if (Hook is not null) return Hook(url, method, body);
+        if (Hook is not null) return Hook(url, method, body, headers);
 
         if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri))
             return new Result(0, "", "not a valid absolute URL: " + url);
         if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
             return new Result(0, "", "unsupported scheme: " + uri.Scheme);
+
+        var parsed = ParseHeaders(headers);
+        // Content-Type has to be settled BEFORE the content exists — StringContent takes it in its
+        // constructor — so it is pulled out of the list rather than added alongside the others.
+        string contentType = "application/json";
+        foreach (var (name, value) in parsed)
+            if (string.Equals(name, "Content-Type", StringComparison.OrdinalIgnoreCase))
+                contentType = value;
 
         try
         {
@@ -43,7 +53,9 @@ public static class NetHttp
             // A body is attached whenever one was given, whatever the verb: the server decides what is
             // legal, and second-guessing it here would block a legitimate DELETE-with-body.
             if (!string.IsNullOrEmpty(body))
-                req.Content = new StringContent(body, new UTF8Encoding(false), "application/json");
+                req.Content = new StringContent(body, new UTF8Encoding(false), contentType);
+
+            Apply(req, parsed);
 
             using var res = Shared.Value.Send(req);
             string text = res.Content.ReadAsStringAsync().GetAwaiter().GetResult();
@@ -54,6 +66,67 @@ public static class NetHttp
         catch (Exception ex)
         {
             return new Result(0, "", Reason(ex));
+        }
+    }
+
+    /// Headers arrive from VeinScript as ONE string, `Name: Value` per line — the HTTP wire format
+    /// itself. A map would have been the obvious signature and is not available: an event payload field
+    /// has a scalar type, there is no map literal, and a list is a value with no type to declare
+    /// (samples/rows_in_order.vein). The wire format is the shape the language can already build with
+    /// `+` and `\n`, and it is self-describing when printed in a log.
+    ///
+    /// Blank lines are skipped so `header(a) + "\n" + header(b)` composes without the caller tracking
+    /// whether it is first. A line with no colon is skipped rather than guessed at.
+    ///
+    /// Public because the DROPPING rules below are the security-relevant half of this file and a test has
+    /// to be able to assert them directly — reaching them through Fetch would need a live server.
+    public static List<(string Name, string Value)> ParseHeaders(string headers)
+    {
+        var list = new List<(string, string)>();
+        if (string.IsNullOrWhiteSpace(headers)) return list;
+
+        foreach (var raw in headers.Split('\n'))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0) continue;
+
+            int colon = line.IndexOf(':');
+            if (colon <= 0) continue;
+
+            string name = line[..colon].Trim();
+            string value = line[(colon + 1)..].Trim();
+            // Refuse control characters outright. Everything here is added WITHOUT validation, so a
+            // stray CR or LF in a value taken from data would otherwise let a caller append headers of
+            // its own — response splitting, wearing the clothes of an ordinary string concatenation.
+            if (name.Length == 0 || HasControl(name) || HasControl(value)) continue;
+
+            list.Add((name, value));
+        }
+        return list;
+    }
+
+    private static bool HasControl(string s)
+    {
+        foreach (char c in s) if (c < ' ' || c == (char)127) return true;
+        return false;
+    }
+
+    /// Request headers and CONTENT headers are two different collections in System.Net.Http, and adding
+    /// one to the wrong collection throws. Rather than keep a list of which is which, try the request
+    /// first and fall back to the content — that is what the split actually means at the call site.
+    private static void Apply(HttpRequestMessage req, List<(string Name, string Value)> headers)
+    {
+        foreach (var (name, value) in headers)
+        {
+            // Already spent on StringContent's constructor; adding it again would duplicate the header.
+            if (string.Equals(name, "Content-Type", StringComparison.OrdinalIgnoreCase)) continue;
+
+            try
+            {
+                if (req.Headers.TryAddWithoutValidation(name, value)) continue;
+                req.Content?.Headers.TryAddWithoutValidation(name, value);
+            }
+            catch (InvalidOperationException) { /* a header this request cannot carry — skip it */ }
         }
     }
 

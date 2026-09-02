@@ -1,0 +1,90 @@
+// stdlib/Rest.vein — VeinScript Standard Library : Vein.Rest
+// The vocabulary for talking to an HTTP service that wants an API key: building the `headers` string
+// *Vein.Net.Http.@Fetch carries, and reading the status it answers with.
+// Discover:  veinc symbols stdlib/Rest.vein
+//
+// WHY THIS EXISTS AT ALL. `@Fetch` gained a `headers` field, and that field is one string with
+// `Name: Value` per line — the HTTP wire format itself, because an event payload field has a scalar type
+// and the language has no map literal. Writing that by hand is a concatenation with a `\n` in the middle
+// that is wrong in a way nothing reports: a missing newline merges two headers into one, and the service
+// answers 401 with no hint which header it never saw. These functions put the newline in.
+//
+// WHY IT IS NOT NAMED FOR A SERVICE. Supabase, PostgREST, GitHub and Stripe all authenticate the same
+// two ways — a bearer token, or a named key header — and none of that is theirs. A `Vein.Supabase` bundle
+// would put one company's product in the standard library and inherit their release schedule. The
+// service-specific half (which path, which query parameters, which `Prefer` header) lives in the program,
+// where it can change without a stdlib release; see samples/db_supabase.vein for that half assembled.
+//
+// WHAT IS DELIBERATELY MISSING, and each is a real limit rather than an oversight:
+//
+//   URL BUILDING. There is no `query(url, key, value)`, because it could not percent-encode: VeinScript
+//     cannot look at a character (no `s[i]`, no char comparison), so a value containing a space or an `&`
+//     would silently produce a broken URL. A function that is correct only for values you already know
+//     are safe is a trap with a helpful name. Concatenate the query string yourself, from literals.
+//   BASIC AUTH. `Authorization: Basic …` needs base64, which is the same character problem. If you need
+//     it, the encoding has to come from the host, not from here.
+//   RETRIES AND TIMEOUTS. A shard cannot be `shared` (STDLIB.md), so any policy declared here would be
+//     invisible behaviour handed to everyone who only wanted the vocabulary. Retry in your own shard, on
+//     @Failed, where you can see it.
+
+bundle Rest by Vein {
+
+    // Headers — assembling the string, one line at a time.
+    //
+    // The two-function split is what makes composition safe: `one` starts a header string and `also`
+    // extends one, so the newline belongs to `also` and never has to be written at a call site. Chaining
+    // reads in the order the headers go out:
+    //
+    //     let h = also(also(one("apikey", key), "Authorization", "Bearer " + key),
+    //                  "Prefer", "return=representation")
+    publicator Headers {
+        shared("One header line — the start of a header string.")
+        fn one(name: string, value: string) -> string { return name + ": " + value }
+
+        shared("Add a header to an existing string. Safe on an empty one — no leading blank line matters, the transport skips them.")
+        fn also(headers: string, name: string, value: string) -> string {
+            return headers + "\n" + name + ": " + value
+        }
+
+        // Not a synonym for `one("Content-Type", …)`: the point is that the SPELLING is the thing people
+        // get wrong ("application/json" vs "text/json" vs a charset suffix), and a name can hold the
+        // right one. Note the transport already defaults a body to application/json, so this is for
+        // saying so explicitly, or for the `accept` direction where there is no default.
+        shared("Content-Type: application/json — the transport's default, stated out loud.")
+        fn json() -> string { return "Content-Type: application/json" }
+
+        shared("Accept a media type in the reply, e.g. accept(\"application/json\").")
+        fn accept(mime: string) -> string { return "Accept: " + mime }
+    }
+
+    // Auth — the two schemes that cover most keyed APIs.
+    publicator Auth {
+        shared("Authorization: Bearer <token> — OAuth2, JWTs, and most modern APIs.")
+        fn bearer(token: string) -> string { return "Authorization: Bearer " + token }
+
+        shared("A key in a header of the service's own choosing, e.g. apiKey(\"apikey\", key) or apiKey(\"X-API-Key\", key).")
+        fn apiKey(name: string, key: string) -> string { return name + ": " + key }
+    }
+
+    // Status — reading the reply.
+    //
+    // Worth naming rather than writing inline, because @Fetched fires for EVERY status (a 404 is an
+    // answer, not a failure — see stdlib/Net.vein), so a handler that forgets to check treats an error
+    // page as data. `ok(f.status)` is the guard that belongs at the top of every `hear @Fetched`.
+    publicator Status {
+        shared("True for 2xx — the request succeeded. Check this before parsing a body.")
+        fn ok(status: int) -> bool { return status >= 200 and status < 300 }
+
+        shared("True for 4xx — this program got something wrong: a bad key, a bad path, a bad body.")
+        fn clientError(status: int) -> bool { return status >= 400 and status < 500 }
+
+        shared("True for 5xx — the service got something wrong. This is the one worth retrying.")
+        fn serverError(status: int) -> bool { return status >= 500 and status < 600 }
+    }
+
+    // --- no behaviour here ---------------------------------------------------------------------------
+    // No shards and no events. Vein.Net already owns the events — re-declaring @Fetch here would give a
+    // program two names for one runtime event, which is the divergence VS0332 exists to catch. These are
+    // leaf functions: a qualified call imports the declaration at compile time, so
+    // `*Vein.Rest.Auth.bearer(…)` runs in the caller's module with no link step.
+}
