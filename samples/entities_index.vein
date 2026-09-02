@@ -37,7 +37,7 @@ bundle EntitiesIndex by you {
     shard Seed {
         run once {
             bring Row("alpha")
-            bring Wide("beta",    1)
+            bring Wide("beta",    4)
             bring Wide("gamma",   2)
             bring Row("delta")
             bring Wide("epsilon", 3)
@@ -70,19 +70,18 @@ bundle EntitiesIndex by you {
                 if Index == 0 { emit *Vein.Console.Io.@Print { text: "first is " + r.Row.title } }
             }
 
-            // Two components. Three of the six carry `$Wide`, and the other three are not in this query
-            // at all — so the counter runs 0,1,2 over the matches, not 1,2,4 over the positions they
-            // happen to occupy in the full list. That distinction is what check-backend pins.
-            emit *Vein.Console.Io.@Print { text: "-- only the wide ones --" }
+            // Two components, and the FILTER is the point. Three of the six carry `$Wide`; the other
+            // three are not in this query at all, so `Index` counts 0,1,2 over the MATCHES — not 1,2,4,
+            // the positions those three occupy in the full list. `Index < 2` therefore keeps beta and
+            // gamma. Count positions instead and it would keep only beta, so this filter changes the
+            // NUMBER of lines, not just the numbers in them — which is what check-backend pins.
+            emit *Vein.Console.Io.@Print { text: "-- first two of the wide ones --" }
             target $Row $Wide #Row as r {
-                emit *Vein.Console.Io.@Print {
-                    text: "   " + Index + " " + r.Row.title + " extra=" + r.Wide.extra
+                if Index < 2 {
+                    emit *Vein.Console.Io.@Print {
+                        text: "   " + Index + " " + r.Row.title + " extra=" + r.Wide.extra
+                    }
                 }
-            }
-
-            // `repeat n as i` and `Index` name the same number, so both spellings agree.
-            repeat 2 as i {
-                emit *Vein.Console.Io.@Print { text: "repeat i=" + i + " Index=" + Index }
             }
         }
     }

@@ -258,4 +258,32 @@ public class CSharpBackendTests
                            "  shard S { each tick { target $H #Live as self { self.H.hp -= 1 } } }";
         Assert.Equal(Emit(src).Code, Emit(src).Code);
     }
+
+    [Fact]
+    public void Repeat_with_a_binding_declares_it_in_the_emitted_loop()
+    {
+        // `repeat n as i` used to emit `for (long __i = …)` and drop the binding entirely, so a body
+        // referring to `i` produced C# where `i` did not exist. Fixed alongside `Index`, and this is the
+        // only guard left after entities_index stopped using the form.
+        var (code, _) = Emit("  shape $H { hp: int }\n" +
+                             "  shard S { run once { repeat 3 as i { let n = i } } }");
+
+        Assert.Matches(@"for \(long __i\d+ = 0;", code);
+        Assert.Matches(@"var i = __i\d+;", code);       // the binding, which is what went missing
+    }
+
+    [Fact]
+    public void Index_counts_matches_not_candidates()
+    {
+        // A two-component query drives the loop from one component and `continue`s on the rest, while
+        // the interpreter filters before iterating. The counter must therefore be bumped AFTER the
+        // guards, or the backend numbers entities the interpreter never sees.
+        var (code, _) = Emit("  shape $A { a: int }\n  shape $B { b: int }\n" +
+                             "  shard S { settled { target $A $B as r { let n = Index } } }");
+
+        int guard = code.IndexOf("continue;", StringComparison.Ordinal);
+        int bump = code.IndexOf("++;", guard, StringComparison.Ordinal);
+        Assert.True(guard >= 0, "expected a `continue` guard for the second component");
+        Assert.True(bump > guard, "the index must be incremented after the guard, not before it");
+    }
 }
