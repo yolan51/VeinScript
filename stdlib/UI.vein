@@ -21,7 +21,12 @@ bundle UI by Vein {
         // `id` first would silently turn every existing `Button("Save")` into a button with the id
         // "Save" and no label. The essential field leads; the decoration follows.
         shared("A button: its label, plus the identifier, style class and handler a renderer resolves.")
-        shape $Button { label: string, id: string, class: string, onclick: string }
+        // Only the label is REQUIRED, and the defaults say so out loud. In HTML an id, a class and a
+        // handler are all optional — `<button>Go</button>` is a complete button — so `bring Button("Go")`
+        // has to stay a one-argument call. Without the defaults it is three silently empty parameters,
+        // which VS0228 now reports, correctly: a missing argument and an argument deliberately left out
+        // look identical at the call site, and a default is how a declaration tells them apart.
+        shape $Button { label: string, id: string = "", class: string = "", onclick: string = "" }
 
         shared("A text input field with current value and placeholder.")
         shape $Field { value: string, placeholder: string }

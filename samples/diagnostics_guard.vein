@@ -7,19 +7,24 @@
 // A fault raises @DiagnosticRaised and you can `hear` it — samples/diagnostics.vein shows that. A wrong
 // ARGUMENT does not, because it does not fault. Here is the whole truth, measured against this tree:
 //
-//   bring Row("a", 1, 99, "x")     too many args    VS0204, a COMPILE ERROR. Caught, and caught well.
-//   bring Row("only-title")        too few args     compiles, runs, `rank` is silently EMPTY.
-//   bring Row(42, "words")         wrong types      compiles, runs, the values land exactly as written.
-//   emit @Order { item: "nuts" }   missing field    compiles, runs, `qty` reads empty.
-//   emit @Order { quantity: 9 }    MISSPELLED field compiles, runs, the 9 is dropped on the floor.
+//   bring Row("a", 1, 99, "x")     too many args    VS0204 error
+//   bring Row("only-title")        too few args     VS0228 warning
+//   bring Row(42, "words")         wrong types      VS0230 warning
+//   add(1)  /  add(1, 2, 3)        call arity       VS0229 warning
+//   emit @Order { quantity: 9 }    unknown field    VS0227 warning
+//   emit @Order { item: "nuts" }   missing field    NOT reported — a missing field reads as empty, and
+//                                                   that is load-bearing: @Fetch gained `headers` after
+//                                                   programs were emitting it with three fields.
 //
-// Only the first is caught by anything. Parameter types are not enforced (`IrExpr.ResolvedType` is never
-// assigned — there is no semantics pass), and an event payload is a free-form map, so a field name that
-// matches nothing is simply a field name that matches nothing.
+// All but the last are caught BEFORE the program runs, so `hear @DiagnosticRaised` is not the answer to
+// a bad argument — the compiler is. There would be nothing to hear anyway: no exception is thrown and no
+// event raised; the program just works with empty values it believes are real.
 //
-// So `hear @DiagnosticRaised` is NOT the answer to a bad argument. There is nothing to hear: no
-// exception was thrown, no event was raised, and the program is quietly working with empty values it
-// believes are real. The answer is a GUARD — a shard that checks the data where it enters and says so.
+// WHAT A COMPILER CANNOT REACH is data. A row from a database, a JSON body, a form field — their shape
+// is not in your source, so no check can look at it. That is what a GUARD is for, and it is the whole
+// point of this file:
+//
+//     a static check catches what you WROTE.  a guard catches what ARRIVED.
 //
 // WHY A SHARD AND NOT AN `if` AT EVERY CALL SITE. The check lives in one place, on the boundary the data
 // crosses, and every producer gets it without knowing. That is the same reason the collector in
@@ -56,16 +61,25 @@ bundle DiagnosticsGuard by you {
             emit @RowArrived { title: "ship it", rank: 0 }          // odd: rank 0 is not a rank
             emit @RowArrived { title: "", rank: 5 }                 // broken: no title
 
-            // THE ONE THAT LOOKS RIGHT. `rnk` is not a field of @RowArrived, so the 9 goes nowhere.
-            // Nothing warns about this at any stage: not the parser, not the compiler, not the runtime.
-            // A typo in a payload key is the quietest mistake available in VeinScript today, and the
-            // guard is the only thing that ever notices the CONSEQUENCE.
+            // THE ONE THE COMPILER CANNOT SEE. The payload below is built from data that arrived as
+            // JSON — a database row, a request body, a file — and the key is `rnk`, not `rank`. So
+            // `row.rank` is nothing, and `rank` arrives EMPTY.
             //
-            // A missing `int` arrives EMPTY rather than 0 — look at the output, which prints
-            // `rank ` with nothing after it. `r.rank < 1` is still true for it, so the guard below
-            // catches the typo and the honest zero with one test. Do not read that as "missing means
-            // zero": it does not, and `+ r.rank` shows the difference the moment you print it.
-            emit @RowArrived { title: "paint it", rnk: 9 }
+            // Write that typo as a literal instead — `emit @RowArrived { title: "x", rnk: 9 }` — and
+            // the compiler now stops you: VS0227, "@RowArrived has no field 'rnk'". That check did not
+            // exist when this file was written, and adding it is what sharpened the lesson:
+            //
+            //     a static check catches what you WROTE.  a guard catches what ARRIVED.
+            //
+            // Neither replaces the other, and this line is the half no compiler can reach — the field
+            // name is inside a string that only exists at runtime.
+            //
+            // A missing `int` arrives EMPTY rather than 0 — look at the output, which prints `rank []`
+            // against `rank [0]`. `r.rank < 1` is true for both, which is why one test below catches
+            // the typo and the honest zero together. Do not read that as "missing means zero": it does
+            // not, and printing it shows the difference immediately.
+            let row = fromJson("{\"title\":\"paint it\",\"rnk\":9}")
+            emit @RowArrived { title: row.title, rank: row.rank }
         }
     }
 

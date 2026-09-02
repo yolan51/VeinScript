@@ -160,13 +160,13 @@ public class DiagnosticsTests
     }
 
     [Fact]
-    public void A_bring_with_too_few_arguments_is_not_checked_and_the_field_is_empty()
+    public void A_bring_with_too_few_arguments_is_VS0228_and_the_field_is_still_empty()
     {
-        // Documents a HOLE, not a feature. The row is built, the missing param is empty, and nothing
-        // anywhere says so. If this test ever fails because a check was added, that is good news —
-        // update it rather than restoring the silence.
+        // Reported now, but the RUNTIME is unchanged and that half still matters: a warning does not
+        // stop the program, so the row is built with an empty rank either way. The check tells you
+        // before it runs; it does not rescue you afterwards.
         var d = Diagnose(RowDecl + "  shard S { run once { bring Row(\"only-title\") } }");
-        Assert.DoesNotContain(d, x => x.Severity != Vein.Compiler.Diagnostics.Severity.Info);
+        Assert.Contains(d, x => x.Code == "VS0228");
 
         var output = Run(RowDecl +
             "  shard S { run once { bring Row(\"only-title\") } }\n" +
@@ -176,10 +176,36 @@ public class DiagnosticsTests
     }
 
     [Fact]
-    public void A_bring_with_swapped_types_is_not_checked_either()
+    public void Filling_the_rest_on_purpose_is_not_reported()
     {
-        // Parameter types are documentation: IrExpr.ResolvedType is never assigned, so there is no
-        // semantics pass to disagree with them. The values land exactly as written.
+        // `?` is the author saying "the remaining parameters get typed zeros, and I mean it". A check
+        // that fired here would punish the one spelling that states the intent.
+        var d = Diagnose(RowDecl + "  shard S { run once { bring Row(\"only-title\")? } }");
+
+        Assert.DoesNotContain(d, x => x.Code == "VS0228");
+    }
+
+    [Fact]
+    public void A_parameter_with_a_default_is_optional_and_not_reported()
+    {
+        var d = Diagnose(
+            "  shape $Card { title: string, note: string = \"\" }\n  mark #Card\n" +
+            "  builder Card { $Card   mark #Card }\n" +
+            "  shard S { run once { bring Card(\"just a title\") } }");
+
+        Assert.DoesNotContain(d, x => x.Code == "VS0228");
+    }
+
+    [Fact]
+    public void A_bring_with_swapped_literal_types_is_VS0230()
+    {
+        var d = Diagnose(RowDecl + "  shard S { run once { bring Row(42, \"not-a-number\") } }");
+
+        // Both arguments are wrong, and both are named — reporting only the first would leave the
+        // second to be discovered on the next compile.
+        Assert.Equal(2, d.Count(x => x.Code == "VS0230"));
+
+        // And the value still lands exactly as written: nothing converts it.
         var output = Run(RowDecl +
             "  shard S { run once { bring Row(42, \"not-a-number\") } }\n" +
             "  shard R { settled { target $Row #Row as r {\n" +
@@ -189,17 +215,83 @@ public class DiagnosticsTests
     }
 
     [Fact]
-    public void An_emit_with_a_misspelled_field_silently_drops_the_value()
+    public void An_int_passed_where_a_float_is_declared_is_not_a_mismatch()
     {
-        // The quietest mistake available in the language: `qty` is never set, and the 9 goes nowhere.
-        // No parse error, no compile warning, no runtime event.
+        // Widening. `IrLiteral` keeps int-ness and arithmetic preserves it, so this is the ordinary way
+        // to write a whole number — flagging it would make every `0` in a float field an error.
+        var d = Diagnose(
+            "  shape $P { x: float, y: float }\n  mark #P\n  builder P { $P   mark #P }\n" +
+            "  shard S { run once { bring P(0, 3) } }");
+
+        Assert.DoesNotContain(d, x => x.Code == "VS0230");
+    }
+
+    [Fact]
+    public void A_non_literal_argument_is_never_judged()
+    {
+        // The line this check will not cross. There is no inference pass, so the type of `a + b` is
+        // genuinely unknown here — and a warning that fires on correct code is worse than no warning.
+        var d = Diagnose(RowDecl +
+            "  fn pick() -> int { return 1 }\n" +
+            "  shard S { run once { let n = pick()\n    bring Row(\"ok\", n) } }");
+
+        Assert.DoesNotContain(d, x => x.Code == "VS0230");
+    }
+
+    [Fact]
+    public void An_emit_with_a_misspelled_field_is_VS0227()
+    {
+        // The quietest mistake in the language, now caught before it runs. The runtime half is
+        // unchanged: `qty` is never set and the 9 still goes nowhere.
+        var d = Diagnose(
+            "  event @Order { item: string, qty: int }\n" +
+            "  shard S { run once { emit @Order { item: \"nails\", quantity: 9 } } }");
+
+        var hit = Assert.Single(d, x => x.Code == "VS0227");
+        Assert.Contains("quantity", hit.Message);
+        Assert.Contains("item, qty", hit.Message);   // says what it DOES take
+
         var output = Run(
             "  event @Order { item: string, qty: int }\n" +
             "  shard S { run once { emit @Order { item: \"nails\", quantity: 9 } } }\n" +
             "  shard H { hear @Order as o { " + P("\"item=[\" + o.item + \"] qty=[\" + o.qty + \"]\"") + " } }");
 
         Assert.Contains("item=[nails] qty=[]", output);
-        Assert.DoesNotContain("9", output);
+    }
+
+    [Fact]
+    public void An_emit_that_omits_a_field_is_NOT_reported()
+    {
+        // Deliberate, and load-bearing. `@Fetch` gained `headers` after programs were already emitting
+        // it with three fields; reporting a missing field would have broken every one of them. An
+        // absent field reads as empty, which is a defined answer — an unknown field name is not.
+        var d = Diagnose(
+            "  event @Order { item: string, qty: int }\n" +
+            "  shard S { run once { emit @Order { item: \"nuts\" } } }");
+
+        Assert.DoesNotContain(d, x => x.Code == "VS0227");
+    }
+
+    [Fact]
+    public void A_call_with_the_wrong_number_of_arguments_is_VS0229()
+    {
+        // Nothing checked this in either direction. `add(1,2,3,4)` returned 3, `add(1)` returned 1 and
+        // `add()` returned 0 — every one a plausible-looking number.
+        var d = Diagnose(
+            "  fn add(a: int, b: int) -> int { return a + b }\n" +
+            "  shard S { run once { " + P("add(1, 2, 3, 4)") + "\n    " + P("add(1)") + " } }");
+
+        Assert.Equal(2, d.Count(x => x.Code == "VS0229"));
+    }
+
+    [Fact]
+    public void A_call_into_another_bundle_is_checked_too()
+    {
+        // The qualified form resolves through the bundle index, so a stdlib signature is as checkable
+        // as a local one — which is the half that matters for anyone building on the standard library.
+        var d = Diagnose("  shard S { run once { *Vein.Rest.Auth.bearer(\"a\", \"b\", \"c\") } }");
+
+        Assert.Contains(d, x => x.Code == "VS0229");
     }
 
     [Fact]

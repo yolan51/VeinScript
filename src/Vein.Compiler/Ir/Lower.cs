@@ -62,6 +62,12 @@ public sealed class Lower
     /// call resolves nowhere" — nothing tracked that before, because nothing needed to.
     private readonly HashSet<string> _localFuncs = new(StringComparer.Ordinal);
 
+    /// Locally declared events and functions, kept as DECLARATIONS rather than names, so a call site or
+    /// an `emit` can be checked against the signature it is supposed to match. `_localFuncs` above only
+    /// ever answered "does this name exist", which is not enough to say "with how many arguments".
+    private readonly Dictionary<string, EventDecl> _events = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, FuncDecl> _funcDecls = new(StringComparer.Ordinal);
+
     /// Marks this bundle DECLARES (`mark #Enemy`), as opposed to `_tags`, which is every mark it USES.
     ///
     /// Empty means the bundle never opted in, and nothing is checked — the additive rule `use` was built
@@ -102,7 +108,8 @@ public sealed class Lower
                 {
                     case BuilderDecl bd: _builders[bd.Name] = bd; break;
                     case ShapeDecl s: _shapeFields[s.Name] = s.Members.OfType<FieldDecl>().ToList(); break;
-                    case FuncDecl fd: _localFuncs.Add(fd.Name); break;
+                    case EventDecl ed: _events[ed.Name] = ed; break;
+                    case FuncDecl fd: _localFuncs.Add(fd.Name); _funcDecls[fd.Name] = fd; break;
                     case MarkDecl md: _declaredMarks.Add(md.Name); break;
                     case UseDecl ud: if (!_used.Contains(ud.Name, StringComparer.Ordinal)) _used.Add(ud.Name); break;
                     case PublicatorDecl pub: Collect(pub.Members); break;
@@ -460,6 +467,154 @@ public sealed class Lower
         return mangled;
     }
 
+    /// A `fn`/`SF` call whose argument count does not match the declaration.
+    ///
+    /// Nothing checked this at all, in either direction, and the results were quiet nonsense:
+    /// `add(1, 2, 3, 4)` returned 3 (the extras ignored), `add(1)` returned 1 (the missing `b` read as
+    /// nothing), and `add()` returned 0. Every one of those is a plausible-looking number.
+    ///
+    /// A LITERAL argument against the type its parameter declares.
+    ///
+    /// Deliberately literals only, and deliberately not a type checker. `IrExpr.ResolvedType` is never
+    /// assigned and there is no inference pass, so the type of `a + b` or `row.title` is genuinely
+    /// unknown here — guessing would produce false positives on correct code, which is the one thing a
+    /// warning must not do. A literal needs no inference: `bring Row(42, "not-a-number")` against
+    /// `{ title: string, rank: int }` is wrong on the face of it, and that is the mistake people
+    /// actually make.
+    ///
+    /// Only the four primitives are judged. A parameter typed `Mark`, `Entity`, or a shape name is
+    /// skipped rather than guessed at, and an int passed to a float is fine — widening, not a mismatch.
+    private void CheckLiteralType(Expr? arg, TypeRef? declared, string owner, string param)
+    {
+        if (arg is null || declared is null) return;
+
+        // `-1` parses as a negation around a literal, and it is still a literal argument to a reader.
+        var lit = arg as LiteralExpr
+               ?? (arg is UnaryExpr { Op: UnOp.Neg, Operand: LiteralExpr inner } ? inner : null);
+        if (lit is null) return;
+
+        string want = declared.Name;
+        string got = lit.Kind switch
+        {
+            LiteralKind.String => "string",
+            LiteralKind.Bool => "bool",
+            LiteralKind.Float or LiteralKind.Percent => "float",
+            _ => "int",
+        };
+
+        if (want is not ("string" or "int" or "float" or "bool")) return;   // not ours to judge
+        if (want == got) return;
+        if (want == "float" && got == "int") return;                        // widening is not a mistake
+
+        _diag.Warning("VS0230",
+            $"{owner} parameter '{param}' is {want}, but this argument is {got}. Nothing converts it — " +
+            "the value lands exactly as written and every later read sees the wrong kind.", lit.Span);
+    }
+
+    /// Unlike a builder parameter, a `fn`/`SF` parameter cannot carry a default — `Param` has no slot
+    /// for one — so the count is exact in both directions and there is no optional tail to allow for.
+    private void CheckCallArity(FuncDecl decl, string name, IReadOnlyList<Expr> args, SourceSpan span)
+    {
+        for (int i = 0; i < args.Count && i < decl.Params.Count; i++)
+            CheckLiteralType(args[i], decl.Params[i].Type, $"'{name}'", decl.Params[i].Name);
+
+        int total = decl.Params.Count, got = args.Count;
+        if (got == total) return;
+
+        _diag.Warning("VS0229",
+            $"'{name}' takes {total} argument(s) and got {got}. " +
+            (got > total
+                ? "The extra ones are evaluated and discarded."
+                : "The missing ones read as empty, which prints as nothing and compares as less than 1."),
+            span);
+    }
+
+    /// The `fn`/`SF` a qualified `*A.B.P.name` refers to. Same suffix match ImportExternalFunction uses,
+    /// kept separate because that one has the side effect of importing the body.
+    private FuncDecl? ResolveExternalFunc(IReadOnlyList<string> path, string name)
+    {
+        string refKey = string.Join(".", path) + "." + name;
+        return Index.Functions.FirstOrDefault(kv =>
+            kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal)).Value;
+    }
+
+    /// `bring Builder(…)` with fewer arguments than the builder has required parameters.
+    ///
+    /// Too MANY has been VS0204 since builders existed; too few was silent, and it is the worse of the
+    /// two: the row is built, the missing parameter is empty, and the program carries on with a value it
+    /// believes is real. `bring Row("only-title")` against `{ title, rank }` produces a row whose rank
+    /// prints as nothing at all.
+    ///
+    /// A parameter with a DEFAULT is optional, and `bring X(…)?` (FillRest) asks for the rest to be
+    /// filled with typed zeros — both are deliberate, and neither is reported.
+    private void CheckTooFewArgs(BringStmt br, string builder,
+                                 List<(string Name, TypeRef? Type, Expr? Default, string? From)> prms)
+    {
+        // Types first, so a call with the right count but the wrong kinds is still reported.
+        for (int i = 0; i < br.Args.Count && i < prms.Count; i++)
+            CheckLiteralType(br.Args[i], prms[i].Type, $"`bring {builder}`", prms[i].Name);
+
+        if (br.FillRest) return;
+
+        int required = prms.Count(p => p.Default is null);
+        if (br.Args.Count >= required) return;
+
+        var missing = prms.Where(p => p.Default is null).Skip(br.Args.Count).Select(p => p.Name);
+        _diag.Warning("VS0228",
+            $"`bring {builder}` needs {required} argument(s) and got {br.Args.Count} — " +
+            $"{string.Join(", ", missing)} will be empty. Add the value, or write `?` to fill the rest " +
+            "with typed zeros on purpose.", br.Span);
+    }
+
+    /// `emit @E { … }` against @E's declaration.
+    ///
+    /// A payload is a free-form map at runtime, which is what makes this worth checking at compile time:
+    /// a key that matches no field is not an error anywhere later, it is simply a key nobody reads. So
+    /// `emit @Order { item: "nails", quantity: 9 }` against `{ item, qty }` drops the 9 on the floor and
+    /// every stage stays silent — the quietest mistake available in the language.
+    ///
+    /// UNKNOWN fields are reported and MISSING ones are not. A missing field reads as empty, which is
+    /// load-bearing: `@Fetch` gained `headers` after programs were already emitting it with three
+    /// fields, and those programs still mean what they did. A field that matches nothing has no such
+    /// defence — nobody writes one on purpose.
+    private void CheckEmitPayload(EmitStmt em)
+    {
+        if (em.Fields.Count == 0) return;
+
+        var decl = ResolveEvent(em.EventPath, em.Event);
+        if (decl is null) return;    // an event this bundle cannot see: not this check's business
+
+        var known = ExpandMembers(decl.Members);
+        if (known.Count == 0) return;
+
+        foreach (var f in em.Fields)
+        {
+            var match = known.FirstOrDefault(k => string.Equals(k.Name, f.Name, StringComparison.Ordinal));
+            if (match.Name is null)
+            {
+                _diag.Warning("VS0227",
+                    $"@{em.Event} has no field '{f.Name}', so this value is dropped. It takes: " +
+                    string.Join(", ", known.Select(k => k.Name)) + ".", f.Span);
+                continue;
+            }
+            CheckLiteralType(f.Value, match.Type, $"@{em.Event} field", f.Name);
+        }
+    }
+
+    /// The event a bare or qualified `@Name` refers to: declared here, reached by a `*A.B.P.` path, or
+    /// pulled in by `use`. Null when nothing matches — including the runtime's own built-ins, which have
+    /// no declaration to check against.
+    private EventDecl? ResolveEvent(IReadOnlyList<string> path, string name)
+    {
+        if (path.Count > 0)
+        {
+            string refKey = string.Join(".", path) + "." + name;
+            return Index.Events.FirstOrDefault(kv =>
+                kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal)).Value;
+        }
+        return _events.TryGetValue(name, out var local) ? local : null;
+    }
+
     private static string RefText(ShapeInclude si) =>
         si.Path.Count > 0 ? "*" + string.Join(".", si.Path) + ".$" + si.Shape : "$" + si.Shape;
 
@@ -657,6 +812,7 @@ public sealed class Lower
                     new IrExpr[] { LowerExpr(mk.Target), new IrTypeNameExpr(mk.Mark) }));
             }
             case EmitStmt em:
+                CheckEmitPayload(em);
                 return new IrExprStmt(new IrRuntimeCall("Emit",
                     new IrExpr[] { new IrStructInit(em.Event, em.Fields.Select(LowerFieldInit).ToList(), em.FillRest) }));
             case DestroyStmt d:
@@ -778,6 +934,10 @@ public sealed class Lower
         // `??` rather than a ternary on `generated`: the compiler cannot tie that flag back to the null
         // check, so the ternary read as `string? → string` (CS8600/CS8604). The right-hand side still
         // only evaluates — and so only bumps the depth — when there is no name.
+        // The identity path walks members rather than computing a parameter list, so the arity check
+        // needs the list built for it — the same expansion the fragment path already does.
+        CheckTooFewArgs(br, b.Name, ExpandMembers(b.Members.Where(m => m is not MarkMember), ownerKey));
+
         bool generated = br.Bind is null;
         string ent = br.Bind ?? ("__ent" + _identityDepth++);
         stmts.Add(new IrLet(ent, null, new IrCall(new IrLocalRef("spawn"), Array.Empty<IrExpr>()), false));
@@ -992,6 +1152,7 @@ public sealed class Lower
         var prms = ExpandMembers(b.Members.Where(m => !ReferenceEquals(m, output)), ownerKey);
         if (!br.FillRest && br.Args.Count > prms.Count)
             _diag.Error("VS0204", $"Builder '{b.Name}' takes {prms.Count} param(s), got {br.Args.Count}.", br.Span);
+        CheckTooFewArgs(br, b.Name, prms);
 
         var stmts = new List<IrStmt>();
         for (int i = 0; i < prms.Count; i++)
@@ -1084,6 +1245,8 @@ public sealed class Lower
             case CallExpr { Callee: StarRefExpr star } c when star.Sigil == MemberSigil.None:
             {
                 string? imported = ImportExternalFunction(star.Path, star.Member, c.Span);
+                if (ResolveExternalFunc(star.Path, star.Member) is { } xdecl)
+                    CheckCallArity(xdecl, star.Member, c.Args, c.Span);
                 var args = c.Args.Select(LowerExpr).ToList();
                 return imported is null
                     ? new IrCall(new IrScopeRef(string.Join(".", star.Path), star.Member), args)
@@ -1118,6 +1281,10 @@ public sealed class Lower
                 return imported is null ? new IrCall(LowerExpr(c.Callee), args)
                                         : new IrCall(new IrLocalRef(imported), args);
             }
+            case CallExpr { Callee: NameExpr ln } c when _funcDecls.TryGetValue(ln.Name, out var ldecl):
+                CheckCallArity(ldecl, ln.Name, c.Args, c.Span);
+                return new IrCall(LowerExpr(c.Callee), c.Args.Select(LowerExpr).ToList());
+
             case CallExpr c: return new IrCall(LowerExpr(c.Callee), c.Args.Select(LowerExpr).ToList());
             case BinaryExpr b: return new IrBinary(MapBin(b.Op), LowerExpr(b.Left), LowerExpr(b.Right));
             case UnaryExpr u: return new IrUnary(u.Op == UnOp.Neg ? IrUnOp.Neg : IrUnOp.Not, LowerExpr(u.Operand));

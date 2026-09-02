@@ -334,3 +334,31 @@ worse than code that does not compile. `samples/json_roundtrip.vein`.
 a Release backend inflates the ratio ~1.4×. And the generated code keeps getting faster for several
 hundred frames — a window opening at frame 100 reports 6.6× where the steady state is 10–18×. Both
 mistakes were made here before the harness was trusted.
+
+**26. ARITY AND LITERAL TYPES ARE CHECKED — everything else about a value still is not.** Four checks
+fire before the program runs, and the Workbench shows them because they are ordinary diagnostics:
+
+| written | code | |
+|---|---|---|
+| `bring B(…)` too many args | **VS0204** | error |
+| `bring B(…)` too few | **VS0228** | warning — the missing params read empty |
+| `emit @E { typo: … }` | **VS0227** | warning — names what @E does take |
+| `fn`/`SF` call, wrong count | **VS0229** | warning — local and `*A.B.P.` alike |
+| literal of the wrong kind | **VS0230** | warning — `bring Row(42, "words")` |
+
+`?` (FillRest) and a parameter with a **default** are the two ways to say "fewer on purpose", and
+neither is reported. An `int` where a `float` is declared is widening, not a mismatch.
+
+**What is deliberately NOT checked**, each for a reason:
+
+- **A missing `emit` field.** It reads as empty, and that is load-bearing — `@Fetch` gained `headers`
+  after programs were emitting it with three fields, and they still mean what they did.
+- **A non-literal argument.** `IrExpr.ResolvedType` is never assigned and there is no inference pass, so
+  the type of `a + b` or `row.title` is genuinely unknown. A warning that fires on correct code is worse
+  than no warning, so anything but a literal is skipped.
+- **Anything about DATA.** A JSON body, a database row, a form field — their shape is not in your source
+  and no check can reach it. That is what a guard shard is for: *a static check catches what you wrote,
+  a guard catches what arrived* (`samples/diagnostics_guard.vein`).
+
+A missing value reads **empty, not zero**. `< 1` is true for it either way, but printing shows `[]`
+against `[0]`.
