@@ -170,7 +170,14 @@ public sealed record WhileStmt(Expr Cond, Block Body, SourceSpan Span) : Stmt(Sp
 public sealed record TargetStmt(Expr Source, string Bind, Block Body, SourceSpan Span) : Stmt(Span);
 /// `target $Shape #Mark as self { … }` — the typed identity query, nested inside a schedule. Binds
 /// `self` to each matching entity; `::Shape.field` reads that entity's component.
-public sealed record QueryStmt(IReadOnlyList<string> Components, IReadOnlyList<string> Tags, string Bind, Block Body, SourceSpan Span) : Stmt(Span);
+public sealed record QueryStmt(IReadOnlyList<string> Components, IReadOnlyList<string> Tags, string Bind, Block Body, SourceSpan Span) : Stmt(Span)
+{
+    /// `target $Row #Row by Row.rank as r` — sort the matches by one component field before iterating.
+    /// Null when absent, which is spawn order (RULES.md 14b). Sorting happens where the data is READ,
+    /// so entity ids never move and the same set can be shown in several orders.
+    public string? OrderShape { get; init; }
+    public string? OrderField { get; init; }
+}
 public sealed record RepeatStmt(Expr Count, string? Var, Block Body, SourceSpan Span) : Stmt(Span);
 public sealed record MatchStmt(Expr Subject, IReadOnlyList<MatchArm> Arms, Block? Else, SourceSpan Span) : Stmt(Span);
 /// `IsMark` — the pattern was written `#Alpha` rather than as a bare enum case. Both match by NAME

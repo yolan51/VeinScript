@@ -61,6 +61,7 @@ public sealed class CSharpBackend : IVeinBackend
         sb.AppendLine("// Do not edit: regenerate with `veinc build <file> --backend csharp`.");
         sb.AppendLine("using System;");
         sb.AppendLine("using System.Collections.Generic;");
+        sb.AppendLine("using System.Linq;");                // ordered queries emit OrderBy/ThenBy
         sb.AppendLine("using ShardECS.SECS.Systems;");   // IIdentityTag — marks are identity tags
         sb.AppendLine("using Vein.Runtime.SECS;");
         sb.AppendLine();
@@ -382,8 +383,24 @@ public sealed class CSharpBackend : IVeinBackend
         // runtimes disagree on `Index`.
         string prevIdx = _indexVar;
         _indexVar = "__idx" + _loopDepth++;
+        // `by Shape.field` sorts where the data is READ. STRINGS MUST COMPARE ORDINALLY: C#'s default
+        // string comparer is culture-sensitive, so `OrderBy(k => k.title)` would order differently on a
+        // machine with a different locale — and differently from the interpreter, which uses
+        // `string.CompareOrdinal`. That is a divergence no output would reveal until it did.
+        //
+        // `.ThenBy(id => id)` keeps ties in spawn order, matching the interpreter's stable sort.
+        string order = "";
+        if (q.OrderShape is { } os && q.OrderField is { } of)
+        {
+            string key = $"World.Get<{Ident(os)}>(__k).{Ident(of)}";
+            bool isText = _componentTypes.TryGetValue(os, out var ot)
+                       && ot.Fields.FirstOrDefault(f => f.Name == of)?.Type.Name is "string" or "Mark";
+            order = isText
+                ? $".OrderBy(__k => {key}, StringComparer.Ordinal).ThenBy(__k => __k)"
+                : $".OrderBy(__k => {key}).ThenBy(__k => __k)";
+        }
         sb.AppendLine($"{pad}long {_indexVar} = -1;");
-        sb.AppendLine($"{pad}foreach (var __e in World.Query<{comp}{marks}>())");
+        sb.AppendLine($"{pad}foreach (var __e in World.Query<{comp}{marks}>(){order})");
         sb.AppendLine(pad + "{");
         foreach (var c in comps.Skip(1))
             sb.AppendLine($"{pad}    if (!World.Has<{c}>(__e)) continue;");

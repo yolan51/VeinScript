@@ -233,37 +233,37 @@ argument.
 
 ---
 
-## D13 — Query order is SPAWN order; no `order by` {#order}
+## D13 — Query order is spawn order; `by Shape.field` sorts it {#order}
 
-**DECIDED (for now).** `target` yields entities ascending by id, which is the order `spawn` — and so
-`bring` — created them. No order key, no sort, no comparator:
+**DECIDED — and the ordered query is now built.** This entry originally recorded an ordered query as
+*considered and deferred*, with two conditions for revisiting: merging two fetches into one display
+order, and re-sorting without re-fetching. Ordering came up in four separate conversations, which was
+the condition in practice.
 
 ```
-target $Row #Row as r { … }      // arrival order, always
-
-shape $Row { title: string, rank: int }
-target $Row #Row by Row.rank     // NOT syntax; considered and not added
+target $Row #Row as r { … }                  // spawn order — the default, and a guarantee
+target $Row #Row by Row.rank  as r { … }     // ascending by an int field
+target $Row #Row by Row.title as r { … }     // ascending by a string field
 ```
 
-*Rationale:* the ordering is a real guarantee on both runtimes rather than an accident —
-`EntityStore.Query` ends `.OrderBy(e => e)`, and `VeinWorld` iterates a `SortedSet<int>` — so it can be
-relied on, and `samples/web_app` already does for its nav, cards and counter. Where the data comes from
-somewhere that can sort, that is where sorting belongs: a served page rebuilds its world per request
-(`veinc serve` constructs a fresh interpreter each time), so the database is queried again anyway and
-`ORDER BY` uses an index the language cannot.
+*Rationale for sorting at READ time rather than at spawn:* entity ids never move, so nothing referring to
+a row — `$Parent { of: Entity }`, a handler reference — is disturbed; the same rows can be shown in
+several orders at once; and it works however the rows arrived. The alternative that was considered and
+rejected, destroying rows and re-bringing them in order, does reorder ids and therefore breaks every
+reference to them. A spawn-time ordering block was also considered: it cannot re-sort later, gives one
+fixed order per set, and would need brings to be deferred and replayed.
 
-The cost is that a `rank` field is inert — stored and never consulted — which is a sharp edge, so
-[RULES.md 14b](RULES.md) states it and `samples/rows_in_order.vein` shows the two ways to order anyway:
-at the source, or one pass per key (`repeat n as i` around a filtered query), which sorts by a field
-using only what the language has. The pass technique costs a scan per key value, which is why it is a
-technique rather than a reason not to add `order by` eventually.
+Two properties both runtimes must share, and `samples/entities_ordered.vein` is in `check-backend` to
+hold them:
 
-*Revisit when either of these turns up:* **merging two fetches** into one display order, which SQL cannot
-do across separate queries without a UNION; or **re-sorting a persistent world** without re-fetching,
-which needs a long-lived server interpreter that does not exist yet. An ordered query would then be
-`target … by Shape.field`, touching parser → IR → interpreter → backend, and would need a
-`check-backend` case, because two runtimes sorting differently is exactly the divergence that check
-exists to catch. A list type ([D9](#d9)) plus a sort function is the other route to the same place.
+- **Strings compare ORDINALLY.** The interpreter uses `string.CompareOrdinal`; the emitted C# is handed
+  `StringComparer.Ordinal`. C#'s default string comparison is culture-sensitive and would sort
+  differently on a machine with a different locale — a divergence no test output would reveal until it
+  did.
+- **The sort is STABLE**, so ties keep spawn order and repeated runs match.
+
+Still absent: descending order, and sorting by anything but one component field. `by` takes a shape and
+a field explicitly rather than inferring, because a multi-shape query has more than one candidate.
 
 ---
 

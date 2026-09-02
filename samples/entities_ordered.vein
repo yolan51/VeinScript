@@ -1,0 +1,71 @@
+// entities_ordered.vein — `target … by Shape.field`, ordering where the data is READ.
+//
+// A query yields spawn order and nothing sorted it, so a `rank` field could be stored and never
+// consulted. `by` fixes that:
+//
+//     target $Row #Row by Row.rank  as r { … }     // ascending by an int field
+//     target $Row #Row by Row.title as r { … }     // ascending by a string field
+//
+// Sorting at READ time rather than at spawn is the whole point: entity ids never move, so nothing
+// referring to a row (`$Parent { of: Entity }`, a handler reference) is disturbed, and the SAME rows can
+// be shown in several orders in the same frame. Destroying and re-bringing rows to reorder them would
+// break every one of those references.
+//
+// Ties keep spawn order — the sort is stable on both runtimes, which is what makes output repeatable.
+//
+// STRINGS COMPARE ORDINALLY, deliberately. The interpreter uses `string.CompareOrdinal` and the emitted
+// C# is given `StringComparer.Ordinal`, because C#'s DEFAULT string comparison is culture-sensitive and
+// would order differently on a machine with a different locale. That is the divergence this file is in
+// check-backend to catch.
+//
+//   veinc run samples/entities_ordered.vein --ticks 1
+//   bash tools/check-backend.sh
+
+bundle EntitiesOrdered by you {
+
+    shape $Row { title: string, rank: int }
+    mark #Row
+
+    builder Row { $Row   mark #Row }
+
+    shard Seed {
+        run once {
+            // Deliberately in neither rank nor title order, so both sorts have work to do.
+            bring Row("delta",   4)
+            bring Row("alpha",   1)
+            bring Row("Zeta",   -2)
+            bring Row("charlie", 3)
+            bring Row("bravo",   1)
+        }
+    }
+
+    shard Show {
+        settled {
+            emit *Vein.Console.Io.@Print { text: "-- spawn order --" }
+            target $Row #Row as r {
+                emit *Vein.Console.Io.@Print { text: "   " + r.Row.rank + "  " + r.Row.title }
+            }
+
+            // By an int field. Negatives sort before positives, which a string sort would not do.
+            emit *Vein.Console.Io.@Print { text: "-- by rank --" }
+            target $Row #Row by Row.rank as r {
+                emit *Vein.Console.Io.@Print { text: "   " + r.Row.rank + "  " + r.Row.title }
+            }
+
+            // By a string field. "Zeta" sorts BEFORE the lowercase names because ordinal comparison puts
+            // uppercase first — a culture-aware sort would place it between bravo and charlie, so this
+            // line is the one that proves the two runtimes agree on which comparison is used.
+            emit *Vein.Console.Io.@Print { text: "-- by title --" }
+            target $Row #Row by Row.title as r {
+                emit *Vein.Console.Io.@Print { text: "   " + r.Row.title }
+            }
+
+            // `alpha` and `bravo` both hold rank 1, and they come out in spawn order — alpha was brought
+            // first. A sort that was not stable could give either.
+            emit *Vein.Console.Io.@Print { text: "-- ties keep spawn order --" }
+            target $Row #Row by Row.rank as r {
+                if r.Row.rank == 1 { emit *Vein.Console.Io.@Print { text: "   " + r.Row.title } }
+            }
+        }
+    }
+}

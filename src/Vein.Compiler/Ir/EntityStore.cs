@@ -94,7 +94,8 @@ public sealed class EntityStore
     ///
     /// MATERIALISED to an array on purpose: the caller iterates it while the body may spawn, destroy or
     /// mark, and a snapshot makes all of that safe with no dying-entity bookkeeping.
-    public long[] Query(IReadOnlyList<string> shapes, IReadOnlyList<string> tags)
+    public long[] Query(IReadOnlyList<string> shapes, IReadOnlyList<string> tags,
+                        string? orderShape = null, string? orderField = null)
     {
         IEnumerable<long>? seed = null;
 
@@ -111,10 +112,39 @@ public sealed class EntityStore
         }
         seed ??= _alive;
 
-        return seed.Where(e => _alive.Contains(e)
-                            && shapes.All(s => Has(e, s))
-                            && tags.All(m => HasTag(e, m)))
-                   .OrderBy(e => e).ToArray();
+        var matches = seed.Where(e => _alive.Contains(e)
+                                   && shapes.All(s => Has(e, s))
+                                   && tags.All(m => HasTag(e, m)));
+
+        // Spawn order unless asked otherwise. `.OrderBy` is STABLE, so ties keep spawn order and a
+        // repeated run gives the same sequence — the property golden output depends on.
+        if (orderShape is null || orderField is null)
+            return matches.OrderBy(e => e).ToArray();
+
+        return matches.OrderBy(e => Read(e, orderShape, orderField), OrderKey.Instance)
+                      .ThenBy(e => e)
+                      .ToArray();
+    }
+
+    /// Orders the loosely-typed values a component field can hold. Numbers compare numerically and
+    /// strings ORDINALLY — never by culture, because the C# backend must produce the same sequence and
+    /// a culture-sensitive comparison differs by machine. Numbers sort before strings when a field
+    /// somehow holds both; nulls sort first.
+    private sealed class OrderKey : IComparer<object?>
+    {
+        public static readonly OrderKey Instance = new();
+
+        public int Compare(object? a, object? b)
+        {
+            if (a is null) return b is null ? 0 : -1;
+            if (b is null) return 1;
+
+            bool na = a is long or int or double, nb = b is long or int or double;
+            if (na && nb) return Convert.ToDouble(a).CompareTo(Convert.ToDouble(b));
+            if (na) return -1;
+            if (nb) return 1;
+            return string.CompareOrdinal(a.ToString(), b.ToString());
+        }
     }
 
     // ---- the activation overlay -------------------------------------------------------------

@@ -654,9 +654,21 @@ public sealed class Parser
                 if (Check(TokenKind.ShapeRef)) comps.Add(Advance().Text);
                 else tags.Add(Advance().Text);
             }
+            // `by Shape.field` — optional, and it goes before `as` so the query reads as one clause:
+            // what to match, how to order it, what to call each one. The shape is named explicitly
+            // rather than inferred, because a multi-shape query has more than one candidate.
+            string? orderShape = null, orderField = null;
+            if (Match(TokenKind.KwBy))
+            {
+                orderShape = ExpectName("a shape name after 'by'").Text;
+                Expect(TokenKind.Dot, "'.' after the shape name");
+                orderField = ExpectName("a field name").Text;
+            }
+
             Expect(TokenKind.KwAs, "'as'");
             string bind = Expect(TokenKind.Ident, "binding name").Text;
-            return new QueryStmt(comps, tags, bind, ParseBlock(), s);
+            return new QueryStmt(comps, tags, bind, ParseBlock(), s)
+                { OrderShape = orderShape, OrderField = orderField };
         }
         var src = ParseExpr();
         Expect(TokenKind.KwAs, "'as'");

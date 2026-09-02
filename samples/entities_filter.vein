@@ -8,8 +8,9 @@
 // (`firstN(Index, 3)`, `even(Index)`). Same functions either way: `Index` is an int like any other.
 //
 // The last block ORDERS by rank, which filtering cannot do on its own — a query yields spawn order and
-// nothing sorts it. Walking the key space with `repeat` and filtering to one value per pass is what puts
-// zeta (rank -2) first, where spawn order had it last.
+// nothing sorts it BY DEFAULT. `by Shape.field` on the query is the direct way (samples/entities_ordered.vein);
+// walking the key space with `repeat` still works when the key is not one component field. Either way,
+// zeta (rank -2) ends up first, where spawn order had it last.
 //
 //   veinc run samples/entities_filter.vein --ticks 1
 //   bash tools/check-backend.sh          (the same program, emitted to C# and diffed against the above)
@@ -30,15 +31,6 @@ bundle EntitiesFilter by you {
 
     shard Seed {
         run once {
-            *Vein.OrderedByInt($Row.rank) {
-                bring Row("alpha",   1)
-                bring Row("beta",    2)
-                bring Row("gamma",   3)
-                bring Row("delta",   4)
-                bring Row("epsilon", 5)
-                bring Row("zeta",   -2)
-            }
-
             bring Row("alpha",   1)
             bring Row("beta",    2)
             bring Row("gamma",   3)
@@ -95,10 +87,10 @@ bundle EntitiesFilter by you {
 
             // ---- ORDERING, which filtering cannot do on its own ---------------------------------------
             //
-            // A query yields spawn order and nothing sorts it (RULES.md 14b) — `rank` is stored and no
-            // `target` consults it. To walk a key instead of a position, walk the KEY SPACE outside the
-            // query and filter to one value per pass. `repeat` is the only construct that can: `Index`
-            // counts iterations of the loop you already have, so it cannot reorder anything.
+            // A query yields spawn order unless asked (RULES.md 14b). `by Row.rank` would sort this
+            // directly; the pass below is the older technique, kept because it needs no ordered query and
+            // still works when the key is not a single component field: walk the key space outside the
+            // query and filter to one value per pass.
             //
             // Ranks here run -2..5, so eight passes with an offset — and the offset is the honest cost.
             // The range has to be known, which is why "order at the source" is the better answer whenever

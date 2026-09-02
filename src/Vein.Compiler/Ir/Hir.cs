@@ -34,7 +34,8 @@ public sealed record IrFunction(
     string Name, IReadOnlyList<IrParam> Params, IrTypeRef Return, IrBlock Body,
     bool IsPure, string? Doc, IReadOnlyList<IrAttr> Attrs);
 
-public sealed record IrQuery(IReadOnlyList<string> Components, IReadOnlyList<string> Tags, string Bind);
+public sealed record IrQuery(IReadOnlyList<string> Components, IReadOnlyList<string> Tags, string Bind,
+                             string? OrderShape = null, string? OrderField = null);
 
 public sealed record IrShard(
     string Name, IReadOnlyList<IrField> State, IrQuery? Query,

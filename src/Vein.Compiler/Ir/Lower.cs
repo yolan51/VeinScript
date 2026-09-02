@@ -597,7 +597,7 @@ public sealed class Lower
                 // compile. Querying a mark nothing sets is legitimate — the query is simply always empty.
                 foreach (var tag in q.Tags) UseMark(tag, q.Span);
                 using var _ = BindTarget(q.Bind);
-                return new IrLoop(IrLoopKind.Target, null, q.Bind, null, new IrQuery(q.Components, q.Tags, q.Bind), null, LowerBlock(q.Body));
+                return new IrLoop(IrLoopKind.Target, null, q.Bind, null, new IrQuery(q.Components, q.Tags, q.Bind, q.OrderShape, q.OrderField), null, LowerBlock(q.Body));
             }
             case RepeatStmt r:
                 return new IrLoop(IrLoopKind.Repeat, null, r.Var, null, null, LowerExpr(r.Count), LowerBlock(r.Body));

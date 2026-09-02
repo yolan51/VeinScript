@@ -142,21 +142,26 @@ Several shapes are an AND (`target $A $B`). There is no dispatch — a heterogen
 cannot be rebuilt by query, which is why `/docs` in `samples/web_app` renders from a literal sequence and
 only its section index is a query.
 
-**14b. QUERY ORDER IS SPAWN ORDER, and there is no other order.** A `target` yields entities ascending by
-id, ids are handed out by `spawn`, and `bring` spawns — so `query order == spawn order == the order you
-called bring`. Both runtimes: `EntityStore.Query` ends `.OrderBy(e => e)`, and the backend's `VeinWorld`
-iterates a `SortedSet<int>`. There is **no `order by`** anywhere in the language, so an `ord`/`rank` field
-can be stored and no query will consult it — which is the trap, because it looks like it should work.
+**14b. QUERY ORDER IS SPAWN ORDER unless you ask otherwise.** A `target` yields entities ascending by id,
+ids are handed out by `spawn`, and `bring` spawns — so by default `query order == spawn order == the
+order you called bring`. Both runtimes: `EntityStore.Query` ends `.OrderBy(e => e)`, and the backend's
+`VeinWorld` iterates a `SortedSet<int>`.
 
-Two ways to get an order anyway, both in `samples/rows_in_order.vein`: **order at the source** (`ORDER BY`
-in SQL, or emit rows in the order you want), or **one pass per key** —
+**`by Shape.field` sorts it** — at READ time, so entity ids never move and nothing referring to a row is
+disturbed:
 
 ```
-repeat 3 as i { target $Row #Row as r { if r.Row.rank == i + 1 { … } } }
+target $Row #Row by Row.rank  as r { … }     // int
+target $Row #Row by Row.title as r { … }     // string, compared ORDINALLY
 ```
 
-which sorts by a field using only `repeat` and `if`. It costs a scan per key value, so it fits a small
-dense integer range (menu slots, columns, priorities) and nothing wider.
+Ties keep spawn order (the sort is stable). Strings compare **ordinally** on both sides, deliberately:
+C#'s default string comparison is culture-sensitive and would order differently per machine.
+`samples/entities_ordered.vein`.
+
+This is also what orders a PAGE, because the `bring` that emits a fragment sits inside the loop — so the
+fragments queue in the query's order. The `bring` that SPAWNS a row is a different one, and its order
+stops mattering the moment you sort at read time.
 
 **14c. `Index` is the nearest loop's 0-based counter, and it does NOT sort.** The parallel to `Entity`:
 that names WHICH identity, this names WHICH ITERATION. Works in `target` (query and collection) and in

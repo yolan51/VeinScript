@@ -8,18 +8,19 @@
 // on both runtimes — `EntityStore.Query` ends `.OrderBy(e => e)`, and the C# backend's `VeinWorld`
 // iterates a `SortedSet<int>`.
 //
-// THERE IS NO SORT built into a query. No `order by`, nothing in the stdlib. A `rank` field can be
-// stored and no `target` will consult it — which is the trap, because it looks like it ought to work.
-// This file stores one, prints the rows out of rank order to prove it does nothing, and then shows the
-// two ways to actually get an order:
+// A QUERY SORTS ONLY IF YOU ASK. By default nothing consults a `rank` field — which is the trap, because
+// it looks like it should work. This file stores one and prints the rows out of rank order to prove it.
 //
-//   1. ORDER AT THE SOURCE — `ORDER BY` in SQL, or emit the rows in the order you want them. Spawn
-//      order becomes display order, and for a served page this is also the cheaper answer: `veinc serve`
-//      builds a fresh interpreter per request, so the query runs again anyway and the database has the
-//      index.
-//   2. ONE PASS PER KEY — `repeat n as i` around a query filtered to `i`. Ordering by a key the language
-//      cannot sort on, using only what the language has. Costs a scan per key value, so it suits a small
-//      dense integer range (menu slots, columns, priorities) and nothing else. `shard ByRank` below.
+// Three ways to get an order, in increasing directness:
+//
+//   1. ORDER AT THE SOURCE — `ORDER BY` in SQL, or emit rows in the order you want. Spawn order becomes
+//      display order. For a served page this is also cheapest: `veinc serve` builds a fresh interpreter
+//      per request, so the query runs again anyway and the database has the index.
+//   2. ONE PASS PER KEY — `repeat n as i` around a query filtered to `i`. Needs the key range known, and
+//      costs a scan per value. `shard ByRank` below.
+//   3. `by Shape.field` ON THE QUERY — `target $Row #Row by Row.rank as r`. Added after this file was
+//      written, and it is what you would reach for now; see samples/entities_ordered.vein. The two
+//      techniques above are kept here because they still apply when the key is not one component field.
 //
 //   veinc run samples/rows_in_order.vein --ticks 1
 //

@@ -720,7 +720,7 @@ public sealed class Interp
                 if (lp.Query is { } q)
                 {
                     long idx = -1, prevIdx = _currentIndex;
-                    foreach (long entity in _store.Query(q.Components, q.Tags))
+                    foreach (long entity in _store.Query(q.Components, q.Tags, q.OrderShape, q.OrderField))
                     {
                         long previous = _currentEntity;
                         _currentEntity = entity;
