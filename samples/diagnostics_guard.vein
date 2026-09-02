@@ -1,0 +1,122 @@
+// diagnostics_guard.vein — validating what the language does not, and reporting it with info/warn/error.
+//
+//   veinc run samples/diagnostics_guard.vein --ticks 1
+//
+// READ THIS FIRST, because it is the reason the file exists.
+//
+// A fault raises @DiagnosticRaised and you can `hear` it — samples/diagnostics.vein shows that. A wrong
+// ARGUMENT does not, because it does not fault. Here is the whole truth, measured against this tree:
+//
+//   bring Row("a", 1, 99, "x")     too many args    VS0204, a COMPILE ERROR. Caught, and caught well.
+//   bring Row("only-title")        too few args     compiles, runs, `rank` is silently EMPTY.
+//   bring Row(42, "words")         wrong types      compiles, runs, the values land exactly as written.
+//   emit @Order { item: "nuts" }   missing field    compiles, runs, `qty` reads empty.
+//   emit @Order { quantity: 9 }    MISSPELLED field compiles, runs, the 9 is dropped on the floor.
+//
+// Only the first is caught by anything. Parameter types are not enforced (`IrExpr.ResolvedType` is never
+// assigned — there is no semantics pass), and an event payload is a free-form map, so a field name that
+// matches nothing is simply a field name that matches nothing.
+//
+// So `hear @DiagnosticRaised` is NOT the answer to a bad argument. There is nothing to hear: no
+// exception was thrown, no event was raised, and the program is quietly working with empty values it
+// believes are real. The answer is a GUARD — a shard that checks the data where it enters and says so.
+//
+// WHY A SHARD AND NOT AN `if` AT EVERY CALL SITE. The check lives in one place, on the boundary the data
+// crosses, and every producer gets it without knowing. That is the same reason the collector in
+// samples/diagnostics.vein belongs to nobody: a rule about the whole program should be written once.
+
+bundle DiagnosticsGuard by you {
+
+    shape $Row { title: string, rank: int }
+    mark #Row
+
+    builder Row { $Row   mark #Row }
+
+    // The boundary. Rows arrive as events — from a database, a file, another program — and NOTHING
+    // about this declaration forces a sender to fill it in correctly. That is what the guard is for.
+    event @RowArrived { title: string, rank: int }
+
+    // ---- the collector -----------------------------------------------------------------------------
+
+    shard Collector {
+        hear *Vein.Diagnostics.Report.@DiagnosticRaised as d {
+            if d.severity == 0 { emit *Vein.Console.Io.@Print { text: "   note  | " + d.message } }
+            if d.severity == 1 { emit *Vein.Console.Io.@Print { text: "   WARN  | " + d.message } }
+            if d.severity == 2 { emit *Vein.Console.Io.@Print { text: "   ERROR | " + d.message } }
+        }
+    }
+
+    // ---- rows arriving, correctly and otherwise ----------------------------------------------------
+
+    shard Source {
+        run once {
+            emit *Vein.Console.Io.@Print { text: "-- four rows arrive --" }
+
+            emit @RowArrived { title: "write the docs", rank: 2 }   // fine
+            emit @RowArrived { title: "ship it", rank: 0 }          // odd: rank 0 is not a rank
+            emit @RowArrived { title: "", rank: 5 }                 // broken: no title
+
+            // THE ONE THAT LOOKS RIGHT. `rnk` is not a field of @RowArrived, so the 9 goes nowhere.
+            // Nothing warns about this at any stage: not the parser, not the compiler, not the runtime.
+            // A typo in a payload key is the quietest mistake available in VeinScript today, and the
+            // guard is the only thing that ever notices the CONSEQUENCE.
+            //
+            // A missing `int` arrives EMPTY rather than 0 — look at the output, which prints
+            // `rank ` with nothing after it. `r.rank < 1` is still true for it, so the guard below
+            // catches the typo and the honest zero with one test. Do not read that as "missing means
+            // zero": it does not, and `+ r.rank` shows the difference the moment you print it.
+            emit @RowArrived { title: "paint it", rnk: 9 }
+        }
+    }
+
+    // ---- the guard: where info / warn / error get called --------------------------------------------
+    //
+    // Each severity earns its name, and the difference between them is what the program DOES next:
+    //
+    //   error — the row is rejected. Nothing is brought, and the program continues without it.
+    //   warn  — the row is kept, but something about it is suspicious enough to say out loud.
+    //   info  — nothing is wrong; this is the running total a reader wants at the end.
+
+    shard Guard {
+        hear @RowArrived as r {
+
+            // A missing string arrives EMPTY, not null, so this one test covers both "sent nothing" and
+            // "sent an empty title" — which are the same thing from here, and both unusable.
+            if r.title == "" {
+                *Vein.Diagnostics.Report.error("row rejected: a row with no title cannot be shown")
+            } else {
+                // Kept, but flagged. A rank of 0 is what a MISSING rank looks like — including the
+                // `rnk:` typo above — so this one warning catches both the honest zero and the typo.
+                if r.rank < 1 {
+                    *Vein.Diagnostics.Report.warn(
+                        "row \"" + r.title + "\" has rank [" + r.rank +
+                        "] — sent as 0, or the field name was misspelled and never arrived at all")
+                }
+
+                // KEPT ANYWAY, and the output shows why that is a choice and not an oversight: the
+                // "paint it" row is brought with an empty rank, sorts ahead of everything, and prints
+                // `rank ` with a hole in it. A warning that changes nothing leaves the bad value in the
+                // data. Moving this bring inside an `else` would make it an error instead — which is
+                // the real decision `warn` vs `error` is asking you to make.
+                bring Row(r.title, r.rank)
+            }
+        }
+    }
+
+    // ---- what survived ------------------------------------------------------------------------------
+    //
+    // `settled`, because a `bring` inside a `hear` commits at the end of THAT event (docs/RULES.md 12b) —
+    // a target loop in the guard itself would never see the row it had just brought.
+
+    shard Report {
+        settled {
+            *Vein.Diagnostics.Report.info("4 rows arrived, and these are the ones that were kept")
+
+            target $Row #Row by Row.rank as r {
+                emit *Vein.Console.Io.@Print {
+                    text: "   kept: rank " + r.Row.rank + "  " + r.Row.title
+                }
+            }
+        }
+    }
+}

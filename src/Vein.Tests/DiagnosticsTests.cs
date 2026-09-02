@@ -137,6 +137,89 @@ public class DiagnosticsTests
         Assert.Equal(1, output.Split("while reporting").Length - 1);
     }
 
+    // ---- what a WRONG ARGUMENT does, which is not this ----------------------------------------------
+    //
+    // A fault raises @DiagnosticRaised. A bad argument does not, because it does not fault — and that
+    // is the question people arrive with. These pin the behaviour as it actually is, so that a future
+    // check cannot be added without someone noticing these and updating them deliberately.
+
+    private static IReadOnlyList<Vein.Compiler.Diagnostics.Diagnostic> Diagnose(string body) =>
+        new VeinCompilerService().Compile(new CompileRequest("t.vein", "bundle T by me {\n" + body + "\n}")).Diagnostics;
+
+    private const string RowDecl =
+        "  shape $Row { title: string, rank: int }\n  mark #Row\n  builder Row { $Row   mark #Row }\n";
+
+    [Fact]
+    public void A_bring_with_too_many_arguments_is_a_compile_error()
+    {
+        // The one arity mistake anything catches — and it is caught at the right time, before the
+        // program runs, which is better than any runtime event could manage.
+        var d = Diagnose(RowDecl + "  shard S { run once { bring Row(\"a\", 1, 99, \"x\") } }");
+
+        Assert.Contains(d, x => x.Code == "VS0204");
+    }
+
+    [Fact]
+    public void A_bring_with_too_few_arguments_is_not_checked_and_the_field_is_empty()
+    {
+        // Documents a HOLE, not a feature. The row is built, the missing param is empty, and nothing
+        // anywhere says so. If this test ever fails because a check was added, that is good news —
+        // update it rather than restoring the silence.
+        var d = Diagnose(RowDecl + "  shard S { run once { bring Row(\"only-title\") } }");
+        Assert.DoesNotContain(d, x => x.Severity != Vein.Compiler.Diagnostics.Severity.Info);
+
+        var output = Run(RowDecl +
+            "  shard S { run once { bring Row(\"only-title\") } }\n" +
+            "  shard R { settled { target $Row #Row as r { " + P("\"rank=[\" + r.Row.rank + \"]\"") + " } } }");
+
+        Assert.Contains("rank=[]", output);
+    }
+
+    [Fact]
+    public void A_bring_with_swapped_types_is_not_checked_either()
+    {
+        // Parameter types are documentation: IrExpr.ResolvedType is never assigned, so there is no
+        // semantics pass to disagree with them. The values land exactly as written.
+        var output = Run(RowDecl +
+            "  shard S { run once { bring Row(42, \"not-a-number\") } }\n" +
+            "  shard R { settled { target $Row #Row as r {\n" +
+            "    " + P("\"title=[\" + r.Row.title + \"] rank=[\" + r.Row.rank + \"]\"") + " } } }");
+
+        Assert.Contains("title=[42] rank=[not-a-number]", output);
+    }
+
+    [Fact]
+    public void An_emit_with_a_misspelled_field_silently_drops_the_value()
+    {
+        // The quietest mistake available in the language: `qty` is never set, and the 9 goes nowhere.
+        // No parse error, no compile warning, no runtime event.
+        var output = Run(
+            "  event @Order { item: string, qty: int }\n" +
+            "  shard S { run once { emit @Order { item: \"nails\", quantity: 9 } } }\n" +
+            "  shard H { hear @Order as o { " + P("\"item=[\" + o.item + \"] qty=[\" + o.qty + \"]\"") + " } }");
+
+        Assert.Contains("item=[nails] qty=[]", output);
+        Assert.DoesNotContain("9", output);
+    }
+
+    [Fact]
+    public void A_missing_int_field_arrives_empty_and_not_zero()
+    {
+        // Worth pinning separately, because "missing means 0" is the assumption everyone brings and it
+        // is wrong. `< 1` is still true for it, which is why one guard catches both cases — but the
+        // moment you PRINT it the difference shows.
+        var output = Run(
+            "  event @Order { item: string, qty: int }\n" +
+            "  shard S { run once { emit @Order { item: \"nuts\" } } }\n" +
+            "  shard H { hear @Order as o {\n" +
+            "    " + P("\"qty=[\" + o.qty + \"]\"") + "\n" +
+            "    if o.qty < 1 { " + P("\"and it compares as less than 1\"") + " } } }");
+
+        Assert.Contains("qty=[]", output);
+        Assert.DoesNotContain("qty=[0]", output);
+        Assert.Contains("and it compares as less than 1", output);
+    }
+
     // ---- the sample ---------------------------------------------------------------------------------
 
     [Fact]
@@ -159,5 +242,31 @@ public class DiagnosticsTests
         Assert.DoesNotContain("THIS LINE NEVER PRINTS", output);
         // Still alive afterwards, and the rows the faulting run brought are intact.
         Assert.Contains("row: [write the docs] rank 3", output);
+    }
+
+    [Fact]
+    public void The_guard_sample_reports_all_three_severities_and_rejects_the_broken_row()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "stdlib"))) dir = dir.Parent;
+        string path = Path.Combine(dir!.FullName, "samples", "diagnostics_guard.vein");
+
+        var r = new VeinCompilerService().Compile(new CompileRequest(
+            Path.GetFileName(path), File.ReadAllText(path), SourcePath: path));
+        Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
+
+        var sw = new StringWriter();
+        new Interp { Ticks = 1 }.Run(r.Modules[0], new StringReader(""), sw);
+        string output = sw.ToString();
+
+        Assert.Contains("ERROR | row rejected", output);   // empty title, not brought
+        Assert.Contains("WARN  | row \"ship it\" has rank [0]", output);
+        Assert.Contains("note  | 4 rows arrived", output);
+
+        // The typo row: `rnk: 9` never reached `rank`, so it warns with an EMPTY rank, not 0.
+        Assert.Contains("WARN  | row \"paint it\" has rank []", output);
+
+        // Three kept out of four — the rejected one built nothing.
+        Assert.Equal(3, output.Split("kept: rank").Length - 1);
     }
 }
