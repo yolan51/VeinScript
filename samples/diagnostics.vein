@@ -1,0 +1,126 @@
+// diagnostics.vein — what VeinScript has instead of try/catch.
+//
+//   veinc run samples/diagnostics.vein --ticks 1
+//
+// THE FAILURE IS A MESSAGE. There is no block to encircle, and that is not an omission: `bring` and
+// `emit` cannot fail at the point they are written. `bring` always spawns (an unknown builder is
+// VS0203, at compile time); `emit` always succeeds, it just may reach nobody. Wrapping either would
+// guard nothing.
+//
+// What CAN go wrong is a whole unit of work — a schedule block, one `hear` handler — and the language
+// already had the shape for that before this file existed. Vein.Net answers a request that went wrong
+// with `@Failed`, and a send that arrived nowhere with `@Undelivered`. The failure arrives as an event
+// and you `hear` it, exactly like a success. So:
+//
+//     C                        VeinScript
+//     try { … }                the shard body, unchanged
+//     catch (e) { … }          hear *Vein.Diagnostics.Report.@DiagnosticRaised as d { … }
+//
+// The difference that matters: a `catch` belongs to the code that failed, and a `hear` belongs to
+// whoever cares. One shard can collect every diagnostic in the program without the failing shards
+// knowing it exists — which is what you want for a log, and impossible with try/catch.
+//
+// WHERE THE SFs GET CALLED. `*Vein.Diagnostics.Report.info/warn/error(…)` are for what YOUR code
+// decides is worth reporting — a row that failed validation, a config that looked wrong. You call them.
+// The RUNTIME raises the same event for a fault, so both land in one place and a collector written for
+// one gets the other for free.
+//
+// A DIAGNOSTIC IS NEVER DROPPED. Every other unheard event vanishes — an emit is not addressed to
+// anyone. This one prints to the console when no shard hears it, because a diagnostics library losing
+// its own diagnostic is the one outcome it must not have. Delete shard Collector below and the same
+// six lines still appear, in the runtime's own format.
+
+bundle DiagnosticsDemo by you {
+
+    shape $Row { title: string, rank: int }
+    mark #Row
+
+    builder Row { $Row   mark #Row }
+
+    // ---- the collector: this is the `catch` ------------------------------------------------------
+    //
+    // Declared FIRST so it is reading from the moment anything runs. It belongs to no particular
+    // failure, which is the point — every diagnostic in the program arrives here, whether some shard
+    // chose to report it or the runtime had to.
+
+    // READ THE OUTPUT ORDER, because it surprises people. The collected lines appear AFTER the plain
+    // prints, not interleaved with them. Nothing is out of order: `@Print` is an event too, and this
+    // handler answers a diagnostic by emitting ANOTHER event, which joins the back of the same queue.
+    // A collector is one hop further from the console than a `@Print` written inline.
+    shard Collector {
+        hear *Vein.Diagnostics.Report.@DiagnosticRaised as d {
+            // severity is an int, not an enum: 0 info / 1 warning / 2 error. stdlib/Diagnostics.vein
+            // says why — a cross-bundle enum needs link-time support that does not exist yet.
+            if d.severity == 0 { emit *Vein.Console.Io.@Print { text: "   note  | " + d.message } }
+            if d.severity == 1 { emit *Vein.Console.Io.@Print { text: "   WARN  | " + d.message } }
+            if d.severity == 2 { emit *Vein.Console.Io.@Print { text: "   ERROR | " + d.message } }
+        }
+    }
+
+    // ---- 1. diagnostics you raise yourself -------------------------------------------------------
+
+    shard Validate {
+        run once {
+            emit *Vein.Console.Io.@Print { text: "-- checking the rows --" }
+
+            bring Row("write the docs", 3)
+            bring Row("", -1)
+
+            // Nothing here FAILED. The program decided these rows are wrong, which is a judgement no
+            // runtime can make for you — and exactly what the SFs are for.
+            *Vein.Diagnostics.Report.info("2 rows to check")
+            *Vein.Diagnostics.Report.warn("a row has an empty title")
+            *Vein.Diagnostics.Report.error("a row has rank -1, which is not a rank")
+        }
+    }
+
+    // ---- 2. a fault the runtime raises for you ---------------------------------------------------
+
+    shard Compute {
+        run once {
+            emit *Vein.Console.Io.@Print { text: "-- dividing --" }
+            emit *Vein.Console.Io.@Print { text: "   5 % 2 = " + (5 % 2) }
+
+            // `% 0` genuinely throws, and this is the whole demonstration:
+            //
+            //   * the line below does not print — the BLOCK stops, not the statement. Resuming
+            //     mid-block would leave the world in a state no source line describes.
+            //   * the message names the shard AND the phase (`Compute (once)`), because "something
+            //     threw" is useless and "which unit of work died" is not.
+            //   * shard Carry_on below still runs. One broken unit does not take the program.
+            emit *Vein.Console.Io.@Print { text: "   5 % 0 = " + (5 % 0) }
+            emit *Vein.Console.Io.@Print { text: "   THIS LINE NEVER PRINTS" }
+        }
+    }
+
+    // `settled`, not `run once`, and the difference is load-bearing: the rows are brought in Validate's
+    // `run once`, and a `bring` commits at the END of its phase (docs/RULES.md 12b). A `target` in
+    // another `run once` block would run BEFORE that commit and print nothing at all — which looks
+    // exactly like "the fault destroyed the rows" and is nothing of the kind. Written the wrong way
+    // first, and the empty output is what caught it.
+    shard Carry_on {
+        settled {
+            emit *Vein.Console.Io.@Print { text: "-- the program is still alive --" }
+            target $Row #Row as r {
+                emit *Vein.Console.Io.@Print { text: "   row: [" + r.Row.title + "] rank " + r.Row.rank }
+            }
+        }
+    }
+
+    // ---- 3. the failure events that came first ---------------------------------------------------
+    //
+    // @DiagnosticRaised is the general case. A subsystem that can fail in a way worth naming gets its
+    // OWN event instead, because the name carries information a severity code cannot:
+    //
+    //     hear *Vein.Net.Http.@Failed     as f { … }   // no reply: bad host, refused, timed out
+    //     hear *Vein.Console.Io.@Undelivered as u { … } // that console is gone
+    //
+    // Both are the same idea — the failure is a message — and neither needs a block around the call
+    // that caused it. samples/db_supabase.vein hears @Failed for exactly this reason.
+
+    shard Unreachable {
+        hear *Vein.Net.Http.@Failed as f {
+            *Vein.Diagnostics.Report.error("no answer from " + f.url + ": " + f.reason)
+        }
+    }
+}

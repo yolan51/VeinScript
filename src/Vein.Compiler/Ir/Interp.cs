@@ -501,7 +501,8 @@ public sealed class Interp
     /// it emitted drain — the same shape as a frame, just triggered by the wall instead of a count.
     private void Fire(Schedule sched)
     {
-        Exec(sched.Body, sched.Owner, new Dictionary<string, object?>(StringComparer.Ordinal));
+        RunGuarded(sched.Body, sched.Owner,
+                   new Dictionary<string, object?>(StringComparer.Ordinal), sched.Kind);
         CommitPhase();
         Drain();
     }
@@ -526,8 +527,46 @@ public sealed class Interp
     {
         foreach (var sched in _schedules)
             if (sched.Kind == kind)
-                Exec(sched.Body, sched.Owner, new Dictionary<string, object?>(StringComparer.Ordinal));
+                RunGuarded(sched.Body, sched.Owner,
+                           new Dictionary<string, object?>(StringComparer.Ordinal), kind);
     }
+
+    /// Run one unit of user code — a schedule block or one event handler — and turn a fault into a
+    /// DIAGNOSTIC the program can hear, rather than an exception that ends the run.
+    ///
+    /// THIS IS THE LANGUAGE'S FAILURE IDIOM, not a new construct. Vein.Net already answers a request
+    /// that went wrong with @Failed and a send that arrived nowhere with @Undelivered: the failure is a
+    /// MESSAGE, heard like any other. A fault is the same shape, so `hear @DiagnosticRaised` is what
+    /// VeinScript has instead of `catch` — and it needs no block to encircle, which is just as well,
+    /// since `bring` and `emit` cannot fail at the point they are written.
+    ///
+    /// The unit is the BLOCK, not the statement. A `run once` body or one `hear` handler is what an
+    /// author thinks of as a piece of work; resuming mid-block would leave the world in a state no
+    /// source line describes.
+    ///
+    /// `canRaise` is false while a @DiagnosticRaised handler is running. A fault THERE cannot become
+    /// another @DiagnosticRaised — that is a loop the queue guard would end at 10,000 iterations, with
+    /// the original cause long buried.
+    private void RunGuarded(IrBlock body, Instance owner, Dictionary<string, object?> locals,
+                            string what, bool canRaise = true)
+    {
+        try { Exec(body, owner, locals); }
+        catch (ReturnSignal) { /* a `return` that escaped its fn — the block simply ends */ }
+        catch (Exception ex)
+        {
+            string where = $"{owner.Name} ({what})";
+            if (!canRaise) { _out?.WriteLine($"(error in {where} while reporting: {ex.Message})"); return; }
+
+            Emit("DiagnosticRaised", new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["severity"] = 2L, ["message"] = $"{where}: {ex.Message}",
+                ["origin"] = null, ["bundle"] = _bundle,
+            });
+        }
+    }
+
+    /// info / warning / error, matching the `severity` codes stdlib/Diagnostics.vein documents.
+    private static string SeverityWord(long s) => s switch { 0 => "info", 1 => "warning", _ => "error" };
 
     /// The one point in a phase where the world changes: the fold reducers reconcile every activation's
     /// contributions first, then the structural commands (mark/attach/destroy) queued during the phase
@@ -578,6 +617,20 @@ public sealed class Interp
             if (name == "Link") { DoLink(payload); continue; }
             if (name == "Fetch") { DoFetch(payload); continue; }
 
+            // A DIAGNOSTIC IS NEVER DROPPED. Every other unheard event vanishing is the design — an
+            // emit is not addressed to anyone. This one is different: a diagnostics library that loses
+            // its own diagnostic is the single outcome it must not have, and that is exactly what
+            // `*Vein.Diagnostics.Report.warn(…)` used to be in any program with no collector shard —
+            // a call that emitted into a queue nobody read, and printed nothing.
+            //
+            // So: a shard that hears it wins, and the console is the fallback rather than the default.
+            if (name == "DiagnosticRaised" && !_handlers.ContainsKey("DiagnosticRaised"))
+            {
+                _out?.WriteLine($"({SeverityWord(AsLong(payload.GetValueOrDefault("severity")))}: " +
+                                Str(payload.GetValueOrDefault("message")) + ")");
+                continue;
+            }
+
             if (!_handlers.TryGetValue(name, out var hs)) continue;
             foreach (var h in hs)
             {
@@ -588,7 +641,8 @@ public sealed class Interp
                     continue;
                 }
                 var locals = new Dictionary<string, object?> { [h.BindName] = payload };
-                Exec(h.Body, h.Owner, locals);
+                RunGuarded(h.Body, h.Owner, locals, "hear @" + name,
+                           canRaise: name != "DiagnosticRaised");
             }
 
             // An event is its own commit point.
