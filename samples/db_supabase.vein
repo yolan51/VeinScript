@@ -37,7 +37,8 @@ bundle DbSupabase by you {
     fn base() -> string { return "https://YOUR-PROJECT.supabase.co" }
     fn key() -> string { return "PASTE-YOUR-ANON-KEY" }
 
-    fn table() -> string { return base() + "/rest/v1/tasks" }
+    fn tablePath() -> string { return "/rest/v1/tasks" }
+    fn table() -> string { return base() + tablePath() }
 
     // `order=rank.asc` is the FIRST place to impose an order, and the cheapest: Postgres has an index and
     // this program does not. `by Task.rank` on the query below is the second place, and it is here as
@@ -53,7 +54,8 @@ bundle DbSupabase by you {
     // — a fragment builder emitting @Html — comes out right. See samples/entities_bring_rows.vein.
     // It is not used here because `order=rank.asc` already did the work, on a machine with an index.
     // See docs/SYNTAX-DECISIONS.md D14.
-    fn selectUrl() -> string { return table() + "?select=id,title,rank,done&order=rank.asc" }
+    fn selectPath() -> string { return tablePath() + "?select=id,title,rank,done&order=rank.asc" }
+    fn selectUrl() -> string { return base() + selectPath() }
 
     // NO QUERY PARAMETER IS BUILT FROM DATA HERE, and that is a rule rather than a convenience. There is
     // no percent-encoding in VeinScript — the language cannot look at a character — so a filter built
@@ -61,23 +63,12 @@ bundle DbSupabase by you {
     // inside the target loop, or add the encoded parameter from the host. stdlib/Rest.vein says the same
     // thing, and refuses to offer a `query(url, key, value)` for exactly this reason.
 
-    // ---- headers ---------------------------------------------------------------------------------
+    // ---- talking to it -----------------------------------------------------------------------------
     //
-    // Supabase wants the key TWICE: `apikey` is how the gateway routes to your project, and
-    // `Authorization` is the identity row-level security evaluates. Sending only one is the classic
-    // first failure — the reply is a 401 whose body names neither header.
-
-    fn auth() -> string {
-        return *Vein.Rest.Headers.also(
-                   *Vein.Rest.Auth.apiKey("apikey", key()),
-                   "Authorization", "Bearer " + key())
-    }
-
-    // `Prefer: return=representation` makes an insert answer with the rows it wrote, including the id
-    // Postgres generated. Without it the reply is 201 and an empty body, and the new row's id is lost.
-    fn writeHeaders() -> string {
-        return *Vein.Rest.Headers.also(auth(), "Prefer", "return=representation")
-    }
+    // *Vein.Rest.Db.get/post carry the double-header auth (apikey + Authorization: Bearer, the classic
+    // "sent only one, got a 401 that names neither" mistake) and, for post, `Prefer: return=representation`
+    // — see stdlib/Rest.vein for why both exist. `base()`/`key()` are the only two things this program
+    // supplies; everything past the colon is the same for any PostgREST-style API.
 
     // ---- what a row is ---------------------------------------------------------------------------
 
@@ -104,7 +95,7 @@ bundle DbSupabase by you {
     shard Load {
         run once {
             emit *Vein.Console.Io.@Print { text: "GET " + selectUrl() }
-            *Vein.Net.Http.getWith(selectUrl(), auth())
+            *Vein.Rest.Db.get(base(), key(), selectPath())
         }
     }
 
@@ -187,7 +178,7 @@ bundle DbSupabase by you {
             target $Draft #Draft as d {
                 let payload = "[" + toJson(d.Draft) + "]"
                 emit *Vein.Console.Io.@Print { text: "POST " + table() + " " + payload }
-                *Vein.Net.Http.postWith(table(), payload, writeHeaders())
+                *Vein.Rest.Db.post(base(), key(), tablePath(), payload)
             }
         }
     }

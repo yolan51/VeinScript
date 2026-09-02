@@ -64,6 +64,21 @@ bundle Rest by Vein {
 
         shared("A key in a header of the service's own choosing, e.g. apiKey(\"apikey\", key) or apiKey(\"X-API-Key\", key).")
         fn apiKey(name: string, key: string) -> string { return name + ": " + key }
+
+        // PostgREST-family services (Supabase included, but the pattern is theirs, not ours — see the
+        // file header) want the SAME key sent two ways: a named header routes the request to the right
+        // project, `Authorization` is the identity row-level security evaluates. Sending only one is the
+        // classic first failure — a 401 whose body names neither header (samples/db_supabase.vein hit
+        // this before writing it down). One function for the pair, so the mistake would have to be
+        // deleting a line rather than forgetting to add one.
+        // Fully qualified even though `also`/`apiKey` live in this same file: a leaf reference is
+        // resolved and inlined into the CALLER's module at compile time (STDLIB.md §1), body and all —
+        // so a bare name inside that body is looked up in the caller's own locals, not this bundle's.
+        // Only a `*Vein.Rest…` reference re-triggers the same import, recursively, for the callee too.
+        shared("Both headers a PostgREST-style API wants for one key: apiKey(name, key) plus bearer(key).")
+        fn keyed(name: string, key: string) -> string {
+            return *Vein.Rest.Headers.also(*Vein.Rest.Auth.apiKey(name, key), "Authorization", "Bearer " + key)
+        }
     }
 
     // Status — reading the reply.
@@ -82,9 +97,55 @@ bundle Rest by Vein {
         fn serverError(status: int) -> bool { return status >= 500 and status < 600 }
     }
 
-    // --- no behaviour here ---------------------------------------------------------------------------
-    // No shards and no events. Vein.Net already owns the events — re-declaring @Fetch here would give a
-    // program two names for one runtime event, which is the divergence VS0332 exists to catch. These are
-    // leaf functions: a qualified call imports the declaration at compile time, so
-    // `*Vein.Rest.Auth.bearer(…)` runs in the caller's module with no link step.
+    // Db — a keyed REST endpoint you talk to more than once: a PostgREST-style API (Supabase, or any
+    // hand-rolled service that authenticates the same way — see the file header for why nothing here
+    // names a vendor).
+    //
+    // WHY A BUILDER AND NOT AN IDENTITY. The natural shape for "declare this once, use it from more than
+    // one shard" is docs/RULES.md rule 7 — a `mark` member, so `bring` builds an identity and later code
+    // reaches it with `target`. That does not work HERE: only *leaf* primitives resolve across a bundle
+    // boundary today (STDLIB.md §1) — a `fn`/`SF`/builder gets imported into the consumer's module at
+    // compile time, but a `$Shape` pulled in only through a builder's include is never registered as a
+    // component TYPE in that module, and `target`/field-read (`c.Connection.base`) needs exactly that
+    // registration to find the row instead of silently reading empty strings. Confirmed against this
+    // tree's own interpreter before writing it down this way rather than the identity-template form.
+    //
+    // So `Connect` stays an EVENT builder (no `mark`, no output field — docs/LANGUAGE.md §3.9's third
+    // form): `bring` still declares the connection in one line, and it still fans out to as many shards
+    // as `hear *Vein.Rest.Db.@Connect` — no entity, no `target`, nothing that depends on the gap above.
+    // `get`/`post` below don't need a bring at all; call them directly wherever `base`/`key` are in scope.
+    publicator Db {
+        shared("Announce a connection: bring Connect(\"https://xyz.supabase.co\", \"anon-key\") — hear *Vein.Rest.Db.@Connect in your own shard(s) to react, or skip bring and call get/post directly with the same two values.")
+        builder Connect { base: string, key: string }
+
+        shared("GET base+path, with the paired apikey/bearer headers built from key.")
+        SF get(base: string, key: string, path: string) {
+            emit *Vein.Net.Http.@Fetch { url: base + path, method: "GET", body: "", headers: *Vein.Rest.Auth.keyed("apikey", key) }
+        }
+
+        // `Prefer: return=representation` makes an insert answer with the row(s) it wrote, including
+        // whatever the service generated (an id, a default, a computed column). Without it PostgREST
+        // answers 201 with an empty body, and a caller reading the reply for the new id finds nothing.
+        shared("POST a JSON body to base+path — paired auth headers, plus Prefer: return=representation.")
+        SF post(base: string, key: string, path: string, body: string) {
+            emit *Vein.Net.Http.@Fetch {
+                url: base + path, method: "POST", body: body,
+                headers: *Vein.Rest.Headers.also(*Vein.Rest.Auth.keyed("apikey", key), "Prefer", "return=representation")
+            }
+        }
+    }
+
+    // --- still no shard --------------------------------------------------------------------------------
+    // `Db.get`/`Db.post` are leaf SFs: they assemble a header string and `emit *Vein.Net.Http.@Fetch`,
+    // the event Vein.Net already owns and NetHttp.Hook already answers — re-declaring @Fetch here instead
+    // would give a program two names for one runtime event, the divergence VS0332 exists to catch.
+    // `Connect` is an ordinary no-channel builder (docs/LANGUAGE.md §3.9): `bring` emits `@Connect` and
+    // nothing runs on its own, so this is still vocabulary, not behaviour — a retry/timeout policy still
+    // has nowhere to hide here, for the same reason as always: a shard cannot be `shared`, so one
+    // declared here would be invisible to everyone who only wanted the vocabulary. Retry in your own
+    // shard, on `@Failed`.
+    //
+    // Everything else here — Headers, Auth, Status — is leaf functions: a qualified call imports the
+    // declaration at compile time, so `*Vein.Rest.Auth.bearer(…)` runs in the caller's module with no
+    // link step.
 }
