@@ -22,8 +22,8 @@ Open a `.vein` file (`Ctrl+O`) or a folder (`Ctrl+K`), edit, Build (`Ctrl+B`), R
 ┌ [VS] File Edit Build Run View Help ────────────────────────────────────────┐
 │ [VS] ▶ ▶▶ ■ [ Control ▾ ] veinc run control_center.vein   3 participants   │
 ├──────────────┬─────────────────────────────┬───────────────────────────────┤
-│ Project      │ ●server.vein │ alice.vein ✕ │  Outline │ IR Tree            │
-│ Explorer     ├─────────────────────────────┤  (declarations · VeinIR)      │
+│ Project      │ ●server.vein │ alice.vein ✕ │  Outline │ Events │ IR Tree   │
+│ Explorer     ├─────────────────────────────┤  (declarations · wiring)      │
 │ (semantic or │  VeinScript editor          │                               │
 │  file tree)  │  (highlight · line# ·       │                               │
 │              │   red underlines ·          │                               │
@@ -60,6 +60,18 @@ same symbol, **Ctrl+T** finds a declaration by typing a few letters of its name,
 lists everything the file declares grouped by kind, and **double-clicking an IR node** lands on the
 source line that produced it (`IrNode` has carried a `Span` since the tree was written, and nothing had
 ever read it).
+
+**Events** — who emits each event and who hears it, every row a jump. In an identity-oriented language
+this *is* the control flow: there are no calls between shards, so "what happens when this fires" can
+never be answered by reading downward. Two shapes are called out by colour, because both look like
+working code and neither is: an event **emitted but never heard** (dead, or a typo'd name) and one
+**heard but never emitted** (a handler that never runs). An event this file only uses is marked as
+declared elsewhere rather than shown as local and undeclared.
+
+**Session** — the folder, the open files, the active tab, the font size and the compile-as-you-type
+setting come back on the next launch. Written on every change to the open set, not only on close: a
+close handler alone covers a clean exit, and a kill or a crash would lose the session it exists to
+preserve. **File ▸ Open Recent** keeps the last eight folders.
 
 What makes this resolvable without a type checker is the **sigil**. `$Row` and `#Row` are different
 identities allowed to share a name (RULES 14e), and every use site says which one it means — so
@@ -265,7 +277,7 @@ exists rather than writing new analysis.
 | E2 | **Problems filtering** | Show only errors; group by code; hide a noisy warning |
 | E3 | **Quick fixes** | One click to fix VS0228 (arity), VS0231 (`base` with no default), VS0217 (shadowed built-in), VS0212 (unknown console) |
 | E4 | **Signature help** | Parameter names and defaults while typing a `bring`, so `base` is obvious |
-| E5 | **Event graph** | Who emits `@X` and who hears it, from `Tooling/EventCatalog.cs` |
+| E5 | ✅ **Event graph** | Who emits `@X` and who hears it, each row a jump — and which events go nowhere |
 | E6 | **Tick stepper** | Run 3 ticks, pause, step one more, and watch entities change |
 | E7 | **Event timeline** | What fired in which wave, in order, for one tick |
 | E8 | **Entity browser** | Every identity and its components at a chosen tick |
@@ -279,15 +291,15 @@ is next", it is "what does this identity look like now, and what changed it".
 
 | # | Item | Done bar |
 |---|---|---|
-| F1 | **Session restore** | Reopen and find the same folder, files and layout |
+| F1 | ✅ **Session restore** | Reopen and find the same folder, files, font size and settings |
 | F2 | **Saved run configurations** | Keep `--ticks 40` between sessions without editing the header |
 | F3 | **`.veinproj`** | A project file that names the principal, the stdlib path and the run configs |
 | F4 | **Stdlib as a read-only tree** | Read `stdlib/Web.vein` without opening it from disk by hand |
 | F5 | **Templates** | New CLI app / chat app / website, not only bundle and app |
 | F6 | **Run the four checks** | `dotnet test`, `check-ir`, `check-backend`, `check-perf` from a menu, with clickable results |
-| F7 | **Theme + font size** | Read it comfortably on a laptop |
-| F8 | **Shortcut map** | See every binding in one place |
-| F9 | **Recent files/folders** | Reopen last week's project in two clicks |
+| F7 | ✅ **Font size** (`Ctrl+±`) | Read it comfortably on a laptop — remembered between sessions |
+| F8 | ✅ **Shortcut map** | See every binding in one place, including the ones no menu shows |
+| F9 | ✅ **Recent folders** | Reopen last week's project in two clicks |
 
 ## Suggested order
 
@@ -302,7 +314,10 @@ questions the code alone does not. What is left is mostly *depth*.
 Also done: **A3 A4 A5** (argument editing, re-run, exit code + duration) · **D7 D8 D9 D10 D11**
 (go to definition, find references, symbol search, outline, IR → source).
 
-**Every item in tracks A and D is now done except bracket matching (D6b) and back/forward (D12).**
+Also done: **E5** (event graph) · **F1 F7 F8 F9** (session restore, font size, shortcut map, recent
+folders).
+
+**Every item in tracks A and D is done except bracket matching (D6b) and back/forward (D12).**
 
 Next, in order: **E3** (quick fixes for the mechanical diagnostics — VS0228 arity, VS0231 `base`,
 VS0217 shadowing; `DefinitionIndex` now supplies the positions they need), then **B5** (a combined

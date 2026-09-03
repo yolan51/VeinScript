@@ -25,6 +25,7 @@
         <MenuItem Header="_Open File…" Click="OnOpen" InputGesture="Ctrl+O" />
         <MenuItem Header="_Close Tab" Click="OnCloseTab" InputGesture="Ctrl+W" />
         <MenuItem Header="Open _Folder…" Click="OnOpenFolder" InputGesture="Ctrl+K" />
+        <MenuItem Header="Open _Recent" Name="RecentMenu" SubmenuOpened="OnRecentOpening" />
         <Separator />
         <MenuItem Header="_Save" Click="OnSave" InputGesture="Ctrl+S" />
         <MenuItem Header="Save _As…" Click="OnSaveAs" InputGesture="Ctrl+Shift+S" />
@@ -70,8 +71,14 @@
         <MenuItem Header="Focus _Terminal" Click="OnFocusTerminal" InputGesture="Ctrl+OemTilde" />
         <Separator />
         <MenuItem Header="Compile as You _Type" Click="OnToggleAutoBuild" />
+        <Separator />
+        <MenuItem Header="Zoom _In" Click="OnFontBigger" InputGesture="Ctrl+OemPlus" />
+        <MenuItem Header="Zoom _Out" Click="OnFontSmaller" InputGesture="Ctrl+OemMinus" />
+        <MenuItem Header="Reset _Zoom" Click="OnFontReset" InputGesture="Ctrl+D0" />
       </MenuItem>
       <MenuItem Header="_Help">
+        <MenuItem Header="_Keyboard Shortcuts" Click="OnShortcuts" />
+        <Separator />
         <MenuItem Header="_About VeinScript Workbench" Click="OnAbout" />
       </MenuItem>
     </Menu>
@@ -121,6 +128,9 @@
           <TabControl Name="Inspector">
             <TabItem Header="Outline">
               <local:OutlinePanel Name="Outline" />
+            </TabItem>
+            <TabItem Header="Events">
+              <local:EventGraphPanel Name="EventGraph" />
             </TabItem>
             <TabItem Header="IR Tree">
               <TreeView Name="IrTree" DoubleTapped="OnIrNodeActivated" />

@@ -8,8 +8,16 @@ namespace Vein.Compiler.Tooling;
 // enumerates every IOP primitive, and a parallel vocabulary for one concept is the drift this codebase
 // keeps deleting — the same reason the terminal runs the real CLI instead of reimplementing it.
 
+/// What a site DOES with the symbol. Emit and Hear are separated from a plain reference because for an
+/// event they are the two halves of the wiring — "who sends this, who listens" is the question, and a
+/// list that only said "used here" would answer neither half.
+public enum SiteRole { Declaration, Emit, Hear, Reference }
+
 /// One declaration or one use.
-public sealed record SymbolSite(string Name, SymbolKind Kind, SourceSpan Span, bool IsDefinition, string Owner);
+public sealed record SymbolSite(string Name, SymbolKind Kind, SourceSpan Span, SiteRole Role, string Owner)
+{
+    public bool IsDefinition => Role == SiteRole.Declaration;
+}
 
 // WHY: `SymbolIndex` gives completion a list of NAMES, with no positions, so nothing could answer "where
 // is this declared". Go-to-definition and find-references both need the same thing — a list of sites —
@@ -77,14 +85,14 @@ public sealed class DefinitionIndex
             }
 
         void Def(string name, SymbolKind kind, SourceSpan span) =>
-            sites.Add(new SymbolSite(name, kind, span, IsDefinition: true, owner));
+            sites.Add(new SymbolSite(name, kind, span, SiteRole.Declaration, owner));
     }
 
     /// Uses inside a body: the sigilled references that a jump should be able to start from.
     private static void Uses(IReadOnlyList<Node> members, string owner, List<SymbolSite> sites)
     {
-        void Use(string name, SymbolKind kind, SourceSpan span) =>
-            sites.Add(new SymbolSite(name, kind, span, IsDefinition: false, owner));
+        void Use(string name, SymbolKind kind, SourceSpan span, SiteRole role = SiteRole.Reference) =>
+            sites.Add(new SymbolSite(name, kind, span, role, owner));
 
         void Ex(Expr? e)
         {
@@ -137,7 +145,7 @@ public sealed class DefinitionIndex
                     Stm(q.Body);
                     break;
                 case AttachStmt a: Use(a.Shape, SymbolKind.Shape, a.Span); break;
-                case EmitStmt em: Use(em.Event, SymbolKind.Event, em.Span); foreach (var f in em.Fields) Ex(f.Value); break;
+                case EmitStmt em: Use(em.Event, SymbolKind.Event, em.Span, SiteRole.Emit); foreach (var f in em.Fields) Ex(f.Value); break;
                 case BringStmt br: Use(br.Builder, SymbolKind.Builder, br.Span); foreach (var a in br.Args) Ex(a); break;
                 case ExprStmt x: Ex(x.Expr); break;
             }
@@ -146,7 +154,7 @@ public sealed class DefinitionIndex
         foreach (var n in members)
             switch (n)
             {
-                case HearBlock hb: Use(hb.Event, SymbolKind.Event, hb.Span); Stm(hb.Body); break;
+                case HearBlock hb: Use(hb.Event, SymbolKind.Event, hb.Span, SiteRole.Hear); Stm(hb.Body); break;
                 case ScheduleBlock sc: Stm(sc.Body); break;
                 case FuncDecl f: Stm(f.Body); break;
                 case Stmt st: Stm(st); break;

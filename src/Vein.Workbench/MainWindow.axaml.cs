@@ -69,6 +69,7 @@ public partial class MainWindow : Window
     private WebPreviewPanel _webPreview = null!;
     private ConsoleTopologyPanel _consoles = null!;
     private OutlinePanel _outline = null!;
+    private EventGraphPanel _eventGraph = null!;
     private TabControl _inspector = null!;
 
     /// Where every shape, mark, event, builder, shard and function is declared and used. Rebuilt each
@@ -135,6 +136,8 @@ public partial class MainWindow : Window
         _consoles = this.FindControl<ConsoleTopologyPanel>("ConsoleTopology")!;
         _outline = this.FindControl<OutlinePanel>("Outline")!;
         _outline.Navigate = GoTo;
+        _eventGraph = this.FindControl<EventGraphPanel>("EventGraph")!;
+        _eventGraph.Navigate = GoTo;
         _inspector = this.FindControl<TabControl>("Inspector")!;
         _runConfigs = this.FindControl<ComboBox>("RunConfigs")!;
         _runHint = this.FindControl<TextBlock>("RunHint")!;
@@ -144,7 +147,7 @@ public partial class MainWindow : Window
 
         _terminal.RepoRoot = FindRepoRoot();
         _terminal.Resolve = ResolveVeinFile;
-        Closed += (_, _) => _terminal.StopAll();   // no console outlives the IDE that opened it
+        Closed += (_, _) => { SaveSession(); _terminal.StopAll(); };   // no console outlives the IDE
 
         _tabs.Activated += OnTabActivated;
         _tabs.ConfirmClose = ConfirmDiscardAsync;
@@ -165,12 +168,65 @@ public partial class MainWindow : Window
         _autoBuild.Tick += (_, _) => { _autoBuild!.Stop(); Build(renderPreview: false); };
         _editor.TextChanged += (_, _) => ScheduleBuild();
 
-        // Populate the explorer on launch so files are visible without Open Folder first.
-        if (!TryOpenDefaultProject())
+        // Last session first, then the default project, then a scratch buffer. Reopening where you left
+        // off is the difference between an editor you return to and one you re-navigate every launch.
+        if (!TryRestoreSession() && !TryOpenDefaultProject())
         {
             _tabs.Open(null, Sample);
             Build();
         }
+    }
+
+    // ---- session ---------------------------------------------------------
+
+    private readonly WorkbenchSettings _settings = WorkbenchSettings.Load();
+
+    /// Reopen the folder and files from last time. Files that have since been deleted or moved are
+    /// skipped silently — a missing file is not an error worth a dialog on startup, it is just gone.
+    private bool TryRestoreSession()
+    {
+        if (_settings.RootFolder is { } root && Directory.Exists(root))
+        {
+            _rootFolder = root;
+            PopulateProjectTree(root);
+        }
+
+        _autoBuildOn = _settings.AutoBuild;
+        if (_settings.FontSize is >= 8 and <= 32) _editor.FontSize = _settings.FontSize;
+
+        var opened = 0;
+        foreach (string file in _settings.OpenFiles.Where(File.Exists))
+        {
+            try { _tabs.Open(file, File.ReadAllText(file)); opened++; }
+            catch { /* unreadable now — skip it rather than fail the whole restore */ }
+        }
+
+        if (opened == 0) return _rootFolder is not null && TryOpenDefaultProject();
+
+        if (_settings.ActiveFile is { } active &&
+            _tabs.Docs.FirstOrDefault(d => d.Path is not null && string.Equals(d.Path, active, StringComparison.OrdinalIgnoreCase)) is { } doc)
+            _tabs.Activate(doc);
+
+        Build();
+        SetStatus($"Restored {opened} file(s) from your last session.");
+        return true;
+    }
+
+    /// Record what is open.
+    ///
+    /// Called on close AND whenever the set of open files changes, because a close handler alone only
+    /// runs for a clean exit — a kill, a crash or a machine restart would lose the session it exists to
+    /// preserve. The file is a few hundred bytes, so writing it on every tab change costs nothing worth
+    /// measuring against losing an afternoon's layout.
+    private void SaveSession()
+    {
+        _settings.RootFolder = _rootFolder;
+        _settings.OpenFiles = _tabs.Docs.Where(d => d.Path is not null).Select(d => d.Path!).ToList();
+        _settings.ActiveFile = _tabs.Active?.Path;
+        _settings.AutoBuild = _autoBuildOn;
+        _settings.FontSize = _editor.FontSize;
+        if (_rootFolder is not null) _settings.Remember(_rootFolder);
+        _settings.Save();
     }
 
     // ---- open files ------------------------------------------------------
@@ -332,6 +388,9 @@ public partial class MainWindow : Window
             case Key.W: OnCloseTab(sender, e); e.Handled = true; break;
             case Key.G: OnGoToLine(sender, e); e.Handled = true; break;
             case Key.T: OnGoToSymbol(sender, e); e.Handled = true; break;
+            case Key.OemPlus or Key.Add: SetFontSize(_editor.FontSize + 1); e.Handled = true; break;
+            case Key.OemMinus or Key.Subtract: SetFontSize(_editor.FontSize - 1); e.Handled = true; break;
+            case Key.D0: SetFontSize(14); e.Handled = true; break;
             case Key.D: EditorCommands.DuplicateLines(_editor); e.Handled = true; break;
             // Ctrl+/ — the key reports as OemQuestion on a US layout and Oem2 on several others.
             case Key.OemQuestion or Key.Oem2: EditorCommands.ToggleComment(_editor); e.Handled = true; break;
@@ -341,11 +400,13 @@ public partial class MainWindow : Window
 
     // File
     private void OnNew(object? sender, RoutedEventArgs e) { _tabs.Open(null, ""); Build(); }
-    private void OnCloseTab(object? sender, RoutedEventArgs e) { if (_tabs.Active is { } d) _ = _tabs.CloseAsync(d); }
+    private void OnCloseTab(object? sender, RoutedEventArgs e) { if (_tabs.Active is { } d) _ = CloseTabAsync(d); }
+
+    private async Task CloseTabAsync(EditorTabs.Doc doc) { await _tabs.CloseAsync(doc); SaveSession(); }
     private void OnNewBundle(object? sender, RoutedEventArgs e) => _ = NewProjectAsync(app: false);
     private void OnNewApp(object? sender, RoutedEventArgs e) => _ = NewProjectAsync(app: true);
     private void OnBuild(object? sender, RoutedEventArgs e) => Build();
-    private void OnBuildInspect(object? sender, RoutedEventArgs e) { Build(); _bottomPanel.SelectedIndex = TabRawIr; _inspector.SelectedIndex = 1; }
+    private void OnBuildInspect(object? sender, RoutedEventArgs e) { Build(); _bottomPanel.SelectedIndex = TabRawIr; _inspector.SelectedIndex = 2; }
     private void OnOpen(object? sender, RoutedEventArgs e) => _ = OpenAsync();
     private void OnOpenFolder(object? sender, RoutedEventArgs e) => _ = OpenFolderAsync();
     private void OnSave(object? sender, RoutedEventArgs e) => _ = SaveAsync();
@@ -533,6 +594,48 @@ public partial class MainWindow : Window
     }
 
     private void OnAbout(object? sender, RoutedEventArgs e) => new AboutWindow().ShowDialog(this);
+    private void OnShortcuts(object? sender, RoutedEventArgs e) => new ShortcutsWindow().ShowDialog(this);
+
+    private void OnFontBigger(object? sender, RoutedEventArgs e) => SetFontSize(_editor.FontSize + 1);
+    private void OnFontSmaller(object? sender, RoutedEventArgs e) => SetFontSize(_editor.FontSize - 1);
+    private void OnFontReset(object? sender, RoutedEventArgs e) => SetFontSize(14);
+
+    private void SetFontSize(double size)
+    {
+        _editor.FontSize = Math.Clamp(size, 8, 32);
+        SetStatus($"Editor font {_editor.FontSize:0}pt");
+    }
+
+    /// Rebuild File ▸ Open Recent from the remembered folders. Rebuilt on demand rather than kept in
+    /// sync, since the list only changes when a folder is opened.
+    private void OnRecentOpening(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem menu) return;
+        menu.ItemsSource = null;
+
+        if (_settings.RecentFolders.Count == 0)
+        {
+            menu.ItemsSource = new[] { new MenuItem { Header = "(nothing yet)", IsEnabled = false } };
+            return;
+        }
+
+        var items = new List<MenuItem>();
+        foreach (string folder in _settings.RecentFolders)
+        {
+            var item = new MenuItem { Header = folder };
+            string captured = folder;
+            item.Click += (_, _) =>
+            {
+                if (!Directory.Exists(captured)) { SetStatus($"{captured} is no longer there."); return; }
+                _rootFolder = captured;
+                _settings.Remember(captured);
+                PopulateProjectTree(captured);
+                SetStatus($"Project: {captured}");
+            };
+            items.Add(item);
+        }
+        menu.ItemsSource = items;
+    }
 
     private void OnFocusTerminal(object? sender, RoutedEventArgs e)
     {
@@ -679,6 +782,7 @@ public partial class MainWindow : Window
         // Open reuses a tab that already holds this file, so double-clicking the explorer twice cannot
         // produce two views of one file that then disagree about its contents.
         _tabs.Open(path, await File.ReadAllTextAsync(path));
+        SaveSession();   // survives a kill, not only a clean close
         _rootFolder ??= Path.GetDirectoryName(path);
         if (_rootFolder is not null) PopulateProjectTree(_rootFolder);
         Build();
@@ -729,6 +833,7 @@ public partial class MainWindow : Window
         var dirs = await top.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { AllowMultiple = false });
         if (dirs.Count == 0) return;
         _rootFolder = dirs[0].Path.LocalPath;
+        _settings.Remember(_rootFolder);
         PopulateProjectTree(_rootFolder);
         SetStatus($"Project: {_rootFolder}");
     }
@@ -1115,6 +1220,7 @@ public partial class MainWindow : Window
         _consoles.Update(result.Ast is null ? null : ConsoleGraph.Analyze(result.Ast));
         _definitions = result.Ast is null ? DefinitionIndex.Empty : DefinitionIndex.Analyze(result.Ast);
         _outline.Update(_definitions);
+        _eventGraph.Update(_definitions);
         if (result.Ast is not null) _symbols = SymbolIndex.Collect(result.Ast);
 
         Title = $"VeinScript Workbench — {name} — {(result.Success ? "ok" : $"{_diags.Count} error(s)")} ({result.ElapsedMs} ms)";
