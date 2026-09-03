@@ -167,7 +167,16 @@ public sealed record LocalVarStmt(VarDecl Decl, SourceSpan Span) : Stmt(Span);  
 
 public sealed record IfStmt(Expr Cond, Block Then, Node? Else, SourceSpan Span) : Stmt(Span); // Else: IfStmt | Block
 public sealed record WhileStmt(Expr Cond, Block Body, SourceSpan Span) : Stmt(Span);
-public sealed record TargetStmt(Expr Source, string Bind, Block Body, SourceSpan Span) : Stmt(Span);
+public sealed record TargetStmt(Expr Source, string Bind, Block Body, SourceSpan Span) : Stmt(Span)
+{
+    /// `target rows as row: $Row` — the shape the elements are DECLARED to have. Null when the loop is
+    /// left dynamic, which stays legal: a `fromJson` document being explored has no shape yet.
+    ///
+    /// It describes a RECORD, not an attached component. Nothing is attached to an entity here, so the
+    /// fields are read directly (`row.title`), unlike a `target $Shape #Mark` binding where the shape
+    /// names a component ON an identity and the read is `self.Shape.field`.
+    public string? AsShape { get; init; }
+}
 /// `target $Shape #Mark as self { … }` — the typed identity query, nested inside a schedule. Binds
 /// `self` to each matching entity; `::Shape.field` reads that entity's component.
 public sealed record QueryStmt(IReadOnlyList<string> Components, IReadOnlyList<string> Tags, string Bind, Block Body, SourceSpan Span) : Stmt(Span)

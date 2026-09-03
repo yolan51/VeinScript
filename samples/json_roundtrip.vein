@@ -57,8 +57,21 @@ bundle JsonRoundtrip by you {
             //
             // The block holds the loop rather than the brings, because how many brings there are lives
             // in the data: one written `bring` inside `target` becomes one per row.
+            //
+            // `as row: $Row` is the ASCRIPTION, and it is the only thing that can speak for data that
+            // arrived from outside. `fromJson` returns whatever the payload held — the compiler cannot
+            // know a row has a title — so without it `row.titel` is a silent nothing rather than a
+            // mistake, which in code talking to a schema someone else controls is the bug that costs
+            // most. The author knows the shape: they are about to `bring Row(…)` with it.
+            //
+            // It describes a RECORD, not a component. Nothing is attached here, so fields are read
+            // directly as `row.title` — unlike `target $Row #Row as r`, where the shape names a
+            // component ON an identity and the read is `r.Row.title`.
+            //
+            // Optional, always: drop it and the loop still runs, untyped, which is what you want while
+            // exploring a payload whose shape you do not know yet.
             ordered by rank {
-                target doc.rows as row {
+                target doc.rows as row: $Row {
                     bring Row(row.title, row.rank, row.done)
                 }
             }

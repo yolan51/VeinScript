@@ -362,3 +362,25 @@ neither is reported. An `int` where a `float` is declared is widening, not a mis
 
 A missing value reads **empty, not zero**. `< 1` is true for it either way, but printing shows `[]`
 against `[0]`.
+
+**27. `target rows as row: $Row` — say what data from OUTSIDE looks like.** A collection binding is the
+one thing nothing can infer: `fromJson` returns whatever the payload held, a query reply carries no
+shape, and a field read off a parsed document is just a value. So `row.titel` was a silent nothing —
+in exactly the code that talks to a schema someone else controls and changes.
+
+The author knows, because they asked for those columns. The ascription says it once, at the boundary,
+using the shape they have already declared for the same records:
+
+```
+target rows as row: $Task { bring Task(row.id, row.title, row.rank, row.done) }
+```
+
+- It describes a **RECORD, not a component**. Nothing is attached to an identity, so fields are read
+  directly — `row.title`, not `row.Task.title`. That is the opposite of `target $Task #Task as t`,
+  where the shape names a component ON an entity and the read is `t.Task.title`.
+- **Optional, always.** Leave it off and the loop runs untyped, which is what you want while exploring
+  a payload whose shape you do not know yet.
+- A shape that does not exist is **VS0233** — the ascription's whole value is that fields get checked,
+  so a typo silently switching that off would be its worst failure.
+- It pairs with a guard rather than replacing one: *the ascription says what you EXPECT, the guard
+  checks what ARRIVED* (`samples/diagnostics_guard.vein`).

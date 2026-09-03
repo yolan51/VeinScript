@@ -418,6 +418,49 @@ public class DiagnosticsTests
         Assert.Contains("and it compares as less than 1", output);
     }
 
+    // ---- `as row: $Shape` — an ascription for data that arrived from outside ----------------------
+
+    [Fact]
+    public void An_ascribed_collection_binding_is_accepted_and_checked()
+    {
+        // The case nothing else can reach: `fromJson` returns whatever the payload held, so a
+        // collection binding has no inferable element type. The author states it — they are about to
+        // `bring Row(…)` with the same shape — and the fields become known.
+        var d = Diagnose(RowDecl +
+            "  shard S { run once {\n" +
+            "    let doc = fromJson(\"[]\")\n" +
+            "    target doc as row: $Row { bring Row(row.title, row.rank) } } }");
+
+        Assert.DoesNotContain(d, x => x.Severity == Vein.Compiler.Diagnostics.Severity.Error);
+        Assert.DoesNotContain(d, x => x.Code == "VS0233");
+    }
+
+    [Fact]
+    public void An_ascription_naming_a_shape_that_does_not_exist_is_VS0233()
+    {
+        // The ascription's whole value is that the fields get checked, so a misspelt shape quietly
+        // switching that back off is the worst failure available to it.
+        var d = Diagnose(RowDecl +
+            "  shard S { run once {\n" +
+            "    let doc = fromJson(\"[]\")\n" +
+            "    target doc as row: $Rowe { bring Row(row.title, row.rank) } } }");
+
+        Assert.Contains(d, x => x.Code == "VS0233");
+    }
+
+    [Fact]
+    public void A_collection_loop_without_an_ascription_stays_legal()
+    {
+        // Optional, always. Exploring a payload whose shape you do not know yet has to keep working,
+        // and that is the state every one of these loops was in before the ascription existed.
+        var d = Diagnose(RowDecl +
+            "  shard S { run once {\n" +
+            "    let doc = fromJson(\"[]\")\n" +
+            "    target doc as row { bring Row(row.title, row.rank) } } }");
+
+        Assert.DoesNotContain(d, x => x.Severity == Vein.Compiler.Diagnostics.Severity.Error);
+    }
+
     // ---- the sample ---------------------------------------------------------------------------------
 
     [Fact]

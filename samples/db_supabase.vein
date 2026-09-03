@@ -55,7 +55,7 @@ bundle DbSupabase by you {
     // There is a third, for when the source cannot sort — a fixed JSON body, a service with no `order`
     // parameter, or a key the database does not have a column for. Wrap the ingest loop:
     //
-    //     ordered by rank { target rows as row { bring Task(row.id, row.title, row.rank, row.done) } }
+    //     ordered by rank { target rows as row: $Task { bring Task(row.id, row.title, row.rank, row.done) } }
     //
     // That sorts the BRINGS, so the identities are spawned in order and even a reader that cannot sort
     // — a fragment builder emitting @Html — comes out right. See samples/entities_bring_rows.vein.
@@ -174,7 +174,7 @@ bundle DbSupabase by you {
                         let rows = fromJson(f.body)
                         emit *Vein.Console.Io.@Print { text: "read " + len(rows) + " rows" }
 
-                        target rows as row {
+                        target rows as row: $Task {
                             bring Task(row.id, row.title, row.rank, row.done)
                         }
 

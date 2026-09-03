@@ -920,8 +920,18 @@ public sealed class Lower
             case TargetStmt t:
             {
                 var src = LowerExpr(t.Source);          // evaluated OUTSIDE the binding
+
+                // `as row: $Row` names a shape, so a name that resolves to nothing is worth saying —
+                // the ascription's whole value is that the fields get checked, and a misspelt shape
+                // would silently switch that back off.
+                if (t.AsShape is { } shp && !_shapeFields.ContainsKey(shp)
+                    && ResolveUsed(Index.Shapes, "$", shp, t.Span) is null)
+                    _diag.Warning("VS0233",
+                        $"Unknown shape '${shp}' — `as {t.Bind}: ${shp}` cannot check the fields it reads.", t.Span);
+
                 using var _ = BindTarget(t.Bind);
-                return new IrLoop(IrLoopKind.Target, null, t.Bind, src, null, null, LowerBlock(t.Body));
+                return new IrLoop(IrLoopKind.Target, null, t.Bind, src, null, null, LowerBlock(t.Body))
+                    { ElementShape = t.AsShape };
             }
             case QueryStmt q:
             {

@@ -676,7 +676,21 @@ public sealed class Parser
         var src = ParseExpr();
         Expect(TokenKind.KwAs, "'as'");
         string b = Expect(TokenKind.Ident, "binding").Text;
-        return new TargetStmt(src, b, ParseBlock(), s);
+
+        // `as row: $Row` — an OPTIONAL ascription saying what shape the records have.
+        //
+        // A collection is the one binding whose element type nothing can infer: the list came from
+        // `fromJson`, a query reply, or a field of a parsed document, and none of those carry a shape.
+        // So `row.title` was unchecked and untyped — in database code, where field names come from a
+        // schema someone else controls and drift without warning.
+        //
+        // The author knows: they asked for those columns. This is where they say so, once, using the
+        // shape they have already declared for the same records.
+        string? asShape = null;
+        if (Match(TokenKind.Colon))
+            asShape = Check(TokenKind.ShapeRef) ? Advance().Text : ExpectName("a $Shape after ':'").Text;
+
+        return new TargetStmt(src, b, ParseBlock(), s) { AsShape = asShape };
     }
 
 

@@ -151,7 +151,10 @@ public class SamplesTests
         Assert.True(total > 1000, $"expected a meaningful sample of expressions, saw {total}");
 
         double pct = 100.0 * typed / total;
-        Assert.True(pct >= 99.0,   // 99.7% today. What remains is genuinely dynamic: a `target` over a
+        Assert.True(pct >= 99.0,   // 99.6% today. What remains is a collection loop with no ascription:
+                                  // `target rows as row` over a fromJson result. `as row: $Shape` is how
+                                  // an author closes that, and leaving it off stays legal on purpose.
+        
                                   // fromJson result has no element type, and inventing one would be worse.
         
         

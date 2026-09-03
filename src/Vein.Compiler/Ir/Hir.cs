@@ -89,7 +89,13 @@ public sealed record IrIf(IrExpr Cond, IrBlock Then, IrBlock? Else) : IrStmt;
 public enum IrLoopKind { While, Target, Repeat }
 public sealed record IrLoop(
     IrLoopKind Kind, IrExpr? Cond, string? Var, IrExpr? Source, IrQuery? Query, IrExpr? Count,
-    IrBlock Body) : IrStmt;
+    IrBlock Body) : IrStmt
+{
+    /// `target rows as row: $Row` — the shape a COLLECTION loop's elements are declared to have.
+    /// Null when the loop is dynamic. Not the same thing as `Query`, which matches entities carrying a
+    /// component; this describes plain records that were never attached to anything.
+    public string? ElementShape { get; init; }
+}
 
 public sealed record IrMatchArm(string CaseName, IrBlock Body);
 public sealed record IrMatch(IrExpr Subject, IReadOnlyList<IrMatchArm> Arms, IrBlock? Else) : IrStmt;

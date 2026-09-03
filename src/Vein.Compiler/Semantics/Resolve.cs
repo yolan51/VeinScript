@@ -43,6 +43,11 @@ public sealed class Resolve
     /// The component a `target $Shape … as x` bound, so `x.field` and `self.field` can be typed.
     private string? _selfComponent;
 
+    /// What IrSelfRef means in the innermost loop: `Entity` in an identity query, the ascribed shape in
+    /// `target rows as row: $Row`, and null in a dynamic collection loop. Defaults to Entity so code
+    /// outside any loop keeps the meaning it had.
+    private IrTypeRef? _selfType = IrTypeRef.Of("Entity");
+
     public Resolve(IrModule module)
     {
         _module = module;
@@ -131,28 +136,48 @@ public sealed class Resolve
         Expr(lp.Source);
 
         string? prevSelf = _selfComponent;
+        var prevSelfType = _selfType;
 
         // An identity query binds an ENTITY, and names the component whose fields `self.f` reads.
         if (lp.Query is { } q)
         {
             _selfComponent = q.Components.FirstOrDefault();
+            _selfType = IrTypeRef.Of("Entity");
             if (lp.Var is not null) _locals[lp.Var] = IrTypeRef.Of("Entity");
         }
         else if (lp.Kind == IrLoopKind.Repeat && lp.Var is not null)
         {
             _locals[lp.Var] = IrTypeRef.Of("int");
         }
-        // `target <collection> as x` — typed only when the SOURCE says what it holds. A `list<int>`
-        // literal does; a `fromJson` result and a field read off a parsed document do not, and those
-        // stay untyped rather than guessed, because a wrong element type would be worse than none.
+        // `target rows as row: $Row` — the AUTHOR said what the elements are. This wins over inference
+        // because it is the only thing that can speak for data crossing a boundary: a `fromJson` result
+        // has no shape to read, and the author is the one who knows which columns they asked for.
+        else if (lp.ElementShape is { } shape)
+        {
+            var t = IrTypeRef.Of(shape);
+            _selfType = t;
+            if (lp.Var is not null) _locals[lp.Var] = t;
+        }
+
+        // Otherwise typed only when the SOURCE says what it holds. A `list<int>` literal does; a
+        // `fromJson` result and a field read off a parsed document do not, and those stay untyped
+        // rather than guessed, because a wrong element type would be worse than none.
         else if (lp.Var is not null && lp.Source is not null
                  && lp.Source.ResolvedType is { Name: "list", Args.Count: 1 } lt)
         {
+            _selfType = lt.Args[0];
             _locals[lp.Var] = lt.Args[0];
+        }
+        else if (lp.Kind == IrLoopKind.Target && lp.Query is null)
+        {
+            // A dynamic collection loop: the binding is a record of unknown shape, so IrSelfRef inside
+            // it means nothing this pass can name. Saying so beats inheriting the enclosing loop's type.
+            _selfType = null;
         }
 
         Block(lp.Body);
         _selfComponent = prevSelf;
+        _selfType = prevSelfType;
     }
 
     // ---- expressions ------------------------------------------------------
@@ -183,9 +208,10 @@ public sealed class Resolve
             case IrEntityRef: return IrTypeRef.Of("Entity");
             case IrLoopIndexRef: return IrTypeRef.Of("int");
 
-            // The identity a `target` bound. Nameless in this IR (docs/RULES.md 12c), which is a
-            // separate problem; what it IS, is an entity.
-            case IrSelfRef: return IrTypeRef.Of("Entity");
+            // The innermost `target` binding, which is nameless in this IR (docs/RULES.md 12c) — so what
+            // it means depends entirely on the loop enclosing it. An identity query binds an ENTITY; a
+            // collection loop binds an element, and only an ascription can say what that is.
+            case IrSelfRef: return _selfType;
 
             case IrUnary u:
                 Expr(u.Operand);
