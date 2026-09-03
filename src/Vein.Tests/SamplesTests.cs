@@ -70,6 +70,44 @@ public class SamplesTests
         Assert.True(found.Count == 0, $"{found.Count} warning(s):\n  " + string.Join("\n  ", found));
     }
 
+    /// Every sample's IR tree, checked for nodes the renderer had no case for.
+    ///
+    /// `tools/check-ir.sh` golden-checks 8 of the 59 samples, and NOTHING renders the other 51 — so a
+    /// statement the renderer did not know about printed as a childless stub named after its C# class,
+    /// and stayed that way. `ordered by` did exactly that: `AstTree` had no `OrderedStmt` case, so the
+    /// whole block rendered as one leaf and every `bring` inside it was missing from the tree.
+    ///
+    /// A golden per sample would also have caught it, at the price of 51 files that churn on every edit.
+    /// This costs nothing to keep and catches the NEXT one automatically, which is the half that matters:
+    /// the hole was never that one node was wrong, it was that nothing was looking.
+    [Fact]
+    public void No_sample_renders_a_node_the_IR_tree_has_no_case_for()
+    {
+        var svc = new VeinCompilerService();
+        var offenders = new List<string>();
+
+        foreach (var path in VeinFiles("samples"))
+        {
+            if (IsFragment(path)) continue;
+
+            var result = svc.Compile(new CompileRequest(
+                Path.GetFileName(path), File.ReadAllText(path), SourcePath: path));
+            if (result.Ast is not { } unit) continue;
+
+            string rel = Path.GetRelativePath(RepoRoot(), path).Replace('\\', '/');
+            var roots = new Vein.Compiler.Ir.AstTree(unit).Roots(unit);
+            string tree = Vein.Compiler.Ir.IrTreeRenderer.Render(rel, roots, new Vein.Compiler.Ir.IrTreeOptions());
+
+            offenders.AddRange(tree.Split('\n')
+                .Where(l => l.Contains("Unrendered", StringComparison.Ordinal))
+                .Select(l => $"{rel}: {l.Trim()}"));
+        }
+
+        Assert.True(offenders.Count == 0,
+            $"{offenders.Count} node(s) fell through to the renderer's fallback:\n  " +
+            string.Join("\n  ", offenders.Distinct()));
+    }
+
     [Fact]
     public void Multi_file_samples_bring_in_their_fragments()
     {

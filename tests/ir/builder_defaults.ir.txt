@@ -1,0 +1,90 @@
+VeinIR v1  file=samples/builder_defaults.vein
+Bundle BuilderDefaults  author=you
+|--- Shape $Content
+|    |--- Field title: string
+|    `--- Field body: string = Str "(no description yet)"
+|--- Shape $Style
+|    |--- Field class: string = Str "panel"
+|    |--- Field accent: string = Str "#4444aa"
+|    `--- Field padded: bool = Bool true
+|--- Shape $Layout
+|    |--- Field column: int = Int 0
+|    `--- Field order: int = Int 0
+|--- Mark #Panel
+|--- Builder Panel
+|    |--- Include $Content
+|    |--- Include $Style
+|    |--- Include $Layout
+|    `--- Mark #Panel
+|--- Shard Build
+|    `--- RunOnce
+|         |--- Bring Panel
+|         |    `--- Arg = Str "Welcome"
+|         |--- Bring Panel
+|         |    |--- Arg = Str "Install"
+|         |    `--- Arg = Str "Run veinc new, then veinc run."
+|         |--- Bring Panel
+|         |    |--- Arg = Str "Danger"
+|         |    |--- Arg = Ref base
+|         |    |--- Arg = Str "panel warn"
+|         |    `--- Arg = Str "#aa4444"
+|         `--- Bring Panel
+|              |--- Arg = Str "Footer"
+|              |--- Arg = Ref base
+|              |--- Arg = Ref base
+|              |--- Arg = Ref base
+|              |--- Arg = Bool false
+|              |--- Arg = Int 1
+|              `--- Arg = Int 9
+|--- Shard Show
+|    `--- Settled
+|         |--- Emit *Vein.Console.Io.@Print
+|         |    `--- Arg text = Str "-- panels, in the column/order the layout asked for --"
+|         |--- Target $Content #Panel as p
+|         |    |--- Emit *Vein.Console.Io.@Print
+|         |    |    `--- Arg text = Concat
+|         |    |         |--- Str "   "
+|         |    |         `--- Path p.Content.title
+|         |    `--- Emit *Vein.Console.Io.@Print
+|         |         `--- Arg text = Concat
+|         |              |--- Str "      "
+|         |              `--- Path p.Content.body
+|         |--- Emit *Vein.Console.Io.@Print
+|         |    `--- Arg text = Str "-- the styling each one ended up with --"
+|         `--- Target $Style #Panel as p
+|              `--- Emit *Vein.Console.Io.@Print
+|                   `--- Arg text = Concat
+|                        |--- Str "   class="
+|                        |--- Path p.Style.class
+|                        |--- Str "  accent="
+|                        |--- Path p.Style.accent
+|                        |--- Str "  padded="
+|                        |--- Path p.Style.padded
+|                        |--- Str "  col="
+|                        `--- Path p.Layout.column
+|--- Shape $Draft
+|    |--- Field title: string
+|    |--- Field note: string
+|    `--- Field slug: string = Str "untitled"
+|--- Mark #Draft
+|--- Builder Draft
+|    |--- Include $Draft
+|    `--- Mark #Draft
+|--- Shard Sketch
+|    `--- RunOnce
+|         `--- Bring Draft  fill=?
+|              `--- Arg = Str "Untitled"
+`--- Shard ShowDraft
+     `--- Settled
+          |--- Emit *Vein.Console.Io.@Print
+          |    `--- Arg text = Str "-- a `?` draft: zero where there is no default, default wher..."
+          `--- Target $Draft #Draft as d
+               `--- Emit *Vein.Console.Io.@Print
+                    `--- Arg text = Concat
+                         |--- Str "   title=["
+                         |--- Path d.Draft.title
+                         |--- Str "] note=["
+                         |--- Path d.Draft.note
+                         |--- Str "] slug=["
+                         |--- Path d.Draft.slug
+                         `--- Str "]"

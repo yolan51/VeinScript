@@ -1,0 +1,71 @@
+VeinIR v1  file=samples/entities_bring_rows.vein
+Bundle EntitiesBringRows  author=you
+|--- Shape $Row
+|    |--- Field title: string
+|    `--- Field rank: int
+|--- Mark #Row
+|--- Builder Row
+|    |--- Include $Row
+|    `--- Mark #Row
+|--- Shard Seed
+|    `--- RunOnce
+|         |--- Let ranks = List
+|         |    |--- Int 4
+|         |    |--- Int 1
+|         |    |--- Unary -
+|         |    |    `--- Int 2
+|         |    |--- Int 3
+|         |    `--- Int 1
+|         `--- Ordered by rank
+|              |--- Bring Row
+|              |    |--- Arg = Str "literal"
+|              |    `--- Arg = Int 0
+|              `--- Target ranks as r
+|                   `--- If
+|                        |--- Cond = Binary >
+|                        |    |--- Ref r
+|                        |    `--- Unary -
+|                        |         `--- Int 2
+|                        `--- Then
+|                             `--- Bring Row
+|                                  |--- Arg = Concat
+|                                  |    |--- Str "src"
+|                                  |    `--- Ref Index
+|                                  `--- Arg = Ref r
+`--- Shard Show
+     `--- Settled
+          |--- Emit *Vein.Console.Io.@Print
+          |    `--- Arg text = Str "-- spawn order, which is now rank order --"
+          |--- Target $Row #Row as r
+          |    `--- Emit *Vein.Console.Io.@Print
+          |         `--- Arg text = Concat
+          |              |--- Str "   e"
+          |              |--- Ref Entity
+          |              |--- Str "  rank "
+          |              |--- Path r.Row.rank
+          |              |--- Str "  "
+          |              `--- Path r.Row.title
+          |--- Emit *Vein.Console.Io.@Print
+          |    `--- Arg text = Str "-- ties keep the order the rows arrived in --"
+          |--- Target $Row #Row as r
+          |    `--- If
+          |         |--- Cond = Binary ==
+          |         |    |--- Path r.Row.rank
+          |         |    `--- Int 1
+          |         `--- Then
+          |              `--- Emit *Vein.Console.Io.@Print
+          |                   `--- Arg text = Concat
+          |                        |--- Str "   "
+          |                        `--- Path r.Row.title
+          |--- Emit *Vein.Console.Io.@Print
+          |    `--- Arg text = Str "-- the filtered row never arrived --"
+          `--- Target $Row #Row as r
+               `--- If
+                    |--- Cond = Binary <
+                    |    |--- Path r.Row.rank
+                    |    `--- Int 0
+                    `--- Then
+                         `--- Emit *Vein.Console.Io.@Print
+                              `--- Arg text = Concat
+                                   |--- Str "   should not appear: "
+                                   `--- Path r.Row.title

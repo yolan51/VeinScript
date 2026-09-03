@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-SAMPLES="demo entities events handles mypage payload shaped site"
+SAMPLES="demo entities events handles mypage payload shaped site entities_bring_rows builder_defaults entities_index"
 GOLDEN_DIR="tests/ir"
 CLI="dotnet run --project src/Vein.Cli --no-build --"
 mkdir -p "$GOLDEN_DIR"

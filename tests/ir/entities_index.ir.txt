@@ -1,0 +1,91 @@
+VeinIR v1  file=samples/entities_index.vein
+Bundle EntitiesIndex  author=you
+|--- Shape $Row
+|    `--- Field title: string
+|--- Shape $Wide
+|    `--- Field extra: int
+|--- Mark #Row
+|--- Builder Row
+|    |--- Include $Row
+|    `--- Mark #Row
+|--- Builder Wide
+|    |--- Include $Row
+|    |--- Include $Wide
+|    `--- Mark #Row
+|--- Shard Seed
+|    `--- RunOnce
+|         |--- Bring Row
+|         |    `--- Arg = Str "alpha"
+|         |--- Bring Wide
+|         |    |--- Arg = Str "beta"
+|         |    `--- Arg = Int 4
+|         |--- Bring Wide
+|         |    |--- Arg = Str "gamma"
+|         |    `--- Arg = Int 2
+|         |--- Bring Row
+|         |    `--- Arg = Str "delta"
+|         |--- Bring Wide
+|         |    |--- Arg = Str "epsilon"
+|         |    `--- Arg = Int 3
+|         `--- Bring Row
+|              `--- Arg = Str "zeta"
+`--- Shard Numbered
+     `--- Settled
+          |--- Emit *Vein.Console.Io.@Print
+          |    `--- Arg text = Str "-- all six, numbered --"
+          |--- Target $Row #Row as r
+          |    `--- Emit *Vein.Console.Io.@Print
+          |         `--- Arg text = Concat
+          |              |--- Ref Index
+          |              |--- Int 1
+          |              |--- Str ". "
+          |              `--- Path r.Row.title
+          |--- Emit *Vein.Console.Io.@Print
+          |    `--- Arg text = Str "-- top 3 --"
+          |--- Target $Row #Row as r
+          |    `--- If
+          |         |--- Cond = Binary <
+          |         |    |--- Ref Index
+          |         |    `--- Int 3
+          |         `--- Then
+          |              `--- Emit *Vein.Console.Io.@Print
+          |                   `--- Arg text = Concat
+          |                        |--- Str "   "
+          |                        `--- Path r.Row.title
+          |--- Emit *Vein.Console.Io.@Print
+          |    `--- Arg text = Str "-- even positions --"
+          |--- Target $Row #Row as r
+          |    `--- If
+          |         |--- Cond = Binary ==
+          |         |    |--- Binary %
+          |         |    |    |--- Ref Index
+          |         |    |    `--- Int 2
+          |         |    `--- Int 0
+          |         `--- Then
+          |              `--- Emit *Vein.Console.Io.@Print
+          |                   `--- Arg text = Concat
+          |                        |--- Str "   "
+          |                        |--- Ref Index
+          |                        |--- Str " "
+          |                        `--- Path r.Row.title
+          |--- Target $Row #Row as r
+          |    `--- If
+          |         |--- Cond = Binary ==
+          |         |    |--- Ref Index
+          |         |    `--- Int 0
+          |         `--- Then
+          |              `--- Emit *Vein.Console.Io.@Print
+          |                   `--- Arg text = Concat
+          |                        |--- Str "first is "
+          |                        `--- Path r.Row.title
+          |--- Emit *Vein.Console.Io.@Print
+          |    `--- Arg text = Str "-- first two of the wide ones --"
+          `--- Target $Row $Wide #Row as r
+               `--- Emit *Vein.Console.Io.@Print
+                    `--- Arg text = Concat
+                         |--- Str "   "
+                         |--- Ref Index
+                         |--- Str " "
+                         |--- Path r.Row.title
+                         |--- Str " extra="
+                         `--- Path r.Wide.extra

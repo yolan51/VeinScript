@@ -130,6 +130,14 @@ public sealed class AstTree
     private static string ScheduleArg(ScheduleBlock sb) =>
         sb.Kind == ScheduleKind.Every ? (sb.IntervalSeconds ?? 0).ToString(CultureInfo.InvariantCulture) + "s" : "";
 
+    /// `by rank` / `by &Row.rank` / `by &Row.$Row.rank` — the key, with whichever qualifiers were
+    /// written. Both are optional and each narrows one step, so the head shows what the source said
+    /// rather than a normalised form: which of them is present is the thing a reader is checking.
+    private static string OrderedHead(OrderedStmt os) =>
+        "by " + (os.Builder is null ? "" : "&" + os.Builder + ".")
+              + (os.Shape is null ? "" : "$" + os.Shape + ".")
+              + os.Key;
+
     private static string QueryHead(QueryStmt q)
     {
         var refs = q.Components.Select(c => "$" + c).Concat(q.Tags.Select(t => "#" + t));
@@ -160,8 +168,25 @@ public sealed class AstTree
         AttachStmt at => AttachNode(at),
         ChanceStmt c => Node("Chance", Pct(c.Probability), c.Span, Block(c.Body)),
         BringStmt br => Bring(br),
+
+        // `return` in an `fn` body. Missing until a coverage test went looking, and the effect was that
+        // every function in the tree showed a bare `ReturnStmt` — the VALUE it returns, which is the
+        // whole content of most `fn`s, was absent from the IR.
+        ReturnStmt r => r.Value is null ? Leaf("Return", "", r.Span) : Wrapper("Return", "", r.Value),
+
+        // `ordered by k { … }`. The body holds `bring`s and `target` loops, so its children render
+        // through this same switch. They appear in WRITTEN order: the tree is structure, and the sort
+        // is a runtime act on keys that are not known here.
+        OrderedStmt os => Node("Ordered", OrderedHead(os), os.Span, os.Body.Select(Stmt)),
+
         ExprStmt e => Expr(e.Expr),
-        _ => Leaf(s.GetType().Name, "", s.Span)
+
+        // A statement with no case above. Named "Unrendered" rather than printed as its C# class name,
+        // because a bare `OrderedStmt` in the tree looks like a node someone meant to put there — which
+        // is exactly how `ordered by` rendered as a childless stub, dropping every `bring` inside it,
+        // for as long as it took someone to read a tree closely. SamplesTests renders all 59 samples and
+        // fails on this word, so the next missing case is found by a test rather than by eye.
+        _ => Leaf("Unrendered", s.GetType().Name, s.Span)
     };
 
     private IrNode IfNode(IfStmt i)
@@ -248,7 +273,10 @@ public sealed class AstTree
             case CallExpr c: return ("Call", Callee(c.Callee), c.Args.Select(Expr).ToList());
             case StructLitExpr s: return ("New", (_shapes.Contains(s.TypeName) ? "$" : "") + s.TypeName, s.Fields.Select(ArgField).ToList());
             case ListLitExpr li: return ("List", "", li.Items.Select(Expr).ToList());
-            default: return (e.GetType().Name, "", New());
+            // Every Expr type above has a case, so this never fires today — and it is kept, loudly
+            // named, for the same reason the statement one is: a new node type should announce itself
+            // rather than arrive looking like a legitimate label.
+            default: return ("Unrendered", e.GetType().Name, New());
         }
     }
 

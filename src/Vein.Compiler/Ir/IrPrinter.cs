@@ -88,6 +88,11 @@ public static class IrPrinter
             case IrBreak: sb.AppendLine($"{Ind(ind)}break"); break;
             case IrContinue: sb.AppendLine($"{Ind(ind)}continue"); break;
             case IrExprStmt e: sb.AppendLine($"{Ind(ind)}{E(e.Expr)}"); break;
+
+            // There was NO default here, which is worse than the tree renderer's: a node this switch
+            // does not know printed nothing at all, so the statement simply was not in the output. That
+            // is how `IrOrdered` was invisible until someone happened to look for it.
+            default: sb.AppendLine($"{Ind(ind)}Unrendered {s.GetType().Name}"); break;
         }
     }
 
