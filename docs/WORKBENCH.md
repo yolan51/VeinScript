@@ -55,6 +55,20 @@ auto-indent that adds a level after `{` and pulls a `}` back out. The comment ru
 in `Tooling/SourceEdits.cs` — all-or-nothing for the block, markers aligned at its shallowest indent,
 and an exact round trip — so they are tested without needing an editor to exist.
 
+**Navigation** — **F12** jumps from a use to its declaration, **Shift+F12** lists every site naming the
+same symbol, and **double-clicking an IR node** lands on the source line that produced it (`IrNode` has
+carried a `Span` since the tree was written, and nothing had ever read it).
+
+What makes this resolvable without a type checker is the **sigil**. `$Row` and `#Row` are different
+identities allowed to share a name (RULES 14e), and every use site says which one it means — so
+`Tooling/DefinitionIndex.cs` keys on (name, kind), never on name alone. A lookup by name would land on
+whichever was declared first and be wrong half the time in exactly the files that use the pattern.
+
+A symbol declared elsewhere — the stdlib, another bundle — resolves to **nothing**, and the status bar
+says so. Jumping somewhere plausible and wrong is worse than not jumping. Local bindings (`let`,
+`target … as w`, `hear … as m`) are deliberately out of scope for the same reason: half-handling them
+would give confident wrong answers inside a shard body.
+
 **Editing** — AvaloniaEdit with VeinScript highlighting (`Assets/VeinScript.xshd`, keyword list
 mirroring `Lexing/Lexer.cs`), line numbers, and red underlines on every diagnostic span
 (`DiagnosticRenderer.cs`). Sigil completion: `$` shapes, `#` marks, `@` events, `.` members,
@@ -221,11 +235,11 @@ chat app of three files or a site of five shards means constant reopening.
 | D6 | ✅ **Auto-indent** | Press Enter after `{` and land one level in; type `}` and it pulls itself back out |
 | D6b | **Bracket match** | See a `{`'s partner highlighted |
 | D13 | ✅ **Duplicate / move line** | `Ctrl+D`, `Alt+↑`, `Alt+↓` |
-| D7 | **Go to definition** (`F12`) | Jump from `$Worker` to its `shape` — across a fragment file |
-| D8 | **Find references** | Every place `@Message` is emitted or heard |
+| D7 | ✅ **Go to definition** (`F12`) | Jump from a `$Worker` use to its `shape` |
+| D8 | ✅ **Find references** (`Shift+F12`) | Every place `@Message` is emitted or heard, listed and jumpable |
 | D9 | **Symbol search** (`Ctrl+T`) | Reach any shape/mark/event/shard by typing its name |
 | D10 | **Outline pane** | The current file's shards, shapes, events as a jumpable list |
-| D11 | **Source ↔ IR click-through** | Click an `IrNode` and land on the source that produced it — **`IrNode.Span` already exists (`Ir/IrTree.cs`) and nothing consumes it** |
+| D11 | ✅ **IR → source click-through** | Double-click an `IrNode` and land on the line that produced it |
 | D12 | **Back / forward** | Return from an F12 jump |
 
 ## Track E — understanding and fixing
@@ -273,11 +287,14 @@ line moves) · **E1** (compile as you type).
 That is a working editing loop, a working run story for all three workloads, and two views that answer
 questions the code alone does not. What is left is mostly *depth*.
 
-Next, in order: **D7 / D11** — go-to-definition, and source↔IR click-through; `IrNode.Span` and
-`Route.Span` are both recorded and nothing reads either, so this is the largest ratio of value to work
-left on the list. Then **E3** (quick fixes for the mechanical diagnostics), **A3–A5** (argument
-editing, re-run, exit code in the tab), **B5** (a combined interleaved transcript — the thing that
-makes a relay bug visible as an *order*), then **F1** (session restore).
+Also done: **D7 D8 D11** (go to definition, find references, IR → source).
+
+Next, in order: **E3** (quick fixes for the mechanical diagnostics — VS0228 arity, VS0231 `base`,
+VS0217 shadowing; `DefinitionIndex` now supplies the positions they need), then **A3–A5** (argument
+editing, re-run, exit code and duration in the session tab), then **B5** (a combined interleaved
+transcript — what makes a relay bug visible as an *order* rather than by alt-tabbing), then **F1**
+(session restore), then **D9/D10** (symbol search and an outline, both nearly free now that every
+declaration's position is indexed).
 
 ---
 
@@ -294,7 +311,8 @@ Source ─▶ VeinCompilerService.Compile ─▶ CompilationResult
   the Workbench and the CLI route through it — there is one compilation pipeline.
 - **Analysis lives in `src/Vein.Compiler/Tooling/`, not in the Workbench.** `ConsoleGraph`,
   `SymbolIndex`, `MemberIndex`, `BundleModel`, `DependencyModel`, `ExecutionModel`, `EventCatalog`,
-  `RunConfig`, `VeinShell` and `RouteMap` are all pure logic the UI only renders. That is what keeps
+  `RunConfig`, `VeinShell`, `RouteMap`, `SourceEdits` and `DefinitionIndex` are all pure logic the UI
+  only renders. That is what keeps
   them testable from `Vein.Tests`, which references only `Vein.Compiler` — and it is why the route
   recovery has nine tests while the panel that shows it has none.
 - **The terminal reimplements no command.** It launches the built `veinc` apphost, so what it prints is

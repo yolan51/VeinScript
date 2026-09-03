@@ -48,6 +48,9 @@
         <MenuItem Header="_Duplicate Line" Click="OnDuplicateLine" InputGesture="Ctrl+D" />
         <MenuItem Header="Move Line _Up" Click="OnMoveLineUp" InputGesture="Alt+Up" />
         <MenuItem Header="Move Line Do_wn" Click="OnMoveLineDown" InputGesture="Alt+Down" />
+        <Separator />
+        <MenuItem Header="Go to De_finition" Click="OnGoToDefinition" InputGesture="F12" />
+        <MenuItem Header="Find _References" Click="OnFindReferences" InputGesture="Shift+F12" />
       </MenuItem>
       <MenuItem Header="_Build">
         <MenuItem Header="_Build" Click="OnBuild" InputGesture="Ctrl+B" />
@@ -112,7 +115,7 @@
           <Border DockPanel.Dock="Top" Name="BundleInspector" IsVisible="False"
                   Background="#1E1E1E" BorderBrush="#333" BorderThickness="0,0,0,1" Padding="12" />
           <TextBlock DockPanel.Dock="Top" Text="Inspector — IR Tree" Margin="8,6" FontWeight="Bold" />
-          <TreeView Name="IrTree" />
+          <TreeView Name="IrTree" DoubleTapped="OnIrNodeActivated" />
         </DockPanel>
       </Grid>
 

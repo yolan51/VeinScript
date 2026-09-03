@@ -68,6 +68,13 @@ public partial class MainWindow : Window
     private EditorTabs _tabs = null!;
     private WebPreviewPanel _webPreview = null!;
     private ConsoleTopologyPanel _consoles = null!;
+
+    /// Where every shape, mark, event, builder, shard and function is declared and used. Rebuilt each
+    /// compile; go-to-definition and find-references both read it.
+    private DefinitionIndex _definitions = DefinitionIndex.Empty;
+
+    /// Non-null while the Diagnostics pane is showing a Find References result instead of diagnostics.
+    private IReadOnlyList<SymbolSite>? _references;
     private AvaloniaEdit.Search.SearchPanel _search = null!;
 
     // ---- compile as you type ---------------------------------------------
@@ -289,6 +296,12 @@ public partial class MainWindow : Window
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.F5) { OnRun(sender, e); e.Handled = true; return; }
+        if (e.Key == Key.F12)
+        {
+            if (e.KeyModifiers.HasFlag(KeyModifiers.Shift)) OnFindReferences(sender, e); else OnGoToDefinition(sender, e);
+            e.Handled = true;
+            return;
+        }
 
         // Alt+Up/Down move lines. Checked before the Control block, which would otherwise swallow them.
         if (e.KeyModifiers.HasFlag(KeyModifiers.Alt) && e.Key is Key.Up or Key.Down)
@@ -1025,6 +1038,7 @@ public partial class MainWindow : Window
         var result = _service.Compile(new CompileRequest(name, _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath));
         _diags = result.Diagnostics;
 
+        _references = null;   // a build replaces a standing Find References with real diagnostics
         _diagBox.ItemsSource = _diags.Select(d => d.ToString()).ToList();
         _rawIr.Text = result.IrText;
         PopulateTree(result.IrTree);
@@ -1035,6 +1049,7 @@ public partial class MainWindow : Window
         if (renderPreview || _bottomPanel.SelectedIndex == TabPreview)
             _webPreview.Update(result.Modules, result.Ast is null ? RouteMap.Empty : RouteMap.Analyze(result.Ast));
         _consoles.Update(result.Ast is null ? null : ConsoleGraph.Analyze(result.Ast));
+        _definitions = result.Ast is null ? DefinitionIndex.Empty : DefinitionIndex.Analyze(result.Ast);
         if (result.Ast is not null) _symbols = SymbolIndex.Collect(result.Ast);
 
         Title = $"VeinScript Workbench — {name} — {(result.Success ? "ok" : $"{_diags.Count} error(s)")} ({result.ElapsedMs} ms)";
@@ -1238,11 +1253,84 @@ public partial class MainWindow : Window
         string Label(string id) => m.Unit(id)?.Label ?? id;
     }
 
+    /// The node is kept on the item so selecting it can jump to the source that produced it. IrNode
+    /// has carried a Span since the tree was written and nothing had ever read it.
     private static TreeViewItem MakeItem(IrNode n)
     {
-        var item = new TreeViewItem { Header = Label(n), IsExpanded = true };
+        var item = new TreeViewItem { Header = Label(n), IsExpanded = true, Tag = n };
         foreach (var c in n.Children) item.Items.Add(MakeItem(c));
         return item;
+    }
+
+    /// Clicking an IR node moves the caret to the source it came from — the other half of reading the
+    /// IR, since "which line made this" is the question the tree always raises and never answered.
+    private void OnIrNodeActivated(object? sender, TappedEventArgs e)
+    {
+        if (_irTree.SelectedItem is TreeViewItem { Tag: IrNode { Span: { } span } })
+            GoTo(span.Line, span.Col);
+    }
+
+    /// Move the caret to a source position and show it. Clamped: a span from a stale compile can point
+    /// past the end of a document being edited, and scrolling nowhere is better than throwing.
+    private void GoTo(int line, int col)
+    {
+        int n = Math.Clamp(line, 1, Math.Max(1, _editor.Document.LineCount));
+        var target = _editor.Document.GetLineByNumber(n);
+        _editor.CaretOffset = Math.Clamp(target.Offset + Math.Max(0, col - 1), target.Offset, target.EndOffset);
+        _editor.ScrollToLine(n);
+        _editor.TextArea.Focus();
+    }
+
+    // ---- go to definition / find references ------------------------------
+
+    /// F12. Resolve what the caret is on and jump to where it is declared.
+    private void OnGoToDefinition(object? sender, RoutedEventArgs e)
+    {
+        if (CaretSymbol() is not { } site)
+        {
+            SetStatus("Go to definition: put the caret on a $shape, #mark, @event or &builder.");
+            return;
+        }
+
+        var def = _definitions.Define(site.Name, site.Kind);
+        if (def is null)
+        {
+            // Declared elsewhere — the stdlib, another bundle — or not at all. Saying so beats jumping
+            // somewhere plausible and wrong.
+            SetStatus($"{site.Kind} {site.Name} is not declared in this file.");
+            return;
+        }
+
+        GoTo(def.Span.Line, def.Span.Col);
+        SetStatus($"{site.Kind} {site.Name} — declared in {def.Owner}, line {def.Span.Line}");
+    }
+
+    /// Shift+F12. List every site naming the same symbol in the Diagnostics pane, which is already the
+    /// list you double-click to jump from.
+    private void OnFindReferences(object? sender, RoutedEventArgs e)
+    {
+        if (CaretSymbol() is not { } site)
+        {
+            SetStatus("Find references: put the caret on a $shape, #mark, @event or &builder.");
+            return;
+        }
+
+        var all = _definitions.All(site.Name, site.Kind);
+        _references = all;
+        _diagBox.ItemsSource = all
+            .Select(s => $"{s.Span.Line}:{s.Span.Col}  {(s.IsDefinition ? "declared" : "used")} in {s.Owner}")
+            .ToList();
+
+        _bottomPanel.IsVisible = true;
+        _bottomPanel.SelectedIndex = TabDiagnostics;
+        SetStatus($"{site.Kind} {site.Name} — {all.Count} site(s). Double-click to jump; build to go back to diagnostics.");
+    }
+
+    /// The symbol under the caret, using the line/column the index records.
+    private SymbolSite? CaretSymbol()
+    {
+        var line = _editor.Document.GetLineByOffset(_editor.CaretOffset);
+        return _definitions.At(line.LineNumber, _editor.CaretOffset - line.Offset + 1);
     }
 
     private static string Label(IrNode n)
@@ -1271,12 +1359,19 @@ public partial class MainWindow : Window
     private void OnDiagnosticActivated(object? sender, TappedEventArgs e)
     {
         int i = _diagBox.SelectedIndex;
-        if (i < 0 || i >= _diags.Count) return;
-        var span = _diags[i].Span;
-        int line = Math.Clamp(span.Line, 1, Math.Max(1, _editor.Document.LineCount));
-        _editor.ScrollToLine(line);
-        try { _editor.CaretOffset = _editor.Document.GetOffset(line, Math.Max(1, span.Col)); } catch { /* ignore */ }
-        _editor.TextArea.Focus();
+        if (i < 0) return;
+
+        // The pane shows references when a Find References is standing, diagnostics otherwise. The list
+        // that is displayed is the list that is jumped through — reading _diags here while references
+        // were shown would jump to whatever diagnostic happened to share the row number.
+        if (_references is { } refs)
+        {
+            if (i < refs.Count) GoTo(refs[i].Span.Line, refs[i].Span.Col);
+            return;
+        }
+
+        if (i >= _diags.Count) return;
+        GoTo(_diags[i].Span.Line, Math.Max(1, _diags[i].Span.Col));
     }
 
     // ---- sigil completion ($ shapes, # marks, @ events) -----------------
