@@ -1,0 +1,122 @@
+// match_orders.vein — `match` branching per-entity across SEVERAL `target` loops.
+//
+//   veinc run samples/match_orders.vein --ticks 2
+//
+// `match here()` is the well-known use — samples/console_roles.vein and console_broadcast.vein turn it
+// into a role switch across several console windows, one program executing differently depending which
+// window it is. This file is the OTHER axis: several ENTITIES in one `target` loop, each taking a
+// different arm depending on a field it carries. Three independent shards each run their own `target
+// $Order #Order as o { match o.Order.status { … } }` over the SAME four orders, and each shard reads a
+// different thing out of the same match.
+//
+// AN ARM MATCHES BY NAME, and that name is compared against whatever the subject stringifies to
+// (Interp.ExecMatch). A plain `status: string` field works exactly like the mark/enum patterns the docs
+// show, provided the text stored in it matches an arm's spelling: `bring Order("Paid", …)` then
+// `when Paid { … }` compares "Paid" to "Paid" and takes that arm. Nothing links the arm name to a
+// declaration — `when Paid` compiles whether or not anything anywhere is called Paid.
+//
+// A REAL `enum` CASE DOES NOT WORK AS A VALUE TODAY, which is why this file uses plain strings instead
+// of the `enum Status { Pending, Paid, Shipped }` LANGUAGE.md §3.4 describes. Measured, not assumed:
+// `bring Order(Pending, …)`, `Status.Pending` and `O.Status.Pending` all store `""` — `status=[]`, never
+// `status=[Pending]`. `enum` is real as a TYPE DECLARATION and as a `match` PATTERN (`when Pending`
+// parses and compares by name whether or not an enum exists); the third leg, a case used as a VALUE,
+// was never built. Two facts underneath it, both worth their own decision:
+//
+//   * `IrEnumRef` — the node that would carry one — is written into IR-SPEC.md §1.4 and exists NOWHERE
+//     in src/. The same specified-but-unimplemented drift `ResolvedType` had before Semantics/Resolve.
+//   * an unresolved name in an expression is silently null, and this is NOT enum-specific:
+//     `bring O(TotallyUndefinedName, "x")` compiles clean and stores `""` too. That general hole is
+//     what makes the enum one invisible — there is no diagnostic to notice either.
+//
+// INTERPRETER ONLY, and it degrades QUIETLY rather than loudly, which is the sharper reason this file is
+// not in tools/check-backend.sh. `match` has no C# emission, so each block becomes a comment:
+//
+//     // [unsupported: IrMatch]
+//
+// The generated file then COMPILES and prints nothing where the interpreter prints four lines. A note is
+// emitted per skipped statement, so the contract's Degrade Explicitly holds — but the failure to expect
+// is silence, not a build error. Compare samples/json_roundtrip.vein, which genuinely does not compile:
+// there the missing emission is a `fromJson` whose VALUE something needs, so the hole cannot be a
+// comment.
+
+bundle MatchOrders by you {
+
+    shape $Order { status: string, item: string }
+    mark #Order
+
+    builder Order { $Order   mark #Order }
+
+    shard Seed {
+        run once {
+            bring Order("Pending", "widget")
+            bring Order("Paid",    "gadget")
+            bring Order("Shipped", "gizmo")
+
+            // A status NO arm below names. Nothing is wrong with this order and nothing here rejects
+            // it — it is what "on hold, awaiting a human" looks like, and it is the row that shows what
+            // happens when a `match` finds no arm.
+            bring Order("OnHold",  "sprocket")
+        }
+    }
+
+    // ---- 1. match DRIVES STATE, not just a print ----------------------------------------------------
+    //
+    // One order at a time, in ITS OWN loop: `target` activates each entity separately, so one order's
+    // `status = …` is that order's fold contribution and does not touch any other order's row
+    // (docs/RULES.md 13). `each tick` so re-running with `--ticks 2` shows a second step — widget moves
+    // Pending → Paid on frame 1 and Paid → Shipped on frame 2, which the two runs below make visible.
+    //
+    // `OnHold` matches NOTHING here and there is no `else` arm, so it is left exactly where it was —
+    // silently, the same way samples/console_roles.vein's workers "match no arm and do nothing" for a
+    // timer that is not theirs. That silence is what makes an `else`-less match the right tool for "act
+    // only on the states I know how to advance, and leave everything else alone."
+    //
+    // Writing `else { }` here would run identically and read as a decision that was never made. The
+    // absence IS the statement, and `shard Report` below shows the other half: an `else` when the job is
+    // to answer for every row rather than to act on the ones you recognise.
+    shard Advance {
+        each tick {
+            target $Order #Order as o {
+                match o.Order.status {
+                    when Pending { o.Order.status = "Paid" }
+                    when Paid    { o.Order.status = "Shipped" }
+                }
+            }
+        }
+    }
+
+    // ---- 2. the same four orders, a DIFFERENT loop, WITH `else` --------------------------------------
+    //
+    // A customer-facing line per order. `else` is what makes this block ANSWER FOR EVERY ROW: `OnHold`
+    // has no `when` of its own and still prints something, because unlike Advance this shard's job is
+    // "say something about every order," not "act on the ones I recognise."
+    shard Report {
+        settled {
+            target $Order #Order as o {
+                match o.Order.status {
+                    when Pending { emit *Vein.Console.Io.@Print { text: o.Order.item + ": waiting for payment" } }
+                    when Paid    { emit *Vein.Console.Io.@Print { text: o.Order.item + ": payment received" } }
+                    when Shipped { emit *Vein.Console.Io.@Print { text: o.Order.item + ": on the way" } }
+                    else         { emit *Vein.Console.Io.@Print { text: o.Order.item + ": status " + o.Order.status } }
+                }
+            }
+        }
+    }
+
+    // ---- 3. a THIRD loop over the same orders, WITHOUT `else` ---------------------------------------
+    //
+    // Warehouse actions exist only for Paid and Shipped — there is nothing to pack or manifest for a
+    // Pending or OnHold order, so no `else` is exactly right here. Run with `--ticks 2` and watch widget
+    // leave this list on frame 1 ("pack") and come back changed on frame 2 ("manifest") as Advance moves
+    // it along; sprocket (OnHold) never appears, on any frame, because nothing here names its status.
+    shard Ops {
+        settled {
+            target $Order #Order as o {
+                match o.Order.status {
+                    when Paid    { emit *Vein.Console.Io.@Print { text: "  [ops] pack " + o.Order.item } }
+                    when Shipped { emit *Vein.Console.Io.@Print { text: "  [ops] manifest " + o.Order.item } }
+                }
+            }
+        }
+    }
+}
