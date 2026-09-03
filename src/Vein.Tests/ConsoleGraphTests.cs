@@ -187,4 +187,49 @@ public class ConsoleGraphTests
         Assert.True(r.Success);
         Assert.Contains(Vs0212(r), d => d.Message.Contains("Sevrer"));
     }
+
+    [Fact]
+    public void A_role_a_match_on_here_can_run_as_is_addressable()
+    {
+        // `match here() { when #Control … }` says this program can BE #Control. The listener is then
+        // this same file in another process — a pipe name is machine-global — so the address is real
+        // without anything spawning it. Every participant of samples/control_center.vein is launched by
+        // hand, and before this the sample was told to spawn a console for itself.
+        var r = Compile(Boot(
+            "match here() {\n" +
+            "  when #Control { emit *Vein.Console.Io.@Print { text: \"c\" } }\n" +
+            "  else { emit *Vein.Console.Io.@Send { to: #Control, text: \"hi\" } }\n" +
+            "}"));
+
+        Assert.True(r.Success);
+        Assert.Empty(Vs0212(r));
+    }
+
+    [Fact]
+    public void A_role_switch_does_not_excuse_an_address_it_never_names()
+    {
+        // Only the arms count. Widening the check for role switches must not turn `match here()` into a
+        // blanket amnesty for every address in the file.
+        var r = Compile(Boot(
+            "match here() {\n" +
+            "  when #Control { emit *Vein.Console.Io.@Send { to: #Sevrer, text: \"hi\" } }\n" +
+            "}"));
+
+        Assert.True(r.Success);
+        Assert.Contains(Vs0212(r), d => d.Message.Contains("Sevrer"));
+    }
+
+    [Fact]
+    public void Only_a_match_on_here_names_a_role()
+    {
+        // `match` on anything else is an ordinary switch over values, and its arms claim no identity.
+        var r = Compile(Boot(
+            "let who = \"x\"\n" +
+            "match who {\n" +
+            "  when #Control { emit *Vein.Console.Io.@Send { to: #Control, text: \"hi\" } }\n" +
+            "}"));
+
+        Assert.True(r.Success);
+        Assert.Contains(Vs0212(r), d => d.Message.Contains("Control"));
+    }
 }

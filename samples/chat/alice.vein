@@ -6,9 +6,13 @@
 // the other client arrive here the same way.
 //
 // alice.vein and bob.vein are the same program with two lines different — the identity (`as`) and the
-// port. They are separate FILES rather than one file choosing a role, because a role switch needs a way
-// to tell the two apart at startup: `here()` answers "which console am I", which is #Main for both, and
-// the language cannot read an environment variable. Two files is the honest version.
+// port. They are separate FILES because each side needs its own `@Listen` port: two processes cannot
+// bind the same one, and a port is not something a role switch could pick for them.
+//
+// A role switch itself IS available, and samples/control_center.vein is built on it — the runtime reads
+// VEIN_CONSOLE, so `here()` differs between two launches of ONE file and `match here()` picks the role.
+// That works for the console transport, whose addresses are names rather than ports. It does not solve
+// this file's problem, which is the port.
 
 bundle ChatAlice by you {
 

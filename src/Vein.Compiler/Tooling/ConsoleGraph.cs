@@ -63,6 +63,9 @@ public sealed class ConsoleGraph
             _ => null
         };
 
+        // `here()` — this process's own address. Bare, since it is a built-in rather than a member.
+        static bool IsHereCall(Expr e) => e is CallExpr { Callee: NameExpr { Name: "here" } };
+
         void Walk(string owner, IReadOnlyList<Node> members)
         {
             void Blk(Block b) { foreach (var s in b.Statements) Stm(s); }
@@ -76,6 +79,23 @@ public sealed class ConsoleGraph
                     case TargetStmt t: Blk(t.Body); break;
                     case QueryStmt q: Blk(q.Body); break;
                     case RepeatStmt r: Blk(r.Body); break;
+                    // `match here() { when #Control { … } }` — every mark arm names a role this program
+                    // can RUN AS, which makes that address real for exactly the reason `@Listen { as }`
+                    // below does: the listener may be this program, in another process.
+                    //
+                    // A console's pipe name is machine-global (Ir/ConsoleBus.cs), so a second
+                    // `veinc run` of the same file IS the #Control being addressed. Without this, the
+                    // one program that never spawns anything — every participant launched by hand —
+                    // was told to spawn a console for itself. See samples/control_center.vein.
+                    case MatchStmt m when IsHereCall(m.Subject):
+                        foreach (var a in m.Arms)
+                        {
+                            if (a.IsMark) spawns.Add(new Spawn(a.CaseName, owner, a.Span));
+                            Blk(a.Body);
+                        }
+                        if (m.Else is not null) Blk(m.Else);
+                        break;
+
                     case MatchStmt m: foreach (var a in m.Arms) Blk(a.Body); if (m.Else is not null) Blk(m.Else); break;
                     case ChanceStmt c: Blk(c.Body); break;
 

@@ -1,0 +1,158 @@
+// control_center.vein — ONE program, launched two or three times, the instances talking to each other.
+//
+//   Terminal 1:   VEIN_CONSOLE=Control veinc run samples/control_center.vein     ← start this first
+//   Terminal 2:   VEIN_CONSOLE=Alpha   veinc run samples/control_center.vein
+//   Terminal 3:   VEIN_CONSOLE=Beta    veinc run samples/control_center.vein
+//
+//   PowerShell:   $env:VEIN_CONSOLE="Alpha"; .\veinc.cmd run samples\control_center.vein
+//
+// Type a line in Alpha and it appears in Beta — having gone through Control, which is the whole point.
+// Alpha and Beta never address each other; neither knows the other exists.
+//
+// An actual run of the three — Alpha typed one line, and note what each window did NOT see:
+//
+//   Control:  CONTROL — waiting for workers.        Alpha:  WORKER Alpha — type a line…
+//             * Beta joined                                 (its own line never comes back)
+//             Beta: reporting in
+//             * Alpha joined                         Beta:  WORKER Beta — type a line…
+//             Alpha: reporting in                           <- Alpha: reporting in
+//             Alpha: hello from alpha                       <- Alpha: hello from alpha
+//
+// Beta sees Alpha's join too, because the relay forwards everything rather than inspecting text for
+// messages it thinks are administrative. A control centre that reads its traffic to decide what to
+// pass on is a control centre with two definitions of "a message" waiting to disagree.
+//
+// WHAT MAKES SEPARATE LAUNCHES FIND EACH OTHER. A console's address is a NAMED PIPE called
+// `vein.console.<name>` (Ir/ConsoleBus.cs), and that name is MACHINE-GLOBAL — no process id, no session
+// id, nothing instance-specific in it. So two `veinc run` processes on one machine are already reachable
+// to each other; there is no connecting step, no port, and nothing to configure. `@Send { to: #Control }`
+// finds whoever is listening as Control, whichever process that happens to be.
+//
+// This is also why running samples/console_roles.vein TWICE makes its windows talk across the two runs:
+// both instances host `vein.console.Alpha`, and `NamedPipeServerStream` is opened with
+// MaxAllowedServerInstances, so a send lands on WHICHEVER listener accepts first. Two instances of one
+// program pool their consoles rather than isolating them. Deliberate here, surprising there.
+//
+// WHICH INSTANCE AM I. `here()` is this process's own address, and the runtime reads it from the
+// VEIN_CONSOLE environment variable (`ConsoleLauncher.CurrentName` → `Interp._self` → `here()`), falling
+// back to #Main. So `match here()` is a ROLE SWITCH across independently launched processes — the same
+// switch samples/console_roles.vein uses for windows it spawned itself, minus the spawning.
+//
+// The distinction that matters: an address here is a NAME, and names are the thing a role switch can
+// choose. samples/chat/ stays two files because its addresses are PORTS, which two processes cannot
+// share and `here()` cannot invent — a different problem wearing the same clothes.
+//
+// MEMORY IS NOT SHARED, and it is worth being exact because it is the first thing people assume. Each
+// process has its own `EntityStore`: no entity, no component, no shard `var` crosses. What crosses is
+// MESSAGES. Control's roster below is not a view of anything — it is what Control has been TOLD, built
+// out of the messages it received, and that is the honest shape for a control centre rather than a
+// limitation to work around.
+//
+// STDIN KEEPS A PROCESS ALIVE. `veinc run` pumps stdin until EOF and then exits, so piping /dev/null
+// into one of these ends it before anything arrives. Run them in real terminals.
+
+bundle ControlCenter by you {
+
+    // One row of the roster: a worker Control has heard from. `addr` is its console address, which is
+    // what `@Send` needs to answer it.
+    //
+    // An ENTITY per worker, because a shard `var` holds one value and the language has no growable list
+    // (samples/chat/server.vein makes the same choice for the same reason). Joining is spawning; the
+    // roster is "which entities exist", so there is no second copy of that fact to drift.
+    shape $Worker { addr: string }
+
+    shard Boot {
+        run once {
+            match here() {
+                when #Control {
+                    emit *Vein.Console.Io.@Print { text: "CONTROL — waiting for workers." }
+                    emit *Vein.Console.Io.@Print { text: "Start others with VEIN_CONSOLE=Alpha / =Beta." }
+                }
+
+                // Everything that is not Control is a worker, including a plain `veinc run` with no
+                // environment variable at all — that one is #Main, and it works exactly the same.
+                else {
+                    emit *Vein.Console.Io.@Print { text: "WORKER " + here() + " — type a line and press Enter." }
+
+                    // Announcing is what puts this process on Control's roster. Control is told the
+                    // sender by the transport, so there is nothing to introduce ourselves with.
+                    emit *Vein.Console.Io.@Send { to: #Control, text: "reporting in" }
+                }
+            }
+        }
+    }
+
+    // ---- the centre ---------------------------------------------------------------------------------
+
+    shard Relay {
+        var known: bool
+
+        hear *Vein.Console.Io.@Message as m {
+            match here() {
+                when #Control {
+                    // Is this a worker we already have? `target` is the only way to look through the
+                    // roster, so the answer comes back on shard state rather than as a return value.
+                    known = false
+                    target $Worker as w {
+                        if w.Worker.addr == m.from { known = true }
+                    }
+
+                    if not known {
+                        let e = spawn()
+                        attach $Worker to e { addr: m.from }
+                        emit *Vein.Console.Io.@Print { text: "* " + m.from + " joined" }
+                    }
+
+                    emit *Vein.Console.Io.@Print { text: m.from + ": " + m.text }
+
+                    // THE RELAY. Everyone except the sender — no `!=` in VeinScript (LANGUAGE.md §7),
+                    // so inequality is `not (a == b)`. Without the guard the sender hears their own line
+                    // come back, which reads as an echo bug rather than a broadcast.
+                    //
+                    // This is the line that makes the demo: Alpha addressed Control, and Beta receives.
+                    target $Worker as w {
+                        if not (w.Worker.addr == m.from) {
+                            emit *Vein.Console.Io.@Send { to: w.Worker.addr, text: m.from + ": " + m.text }
+                        }
+                    }
+                }
+
+                // A worker just shows what arrived. It reached us through Control, from a process that
+                // does not know we exist.
+                else { emit *Vein.Console.Io.@Print { text: "  <- " + m.text } }
+            }
+        }
+    }
+
+    // ---- what a worker types ------------------------------------------------------------------------
+
+    shard Typing {
+        hear *Vein.Console.Io.@Input as i {
+            match here() {
+                // Control is a relay, not a participant — a line typed here goes nowhere on purpose.
+                when #Control { emit *Vein.Console.Io.@Print { text: "(control relays; it does not chat)" } }
+                else { emit *Vein.Console.Io.@Send { to: #Control, text: i.text } }
+            }
+        }
+    }
+
+    // ---- when the centre is not running -------------------------------------------------------------
+    //
+    // A send that reaches nobody is NORMAL here: start a worker before Control and this is what you get,
+    // rather than a hang or a silence. It is the only way a program can tell "delivered" from "shouting
+    // into a void" — the same line stdlib/Net.vein draws with @Undelivered for peers.
+
+    shard Reachability {
+        hear *Vein.Console.Io.@Undelivered as u {
+            emit *Vein.Console.Io.@Print { text: "(no one is listening as " + u.to + " — is Control running?)" }
+
+            // Control drops a worker that has gone away. `destroy` takes the identity AND its component;
+            // unmarking would leave the row behind, and a returning worker would then be given a second
+            // one for the same address. Safe mid-iteration: a query materialises its ids before the body
+            // runs, and the destroy is queued for the commit point.
+            target $Worker as w {
+                if w.Worker.addr == u.to { destroy w }
+            }
+        }
+    }
+}
