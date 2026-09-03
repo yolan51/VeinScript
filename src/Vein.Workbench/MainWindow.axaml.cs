@@ -60,6 +60,12 @@ public partial class MainWindow : Window
     private TabControl _bottomPanel = null!;
     private TextBlock _statusBar = null!;
     private Border _bundleInspector = null!;
+    private Terminal.TerminalPanel _terminal = null!;
+    private ComboBox _runConfigs = null!;
+    private TextBlock _runHint = null!;
+
+    /// The run configurations the open file declares in its own header, in header order.
+    private IReadOnlyList<RunConfig> _configs = Array.Empty<RunConfig>();
 
     public MainWindow()
     {
@@ -76,6 +82,13 @@ public partial class MainWindow : Window
         _bottomPanel = this.FindControl<TabControl>("BottomPanel")!;
         _statusBar = this.FindControl<TextBlock>("StatusBar")!;
         _bundleInspector = this.FindControl<Border>("BundleInspector")!;
+        _terminal = this.FindControl<Terminal.TerminalPanel>("TerminalPanel")!;
+        _runConfigs = this.FindControl<ComboBox>("RunConfigs")!;
+        _runHint = this.FindControl<TextBlock>("RunHint")!;
+
+        _terminal.RepoRoot = FindRepoRoot();
+        _terminal.Resolve = ResolveVeinFile;
+        Closed += (_, _) => _terminal.StopAll();   // no console outlives the IDE that opened it
 
         LoadHighlighting();
         _editor.TextArea.TextView.BackgroundRenderers.Add(_marker);
@@ -176,11 +189,105 @@ public partial class MainWindow : Window
     private void OnPaste(object? sender, RoutedEventArgs e) => _editor.Paste();
     private void OnSelectAll(object? sender, RoutedEventArgs e) => _editor.SelectAll();
 
-    // Run the current program. If the file is saved and the repo `veinc` wrapper is found, launch it as a
-    // REAL external console (`veinc run <file>`) so `bring Console` opens real OS windows — same as the
-    // built exe. Otherwise (untitled/unsaved) fall back to an in-process run whose output goes to the
-    // Output tab, with console spawns shown inline as `[console: name] firsttext`.
-    private async void OnRun(object? sender, RoutedEventArgs e)
+    // ---- running ---------------------------------------------------------
+    //
+    // ▶ runs the configuration the FILE declares. Before this, Run hardcoded `veinc run <file>` with no
+    // arguments and no environment, so the third of the samples that need `--ticks 4`, `--port 8080` or
+    // a VEIN_CONSOLE could not be started from the IDE at all — the header said how, and Run ignored it.
+
+    /// Reread the open file's header and repopulate the toolbar dropdown.
+    private void RefreshRunConfigs()
+    {
+        _configs = RunConfig.From(_editor.Text, _currentPath ?? "untitled.vein");
+        _runConfigs.ItemsSource = _configs.Select(c => c.Label).ToList();
+        if (_configs.Count > 0) _runConfigs.SelectedIndex = 0;
+
+        // A file with no header line is usually a FRAGMENT — loaded into an app, never run alone. Saying
+        // so is more use than a ▶ that cannot work.
+        _runHint.Text = _configs.Count switch
+        {
+            0 => "no run line in this file's header",
+            1 => "",
+            var n => $"{n} participants — run each"
+        };
+    }
+
+    /// Run the selected configuration in its own terminal session.
+    private void OnRun(object? sender, RoutedEventArgs e)
+    {
+        var result = _service.Compile(new CompileRequest(
+            _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath),
+            _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath));
+        if (!result.Success)
+        {
+            _bottomPanel.SelectedIndex = 0;   // Diagnostics
+            SetStatus($"Run: fix {result.Diagnostics.Count} error(s) first.");
+            return;
+        }
+
+        if (_configs.Count == 0)
+        {
+            SetStatus("Nothing to run — this file declares no run line (a fragment is loaded by an app).");
+            return;
+        }
+
+        if (_currentPath is not null) File.WriteAllText(_currentPath, _editor.Text);   // run what is on screen
+
+        var cfg = _configs[Math.Max(0, Math.Min(_runConfigs.SelectedIndex, _configs.Count - 1))];
+        var spec = new LaunchSpec(LaunchKind.Cli, cfg.Command, cfg.Args, cfg.Env);
+
+        _bottomPanel.SelectedIndex = 5;   // Terminal
+        _terminal.Run(spec, cfg.Label);
+        SetStatus($"Running {cfg.Display}");
+    }
+
+    private void OnStopAll(object? sender, RoutedEventArgs e)
+    {
+        _terminal.StopAll();
+        SetStatus("Stopped every terminal session.");
+    }
+
+    private void OnAbout(object? sender, RoutedEventArgs e) => new AboutWindow().ShowDialog(this);
+
+    private void OnFocusTerminal(object? sender, RoutedEventArgs e)
+    {
+        _bottomPanel.IsVisible = true;
+        _bottomPanel.SelectedIndex = 5;
+        _terminal.FocusPrompt();
+    }
+
+    /// A bare `x.vein` typed at the prompt → a real path. The open folder first, then the repo's
+    /// samples/ and stdlib/. Ambiguity resolves to nothing: running the wrong file is worse than
+    /// running none, and the prompt says which candidates it found.
+    private string? ResolveVeinFile(string name)
+    {
+        var roots = new[] { ProjectDir, _rootFolder, FindRepoRoot() }
+            .Where(r => r is not null && Directory.Exists(r)).Select(r => r!).Distinct(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string root in roots)
+        {
+            var hits = Directory.EnumerateFiles(root, name, SearchOption.AllDirectories)
+                                .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}") &&
+                                            !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
+                                .Take(2).ToList();
+            if (hits.Count == 1) return hits[0];
+            if (hits.Count > 1) return null;
+        }
+        return null;
+    }
+
+    /// The repo root — the folder holding `stdlib/`, same rule the tests use.
+    private static string FindRepoRoot()
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+            if (Directory.Exists(Path.Combine(dir.FullName, "stdlib"))) return dir.FullName;
+        return Environment.CurrentDirectory;
+    }
+
+    // The original Run: a REAL external console window, so `bring Console` opens real OS windows exactly
+    // as the built exe does. Kept because three separate windows is still the better way to DEMO a
+    // multi-console sample; the in-panel sessions are for inspecting one without leaving the IDE.
+    private async void OnRunExternal(object? sender, RoutedEventArgs e)
     {
         string name = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
         var result = _service.Compile(new CompileRequest(name, _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath));
@@ -197,12 +304,32 @@ public partial class MainWindow : Window
             try
             {
                 await File.WriteAllTextAsync(_currentPath, _editor.Text);   // run the current content
-                Process.Start(new ProcessStartInfo(veinc, $"run \"{_currentPath}\"")
+
+                // The selected configuration, not a bare `run` — an external window that ignored
+                // `--ticks` or VEIN_CONSOLE would disagree with what ▶ next to it just did.
+                var cfg = _configs.Count > 0
+                    ? _configs[Math.Max(0, Math.Min(_runConfigs.SelectedIndex, _configs.Count - 1))]
+                    : new RunConfig("run", "run", new[] { _currentPath }, new Dictionary<string, string>());
+
+                var psi = new ProcessStartInfo(veinc, string.Join(" ", cfg.CommandLine.Select(Quote)))
                 {
                     UseShellExecute = true,                                 // opens its own console window
                     WorkingDirectory = Path.GetDirectoryName(veinc)!
-                });
-                SetStatus($"Running {name} in a new console window…");
+                };
+                // UseShellExecute cannot carry an environment, so a configuration that needs one has to
+                // go through cmd. Saying `set X=…` in the window is also the honest thing to show.
+                if (cfg.Env.Count > 0)
+                {
+                    string sets = string.Concat(cfg.Env.Select(kv => $"set \"{kv.Key}={kv.Value}\" && "));
+                    psi = new ProcessStartInfo("cmd.exe", $"/k {sets}\"{veinc}\" {string.Join(" ", cfg.CommandLine.Select(Quote))}")
+                    {
+                        UseShellExecute = true,
+                        WorkingDirectory = Path.GetDirectoryName(veinc)!
+                    };
+                }
+
+                Process.Start(psi);
+                SetStatus($"Running {cfg.Display} in a new console window…");
                 return;
             }
             catch (Exception ex) { SetStatus($"External run failed ({ex.Message}); running in-process."); }
@@ -220,6 +347,9 @@ public partial class MainWindow : Window
         _bottomPanel.SelectedIndex = 2;   // Output
         SetStatus($"Ran {name} in-process (save it to open real console windows).");
     }
+
+    /// Quote an argument only when it needs it — an unquoted path with a space becomes two arguments.
+    private static string Quote(string a) => a.Contains(' ') ? $"\"{a}\"" : a;
 
     /// Walk up from the app's base directory to find a repo file (e.g. veinc.cmd). Null if not found.
     private static string? FindRepoTool(string fileName)
@@ -663,6 +793,7 @@ public partial class MainWindow : Window
         PopulateDependencies(result.Ast);
         PopulateExecution(result.Ast);
         UpdateMarks();
+        RefreshRunConfigs();
         if (result.Ast is not null) _symbols = SymbolIndex.Collect(result.Ast);
 
         Title = $"VeinScript Workbench — {name} — {(result.Success ? "ok" : $"{_diags.Count} error(s)")} ({result.ElapsedMs} ms)";

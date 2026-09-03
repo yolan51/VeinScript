@@ -1,11 +1,21 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ae="using:AvaloniaEdit"
+        xmlns:term="using:Vein.Workbench.Terminal"
         x:Class="Vein.Workbench.MainWindow"
         Width="1320" Height="860"
+        Icon="avares://Vein.Workbench/Assets/VSLOGO.png"
         Title="VeinScript Workbench">
   <DockPanel>
     <Menu DockPanel.Dock="Top">
+      <!-- The logo sits in the menu strip itself, so it is present on every screen without costing a
+           row of vertical space the editor would rather have. -->
+      <MenuItem Padding="6,0" IsHitTestVisible="False">
+        <MenuItem.Header>
+          <Image Source="avares://Vein.Workbench/Assets/VSLOGO.png" Height="20" Width="22"
+                 Stretch="Uniform" VerticalAlignment="Center" />
+        </MenuItem.Header>
+      </MenuItem>
       <MenuItem Header="_File">
         <MenuItem Header="_New File" Click="OnNew" InputGesture="Ctrl+N" />
         <MenuItem Header="New _Bundle…" Click="OnNewBundle" />
@@ -35,12 +45,32 @@
       </MenuItem>
       <MenuItem Header="_Run">
         <MenuItem Header="_Run" Click="OnRun" InputGesture="F5" />
+        <MenuItem Header="Run in E_xternal Console" Click="OnRunExternal" InputGesture="Shift+F5" />
+        <Separator />
+        <MenuItem Header="_Stop All Sessions" Click="OnStopAll" />
       </MenuItem>
       <MenuItem Header="_View">
         <MenuItem Header="Toggle _Project Explorer" Click="OnToggleExplorer" />
         <MenuItem Header="Toggle _Bottom Panel" Click="OnToggleBottom" />
+        <MenuItem Header="Focus _Terminal" Click="OnFocusTerminal" InputGesture="Ctrl+OemTilde" />
+      </MenuItem>
+      <MenuItem Header="_Help">
+        <MenuItem Header="_About VeinScript Workbench" Click="OnAbout" />
       </MenuItem>
     </Menu>
+
+    <!-- Toolbar: the run configuration this file declares in its own header, and the controls for it. -->
+    <Border DockPanel.Dock="Top" Background="#1E1E1E" BorderBrush="#333" BorderThickness="0,0,0,1" Padding="8,4">
+      <StackPanel Orientation="Horizontal" Spacing="6">
+        <Image Source="avares://Vein.Workbench/Assets/VSLOGO.png" Height="24" Width="26"
+               Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,6,0" />
+        <Button Name="RunButton" Click="OnRun" Padding="10,2" ToolTip.Tip="Run the selected configuration (F5)">▶</Button>
+        <Button Name="StopButton" Click="OnStopAll" Padding="10,2" ToolTip.Tip="Stop every terminal session">■</Button>
+        <ComboBox Name="RunConfigs" MinWidth="320" VerticalAlignment="Center"
+                  ToolTip.Tip="Run configurations declared in this file's header" />
+        <TextBlock Name="RunHint" VerticalAlignment="Center" Foreground="Gray" FontSize="11" />
+      </StackPanel>
+    </Border>
 
     <Border DockPanel.Dock="Bottom" Background="#252526" Padding="10,3">
       <TextBlock Name="StatusBar" Text="Ready" />
@@ -87,6 +117,9 @@
         </TabItem>
         <TabItem Header="Execution">
           <ScrollViewer Name="ExecPanel" Padding="12,8" />
+        </TabItem>
+        <TabItem Header="Terminal">
+          <term:TerminalPanel Name="TerminalPanel" />
         </TabItem>
       </TabControl>
     </Grid>

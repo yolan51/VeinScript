@@ -21,6 +21,9 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Assets/VeinScript.xshd" />
+    <!-- The logo is an AvaloniaResource, not an EmbeddedResource: that is what `avares://` resolves,
+         and it is referenced from XAML (window icon, menu strip, toolbar, About). -->
+    <AvaloniaResource Include="Assets/VSLOGO.png" />
   </ItemGroup>
 
   <ItemGroup>
