@@ -150,6 +150,9 @@ public sealed class Lower
             // LANGUAGE.md), and one code cannot identify two unrelated conditions.
             _diag.Error("VS0219", $"bundle '{bundle.Name}' has {startDecls.Count} `start` entries; a bundle has at most one entry point.", startDecls[1].Span);
         var startDecl = startDecls.FirstOrDefault();
+        // `start @Request { … }` names an event too, and usually one from another bundle. Registering it
+        // is what types `r.path` inside the handler that hears it.
+        if (startDecl is not null) RegisterImportedEvent(startDecl.EventPath, startDecl.Event);
         var start = startDecl is null ? null : new IrStart(
             startDecl.Event,
             startDecl.Fields.Select(f => (f.Name, LowerExpr(f.Value))).ToList(),
@@ -186,6 +189,10 @@ public sealed class Lower
         // fields into a bring, but the component type has to exist here or reading it back finds nothing.
         foreach (var t in _importedShapes.Values)
             if (!types.Any(x => x.Name == t.Name && x.Kind == IrTypeKind.Component)) types.Add(t);
+
+        // The provenance type, once, if anything here declares or hears an event.
+        if (types.Any(t => t.Kind == IrTypeKind.Message) || _importedEvents.Count > 0)
+            types.Add(ProvenanceDecl());
 
         // …and imported EVENT payloads, so a `hear` binding's fields have types. Marked `imported`, so a
         // consumer can tell "this event is declared elsewhere" from "this module owns it".
@@ -662,11 +669,36 @@ public sealed class Lower
             return Index.Events.FirstOrDefault(kv =>
                 kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal)).Value;
         }
-        return _events.TryGetValue(name, out var local) ? local : null;
+        if (_events.TryGetValue(name, out var local)) return local;
+
+        // Then a `use`d bundle. `use Web` makes `@Request` mean *Vein.Web.Http.@Request, and the payload
+        // is that declaration's — the same widening rule bare calls and marks already follow.
+        return ResolveUsed(Index.Events, "@", name, default)?.Value;
     }
 
     private static string RefText(ShapeInclude si) =>
         si.Path.Count > 0 ? "*" + string.Join(".", si.Path) + ".$" + si.Shape : "$" + si.Shape;
+
+    /// The type of an event's `from`. Named with a `Vein` prefix because it shares a namespace with the
+    /// program's own types in generated code, and a user shape called `Provenance` is perfectly legal.
+    public const string ProvenanceType = "VeinProvenance";
+
+    /// The declaration for it — emitted into any module that declares an event, so a consumer can type
+    /// `d.from.kind` without knowing anything the IR does not say.
+    ///
+    /// `name` and `kind` only. `Interp.FromOf` also carries `identity`, `shapes` and `marks`, and those
+    /// are the AUDIENCE barrier's inputs: `audience` is a declaration, not an expression, so no program
+    /// can read them. What a runtime must reproduce is what a program can observe.
+    private static IrType ProvenanceDecl() => new(
+        ProvenanceType, IrTypeKind.Struct,
+        new[]
+        {
+            new IrField("name", IrTypeRef.Of("string"), null),
+            new IrField("kind", IrTypeRef.Of("string"), null),
+        },
+        Array.Empty<IrEnumCase>(),
+        "Who emitted an event: the First-Class object's name and kind.",
+        new[] { IrAttr.Of("provenance") });
 
     private IrType LowerEvent(EventDecl e)
     {
@@ -675,6 +707,18 @@ public sealed class Lower
         // Every event is auto-tagged with its emitter's identity on emit (origin/source).
         fields.Add(new IrField("origin", IrTypeRef.Of("Entity"), null));
         fields.Add(new IrField("source", IrTypeRef.Of("Entity"), null));
+
+        // PROVENANCE, declared rather than merely attached. `Interp.Emit` puts a `from` on every payload
+        // — the emitting First-Class object — and programs read it (`d.from.kind`, `d.from.name`). It
+        // was in no declaration anywhere, so the field existed at runtime and nothing described it: a
+        // consumer learned about it by reading Interp.cs, and the C# backend emitted a payload class
+        // WITHOUT it, which is why samples/events.vein and samples/payload.vein did not compile.
+        //
+        // `Interp` also attaches `id`, `cause` and `trail` — the causation chain `veinc events` traces.
+        // Those are deliberately NOT declared: the language offers no way to read them, so they are
+        // tooling metadata rather than part of the payload's program-visible surface. Declaring fields a
+        // backend cannot reproduce would create the silent divergence this whole exercise is closing.
+        fields.Add(new IrField("from", IrTypeRef.Of(ProvenanceType), null));
         return new IrType(e.Name, IrTypeKind.Message, fields, Array.Empty<IrEnumCase>(), e.Doc,
             new[] { IrAttr.Of("message"), IrAttr.Of("origin", "auto") });
     }
@@ -799,15 +843,38 @@ public sealed class Lower
     /// transport lives on the interpreter — trading an honest gap for a silent one.
     private void RegisterImportedEvent(IReadOnlyList<string> path, string name)
     {
-        if (path.Count == 0 || _events.ContainsKey(name) || _importedEvents.ContainsKey(name)) return;
-        if (ResolveEvent(path, name) is not { } decl) return;
+        // A LOCAL declaration always wins, and an already-registered import is done. Note the empty path
+        // is NOT a reason to stop: `use Web` then `hear @Request` reaches stdlib by a bare name, which is
+        // exactly rule 18 — `use` widens what a bare name may mean — and skipping it left every
+        // `r.path` untyped in the web samples.
+        if (_events.ContainsKey(name) || _importedEvents.ContainsKey(name)) return;
 
-        _importedEvents[name] = new IrType(
-            name, IrTypeKind.Message,
-            ExpandMembers(decl.Members).Select(m => new IrField(m.Name, Ty(m.Type), null, LowerDefault(m.Default))).ToList(),
-            Array.Empty<IrEnumCase>(), decl.Doc,
-            new[] { IrAttr.Of("message"), IrAttr.Of("imported") });
+        if (ResolveEvent(path, name) is { } decl)
+        {
+            _importedEvents[name] = ImportedEvent(name, ExpandMembers(decl.Members), decl.Doc);
+            return;
+        }
+
+        // A BUILDER with no output channel and no `mark` emits `@<BuilderName>` carrying all its params
+        // (docs/RULES.md 5) — `*Vein.Rest.Db.&Connect` is one, and `hear @Connect as c { c.base }` is how
+        // it is read. There is no `event` declaration anywhere for it, so nothing described the payload:
+        // the event exists only as a consequence of how the builder is shaped.
+        if (ResolveExternalBuilder(path, name) is { Key: { } owner, Value: { } b }
+            && !b.Members.OfType<MarkMember>().Any()
+            && !b.Members.OfType<FieldDecl>().Any(f => OutputFields.Contains(f.Name)))
+        {
+            // `owner` is load-bearing: the builder's `$Shape` includes belong to the bundle that
+            // DECLARED it, and expanding them against this one silently produced an empty payload.
+            _importedEvents[name] = ImportedEvent(name, ExpandMembers(b.Members, owner), b.Doc);
+        }
     }
+
+    private IrType ImportedEvent(string name, List<(string Name, TypeRef? Type, Expr? Default, string? From)> members, string? doc) =>
+        new(name, IrTypeKind.Message,
+            members.Select(m => new IrField(m.Name, Ty(m.Type), null, LowerDefault(m.Default)))
+                   .Append(new IrField("from", IrTypeRef.Of(ProvenanceType), null)).ToList(),
+            Array.Empty<IrEnumCase>(), doc,
+            new[] { IrAttr.Of("message"), IrAttr.Of("imported") });
 
     private readonly Dictionary<string, IrType> _importedEvents = new(StringComparer.Ordinal);
 

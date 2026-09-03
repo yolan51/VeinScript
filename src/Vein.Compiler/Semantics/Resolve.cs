@@ -46,7 +46,18 @@ public sealed class Resolve
     public Resolve(IrModule module)
     {
         _module = module;
-        foreach (var t in module.Types) _types[t.Name] = t;
+
+        // TAGS ARE SKIPPED, and that is the whole subtlety. `$Row` and `#Row` are different things
+        // (docs/RULES.md 15) and a module holds BOTH under the same name — a Component and a Tag. Keyed
+        // by name alone, whichever came last won, and the Tag comes last: `r.Row.rank` then resolved
+        // against a type with no fields and went untyped, 56 times in one sample.
+        //
+        // Lower carries the mirror image of this warning — deduping by name there let a shape swallow a
+        // mark, so the Tag was never emitted at all. Same name, two meanings, in both directions.
+        //
+        // A Tag can never be a receiver: it has no fields, and `self.Row` means the COMPONENT.
+        foreach (var t in module.Types)
+            if (t.Kind != IrTypeKind.Tag) _types[t.Name] = t;
         foreach (var f in module.Functions) _funcs[f.Name] = f.Return;
     }
 
@@ -131,8 +142,14 @@ public sealed class Resolve
         {
             _locals[lp.Var] = IrTypeRef.Of("int");
         }
-        // `target <collection> as x` — the element type is not recoverable (a list literal's items may
-        // differ, and a `fromJson` list is dynamic), so the binding stays untyped rather than guessed.
+        // `target <collection> as x` — typed only when the SOURCE says what it holds. A `list<int>`
+        // literal does; a `fromJson` result and a field read off a parsed document do not, and those
+        // stay untyped rather than guessed, because a wrong element type would be worse than none.
+        else if (lp.Var is not null && lp.Source is not null
+                 && lp.Source.ResolvedType is { Name: "list", Args.Count: 1 } lt)
+        {
+            _locals[lp.Var] = lt.Args[0];
+        }
 
         Block(lp.Body);
         _selfComponent = prevSelf;
@@ -178,9 +195,24 @@ public sealed class Resolve
             case IrFieldAccess fa: return Field(fa);
             case IrIndex ix: Expr(ix.Receiver); Expr(ix.Index); return null;
 
+            // `list<T>` when every item agrees, bare `list` when they do not. The element type is what
+            // lets `target ranks as r { … r … }` type its binding, which in turn types everything read
+            // through it — a list literal is the one collection whose contents are visible here.
             case IrList li:
-                foreach (var it in li.Items) Expr(it);
-                return IrTypeRef.Of("list");
+            {
+                IrTypeRef? elem = null;
+                bool uniform = li.Items.Count > 0;
+                foreach (var it in li.Items)
+                {
+                    var t = Expr(it);
+                    if (t is null) uniform = false;
+                    else if (elem is null) elem = t;
+                    else if (elem.Name != t.Name) uniform = false;
+                }
+                return uniform && elem is not null
+                    ? new IrTypeRef("list", new[] { elem }, false)
+                    : IrTypeRef.Of("list");
+            }
 
             case IrStructInit si:
                 foreach (var (_, v) in si.Fields) Expr(v);

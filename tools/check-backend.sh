@@ -15,7 +15,7 @@ WORK="${TMPDIR:-/tmp}/vein-backend-check"
 CLI="$REPO/src/Vein.Cli/bin/Debug/net8.0/veinc.dll"
 
 # Programs in the identity subset the backend covers, with the frames to run them for.
-CASES=("samples/entities.vein:3" "samples/entities_multi.vein:2" "samples/entities_chance.vein:4" "samples/entities_detach.vein:4" "samples/entities_template.vein:2" "samples/entities_marks.vein:4" "samples/entities_bind.vein:2" "samples/entities_index.vein:2" "samples/entities_filter.vein:2" "samples/entities_ordered.vein:2" "samples/entities_bring_order.vein:2" "samples/entities_bring_rows.vein:2" "samples/bench_folds.vein:2" "samples/builder_defaults.vein:2" "samples/dom_rewire.vein:2" "samples/rows_in_order.vein:1")
+CASES=("samples/entities.vein:3" "samples/entities_multi.vein:2" "samples/entities_chance.vein:4" "samples/entities_detach.vein:4" "samples/entities_template.vein:2" "samples/entities_marks.vein:4" "samples/entities_bind.vein:2" "samples/entities_index.vein:2" "samples/entities_filter.vein:2" "samples/entities_ordered.vein:2" "samples/entities_bring_order.vein:2" "samples/entities_bring_rows.vein:2" "samples/bench_folds.vein:2" "samples/builder_defaults.vein:2" "samples/dom_rewire.vein:2" "samples/rows_in_order.vein:1" "samples/events.vein:2" "samples/payload.vein:2")
 
 echo "building…"
 dotnet build "$REPO/VeinScript.sln" -v quiet --nologo >/dev/null 2>&1 || { echo "BUILD FAILED"; exit 1; }
