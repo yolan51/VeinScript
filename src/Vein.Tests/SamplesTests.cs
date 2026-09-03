@@ -108,6 +108,144 @@ public class SamplesTests
             string.Join("\n  ", offenders.Distinct()));
     }
 
+    /// How much of the HIR carries a type, across every sample.
+    ///
+    /// IR-SPEC.md's first invariant is *"Fully typed. Every IrExpr has a resolved IrTypeRef."* It was
+    /// aspirational: `ResolvedType` existed and nothing assigned it, so consumers re-derived types and
+    /// disagreed — the C# backend printed "True" where the interpreter printed "true", and formatted
+    /// doubles in the machine's culture.
+    ///
+    /// A RATIO rather than a demand that every node be typed, because some genuinely cannot be: a
+    /// `fromJson` result and a collection binding are dynamic by nature. The number is the point — it
+    /// makes the invariant a measurement instead of a claim, and a change that drops it will say so.
+    [Fact]
+    public void Most_of_the_HIR_carries_a_resolved_type()
+    {
+        var svc = new VeinCompilerService();
+        int typed = 0, total = 0;
+
+        foreach (var path in VeinFiles("samples"))
+        {
+            if (IsFragment(path)) continue;
+            var r = svc.Compile(new CompileRequest(
+                Path.GetFileName(path), File.ReadAllText(path), SourcePath: path));
+
+            foreach (var m in r.Modules)
+                foreach (var e in AllExprs(m))
+                {
+                    total++;
+                    if (e.ResolvedType is not null) typed++;
+                }
+        }
+
+        Assert.True(total > 1000, $"expected a meaningful sample of expressions, saw {total}");
+
+        double pct = 100.0 * typed / total;
+        Assert.True(pct >= 80.0,   // 83.6% at the time of writing; the floor leaves room, the message shows the truth
+        
+            $"only {typed}/{total} ({pct:F1}%) of HIR expressions carry a type — Semantics/Resolve " +
+            "has regressed, and every consumer is back to guessing.");
+    }
+
+    /// Every expression in a module, including the ones nested in statements.
+    private static IEnumerable<Vein.Compiler.Ir.IrExpr> AllExprs(Vein.Compiler.Ir.IrModule m)
+    {
+        foreach (var f in m.Functions)
+            foreach (var e in InBlock(f.Body)) yield return e;
+        foreach (var s in m.Shards)
+            foreach (var fn in s.Methods)
+                foreach (var e in InBlock(fn.Body)) yield return e;
+    }
+
+    private static IEnumerable<Vein.Compiler.Ir.IrExpr> InBlock(Vein.Compiler.Ir.IrBlock b)
+    {
+        foreach (var s in b.Statements)
+            foreach (var e in InStmt(s)) yield return e;
+    }
+
+    private static IEnumerable<Vein.Compiler.Ir.IrExpr> InStmt(Vein.Compiler.Ir.IrStmt? s)
+    {
+        switch (s)
+        {
+            case null: yield break;
+            case Vein.Compiler.Ir.IrBlock b:
+                foreach (var e in InBlock(b)) yield return e;
+                break;
+            case Vein.Compiler.Ir.IrLet l:
+                foreach (var e in InExpr(l.Init)) yield return e;
+                break;
+            case Vein.Compiler.Ir.IrAssign a:
+                foreach (var e in InExpr(a.Target)) yield return e;
+                foreach (var e in InExpr(a.Value)) yield return e;
+                break;
+            case Vein.Compiler.Ir.IrIf i:
+                foreach (var e in InExpr(i.Cond)) yield return e;
+                foreach (var e in InBlock(i.Then)) yield return e;
+                if (i.Else is not null) foreach (var e in InBlock(i.Else)) yield return e;
+                break;
+            case Vein.Compiler.Ir.IrExprStmt x:
+                foreach (var e in InExpr(x.Expr)) yield return e;
+                break;
+            case Vein.Compiler.Ir.IrReturn r:
+                foreach (var e in InExpr(r.Value)) yield return e;
+                break;
+            case Vein.Compiler.Ir.IrOrdered o:
+                foreach (var e in InBlock(o.Collect)) yield return e;
+                break;
+            case Vein.Compiler.Ir.IrOrderedBring ob:
+                foreach (var e in InExpr(ob.Key)) yield return e;
+                foreach (var e in InBlock(ob.Body)) yield return e;
+                break;
+            case Vein.Compiler.Ir.IrMatch m:
+                foreach (var e in InExpr(m.Subject)) yield return e;
+                foreach (var arm in m.Arms) foreach (var e in InBlock(arm.Body)) yield return e;
+                if (m.Else is not null) foreach (var e in InBlock(m.Else)) yield return e;
+                break;
+            case Vein.Compiler.Ir.IrLoop lp:
+                foreach (var e in InExpr(lp.Cond)) yield return e;
+                foreach (var e in InExpr(lp.Count)) yield return e;
+                foreach (var e in InExpr(lp.Source)) yield return e;
+                foreach (var e in InBlock(lp.Body)) yield return e;
+                break;
+        }
+    }
+
+    private static IEnumerable<Vein.Compiler.Ir.IrExpr> InExpr(Vein.Compiler.Ir.IrExpr? e)
+    {
+        if (e is null) yield break;
+        yield return e;
+
+        switch (e)
+        {
+            case Vein.Compiler.Ir.IrBinary b:
+                foreach (var x in InExpr(b.Left)) yield return x;
+                foreach (var x in InExpr(b.Right)) yield return x;
+                break;
+            case Vein.Compiler.Ir.IrUnary u:
+                foreach (var x in InExpr(u.Operand)) yield return x;
+                break;
+            case Vein.Compiler.Ir.IrFieldAccess fa:
+                foreach (var x in InExpr(fa.Receiver)) yield return x;
+                break;
+            case Vein.Compiler.Ir.IrIndex ix:
+                foreach (var x in InExpr(ix.Receiver)) yield return x;
+                foreach (var x in InExpr(ix.Index)) yield return x;
+                break;
+            case Vein.Compiler.Ir.IrCall c:
+                foreach (var a in c.Args) foreach (var x in InExpr(a)) yield return x;
+                break;
+            case Vein.Compiler.Ir.IrRuntimeCall rc:
+                foreach (var a in rc.Args) foreach (var x in InExpr(a)) yield return x;
+                break;
+            case Vein.Compiler.Ir.IrStructInit si:
+                foreach (var (_, v) in si.Fields) foreach (var x in InExpr(v)) yield return x;
+                break;
+            case Vein.Compiler.Ir.IrList li:
+                foreach (var i in li.Items) foreach (var x in InExpr(i)) yield return x;
+                break;
+        }
+    }
+
     [Fact]
     public void Multi_file_samples_bring_in_their_fragments()
     {

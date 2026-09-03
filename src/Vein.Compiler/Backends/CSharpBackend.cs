@@ -892,15 +892,23 @@ public sealed class CSharpBackend : IVeinBackend
 
     /// Force string context, so `"enemy " + Entity` concatenates rather than failing to compile when the
     /// left operand is not already a string.
-    /// Is this `+` building TEXT? A string literal anywhere in the left spine settles it, which is how
-    /// every concatenation in the samples is written: `"label " + value + " more"` parses left-nested,
-    /// so the literal is reachable by walking down the left. A `+` with no literal in it stays
-    /// arithmetic, because the IR carries no types (`ResolvedType` is never assigned) and guessing
-    /// would turn integer addition into string joining.
-    private static bool IsConcat(IrExpr e) => e switch
+    /// Is this `+` building TEXT? The IR now says so: `Semantics/Resolve` types a `+` as `string` when
+    /// either operand is one, applying to types the rule the interpreter applies to values.
+    ///
+    /// This used to be a syntactic guess — walk the tree looking for a string literal — and it was wrong
+    /// in both directions. `title + suffix`, two string FIELDS with no literal between them, read as
+    /// arithmetic; and any `+` reached through an untyped path fell back to C#'s own conversions, which
+    /// print "True" for a bool and format a double in the machine's culture.
+    ///
+    /// The literal walk survives only as a FALLBACK, for the expressions Resolve cannot type yet (a
+    /// `fromJson` result, a collection binding). Where the IR knows, the IR decides.
+    private static bool IsConcat(IrExpr e) =>
+        e.ResolvedType?.Name == "string" || LooksLikeConcat(e);
+
+    private static bool LooksLikeConcat(IrExpr e) => e switch
     {
         IrLiteral { Kind: IrLiteralKind.String } => true,
-        IrBinary { Op: IrBinOp.Add } b => IsConcat(b.Left) || IsConcat(b.Right),
+        IrBinary { Op: IrBinOp.Add } b => LooksLikeConcat(b.Left) || LooksLikeConcat(b.Right),
         _ => false,
     };
 

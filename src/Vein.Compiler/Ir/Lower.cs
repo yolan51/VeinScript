@@ -187,7 +187,12 @@ public sealed class Lower
         foreach (var t in _importedShapes.Values)
             if (!types.Any(x => x.Name == t.Name && x.Kind == IrTypeKind.Component)) types.Add(t);
 
-        return new IrModule(bundle.Name, types, funcs, shards) { Start = start };
+        // TYPES LAST, and unconditionally. `Semantics/Resolve` is its own class — IR-SPEC.md describes it
+        // as its own stage — but it runs from HERE rather than from the ten call sites that lower a
+        // bundle, because a consumer that received an unresolved module would look exactly like one that
+        // received a resolved one and silently fall back to guessing. That is the failure this pass
+        // exists to end, so it must not be possible to skip it.
+        return Semantics.Resolve.Run(new IrModule(bundle.Name, types, funcs, shards) { Start = start });
     }
 
     /// The same `Author.Bundle` in two search roots — e.g. an installed `bundles/` copy alongside the

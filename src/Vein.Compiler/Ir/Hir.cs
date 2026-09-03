@@ -103,8 +103,22 @@ public sealed record IrExprStmt(IrExpr Expr) : IrStmt;
 
 public abstract record IrExpr
 {
-    /// Filled by the typecheck pass (M3); null in this milestone.
-    public IrTypeRef? ResolvedType { get; init; }
+    /// The expression's type, filled by `Semantics/Resolve.cs`.
+    ///
+    /// IR-SPEC.md's first invariant — *"Fully typed. Every IrExpr has a resolved IrTypeRef. No inference
+    /// remains."* — was aspirational for a long time: this property existed and nothing ever assigned it.
+    /// Consumers therefore re-derived types, and disagreed. The C# backend guessed syntactically at
+    /// whether a `+` built text (bools printed "True" against the interpreter's "true", and doubles
+    /// formatted in the machine's culture); VS0230 could only check literal arguments and said so.
+    ///
+    /// `internal set` rather than `init` on purpose: the pass ANNOTATES the tree in place. Rebuilding
+    /// every node to attach a type would be a second full traversal that can silently drop the parts it
+    /// forgets to copy, and the IR is not shared between compilations. Outside the compiler it stays
+    /// read-only.
+    ///
+    /// Null still means "not yet known" — a construct Resolve does not cover yet. Consumers must treat
+    /// it as unknown rather than as an error; `SamplesTests` measures how much of the tree is typed.
+    public IrTypeRef? ResolvedType { get; internal set; }
 }
 
 public enum IrLiteralKind { Int, Float, Percent, String, Bool }
