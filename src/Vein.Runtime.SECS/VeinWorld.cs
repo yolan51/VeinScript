@@ -277,13 +277,14 @@ public sealed class VeinWorld
 
     private readonly List<VeinSystem> _systems = new();
 
-    public void Register(VeinSystem system) { system.Attach(this); _systems.Add(system); }
+    public void Register(VeinSystem system) { system.Attach(this); _systems.Add(system); system.Subscribe(); }
 
     /// `run once` builds the world before anything else, so a query in a later phase finds it.
     public void Start()
     {
         foreach (var s in _systems) s.Once();
         Commit();
+        Drain();   // Interp: RunOnce() then Drain() — events raised at boot are handled before frame 1
     }
 
     /// One frame, in the order docs/RUNTIME.md §4.1 defines: every tick block contributes, the phase
@@ -296,12 +297,49 @@ public sealed class VeinWorld
         Commit();
         foreach (var s in _systems) s.Settled();
         Commit();
+        Drain();   // Interp.Frame: events from either phase are handled against a settled world
     }
 
     public void Run(int frames) { for (int i = 0; i < frames; i++) Frame(); }
 
     public void Print(string text) => Out.WriteLine(text);
 
+    // ---- the reactive half ------------------------------------------------
+    //
+    // Mirrors Interp's queue, not a variation on it: emit appends, Drain takes one event at a time,
+    // hands it to every subscriber, and COMMITS after each one. The per-event commit is the load-bearing
+    // part (docs/RULES.md 12b) — it is what makes "wire it in one event, read it in the next" work, and
+    // a drain that committed once at the end would quietly break every program built on that.
+
+    private readonly Queue<(string Name, object Payload)> _events = new();
+    private readonly Dictionary<string, List<Action<object>>> _handlers = new(StringComparer.Ordinal);
+
+    /// Register a `hear` handler. Called from a system's `Subscribe`, before the first phase runs, so a
+    /// `run once` that emits is never racing a handler that has not subscribed yet.
+    public void On(string @event, Action<object> handler)
+    {
+        if (!_handlers.TryGetValue(@event, out var list)) _handlers[@event] = list = new();
+        list.Add(handler);
+    }
+
+    /// `emit @E { … }`. Queued rather than dispatched, so an emit inside a handler is handled AFTER the
+    /// current one finishes — the interpreter's order, and the reason a handler can emit without
+    /// recursing into itself.
+    public void Emit(string @event, object payload) => _events.Enqueue((@event, payload));
+
+    /// The guard is the interpreter's, for the same reason: a pair of handlers that emit each other's
+    /// event is a live-lock, and stopping is better than hanging with no output.
+    public void Drain()
+    {
+        int guard = 0;
+        while (_events.Count > 0 && guard++ < 10_000)
+        {
+            var (name, payload) = _events.Dequeue();
+            if (_handlers.TryGetValue(name, out var hs))
+                foreach (var h in hs) h(payload);
+            Commit();
+        }
+    }
 }
 
 /// Every generated component implements this. `Fold` is generated per shape, because which fields are
@@ -322,6 +360,10 @@ public abstract class VeinSystem
 {
     protected VeinWorld World = null!;
     internal void Attach(VeinWorld world) => World = world;
+
+    /// Wire this system's `hear` handlers. Called by `Register`, so every subscription exists before any
+    /// phase runs — a `run once` that emits must not outrun a handler that has not subscribed.
+    public virtual void Subscribe() { }
 
     public virtual void Once() { }
     public virtual void Tick() { }

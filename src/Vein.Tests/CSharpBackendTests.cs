@@ -214,15 +214,31 @@ public class CSharpBackendTests
     // ---- the boundary, stated out loud -----------------------------------------------------------
 
     [Fact]
-    public void A_hear_handler_is_not_emitted_and_says_so()
+    public void A_hear_handler_on_a_local_event_is_emitted_and_subscribed()
     {
-        // Silently dropping this would produce a program that compiles and does less than the source.
+        // The reactive half used to stop at the boundary and say so. It no longer does: a `hear` on an
+        // event this module declares becomes a method plus a subscription, and the runtime's queue
+        // dispatches to it — samples/rows_in_order.vein is checked against the interpreter this way.
         var (code, notes) = Emit(
-            "  shape $H { hp: int }\n" +
-            "  shard S { hear *Vein.Console.Io.@Input as i { } }");
+            "  event @Ping { text: string }\n" +
+            "  shard S { hear @Ping as p { emit *Vein.Console.Io.@Print { text: p.text } } }");
 
-        Assert.DoesNotContain("void Hear", code);
-        Assert.Contains(notes, n => n.Contains("hear"));
+        Assert.Contains("private void hear_Ping(Events.Ping p)", code);
+        Assert.Contains("World.On(\"Ping\", p => hear_Ping((Events.Ping)p));", code);
+        Assert.DoesNotContain(notes, n => n.Contains("hear"));
+    }
+
+    [Fact]
+    public void An_event_declared_in_ANOTHER_bundle_still_says_so()
+    {
+        // The boundary that remains, and the reason it is not silent: there is no payload type here to
+        // construct and no handler this module owns — a stdlib event reaches a transport the
+        // interpreter provides and this runtime does not.
+        var (_, notes) = Emit(
+            "  shape $H { hp: int }\n" +
+            "  shard S { run once { emit *Vein.Net.Http.@Fetch { url: \"x\", method: \"GET\", body: \"\" } } }");
+
+        Assert.Contains(notes, n => n.Contains("@Fetch"));
     }
 
     [Fact]
@@ -236,10 +252,19 @@ public class CSharpBackendTests
     }
 
     [Fact]
-    public void An_event_type_is_reported_rather_than_emitted()
+    public void An_event_type_becomes_a_payload_class_with_initialised_fields()
     {
-        var (_, notes) = Emit("  publicator P { shared(\"d\") event @Ping { text: string } }");
-        Assert.Contains(notes, n => n.Contains("@Ping"));
+        var (code, _) = Emit("  publicator P { shared(\"d\") event @Ping { text: string, n: int } }");
+
+        // NESTED in `Events`, because VeinScript separates `@Ping` from `Ping` by sigil and C# does not
+        // — `event @Show` beside `shard Show` is ordinary source (samples/entities_tree.vein).
+        Assert.Contains("public static class Events", code);
+        Assert.Contains("public sealed class Ping", code);
+
+        // Initialised, not bare: an `emit` may omit a field, and the interpreter reads a missing one as
+        // empty rather than null. A bare `string` would be null here and "" there.
+        Assert.Contains("public string text = \"\";", code);
+        Assert.Contains("public long n = 0L;", code);
     }
 
     [Fact]
