@@ -39,6 +39,9 @@ internal sealed class WebPreviewPanel : UserControl
     /// Jump to a source position. Wired by the window to the shared GoTo.
     public Action<int, int>? Navigate { get; set; }
 
+    /// Start `veinc serve` for this file. Wired by the window, which owns the terminal.
+    public Action? Serve { get; set; }
+
     public WebPreviewPanel()
     {
         var refresh = new Button { Content = "Refresh", Padding = new Avalonia.Thickness(10, 2) };
@@ -58,6 +61,12 @@ internal sealed class WebPreviewPanel : UserControl
             Navigate?.Invoke(site.Span.Line, site.Span.Col);
         };
 
+        // `veinc serve` in a terminal session, and a link to it. The preview answers "what does this
+        // route render"; a real server answers "does it behave in a browser", and they are different
+        // questions — forms, scripts and relative links only work in the second.
+        var serve = new Button { Content = "Serve", Padding = new Avalonia.Thickness(10, 2) };
+        serve.Click += (_, _) => Serve?.Invoke();
+
         _routes.SelectionChanged += (_, _) => Render();
 
         var bar = new StackPanel
@@ -68,7 +77,7 @@ internal sealed class WebPreviewPanel : UserControl
             Children =
             {
                 new TextBlock { Text = "Route", VerticalAlignment = VerticalAlignment.Center },
-                _routes, refresh, source, browser, _status
+                _routes, refresh, source, serve, browser, _status
             }
         };
 

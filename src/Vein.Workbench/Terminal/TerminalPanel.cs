@@ -44,7 +44,23 @@ internal sealed class TerminalPanel : UserControl
         /// and one shared list makes ↑ mostly recall the wrong kind of thing.
         public List<string> Sent { get; } = new();
         public int SentAt { get; set; }
+
+        /// Messages this session sent that reached nobody, since it last started.
+        public int Undelivered { get; set; }
     }
+
+    /// Text prefixes the OPEN FILE prints when a message is undelivered, read out of its own
+    /// `hear @Undelivered` block by `Tooling/UndeliveredSignals`. Set by the window on each build.
+    ///
+    /// Read from the file rather than guessed. `@Undelivered` is an ordinary event the PROGRAM hears
+    /// and prints however it likes, so nothing but text crosses the process boundary — and the four
+    /// shipped handlers word it four different ways. A hand-written phrase list would have matched one
+    /// and silently missed three, which is worse than not flagging at all: the absence would read as
+    /// "nothing went wrong".
+    public IReadOnlyList<string> UndeliveredPrefixes { get; set; } = Array.Empty<string>();
+
+    private bool LooksUndelivered(string line) =>
+        UndeliveredPrefixes.Any(p => line.TrimStart().StartsWith(p.TrimStart(), StringComparison.Ordinal));
 
     public TerminalPanel()
     {
@@ -130,6 +146,16 @@ internal sealed class TerminalPanel : UserControl
             if (!Matches(tab, line)) return;
             output.Text += line + "\n";
             output.CaretIndex = output.Text.Length;
+
+            // A message that reached nobody is the single most confusing thing a multi-process sample
+            // does: it prints one grey line among hundreds and otherwise behaves as if it worked. The
+            // tab says so until the session is next started, so it survives being scrolled past.
+            if (LooksUndelivered(line))
+            {
+                tab.Undelivered++;
+                status.Text = tab.Undelivered == 1 ? "1 message undelivered" : $"{tab.Undelivered} messages undelivered";
+                status.Foreground = Brushes.Goldenrod;
+            }
         };
 
         filter.TextChanged += (_, _) => Refilter(tab);
@@ -274,6 +300,7 @@ internal sealed class TerminalPanel : UserControl
     {
         if (tab.Session.Start(spec, RepoRoot, CliProject))
         {
+            tab.Undelivered = 0;   // this run's count, not the last one's
             tab.Status.Text = "running";
             tab.Status.Foreground = Brushes.MediumSeaGreen;
             tab.Item.Header = Header(tab, running: true);

@@ -112,6 +112,10 @@ public partial class MainWindow : Window
     private ComboBox _runConfigs = null!;
     private TextBlock _runHint = null!;
     private TextBox _runArgs = null!;
+    private CheckBox _showErrors = null!;
+    private CheckBox _showWarnings = null!;
+    private TextBox _diagFilter = null!;
+    private TextBlock _diagSummary = null!;
 
     /// The run configurations the open file declares in its own header, in header order.
     private IReadOnlyList<RunConfig> _configs = Array.Empty<RunConfig>();
@@ -135,6 +139,7 @@ public partial class MainWindow : Window
         _tabs = this.FindControl<EditorTabs>("FileTabs")!;
         _webPreview = this.FindControl<WebPreviewPanel>("WebPreview")!;
         _webPreview.Navigate = GoTo;
+        _webPreview.Serve = () => OnServe(this, new RoutedEventArgs());
         _consoles = this.FindControl<ConsoleTopologyPanel>("ConsoleTopology")!;
         _outline = this.FindControl<OutlinePanel>("Outline")!;
         _outline.Navigate = GoTo;
@@ -144,6 +149,13 @@ public partial class MainWindow : Window
         _runConfigs = this.FindControl<ComboBox>("RunConfigs")!;
         _runHint = this.FindControl<TextBlock>("RunHint")!;
         _runArgs = this.FindControl<TextBox>("RunArgs")!;
+        _showErrors = this.FindControl<CheckBox>("ShowErrors")!;
+        _showWarnings = this.FindControl<CheckBox>("ShowWarnings")!;
+        _diagFilter = this.FindControl<TextBox>("DiagFilter")!;
+        _diagSummary = this.FindControl<TextBlock>("DiagSummary")!;
+        _diagFilter.TextChanged += (_, _) => ApplyDiagnosticFilter();
+        _showErrors.IsCheckedChanged += (_, _) => ApplyDiagnosticFilter();
+        _showWarnings.IsCheckedChanged += (_, _) => ApplyDiagnosticFilter();
         _runArgs.TextChanged += (_, _) => { if (!_syncingRunArgs) _runArgsEdited = true; };
         _runConfigs.SelectionChanged += (_, _) => { _runArgsEdited = false; SyncRunArgs(); };
 
@@ -604,6 +616,25 @@ public partial class MainWindow : Window
 
         SetStatus($"Started all {_configs.Count} participants — type into a session to drive it.");
     }
+
+    /// `veinc serve` for the open file, in a terminal session, and open a browser at it.
+    ///
+    /// A session per port: starting Serve twice would bind the same port twice and the second would
+    /// fail, so an existing serve session is reused rather than stacked.
+    private void OnServe(object? sender, RoutedEventArgs e)
+    {
+        if (_currentPath is null) { SetStatus("Save the file first — serve serves a file, not a buffer."); return; }
+        if (_tabs.Active is { } doc) { File.WriteAllText(_currentPath, doc.Document.Text); _tabs.MarkSaved(doc); }
+
+        _bottomPanel.IsVisible = true;
+        _bottomPanel.SelectedIndex = TabTerminal;
+        _terminal.Run(new LaunchSpec(LaunchKind.Cli, "serve",
+            new[] { _currentPath, "--port", ServePort.ToString() }, new Dictionary<string, string>()), "serve");
+
+        SetStatus($"Serving on http://localhost:{ServePort} — the terminal session holds it open.");
+    }
+
+    private const int ServePort = 8080;
 
     /// `veinc build` — publish a standalone executable. Runs in a terminal session like everything else,
     /// so the CLI's own account of where it landed is what you read, rather than a summary of it.
@@ -1239,7 +1270,7 @@ public partial class MainWindow : Window
         _diags = result.Diagnostics;
 
         _references = null;   // a build replaces a standing Find References with real diagnostics
-        _diagBox.ItemsSource = _diags.Select(d => d.ToString()).ToList();
+        ApplyDiagnosticFilter();
         _rawIr.Text = result.IrText;
         PopulateTree(result.IrTree);
         PopulateDependencies(result.Ast);
@@ -1249,6 +1280,7 @@ public partial class MainWindow : Window
         if (renderPreview || _bottomPanel.SelectedIndex == TabPreview)
             _webPreview.Update(result.Modules, result.Ast is null ? RouteMap.Empty : RouteMap.Analyze(result.Ast));
         _consoles.Update(result.Ast is null ? null : ConsoleGraph.Analyze(result.Ast));
+        _terminal.UndeliveredPrefixes = result.Ast is null ? Array.Empty<string>() : UndeliveredSignals.Analyze(result.Ast);
         _definitions = result.Ast is null ? DefinitionIndex.Empty : DefinitionIndex.Analyze(result.Ast);
         _outline.Update(_definitions);
         _eventGraph.Update(_definitions);
@@ -1597,6 +1629,46 @@ public partial class MainWindow : Window
         _editor.TextArea.TextView.InvalidateVisual();
     }
 
+    // ---- diagnostics filtering -------------------------------------------
+    //
+    // There are 60 VS codes. A file mid-edit can produce a wall of cascading parse errors with the one
+    // warning you were chasing somewhere inside it, and "scroll and squint" is not a filter.
+    //
+    // The list that is DISPLAYED is the list that is jumped through — _shownDiags, not _diags — because
+    // indexing the unfiltered list from a filtered view would jump to whichever diagnostic happened to
+    // share a row number, which is worse than not jumping at all.
+
+    private IReadOnlyList<Diagnostic> _shownDiags = Array.Empty<Diagnostic>();
+
+    private void ApplyDiagnosticFilter()
+    {
+        // Showing diagnostics ends a standing Find References. Without this the pane would hold
+        // diagnostics while the double-click handler still jumped through references — the two lists
+        // silently disagreeing about what row 3 means.
+        _references = null;
+
+        bool errors = _showErrors.IsChecked ?? true;
+        bool warnings = _showWarnings.IsChecked ?? true;
+        string q = (_diagFilter.Text ?? "").Trim();
+
+        _shownDiags = _diags.Where(d =>
+        {
+            bool isError = d.Severity == Severity.Error;
+            if (isError && !errors) return false;
+            if (!isError && !warnings) return false;
+            return q.Length == 0 || d.ToString().Contains(q, StringComparison.OrdinalIgnoreCase);
+        }).ToList();
+
+        _diagBox.ItemsSource = _shownDiags.Select(d => d.ToString()).ToList();
+
+        int hidden = _diags.Count - _shownDiags.Count;
+        _diagSummary.Text = _diags.Count == 0
+            ? ""
+            : $"{_diags.Count(d => d.Severity == Severity.Error)} error(s), " +
+              $"{_diags.Count(d => d.Severity != Severity.Error)} warning(s)" +
+              (hidden > 0 ? $"  ·  {hidden} hidden" : "");
+    }
+
     private void OnDiagnosticActivated(object? sender, TappedEventArgs e)
     {
         int i = _diagBox.SelectedIndex;
@@ -1611,8 +1683,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (i >= _diags.Count) return;
-        GoTo(_diags[i].Span.Line, Math.Max(1, _diags[i].Span.Col));
+        if (i >= _shownDiags.Count) return;
+        GoTo(_shownDiags[i].Span.Line, Math.Max(1, _shownDiags[i].Span.Col));
     }
 
     // ---- sigil completion ($ shapes, # marks, @ events) -----------------

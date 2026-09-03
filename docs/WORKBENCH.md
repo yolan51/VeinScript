@@ -102,7 +102,10 @@ manifest, with search, Type/Visibility filters, a grouping toggle, a detail pane
 PUBLIC/SHARED/PRIVATE bar (`Tooling/BundleModel.cs`).
 
 **Bottom panel** — eight tabs:
-- **Diagnostics** — every `Diagnostic`; double-click jumps the caret there.
+- **Diagnostics** — every `Diagnostic`; double-click jumps the caret there. Filterable by severity and
+  by text, because there are 60 VS codes and a file mid-edit can bury the one warning you were chasing
+  under a wall of cascading parse errors. The list *displayed* is the list jumped through, so a filtered
+  view never sends you to whichever diagnostic happened to share a row number.
 - **Raw IR** — the VeinIR ASCII tree, identical to `veinc ir`.
 - **Output** — in-process run output (the fallback path for an unsaved file).
 - **Dependencies** — what the bundle consumes, grouped Author → Bundle → Publicator → member, with ⚠
@@ -142,6 +145,13 @@ session, so what you read is the CLI's own account of where the exe landed.
 running, and what you last typed *at* the program while one is. They are separate vocabularies — a chat
 sample's `hello` has nothing to do with `veinc run`, and one shared list makes ↑ mostly offer the wrong
 kind of thing.
+
+A session whose messages **reached nobody** says so on its tab until the next run, rather than in one
+grey line among hundreds. That flag is not guessed at: `@Undelivered` is an ordinary event the program
+hears and prints however it likes, so `Tooling/UndeliveredSignals.cs` reads the literal text prefixes
+out of the file's **own** `hear @Undelivered` block. The four shipped handlers word it four different
+ways — a hand-written phrase list would have matched one and silently missed three, and a missing
+warning reads as "nothing went wrong".
 
 **Terminal** — concurrent sessions, each with its own output pane, its own **stdin**, and ■ / EOF / ✕.
 `Tooling/VeinShell.cs` accepts what you would paste from a sample header in either dialect
@@ -234,7 +244,7 @@ The workload this IDE is unusual for: `console_chat.vein`, `samples/chat/`, `con
 | B5 | **A combined transcript** | One interleaved, timestamped view of all sessions, so a relay bug is visible as an ORDER rather than by alt-tabbing |
 | B6 | **Message inspector** | Click a line in the transcript and see the event, its payload and its sender |
 | B7 | **Live console registry** | Which pipe names are bound right now, including terminals outside the IDE — the answer to "is Control actually running?" |
-| B8 | **Undelivered surfaced** | `@Undelivered` shown as a warning row, not just a printed line |
+| B8 | ✅ **Undelivered surfaced** | A session that sent to nobody says so on its tab, not in one grey line |
 | B9 | **Port + pipe conflict check** | Before launch: "Alice's 9701 is already bound" instead of a runtime failure |
 | B10 | **App composition view** | For an `app.vein`, which bundle hears which emit — the one combination `app_capabilities/` demonstrates and nothing visualises |
 
@@ -253,7 +263,7 @@ socket involved (`Vein.Cli/Program.cs`, `case "render"`), so a preview pane is a
 | C3 | ✅ **The markup itself** | Read what `&Open`/`&Close` assembled |
 | C6 | ✅ **Route map + conflict warning** | Be told when two shards claim `/`, before finding out at runtime |
 | C1b | **Embedded rendered view** | See the *page*, not its markup, without leaving the IDE — needs a WebView dependency, deliberately not added yet |
-| C4 | **Serve with one click** | ▶ starts `serve --port 8080` and the status bar links to it |
+| C4 | ✅ **Serve with one click** | Start `serve --port 8080` from the Preview tab or the Build menu |
 | C5 | **Live reload** | Save the file, and the running `serve` and the preview both update |
 | C11 | ✅ **Route navigation** | Jump from a previewed route to the `if` that answers it |
 | C7 | **Element completion** | `&` completes the `Vein.Web.Elements` builders with their parameter names |
@@ -292,7 +302,7 @@ exists rather than writing new analysis.
 | # | Item | Done bar |
 |---|---|---|
 | E1 | ✅ **Compile as you type** | See VS0228 while typing the bad `bring`, not after `Ctrl+B` |
-| E2 | **Problems filtering** | Show only errors; group by code; hide a noisy warning |
+| E2 | ✅ **Problems filtering** | Show only errors, or only the lines mentioning VS0212 |
 | E3 | **Quick fixes** | One click to fix VS0228 (arity), VS0231 (`base` with no default), VS0217 (shadowed built-in), VS0212 (unknown console) |
 | E4 | **Signature help** | Parameter names and defaults while typing a `bring`, so `base` is obvious |
 | E5 | ✅ **Event graph** | Who emits `@X` and who hears it, each row a jump — and which events go nowhere |
@@ -338,11 +348,15 @@ font size, shortcut map, recent folders).
 
 **Tracks A and D are complete.**
 
-Next, in order: **E2/E3/E9** (problems filtering, quick fixes for the mechanical diagnostics, and
-diagnostic explanations — `DefinitionIndex` now supplies the positions they need), then **C4/C5**
-(serve with one click, live reload), then **B5/B8** (a combined interleaved transcript, and
-`@Undelivered` surfaced as a warning rather than a printed line), then **F3** (`.veinproj`, which
-F2/F4/F5 hang off).
+Also done: **B8** (undelivered surfaced) · **C4** (serve with one click) · **E2** (problems filtering).
+
+Next, in order: **E3** (quick fixes for the mechanical diagnostics), then **B5** (a combined
+interleaved transcript), then **F3** (`.veinproj`, which F2/F4/F5 hang off), then **C7/C9/C10**.
+
+**E9 is deliberately not on that list.** The diagnostic messages already explain themselves and name
+the fix inline — VS0228 ends "Add the value, or write `?` to fill the rest with typed zeros on
+purpose". A catalog restating them would be a second copy to drift; if E9 is done at all it should add
+*background* the message cannot carry, not paraphrase it.
 
 **E6–E8** — the tick stepper, event timeline and entity browser — is the largest remaining piece and
 the most specific to this language, and it is not UI work: it needs `Interp` to expose stepping and
@@ -363,7 +377,8 @@ Source ─▶ VeinCompilerService.Compile ─▶ CompilationResult
   the Workbench and the CLI route through it — there is one compilation pipeline.
 - **Analysis lives in `src/Vein.Compiler/Tooling/`, not in the Workbench.** `ConsoleGraph`,
   `SymbolIndex`, `MemberIndex`, `BundleModel`, `DependencyModel`, `ExecutionModel`, `EventCatalog`,
-  `RunConfig`, `VeinShell`, `RouteMap`, `SourceEdits`, `BracketMatcher` and `DefinitionIndex` are all
+  `RunConfig`, `VeinShell`, `RouteMap`, `SourceEdits`, `BracketMatcher`, `UndeliveredSignals` and
+  `DefinitionIndex` are all
   pure logic the UI
   only renders. That is what keeps
   them testable from `Vein.Tests`, which references only `Vein.Compiler` — and it is why the route
