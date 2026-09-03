@@ -62,6 +62,11 @@ public sealed class CSharpBackend : IVeinBackend
     /// travel with the code that depends on them.
     private bool _needsOrder;
 
+    /// Set when a concatenation or a `@Print` is emitted, so the text formatter is appended to the file.
+    /// Emitted INTO the generated code for the same reason __VeinOrder is: the rules travel with the
+    /// code that depends on them, rather than being a runtime version this file happens to meet.
+    private bool _needsText;
+
     public BackendResult Emit(IrModule module)
     {
         _notes.Clear();
@@ -69,6 +74,7 @@ public sealed class CSharpBackend : IVeinBackend
         _componentTypes.Clear();
         _functions.Clear();
         _needsOrder = false;
+        _needsText = false;
         _orderList = "";
         _selfBind = "__e";
         foreach (var f in module.Functions) _functions.Add(f.Name);
@@ -114,6 +120,27 @@ public sealed class CSharpBackend : IVeinBackend
             sb.AppendLine("        if (nb) return 1;");
             sb.AppendLine("        return string.CompareOrdinal(a.ToString(), b.ToString());");
             sb.AppendLine("    }");
+            sb.AppendLine("}");
+        }
+
+        // Text formatting, and it must agree with Interp.Str line for line. C#'s own conversions do not:
+        // `bool.ToString()` is "True" where VeinScript writes `true`, and a double formats in the CURRENT
+        // culture, so a machine using a comma decimal separator would print "3,5" against the
+        // interpreter's "3.5" — a divergence that appears only on someone else's computer.
+        if (_needsText)
+        {
+            sb.AppendLine();
+            sb.AppendLine("internal static class __VeinText");
+            sb.AppendLine("{");
+            sb.AppendLine("    public static string S(object? v) => v switch");
+            sb.AppendLine("    {");
+            sb.AppendLine("        null => \"\",");
+            sb.AppendLine("        string s => s,");
+            sb.AppendLine("        bool b => b ? \"true\" : \"false\",");
+            sb.AppendLine("        double d => d.ToString(System.Globalization.CultureInfo.InvariantCulture),");
+            sb.AppendLine("        float f => ((double)f).ToString(System.Globalization.CultureInfo.InvariantCulture),");
+            sb.AppendLine("        _ => v.ToString() ?? \"\",");
+            sb.AppendLine("    };");
             sb.AppendLine("}");
         }
 
@@ -409,6 +436,76 @@ public sealed class CSharpBackend : IVeinBackend
         }
     }
 
+    /// Every component this body reads off the CURRENT target binding, as `self.Comp` or `self.Comp.f`.
+    ///
+    /// It does NOT descend into a nested `target`, and that is the point rather than an omission: inside
+    /// one, `IrSelfRef` means the INNER binding (docs/RULES.md 12c — the reference is nameless and
+    /// resolves to the innermost loop), so a component named there belongs to that loop's declarations,
+    /// not this one. Collecting it here would declare a `self_X` shadowed by the inner loop's own.
+    private void CollectSelfComponents(IrStmt? s, HashSet<string> found)
+    {
+        switch (s)
+        {
+            case null: return;
+            case IrBlock b: foreach (var st in b.Statements) CollectSelfComponents(st, found); return;
+            case IrLet l: CollectSelfComponents(l.Init, found); return;
+            case IrAssign a: CollectSelfComponents(a.Target, found); CollectSelfComponents(a.Value, found); return;
+            case IrIf i:
+                CollectSelfComponents(i.Cond, found);
+                CollectSelfComponents(i.Then, found);
+                CollectSelfComponents(i.Else, found);
+                return;
+            case IrExprStmt e: CollectSelfComponents(e.Expr, found); return;
+            case IrReturn r: CollectSelfComponents(r.Value, found); return;
+            case IrOrdered o: CollectSelfComponents(o.Collect, found); return;
+            case IrOrderedBring ob: CollectSelfComponents(ob.Key, found); CollectSelfComponents(ob.Body, found); return;
+            case IrMatch m:
+                CollectSelfComponents(m.Subject, found);
+                foreach (var arm in m.Arms) CollectSelfComponents(arm.Body, found);
+                CollectSelfComponents(m.Else, found);
+                return;
+
+            // A `while`/`repeat` shares this binding, so its body counts. A `target` does not — see above.
+            case IrLoop { Kind: IrLoopKind.Target }: return;
+            case IrLoop lp:
+                CollectSelfComponents(lp.Cond, found);
+                CollectSelfComponents(lp.Count, found);
+                CollectSelfComponents(lp.Body, found);
+                return;
+
+            default: return;   // break/continue carry no expressions
+        }
+    }
+
+    private void CollectSelfComponents(IrExpr? e, HashSet<string> found)
+    {
+        switch (e)
+        {
+            case null: return;
+
+            // The two shapes FieldAccess recognises: `self.Comp` on its own, and `self.Comp.field`.
+            case IrFieldAccess { Receiver: IrSelfRef } fa when _components.Contains(fa.Field):
+                found.Add(Ident(fa.Field));
+                return;
+            case IrFieldAccess fa:
+                CollectSelfComponents(fa.Receiver, found);
+                return;
+
+            case IrBinary b: CollectSelfComponents(b.Left, found); CollectSelfComponents(b.Right, found); return;
+            case IrUnary u: CollectSelfComponents(u.Operand, found); return;
+            case IrIndex ix: CollectSelfComponents(ix.Receiver, found); CollectSelfComponents(ix.Index, found); return;
+            case IrList li: foreach (var it in li.Items) CollectSelfComponents(it, found); return;
+            case IrCall c:
+                CollectSelfComponents(c.Callee, found);
+                foreach (var a in c.Args) CollectSelfComponents(a, found);
+                return;
+            case IrRuntimeCall rc: foreach (var a in rc.Args) CollectSelfComponents(a, found); return;
+            case IrStructInit si: foreach (var (_, v) in si.Fields) CollectSelfComponents(v, found); return;
+
+            default: return;   // literals and the bare refs carry nothing
+        }
+    }
+
     /// `target $Shape #Mark as self { … }` — one activation per matching entity.
     ///
     /// The activation works on a COPY, and hands the copy plus its snapshot back at the end. That is what
@@ -514,12 +611,32 @@ public sealed class CSharpBackend : IVeinBackend
             sb.AppendLine($"{pad}    var self_{c} = __snap_{c};");
         }
 
+        // A body may read a component the query did NOT name — `target $Style #Panel as p` whose body
+        // says `p.Layout.column`. The interpreter allows it: a binding is an entity, and any component
+        // that entity carries is readable from it. The backend declared `self_` only for the queried
+        // ones, so the emitted C# named `self_Layout` and nothing declared it — CS0103, with no note.
+        //
+        // These are read GUARDED, because the query never asserted the component is present: `Get` on a
+        // missing one throws, where the interpreter reads an absent field as empty. Same reason the
+        // contribution is guarded — folding a component the entity does not carry would create it.
+        var extra = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var s in loop.Body.Statements) CollectSelfComponents(s, extra);
+        extra.ExceptWith(comps);
+
+        foreach (var c in extra.OrderBy(x => x, StringComparer.Ordinal))
+        {
+            sb.AppendLine($"{pad}    var __snap_{c} = World.Has<{c}>(__e) ? World.Get<{c}>(__e) : default({c});");
+            sb.AppendLine($"{pad}    var self_{c} = __snap_{c};");
+        }
+
         foreach (var s in loop.Body.Statements) EmitStmt(sb, s, depth + 1);
 
         // Every component the query bound is contributed, so a fold on any of them reconciles — writing
         // back only the first would silently drop writes to the others.
         foreach (var c in comps)
             sb.AppendLine($"{pad}    World.Contribute(__e, __snap_{c}, self_{c});");
+        foreach (var c in extra.OrderBy(x => x, StringComparer.Ordinal))
+            sb.AppendLine($"{pad}    if (World.Has<{c}>(__e)) World.Contribute(__e, __snap_{c}, self_{c});");
         sb.AppendLine(pad + "}");
 
         _selfComponent = prev;
@@ -563,6 +680,12 @@ public sealed class CSharpBackend : IVeinBackend
         IrSelfRef => _selfBind,
         IrTypeNameExpr t => "\"" + t.Name + "\"",
         IrFieldAccess f => FieldAccess(f),
+        // A CONCATENATION, not an addition — decided the way a reader decides it: a string literal on
+        // either side, transitively. Emitting a raw `+` let C# pick the text, and C# disagrees with the
+        // interpreter twice over: `bool.ToString()` is "True", and a double formats in the CURRENT
+        // culture, so the same program printed "True" here and "true" there, and would have printed
+        // "3,5" on a machine in France. Both runtimes now format through the same rules.
+        IrBinary b when b.Op == IrBinOp.Add && IsConcat(b) => Concat(b),
         IrBinary b => $"({Expr(b.Left)} {Op(b.Op)} {Expr(b.Right)})",
         IrUnary u => u.Op == IrUnOp.Neg ? $"(-{Expr(u.Operand)})" : $"(!{Expr(u.Operand)})",
         IrRuntimeCall rc => RuntimeCall(rc),
@@ -688,7 +811,30 @@ public sealed class CSharpBackend : IVeinBackend
 
     /// Force string context, so `"enemy " + Entity` concatenates rather than failing to compile when the
     /// left operand is not already a string.
-    private string Str(IrExpr? e) => e is null ? "\"\"" : $"System.Convert.ToString({Expr(e)})";
+    /// Is this `+` building TEXT? A string literal anywhere in the left spine settles it, which is how
+    /// every concatenation in the samples is written: `"label " + value + " more"` parses left-nested,
+    /// so the literal is reachable by walking down the left. A `+` with no literal in it stays
+    /// arithmetic, because the IR carries no types (`ResolvedType` is never assigned) and guessing
+    /// would turn integer addition into string joining.
+    private static bool IsConcat(IrExpr e) => e switch
+    {
+        IrLiteral { Kind: IrLiteralKind.String } => true,
+        IrBinary { Op: IrBinOp.Add } b => IsConcat(b.Left) || IsConcat(b.Right),
+        _ => false,
+    };
+
+    private string Concat(IrBinary b)
+    {
+        _needsText = true;
+        return $"(__VeinText.S({Expr(b.Left)}) + __VeinText.S({Expr(b.Right)}))";
+    }
+
+    private string Str(IrExpr? e)
+    {
+        if (e is null) return "\"\"";
+        _needsText = true;
+        return $"__VeinText.S({Expr(e)})";
+    }
 
     private string StructInit(IrStructInit si)
     {

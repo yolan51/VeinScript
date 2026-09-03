@@ -70,15 +70,22 @@ public sealed class VeinWorld
         return id;
     }
 
-    public void Attach<T>(int entity, T component) where T : struct, IVeinComponent<T>
-    {
-        // Bumps the structural version: `Query<T>` matches on component PRESENCE, so gaining one
-        // invalidates a cached query exactly as gaining a mark does. Attaching only ever happened before
-        // the first query ran, which is why the missing bump never showed.
-        _structuralVersion++;
-        _secs.Add(entity, component);
-        Of<T>().Touch(entity);
-    }
+    /// `attach $C to e { … }`. DEFERRED, like `Detach` below and like the interpreter's own
+    /// `AddComponent`, which queues into `_commands` — applied at the commit point, AFTER the folds.
+    ///
+    /// It used to be immediate, and the note it carried explained why that survived: *"attaching only
+    /// ever happened before the first query ran"*. True while `bring` was the only caller. It stopped
+    /// being true for a re-attach inside a `target` loop — samples/dom_rewire.vein rewires a `$Handler`
+    /// that already exists — and immediate application put the write BEFORE the fold commit, so the
+    /// contribution taken from the pre-attach snapshot was reconciled back over it. The backend printed
+    /// the old handler while the interpreter printed the new one, with no note and no error: exactly the
+    /// silent disagreement docs/BACKEND-CONTRACT.md exists to forbid.
+    ///
+    /// The structural bump moves inside the deferred action with the write it belongs to: `Query<T>`
+    /// matches on component PRESENCE, so the cache must be invalidated when the component actually
+    /// arrives, not when the attach was requested.
+    public void Attach<T>(int entity, T component) where T : struct, IVeinComponent<T> =>
+        Defer(() => { _structuralVersion++; _secs.Add(entity, component); Of<T>().Touch(entity); });
 
     /// `unattach $C from e`. DEFERRED, like every other structural change and like the interpreter's own
     /// `RemoveComponent` — applied at the commit point so no unit in the phase sees a half-changed world.
