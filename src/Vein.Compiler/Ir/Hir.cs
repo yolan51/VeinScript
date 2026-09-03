@@ -130,7 +130,15 @@ public abstract record IrExpr
 public enum IrLiteralKind { Int, Float, Percent, String, Bool }
 public sealed record IrLiteral(object? Value, IrLiteralKind Kind) : IrExpr;
 public sealed record IrLocalRef(string Name) : IrExpr;             // param/local/global — resolved later
-public sealed record IrSelfRef : IrExpr;                            // the identity bound by `target`
+/// The value bound by an enclosing `target … as <bind>`, NAMED.
+///
+/// It was nameless, and the interpreter resolved it to the innermost binding — so inside
+/// `target $A as x { target $B as y { … } }`, `x.A.field` read y's row. Silently: a plausible value,
+/// never an error, and indistinguishable from correct in a single loop. Roadmap item 5, RULES.md 12c.
+///
+/// The name was always available at the one place this is created (`Lower` tests the bind STACK to
+/// decide a NameExpr is a binding at all) and was simply dropped on the floor.
+public sealed record IrSelfRef(string Bind) : IrExpr;
 public sealed record IrEntityRef : IrExpr;                          // `Entity` — the nearest entity's int id
 public sealed record IrLoopIndexRef : IrExpr;                           // `Index` — the nearest loop's 0-based counter
 public sealed record IrScopeRef(string Module, string Name) : IrExpr;

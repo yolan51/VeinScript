@@ -1374,7 +1374,7 @@ public sealed class Lower
                 return new IrLiteral(l.Value, MapLit(l.Kind));
             // The name bound by the enclosing `target … as <bind>` IS the identity, not an ordinary local —
             // that is what makes `self.Health.hp -= 1` a fold contribution rather than a plain assignment.
-            case NameExpr n when IsTargetBind(n.Name): return new IrSelfRef();
+            case NameExpr n when IsTargetBind(n.Name): return new IrSelfRef(n.Name);
             case NameExpr n: return new IrLocalRef(n.Name);
             case EntityExpr: return new IrEntityRef();
             case LoopIndexExpr: return new IrLoopIndexRef();

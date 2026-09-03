@@ -38,6 +38,51 @@ public class IdentityRuntimeTests
 
     private static int Count(string s, string needle) => s.Split(needle).Length - 1;
 
+    // ---- a nested `target` reads the OUTER binding ---------------------------------------------
+    //
+    // There was no test for this, and that absence is why it survived: `Lower` emitted a NAMELESS
+    // IrSelfRef for every target binding, and the interpreter resolved it to the innermost loop. In a
+    // single loop that is indistinguishable from correct, so `x.A.field` inside a second query silently
+    // read the INNER row — a plausible value, never an error. Roadmap item 5.
+
+    [Fact]
+    public void A_nested_target_reads_the_outer_binding_by_name()
+    {
+        var (output, _) = Run(
+            "bundle T by me {\n" +
+            "  shape $Deck { title: string }\n  mark #Deck\n  builder Deck { $Deck   mark #Deck }\n" +
+            "  shape $Card { face: string }\n  mark #Card\n  builder Card { $Card   mark #Card }\n" +
+            "  shard Seed { run once { bring Deck(\"trumps\")\n    bring Card(\"ace\")\n    bring Card(\"king\") } }\n" +
+            "  shard Show { settled {\n" +
+            "    target $Deck #Deck as d {\n" +
+            "      target $Card #Card as c {\n" +
+            "        " + P("d.Deck.title + \"/\" + c.Card.face") + " } } } }\n" +
+            "}");
+
+        // The outer binding must survive the inner loop. Before the fix the deck title was empty and
+        // this read "/ace" — the shape of the bug, and why it looked like data simply missing.
+        Assert.Equal(new[] { "trumps/ace", "trumps/king" }, Lines(output));
+    }
+
+    [Fact]
+    public void An_outer_binding_survives_a_nested_COLLECTION_loop_too()
+    {
+        // The same nameless reference, reached the other way: an identity query wrapping a `target`
+        // over a list. The inner loop pushes an element onto the same stack the outer entity was on.
+        var (output, _) = Run(
+            "bundle T by me {\n" +
+            "  shape $Deck { title: string }\n  mark #Deck\n  builder Deck { $Deck   mark #Deck }\n" +
+            "  shard Seed { run once { bring Deck(\"trumps\") } }\n" +
+            "  shard Show { settled {\n" +
+            "    target $Deck #Deck as d {\n" +
+            "      let faces = [\"ace\", \"king\"]\n" +
+            "      target faces as f {\n" +
+            "        " + P("d.Deck.title + \"/\" + f") + " } } } }\n" +
+            "}");
+
+        Assert.Equal(new[] { "trumps/ace", "trumps/king" }, Lines(output));
+    }
+
     // ---- the world exists at all -------------------------------------------------------------
 
     [Fact]

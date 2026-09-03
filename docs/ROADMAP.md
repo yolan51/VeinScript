@@ -145,20 +145,7 @@ Ordered by how much each unblocks, not by milestone number.
    `string` — `QueryStmt.Tags`, `MarkStmt.Mark`, carried, audience, match arms — so the work is
    promoting both to a ref type through the AST, IR, interpreter and backend, and it should be done for
    shapes and marks together or not at all. Sized accordingly: it touches the golden IR trees.
-5. **A nested `target` reads EMPTY from the outer binding** — silently, which makes it the worst kind.
-   `target $A as x { target $B as y { … } }` gives `x.A.field` the value of `y`'s row, because
-   [Lower.cs](../src/Vein.Compiler/Ir/Lower.cs) emits a nameless `IrSelfRef` for every target binding and
-   the interpreter resolves it to `_targetBinds[^1]` — the innermost loop. Indistinguishable from correct
-   in a single loop, so nothing caught it until a page tried to render a button's handler through a second
-   query.
-
-   The fix is to give `IrSelfRef` a name and resolve it from `locals`, which the loop already populates
-   (`locals[lp.Var] = entity`). Touches Hir, Lower, Interp and the C# backend, and regenerates the golden
-   IR. Note the bind stack in Lower already carries the comment *"A stack, because targets nest"* —
-   nesting was anticipated; the name simply never reached the IR node.
-
-   **This gates the hierarchy work below**, which is why it is filed above it.
-6. **A parent/child model, so a UI is a tree of identities rather than markup** — the direction
+5. **A parent/child model, so a UI is a tree of identities rather than markup** — the direction
    `samples/web_app` keeps pointing at. Every page element is already an identity; what is missing is
    depth. `Vein.Core.Relations.$Parent { of: Entity }` already exists and needs no new concept: today's
    `$OnClick { handler: Entity }` and `entities_bind`'s `$Edge { to: Entity }` prove a shape carrying an
@@ -167,21 +154,23 @@ Ordered by how much each unblocks, not by milestone number.
    **Depth 1 already works** — `samples/entities_tree.vein` shows two decks of the same kind, each
    listing its own cards, which is the case a mark cannot express. It also shows the shape of the
    limit: the parent has to arrive as a VALUE (an event payload) rather than as an enclosing loop
-   variable, so there is one `emit` per deck. Item 5 is what replaces that with a walk.
+   variable, so there is one `emit` per deck. A nested `target` now binds by name, so the walk that
+   replaces it is expressible — see `samples/entities_nested.vein`.
 
    What it buys is a UI abstraction that is NOT html: the same `Window → Panel → Button` tree rendered by
    a web backend as divs, by a desktop backend as native widgets, by a console backend as a TUI. HTML
    becomes one target rather than the model.
 
    Three things to settle before building it:
-   - **Rendering a tree is a nested walk**, so item 5 is a prerequisite, not a nicety.
+   - **Rendering a tree is a nested walk**, which was a prerequisite and is now done: a nested `target`
+     reads both bindings, in both runtimes.
    - **A builder emits ONE fragment and cannot wrap**, which is why `&Open`/`&Close` are two halves. A
      `Window` that renders `<div>` … children … `</div>` needs the renderer to emit the halves around a
      subtree walk, not a nesting builder. Builder-inside-builder is not the answer and would not parse:
      a builder body is `ParseSigBody()`, which holds no statements.
    - **Ordering among siblings** is entity id, i.e. spawn order. That works today and should stay the
      rule rather than growing an explicit index.
-7. **`SecsRuntime.Probe`** — the repo's one live `TODO`. It was the net8↔net9 linkage proof; M5 supersedes
+6. **`SecsRuntime.Probe`** — the repo's one live `TODO`. It was the net8↔net9 linkage proof; M5 supersedes
    it, so it should either grow into the direct-materialisation path or be deleted.
 
 ### Recently closed
@@ -191,6 +180,7 @@ closed it. `git log --grep` on the phrase finds the full account.
 
 | What | And the part worth remembering |
 |---|---|
+| A nested `target` reading the outer binding | `IrSelfRef` was nameless, so the interpreter resolved every one to the innermost loop and `d.Deck.title` came back EMPTY — a plausible blank, never an error. The C# backend could not even run to be wrong: both loops emitted `foreach (var __e …)` and both declared `self_<Comp>`, so nested queries did not compile. The name was in `Lower`'s hand the whole time — it tests the bind stack to decide a name IS a binding, then dropped it. Naming the node DELETED code in three consumers: `Resolve`'s `_selfType`, the backend's `_selfBind`, and the collector's refusal to descend into nested loops. |
 | `use` resolution | A bare name falls back to the bundles a file `use`s. Qualified `bring` turned out to have been done for some time; the entry was stale. |
 | `use` capturing a built-in | `use Console` bound bare `spawn` to a console-window launcher, so `let e = spawn()` built no entity and every `target` matched an empty world. Built-ins now win, shadowing reported as **VS0217**. |
 | Fragment ordering | `shards/` fragments ran *after* the main file, silently breaking "the kernel closes the phase, so declare it last" — a route moved into a fragment answered nothing, with no diagnostic. Fragments now merge first: they extend, the main file closes. |

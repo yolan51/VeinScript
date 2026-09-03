@@ -94,10 +94,10 @@ public class CSharpBackendTests
             "  shape $H { hp: int folds sum }\n" +
             "  shard S { each tick { target $H #Live as self { self.H.hp -= 1 } } }");
 
-        Assert.Contains("foreach (var __e in World.Query<H, Marks.Live>())", code);
-        Assert.Contains("var __snap_H = World.Get<H>(__e);", code);
-        Assert.Contains("var self_H = __snap_H;", code);    // struct copy — free, and no allocation
-        Assert.Contains("World.Contribute(__e, __snap_H, self_H);", code);
+        Assert.Contains("foreach (var __e0 in World.Query<H, Marks.Live>())", code);
+        Assert.Contains("var __snap_self_H = World.Get<H>(__e0);", code);
+        Assert.Contains("var self_H = __snap_self_H;", code);    // struct copy — free, and no allocation
+        Assert.Contains("World.Contribute(__e0, __snap_self_H, self_H);", code);
     }
 
     [Fact]
@@ -112,15 +112,15 @@ public class CSharpBackendTests
             "  shape $S { sp: int folds sum }\n" +
             "  shard M { each tick { target $H $S #Live as self { self.H.hp -= 1\n      self.S.sp -= 2 } } }");
 
-        Assert.Contains("foreach (var __e in World.Query<H, Marks.Live>())", code);
-        Assert.Contains("if (!World.Has<S>(__e)) continue;", code);
+        Assert.Contains("foreach (var __e0 in World.Query<H, Marks.Live>())", code);
+        Assert.Contains("if (!World.Has<S>(__e0)) continue;", code);
 
         // Both components are bound AND both are handed back: writing back only the queried one would
         // drop the other's deltas, which a `folds sum` field would then silently under-count.
-        Assert.Contains("var self_H = __snap_H;", code);
-        Assert.Contains("var self_S = __snap_S;", code);
-        Assert.Contains("World.Contribute(__e, __snap_H, self_H);", code);
-        Assert.Contains("World.Contribute(__e, __snap_S, self_S);", code);
+        Assert.Contains("var self_H = __snap_self_H;", code);
+        Assert.Contains("var self_S = __snap_self_S;", code);
+        Assert.Contains("World.Contribute(__e0, __snap_self_H, self_H);", code);
+        Assert.Contains("World.Contribute(__e0, __snap_self_S, self_S);", code);
 
         Assert.DoesNotContain(notes, n => n.Contains("multi-component"));
     }
@@ -136,7 +136,7 @@ public class CSharpBackendTests
             "  shard S { each tick { target $H as self { chance 30% { self.H.hp -= 1 }\n" +
             "      unattach $H from self } } }");
 
-        Assert.Contains("World.Detach<H>(__e)", code);
+        Assert.Contains("World.Detach<H>(__e0)", code);
         Assert.Contains("World.Random()", code);
         Assert.DoesNotContain("0.0 /*", code);
         Assert.Empty(notes);
@@ -196,7 +196,7 @@ public class CSharpBackendTests
 
         Assert.Contains("public static class Marks", code);
         Assert.Contains("public readonly struct Live : IIdentityTag { }", code);
-        Assert.Contains("World.Defer(() => World.UnmarkAs<Marks.Live>(__e))", code);
+        Assert.Contains("World.Defer(() => World.UnmarkAs<Marks.Live>(__e0))", code);
         Assert.DoesNotContain("\"Live\"", code);   // no mark survives as a string
     }
 

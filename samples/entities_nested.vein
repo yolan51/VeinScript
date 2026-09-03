@@ -1,0 +1,72 @@
+// entities_nested.vein — a `target` inside a `target`, reading BOTH bindings.
+//
+//   veinc run samples/entities_nested.vein --ticks 1
+//   bash tools/check-backend.sh
+//
+// This is the regression guard for roadmap item 5, and it is in check-backend because the bug it guards
+// was in BOTH runtimes and each got it wrong differently.
+//
+// WHAT WAS WRONG. `Lower` emitted a NAMELESS `IrSelfRef` for every target binding, so nothing in the IR
+// recorded which loop a reference meant. The interpreter resolved it to `_targetBinds[^1]` — the
+// innermost — so `d.Deck.title` written inside the inner loop silently read the CARD's row and came back
+// empty. Not an error, not a crash: a plausible blank, indistinguishable from correct in a single loop,
+// which is why it survived until a page tried to render a button's handler through a second query.
+//
+// The C# backend had the same hole plus two of its own: both loops emitted `foreach (var __e …)` and both
+// declared `self_<Comp>`, so a nested query did not compile at all (CS0136, twice). It could not be run
+// to see the wrong answer.
+//
+// WHAT FIXES IT is that `IrSelfRef` carries the binding's NAME, which `Lower` had all along — it tests
+// the bind stack to decide a name IS a binding, then dropped the name on the floor. The interpreter
+// resolves it out of the locals the loop already fills; the backend keys its entity variable and its
+// component locals by binding, so `self_d_Deck` and `self_c_Card` cannot collide and cannot be confused.
+//
+// The output below is the whole test: every card line carries the deck's title. Before the fix the
+// interpreter printed "/ace" — the slash with nothing in front of it.
+
+bundle EntitiesNested by you {
+
+    shape $Deck { title: string }
+    mark #Deck
+
+    builder Deck { $Deck   mark #Deck }
+
+    shape $Card { face: string }
+    mark #Card
+
+    builder Card { $Card   mark #Card }
+
+    shard Seed {
+        run once {
+            bring Deck("trumps")
+            bring Card("ace")
+            bring Card("king")
+        }
+    }
+
+    shard Show {
+        settled {
+            // TWO bindings live at once. `d` belongs to the outer loop and `c` to the inner, and the
+            // body reads both — which is the entire point: nothing here is expressible while a binding
+            // is anonymous.
+            target $Deck #Deck as d {
+                target $Card #Card as c {
+                    emit *Vein.Console.Io.@Print { text: d.Deck.title + " / " + c.Card.face }
+                }
+            }
+        }
+    }
+
+    // The same nesting with a COLLECTION inside a query, because the two loop kinds bind by different
+    // mechanisms — an entity id against a list element — and the fix has to hold for both.
+    shard Suits {
+        settled {
+            target $Deck #Deck as d {
+                let suits = ["hearts", "spades"]
+                target suits as s {
+                    emit *Vein.Console.Io.@Print { text: "   " + d.Deck.title + " has " + s }
+                }
+            }
+        }
+    }
+}

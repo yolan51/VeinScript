@@ -109,7 +109,9 @@ public static class IrPrinter
     {
         IrLiteral l => l.Kind == IrLiteralKind.String ? $"\"{l.Value}\"" : $"{l.Value}",
         IrLocalRef r => r.Name,
-        IrSelfRef => "self",
+        // The binding's own name, not a generic `self` — which is the point of naming the node: a
+        // nested `target` prints two distinguishable bindings instead of two identical words.
+        IrSelfRef sr => sr.Bind,
         IrEntityRef => "Entity",
         IrLoopIndexRef => "Index",
         IrScopeRef s => $"{s.Module}::{s.Name}",

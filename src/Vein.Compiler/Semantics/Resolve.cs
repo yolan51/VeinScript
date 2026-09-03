@@ -40,13 +40,13 @@ public sealed class Resolve
     /// interpreter actually resolves names.
     private readonly Dictionary<string, IrTypeRef> _locals = new(StringComparer.Ordinal);
 
-    /// The component a `target $Shape … as x` bound, so `x.field` and `self.field` can be typed.
-    private string? _selfComponent;
-
-    /// What IrSelfRef means in the innermost loop: `Entity` in an identity query, the ascribed shape in
-    /// `target rows as row: $Row`, and null in a dynamic collection loop. Defaults to Entity so code
-    /// outside any loop keeps the meaning it had.
-    private IrTypeRef? _selfType = IrTypeRef.Of("Entity");
+    /// The component each `target $Shape … as x` bound, keyed by BINDING — so the bare `self.field` form,
+    /// where the shape is implied rather than written, resolves against the right loop.
+    ///
+    /// This was a single value, and a single value was all a nameless `IrSelfRef` could support. It also
+    /// meant a nested loop overwrote its parent's, which is the type-level shadow of the bug RULES.md 12c
+    /// described at runtime.
+    private readonly Dictionary<string, string> _selfComps = new(StringComparer.Ordinal);
 
     public Resolve(IrModule module)
     {
@@ -83,7 +83,7 @@ public sealed class Resolve
     private void Function(IrFunction f, IrShard? owner)
     {
         _locals.Clear();
-        _selfComponent = null;
+        _selfComps.Clear();
         if (owner is not null)
             foreach (var st in owner.State) _locals[st.Name] = st.Type;
         foreach (var p in f.Params) _locals[p.Name] = p.Type;
@@ -135,15 +135,19 @@ public sealed class Resolve
         Expr(lp.Count);
         Expr(lp.Source);
 
-        string? prevSelf = _selfComponent;
-        var prevSelfType = _selfType;
+        // Every branch below writes ONLY `_locals[lp.Var]`, and `IrSelfRef` reads back out of it by name.
+        // There is no separate "what does self mean here" state to push and pop any more: the binding is
+        // named, so the ordinary scope IS the answer, and a nested loop adds a second name beside the
+        // first instead of shadowing it.
 
         // An identity query binds an ENTITY, and names the component whose fields `self.f` reads.
         if (lp.Query is { } q)
         {
-            _selfComponent = q.Components.FirstOrDefault();
-            _selfType = IrTypeRef.Of("Entity");
-            if (lp.Var is not null) _locals[lp.Var] = IrTypeRef.Of("Entity");
+            if (lp.Var is not null)
+            {
+                _locals[lp.Var] = IrTypeRef.Of("Entity");
+                if (q.Components.FirstOrDefault() is { } c) _selfComps[lp.Var] = c;
+            }
         }
         else if (lp.Kind == IrLoopKind.Repeat && lp.Var is not null)
         {
@@ -154,30 +158,19 @@ public sealed class Resolve
         // has no shape to read, and the author is the one who knows which columns they asked for.
         else if (lp.ElementShape is { } shape)
         {
-            var t = IrTypeRef.Of(shape);
-            _selfType = t;
-            if (lp.Var is not null) _locals[lp.Var] = t;
+            if (lp.Var is not null) _locals[lp.Var] = IrTypeRef.Of(shape);
         }
 
         // Otherwise typed only when the SOURCE says what it holds. A `list<int>` literal does; a
-        // `fromJson` result and a field read off a parsed document do not, and those stay untyped
-        // rather than guessed, because a wrong element type would be worse than none.
+        // `fromJson` result and a field read off a parsed document do not, and those stay UNSET rather
+        // than guessed — an absent local reads back as null, which is the honest answer.
         else if (lp.Var is not null && lp.Source is not null
                  && lp.Source.ResolvedType is { Name: "list", Args.Count: 1 } lt)
         {
-            _selfType = lt.Args[0];
             _locals[lp.Var] = lt.Args[0];
-        }
-        else if (lp.Kind == IrLoopKind.Target && lp.Query is null)
-        {
-            // A dynamic collection loop: the binding is a record of unknown shape, so IrSelfRef inside
-            // it means nothing this pass can name. Saying so beats inheriting the enclosing loop's type.
-            _selfType = null;
         }
 
         Block(lp.Body);
-        _selfComponent = prevSelf;
-        _selfType = prevSelfType;
     }
 
     // ---- expressions ------------------------------------------------------
@@ -211,7 +204,7 @@ public sealed class Resolve
             // The innermost `target` binding, which is nameless in this IR (docs/RULES.md 12c) — so what
             // it means depends entirely on the loop enclosing it. An identity query binds an ENTITY; a
             // collection loop binds an element, and only an ascription can say what that is.
-            case IrSelfRef: return _selfType;
+            case IrSelfRef sr: return _locals.GetValueOrDefault(sr.Bind);
 
             case IrUnary u:
                 Expr(u.Operand);
@@ -322,7 +315,7 @@ public sealed class Resolve
             return decl.Fields.FirstOrDefault(f => f.Name == fa.Field)?.Type;
 
         // `self.field` with no component named — the query bound one, so try it.
-        if (fa.Receiver is IrSelfRef && _selfComponent is { } sc
+        if (fa.Receiver is IrSelfRef sr && _selfComps.TryGetValue(sr.Bind, out var sc)
             && _types.TryGetValue(sc, out var self))
             return self.Fields.FirstOrDefault(f => f.Name == fa.Field)?.Type;
 

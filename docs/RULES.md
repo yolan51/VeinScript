@@ -118,14 +118,22 @@ Two consequences: **`run once` commits once for ALL shards**, so one shard canno
 spawned; and within a single `hear @Request` a wiring shard and a rendering shard cannot see each other,
 which (with rule 22) is why a web page cannot wire-then-render in one request.
 
-**12c. A nested `target` reads EMPTY from the outer binding — silently.** Inside
-`target $A as x { target $B as y { … } }`, `x.A.field` yields empty rather than `x`'s value: Lower emits
-a nameless `IrSelfRef` for every target binding and the interpreter resolves it to `_targetBinds[^1]`,
-the innermost loop. Indistinguishable from correct in a single loop. Keep queries flat — carry what the
-inner loop needs as a value (an `Entity` field plus a `fn`), as `samples/web_app` does for handler names.
+**12c. A nested `target` binds BY NAME, so both bindings are readable.** Inside
+`target $Deck as d { target $Card as c { … } }`, `d.Deck.title` is the deck's and `c.Card.face` is the
+card's, in both runtimes. `samples/entities_nested.vein` is the guard, and it is in `check-backend`
+because each runtime used to get this wrong in its own way.
 
-A `hear` binding is NOT affected — `r.path` read inside a `target` loop is correct, which is what lets
-the nav in `samples/web_app` bold the current page. The bug is target-inside-target only.
+**This rule used to say the opposite, and the history is worth one line.** `Lower` emitted a NAMELESS
+`IrSelfRef`, so nothing recorded which loop a reference meant: the interpreter resolved every one to the
+innermost binding and `d.Deck.title` came back empty — a plausible blank, never an error,
+indistinguishable from correct in a single loop. The C# backend had it worse: both loops emitted
+`foreach (var __e …)` and both declared `self_<Comp>`, so a nested query did not compile at all. The
+advice here was *"keep queries flat"*, and `samples/web_app` still carries the workaround it prescribed
+— an `Entity` field plus a `fn` to look the value up — which is now a choice rather than a requirement.
+
+A `hear` binding was never affected: `r.path` read inside a `target` loop was always correct, because a
+handler's parameter is an ordinary named local. That is precisely the mechanism the fix gave target
+bindings — `IrSelfRef` carries its binding's name and resolves out of the same locals.
 
 **13. `folds` reconciles concurrent writes; `settled` is where the reconciled value is readable.** Two
 shards doing `hp -= 1` in one tick give `hp - 2`, because each contributes a *delta* from its own

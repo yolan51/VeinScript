@@ -5,9 +5,13 @@ close to IOP source but is stripped of everything a backend shouldn't have to kn
 
 ## Invariants (what a backend can rely on)
 
-1. **Fully typed.** Every `IrExpr` has a resolved `IrTypeRef`. No inference remains.
-2. **Names resolved.** Every reference points to a declaration (local, param, field, function, type,
-   shard). No unresolved names left to resolve.
+1. **Typed.** `Semantics/Resolve` fills `IrExpr.ResolvedType`. NOT every node: what a `fromJson` result
+   or an unascribed collection binding holds is genuinely unknown, so null means "not known", never
+   "error", and a consumer keeps a fallback for it. `SamplesTests` measures the ratio across every
+   sample rather than asserting the absolute — it was 0% for a long time while this line claimed 100%.
+2. **Bindings named.** A `target … as x` reference carries `x` (`IrSelfRef.Bind`), so a nested query
+   reads the binding it names. Other references are still resolved by NAME rather than by pointer —
+   `IrLocalRef(string)`, `IrFieldAccess(…, string)` — so this invariant is partial and says so.
 3. **Surface sugar lowered.** No sigils, `chance`, `mark`, `each tick`, `folds`, `target` *syntax*.
    Data is `IrType`; behavior is `IrShard`; IOP intent survives as `IrType.Kind` + `IrAttr` + fold
    info + query descriptors (§3–4).
@@ -81,7 +85,7 @@ IrExprStmt(IrExpr Expr)
 ```
 IrLiteral(object? Value, IrTypeRef Type)          // int/float/bool/string/percent
 IrLocalRef(IrLet|IrParam Decl)
-IrSelfRef()                                        // the identity bound by `target … as <bind>`
+IrSelfRef(string Bind)                             // the identity bound by `target … as <bind>`
 IrFieldAccess(IrExpr Receiver, IrField Field)      // a.b, self.Health.hp
 IrCall(IrCallable Callee, IrExpr[] Args)
 IrBinary(IrBinOp Op, IrExpr L, IrExpr R)           // + - * / % == != < > <= >= and or

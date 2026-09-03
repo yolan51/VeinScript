@@ -936,9 +936,15 @@ public sealed class Interp
                 // A bare `self` used as a value = the nearest entity's id (aligns with `Entity`).
                 if (r.Name == "self") return _currentEntity;
                 return null;
-            // The value bound by the innermost `target … as <bind>`, NOT the shard — Lower emits IrSelfRef
-            // for a collection `target` too, so this is an element there and an entity id in a query.
-            case IrSelfRef: return _targetBinds.Count > 0 ? _targetBinds[^1] : self.Name;
+            // The value bound by `target … as <bind>` — an entity id in a query, an element in a
+            // collection loop. Resolved BY NAME from the locals the loop already fills, so a nested
+            // query reads the binding it names rather than the innermost one (RULES.md 12c).
+            //
+            // The fallback is the shard, for a `self` that names no binding in scope.
+            case IrSelfRef sr:
+                return locals.TryGetValue(sr.Bind, out var bound) ? bound
+                     : _targetBinds.Count > 0 ? _targetBinds[^1]
+                     : self.Name;
             case IrEntityRef: return _currentEntity;   // `Entity` — nearest entity's int id (0 = none)
             case IrLoopIndexRef: return _currentIndex; // `Index` — nearest loop's 0-based counter
             case IrFieldAccess f:

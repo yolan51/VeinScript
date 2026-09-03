@@ -40,16 +40,13 @@ public sealed class CSharpBackend : IVeinBackend
     /// declares field defaults — `default(T)` is only the right seed when it does not.
     private readonly Dictionary<string, IrType> _componentTypes = new(StringComparer.Ordinal);
 
-    /// The component the innermost `target` bound, so `self.Health.hp` knows which local to read.
-    private string? _selfComponent;
-
     /// Module-level `fn`/`SF` names, so a call to one is emitted qualified. Without this the backend
     /// emitted the call and never the function — CS0103 at every call site, which no backend-checked
     /// sample hit because none of them used a function.
     private readonly HashSet<string> _functions = new(StringComparer.Ordinal);
 
     /// The C# name `Index` resolves to in the loop being emitted. Tracked and restored like
-    /// `_selfComponent`, and made unique per depth: C# forbids a nested local shadowing an outer one
+    /// the self locals, and made unique per depth: C# forbids a nested local shadowing an outer one
     /// (CS0136), so a fixed name would refuse to compile the moment two loops nested.
     private string _indexVar = "0";
     private int _loopDepth;
@@ -58,13 +55,27 @@ public sealed class CSharpBackend : IVeinBackend
     /// itself to this; nested blocks save and restore it, so the inner one takes its own brings.
     private string _orderList = "";
 
-    /// What IrSelfRef — the nameless innermost `target` binding (docs/RULES.md 12c) — emits as.
+    /// What each `target … as <bind>` emits as, keyed by the binding NAME.
     ///
-    /// `__e` for an identity query, whose loop variable this backend names itself. A COLLECTION loop
-    /// (`target xs as row`) names its variable after the binding instead, and emitting `__e` there was a
-    /// straight CS0103: the name did not exist. It went unseen because no backend-checked program had
-    /// referenced a collection binding until samples/entities_bring_rows.vein did.
-    private string _selfBind = "__e";
+    /// It used to be a single string, because `IrSelfRef` carried no name and the innermost loop was the
+    /// only thing it could mean. That made nested queries impossible twice over: both loops declared
+    /// `__e` and both declared `self_<Comp>`, so the C# did not compile (CS0136), and an outer binding
+    /// read inside an inner loop resolved to the inner entity — the backend's copy of RULES.md 12c.
+    ///
+    /// A map, so `d` and `c` in `target … as d { target … as c { d.Deck.title } }` name different things.
+    private readonly Dictionary<string, string> _selfVars = new(StringComparer.Ordinal);
+
+    /// The component each binding's query named first, for the bare `self.hp` form where the shape is
+    /// implied rather than written.
+    private readonly Dictionary<string, string> _selfComps = new(StringComparer.Ordinal);
+
+    /// The innermost identity query's entity variable — what `Entity` evaluates to.
+    private string _entityVar = "__e";
+
+    /// One binding's component locals. Named per BINDING rather than per component, so two nested loops
+    /// holding the same shape do not collide in C#.
+    private static string SelfLocal(string bind, string comp) => $"{Ident(bind)}_{Ident(comp)}";
+    private static string Snap(string bind, string comp) => $"__snap_{Ident(bind)}_{Ident(comp)}";
 
     /// Set when an `ordered by` block is emitted, so the comparer class is appended to the file. It is
     /// emitted INTO the generated file rather than taken from the runtime, so the ordering semantics
@@ -87,7 +98,9 @@ public sealed class CSharpBackend : IVeinBackend
         _needsOrder = false;
         _needsText = false;
         _orderList = "";
-        _selfBind = "__e";
+        _selfVars.Clear();
+        _selfComps.Clear();
+        _entityVar = "__e";
         foreach (var f in module.Functions) _functions.Add(f.Name);
         foreach (var t in module.Types)
             if (t.Kind == IrTypeKind.Component) { _components.Add(t.Name); _componentTypes[t.Name] = t; }
@@ -523,13 +536,14 @@ public sealed class CSharpBackend : IVeinBackend
         }
     }
 
-    /// Every component this body reads off the CURRENT target binding, as `self.Comp` or `self.Comp.f`.
+    /// Every (binding, component) pair this body reads, as `d.Comp` or `d.Comp.field`.
     ///
-    /// It does NOT descend into a nested `target`, and that is the point rather than an omission: inside
-    /// one, `IrSelfRef` means the INNER binding (docs/RULES.md 12c — the reference is nameless and
-    /// resolves to the innermost loop), so a component named there belongs to that loop's declarations,
-    /// not this one. Collecting it here would declare a `self_X` shadowed by the inner loop's own.
-    private void CollectSelfComponents(IrStmt? s, HashSet<string> found)
+    /// It DOES descend into a nested `target` now, which it could not do while the reference was
+    /// nameless: `self_X` inside an inner loop was indistinguishable from the inner loop's own, so the
+    /// collector had to stop at the boundary and an outer component read there went undeclared. With a
+    /// name on the pair, `d.Deck.title` written inside `target … as c` is plainly d's, and d's loop is
+    /// where it gets declared — on the entity that actually carries it.
+    private void CollectSelfComponents(IrStmt? s, HashSet<(string Bind, string Comp)> found)
     {
         switch (s)
         {
@@ -552,8 +566,6 @@ public sealed class CSharpBackend : IVeinBackend
                 CollectSelfComponents(m.Else, found);
                 return;
 
-            // A `while`/`repeat` shares this binding, so its body counts. A `target` does not — see above.
-            case IrLoop { Kind: IrLoopKind.Target }: return;
             case IrLoop lp:
                 CollectSelfComponents(lp.Cond, found);
                 CollectSelfComponents(lp.Count, found);
@@ -564,15 +576,15 @@ public sealed class CSharpBackend : IVeinBackend
         }
     }
 
-    private void CollectSelfComponents(IrExpr? e, HashSet<string> found)
+    private void CollectSelfComponents(IrExpr? e, HashSet<(string Bind, string Comp)> found)
     {
         switch (e)
         {
             case null: return;
 
             // The two shapes FieldAccess recognises: `self.Comp` on its own, and `self.Comp.field`.
-            case IrFieldAccess { Receiver: IrSelfRef } fa when _components.Contains(fa.Field):
-                found.Add(Ident(fa.Field));
+            case IrFieldAccess { Receiver: IrSelfRef sr } fa when _components.Contains(fa.Field):
+                found.Add((sr.Bind, Ident(fa.Field)));
                 return;
             case IrFieldAccess fa:
                 CollectSelfComponents(fa.Receiver, found);
@@ -610,20 +622,18 @@ public sealed class CSharpBackend : IVeinBackend
                 // Same counter discipline as the query form, so `Index` means the same thing in both.
                 string prevC = _indexVar;
                 _indexVar = "__idx" + _loopDepth++;
-                string bind = Ident(loop.Var ?? "__x");
-                // The binding is nameless in the IR — `row` in the source lowers to IrSelfRef, not to a
-                // local — so the emitter has to say what it is called HERE. Leaving this at `__e` (the
-                // query form's variable) emitted a name nothing declared.
-                string prevBind = _selfBind;
-                _selfBind = bind;
+                string elemVar = Ident(loop.Var ?? "__x");
+                // A collection loop names its C# variable after the binding, and records that under the
+                // binding's own name — so an enclosing query's binding, read inside this loop, still
+                // resolves to the enclosing loop rather than to this element.
+                _selfVars[loop.Var ?? "__x"] = elemVar;
                 sb.AppendLine($"{pad}long {_indexVar} = -1;");
-                sb.AppendLine($"{pad}foreach (var {bind} in {Expr(loop.Source)})");
+                sb.AppendLine($"{pad}foreach (var {elemVar} in {Expr(loop.Source)})");
                 sb.AppendLine(pad + "{");
                 sb.AppendLine($"{pad}    {_indexVar}++;");
                 foreach (var s in loop.Body.Statements) EmitStmt(sb, s, depth + 1);
                 sb.AppendLine(pad + "}");
                 _indexVar = prevC;
-                _selfBind = prevBind;
                 return;
             }
             _notes.Add("target with no query and no source not emitted.");
@@ -647,12 +657,18 @@ public sealed class CSharpBackend : IVeinBackend
             return;
         }
         string marks = q.Tags.Count == 0 ? "" : ", " + string.Join(", ", q.Tags.Select(t => "Marks." + Ident(t)));
-        string prev = _selfComponent!;
-        _selfComponent = comp;
-        // An identity query names its own loop variable, whatever loop it sits inside — so a query
-        // nested in a collection loop has to take `__e` back rather than inherit the outer binding.
-        string prevSelf = _selfBind;
-        _selfBind = "__e";
+
+        // Every loop gets its OWN entity variable and its own component locals, keyed by the BINDING the
+        // source gave it. Sharing one `__e` and one `self_<Comp>` meant a nested query redeclared both in
+        // an inner scope — CS0136 twice over, so nested queries did not compile at all — and, worse, an
+        // outer binding read inside the inner loop resolved to the inner entity. That is the same bug
+        // RULES.md 12c described in the interpreter, in the runtime that could not even be run to see it.
+        string bind = loop.Var ?? "self";
+        string entVar = "__e" + _loopDepth++;
+        string prevEnt = _entityVar;
+        _entityVar = entVar;
+        _selfVars[bind] = entVar;
+        _selfComps[bind] = comp;
 
         // Several components are an AND. `World.Query<T>` indexes on ONE, so the first drives the loop and
         // the rest are tested per entity — the entity is skipped unless it carries all of them.
@@ -683,10 +699,10 @@ public sealed class CSharpBackend : IVeinBackend
                 : $".OrderBy(__k => {key}).ThenBy(__k => __k)";
         }
         sb.AppendLine($"{pad}long {_indexVar} = -1;");
-        sb.AppendLine($"{pad}foreach (var __e in World.Query<{comp}{marks}>(){order})");
+        sb.AppendLine($"{pad}foreach (var {entVar} in World.Query<{comp}{marks}>(){order})");
         sb.AppendLine(pad + "{");
         foreach (var c in comps.Skip(1))
-            sb.AppendLine($"{pad}    if (!World.Has<{c}>(__e)) continue;");
+            sb.AppendLine($"{pad}    if (!World.Has<{c}>({entVar})) continue;");
         sb.AppendLine($"{pad}    {_indexVar}++;");
 
         // Two struct copies per component, both free. `Get` returns by value, and assigning it again gives
@@ -694,8 +710,8 @@ public sealed class CSharpBackend : IVeinBackend
         // sees the committed value, with no allocation anywhere in the loop.
         foreach (var c in comps)
         {
-            sb.AppendLine($"{pad}    var __snap_{c} = World.Get<{c}>(__e);");
-            sb.AppendLine($"{pad}    var self_{c} = __snap_{c};");
+            sb.AppendLine($"{pad}    var {Snap(bind, c)} = World.Get<{c}>({entVar});");
+            sb.AppendLine($"{pad}    var {SelfLocal(bind, c)} = {Snap(bind, c)};");
         }
 
         // A body may read a component the query did NOT name — `target $Style #Panel as p` whose body
@@ -706,14 +722,20 @@ public sealed class CSharpBackend : IVeinBackend
         // These are read GUARDED, because the query never asserted the component is present: `Get` on a
         // missing one throws, where the interpreter reads an absent field as empty. Same reason the
         // contribution is guarded — folding a component the entity does not carry would create it.
-        var extra = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var s in loop.Body.Statements) CollectSelfComponents(s, extra);
-        extra.ExceptWith(comps);
+        // Collected per BINDING, and the collector now descends into nested loops — which it could not do
+        // while the reference was nameless, because `self_X` inside an inner loop was indistinguishable
+        // from the inner loop's own. `d.Deck.title` read inside a nested `target … as c` belongs to `d`,
+        // and is declared by d's loop, where the entity actually carries it.
+        var pairs = new HashSet<(string Bind, string Comp)>();
+        foreach (var s in loop.Body.Statements) CollectSelfComponents(s, pairs);
+        var extra = pairs.Where(p => p.Bind == bind).Select(p => p.Comp)
+                         .Where(c => !comps.Contains(c))
+                         .Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
 
-        foreach (var c in extra.OrderBy(x => x, StringComparer.Ordinal))
+        foreach (var c in extra)
         {
-            sb.AppendLine($"{pad}    var __snap_{c} = World.Has<{c}>(__e) ? World.Get<{c}>(__e) : default({c});");
-            sb.AppendLine($"{pad}    var self_{c} = __snap_{c};");
+            sb.AppendLine($"{pad}    var {Snap(bind, c)} = World.Has<{c}>({entVar}) ? World.Get<{c}>({entVar}) : default({c});");
+            sb.AppendLine($"{pad}    var {SelfLocal(bind, c)} = {Snap(bind, c)};");
         }
 
         foreach (var s in loop.Body.Statements) EmitStmt(sb, s, depth + 1);
@@ -721,13 +743,12 @@ public sealed class CSharpBackend : IVeinBackend
         // Every component the query bound is contributed, so a fold on any of them reconciles — writing
         // back only the first would silently drop writes to the others.
         foreach (var c in comps)
-            sb.AppendLine($"{pad}    World.Contribute(__e, __snap_{c}, self_{c});");
-        foreach (var c in extra.OrderBy(x => x, StringComparer.Ordinal))
-            sb.AppendLine($"{pad}    if (World.Has<{c}>(__e)) World.Contribute(__e, __snap_{c}, self_{c});");
+            sb.AppendLine($"{pad}    World.Contribute({entVar}, {Snap(bind, c)}, {SelfLocal(bind, c)});");
+        foreach (var c in extra)
+            sb.AppendLine($"{pad}    if (World.Has<{c}>({entVar})) World.Contribute({entVar}, {Snap(bind, c)}, {SelfLocal(bind, c)});");
         sb.AppendLine(pad + "}");
 
-        _selfComponent = prev;
-        _selfBind = prevSelf;
+        _entityVar = prevEnt;
         _indexVar = prevIdx;
     }
 
@@ -762,9 +783,9 @@ public sealed class CSharpBackend : IVeinBackend
         null => "",
         IrLiteral l => Literal(l),
         IrLocalRef r => Ident(r.Name),
-        IrEntityRef => "__e",
+        IrEntityRef => _entityVar,
         IrLoopIndexRef => _indexVar,
-        IrSelfRef => _selfBind,
+        IrSelfRef sr => _selfVars.GetValueOrDefault(sr.Bind, _entityVar),
         IrTypeNameExpr t => "\"" + t.Name + "\"",
         IrFieldAccess f => FieldAccess(f),
         // A CONCATENATION, not an addition — decided the way a reader decides it: a string literal on
@@ -807,11 +828,18 @@ public sealed class CSharpBackend : IVeinBackend
     /// the local the activation is working on, so it collapses to `self_Health.hp`.
     private string FieldAccess(IrFieldAccess f)
     {
-        if (f.Receiver is IrSelfRef && _components.Contains(f.Field)) return "self_" + Ident(f.Field);
-        if (f.Receiver is IrFieldAccess inner && inner.Receiver is IrSelfRef && _components.Contains(inner.Field))
-            return $"self_{Ident(inner.Field)}.{Ident(f.Field)}";
-        // A bare `self.hp` inside a target — the component is whatever the query bound.
-        if (f.Receiver is IrSelfRef && _selfComponent is { } sc) return $"self_{sc}.{Ident(f.Field)}";
+        // `d.Deck` — the component named off a binding. Which BINDING is what decides the local now, so
+        // an outer one read inside a nested loop reaches the outer loop's copy.
+        if (f.Receiver is IrSelfRef s0 && _components.Contains(f.Field)) return SelfLocal(s0.Bind, f.Field);
+
+        // `d.Deck.title` — a field of that component.
+        if (f.Receiver is IrFieldAccess { Receiver: IrSelfRef s1 } inner && _components.Contains(inner.Field))
+            return $"{SelfLocal(s1.Bind, inner.Field)}.{Ident(f.Field)}";
+
+        // A bare `self.hp` inside a target — the component is whatever that binding's query named.
+        if (f.Receiver is IrSelfRef s2 && _selfComps.TryGetValue(s2.Bind, out var sc))
+            return $"{SelfLocal(s2.Bind, sc)}.{Ident(f.Field)}";
+
         return $"{Expr(f.Receiver)}.{Ident(f.Field)}";
     }
 
