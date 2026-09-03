@@ -1,0 +1,81 @@
+namespace Vein.Compiler.Tooling;
+
+/// Where a rule is written down, and the one line of background a message has no room for.
+public sealed record DiagnosticNote(string Code, string Why, string Doc);
+
+// WHY: the diagnostics already explain themselves and name their own fix — VS0228 ends "Add the value,
+// or write `?` to fill the rest with typed zeros on purpose". Restating those here would be a second
+// copy of the same sentence, drifting the moment one of them is reworded.
+//
+// So this carries only what a message CANNOT: why the rule exists, and where the reasoning is written
+// down at length. That is the question a message leaves behind — not "what do I type" but "why is this
+// a rule at all" — and the answer is usually a paragraph in RULES.md that took a mistake to learn.
+//
+// Silent on codes with nothing extra to say. A guide that produced filler for all 60 would teach you to
+// stop reading it.
+public static class DiagnosticGuide
+{
+    private static readonly DiagnosticNote[] Notes =
+    {
+        new("VS0204", "A builder's parameters are positional, so an extra argument has no slot to land in.",
+            "docs/RULES.md — 'bring B(…) too many args'"),
+
+        new("VS0205", "Reported at every CALL site rather than at the declaration that caused it, which is why one bad shape can light up a whole file.",
+            "docs/RULES.md §65"),
+
+        new("VS0212", "A console address is an identity, but the runtime never checks one — ConsoleBus concatenates it into an OS pipe name and a miss is silently swallowed. This is the only thing that catches a typo'd address.",
+            "src/Vein.Compiler/Tooling/ConsoleGraph.cs"),
+
+        new("VS0216", "Reach it by its `*Author.Bundle.Publicator.member` path instead; rule 17b allows one there.",
+            "docs/RULES.md §285"),
+
+        new("VS0217", "`use` cannot rebind a built-in — the built-in wins, and the shadowed member becomes unreachable by its short name. `use Console` silently shadowing spawn() is the bug this was added for.",
+            "docs/RULES.md §283"),
+
+        new("VS0218", "A bundle that declares ANY mark has all of its mark names checked. Declaring one turns the check on for the file.",
+            "docs/RULES.md §255"),
+
+        new("VS0220", "A shape and a mark may share a name, but two of the same kind may not — get them wrong and an app linking both cannot tell them apart (VS0332).",
+            "docs/RULES.md §252"),
+
+        new("VS0221", "Only an identity template can be bound with `as`; a fragment builder has no identity to bind.",
+            "docs/RULES.md §82"),
+
+        new("VS0222", "A count cannot be combined with `as`, because the name would bind only the last one made.",
+            "docs/RULES.md §82"),
+
+        new("VS0223", "The top of a shape-including block admits `bring` and `target` and refuses everything else.",
+            "docs/SYNTAX-DECISIONS.md §317"),
+
+        new("VS0225", "`&Builder.param` names that builder's parameter, so every bring in the block has to be that builder.",
+            "docs/RULES.md §206"),
+
+        new("VS0226", "Two includes give a parameter of the same name, and the short forms refuse to guess between them. `&Builder.$Shape.param` narrows to one.",
+            "docs/RULES.md §210"),
+
+        new("VS0227", "An emit's field names are checked against the event's declaration; the message names what the event does take.",
+            "docs/RULES.md §353"),
+
+        new("VS0228", "Positional binding means only a TRAILING run of parameters can be optional, so a short call leaves the last ones empty rather than the ones you skipped.",
+            "docs/RULES.md §352"),
+
+        new("VS0230", "Checked against the parameter's declared type — `bring Row(42, \"words\")` with those the other way round is the case this catches.",
+            "docs/RULES.md §355"),
+
+        new("VS0231", "`base` takes a parameter's DEFAULT. Without one there is nothing to take, so it falls back to a typed zero — which is legal and rarely what was meant.",
+            "docs/RULES.md — `base`"),
+
+        new("VS0233", "The whole value of an ascription is that its fields get checked, so a shape that does not exist checks nothing.",
+            "docs/RULES.md §391"),
+    };
+
+    private static readonly Dictionary<string, DiagnosticNote> ByCode =
+        Notes.ToDictionary(n => n.Code, StringComparer.Ordinal);
+
+    /// Background for a code, or null when there is nothing to add beyond the message itself.
+    public static DiagnosticNote? For(string? code) =>
+        code is not null && ByCode.TryGetValue(code, out var note) ? note : null;
+
+    /// Every code with a note, for tests and for a listing.
+    public static IReadOnlyList<DiagnosticNote> All => Notes;
+}

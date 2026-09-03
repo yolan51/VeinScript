@@ -40,6 +40,43 @@ public sealed class EntityStore
 
     public int EntityCount => _alive.Count;
 
+    /// One identity as it stands: its components with their field values, and its marks.
+    public sealed record EntitySnapshot(
+        long Entity,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, object?>> Components,
+        IReadOnlyList<string> Marks);
+
+    /// Every live identity, ascending by id.
+    ///
+    /// For LOOKING at the world, which is a different need from Query: a query asks "who has these
+    /// components" because a body is about to run over them, and returns bare ids. This asks "what is
+    /// there", and the answer has to carry the values — an entity browser that showed ids and component
+    /// names would answer the easy half of the question.
+    ///
+    /// Copied, not referenced. The caller is a UI holding it across ticks, and handing out the live
+    /// dictionaries would let it observe half-applied fold commits.
+    public IReadOnlyList<EntitySnapshot> Snapshot()
+    {
+        var result = new List<EntitySnapshot>(_alive.Count);
+
+        foreach (long entity in _alive)
+        {
+            var components = new SortedDictionary<string, IReadOnlyDictionary<string, object?>>(StringComparer.Ordinal);
+            foreach (var (shape, table) in _components)
+                if (table.TryGetValue(entity, out var fields))
+                    components[shape] = new Dictionary<string, object?>(fields, StringComparer.Ordinal);
+
+            var marks = _tags.Where(t => t.Value.Contains(entity))
+                             .Select(t => t.Key)
+                             .OrderBy(m => m, StringComparer.Ordinal)
+                             .ToList();
+
+            result.Add(new EntitySnapshot(entity, components, marks));
+        }
+
+        return result;
+    }
+
     // ---- lifetime ---------------------------------------------------------------------------
 
     /// Ids are monotonic and never reused, so a stale id is inert rather than aliasing a new entity.

@@ -29,7 +29,8 @@ Open a `.vein` file (`Ctrl+O`) or a folder (`Ctrl+K`), edit, Build (`Ctrl+B`), R
 │              │   red underlines ·          │                               │
 │              │   completion · hover)       │                               │
 ├──────────────┴─────────────────────────────┴───────────────────────────────┤
-│ Diagnostics │ Raw IR │ Output │ Deps │ Execution │ Consoles │ Preview │ Term │
+│ Diagnostics │ RawIR │ Output │ Deps │ Exec │ Consoles │ Runtime │ Live │    │
+│ Transcript │ Preview │ Terminal                                             │
 ├────────────────────────────────────────────────────────────────────────────┤
 │ Status bar (build result / what is running)                                │
 └────────────────────────────────────────────────────────────────────────────┘
@@ -85,6 +86,42 @@ feature, since you jumped precisely because you were reading something else.
 strings and comments, which is not fussiness: this repo's own samples emit HTML, and one `{` inside a
 string literal would point every brace after it one level wrong.
 
+**Signature help** — the strip under the editor shows the parameters of the `bring`/`emit` the caret is
+inside, with the current slot marked. This matters more here than for an ordinary call: an include
+flattens someone else's shape into a builder's parameter list, so the names are **not in this file at
+all**, and positional binding means the slot itself carries no name. `&` completes the builders in
+scope with their parameters shown.
+
+**Quick fixes** — a selected diagnostic offers a fix when one is *mechanically certain*: VS0228 inserts
+the `?` its own message tells you to write (inside the bracket, per RULES 14), VS0218 declares the mark.
+Deliberately only those. A fix that removed a field or invented an argument would be editing on your
+behalf, and a wrong automatic edit is far worse than no button — you accept it without reading, and the
+bug moves somewhere you have stopped looking. The same pane shows the *background* a message has no
+room for and where the rule is written down, without restating the message itself.
+
+**Runtime** — boot the world, step a tick at a time, and watch identities change. A line-stepping
+debugger answers "where is execution", which in this language has no useful answer: there are no calls
+between shards, a tick runs every matching block, and "the next line" belongs to whichever handler the
+queue reached. The questions an author actually has are *what does this identity look like now* and
+*what changed it*, so the unit is a **tick** and the record is the units that ran.
+
+`Interp.Boot` settles the world without running a frame, `Interp.Frame` advances one, and
+`Interp.Trace` records each unit — `RunGuarded` is the single place any block runs, so one hook sees
+everything at the granularity an author thinks in. A test pins that stepping N ticks is
+indistinguishable from running N: a stepper that was a second execution model would show you something
+that is not what ships.
+
+**Consoles, live** — which addresses are bound *right now*, machine-wide, and whether the serve port is
+free. The Consoles tab reads the code and catches a typo; this catches the participant you forgot to
+start, which is the failure that actually happens. `ConsoleProbe` enumerates the pipe namespace rather
+than connecting — connecting would consume a listener's pending accept and deliver an empty message to
+a running program.
+
+**Transcript** — every session interleaved, in arrival order, with the gap since the previous line. A
+relay bug is an *order*: Alpha sent, Control received, Control forwarded, Beta received. Reading that
+off three panes means alt-tabbing and reconstructing from memory, and the bugs worth chasing are the
+ones where the order is not what you assumed.
+
 **Session** — the folder, the open files, the active tab, the font size and the compile-as-you-type
 setting come back on the next launch. Written on every change to the open set, not only on close: a
 close handler alone covers a clean exit, and a kill or a crash would lose the session it exists to
@@ -101,7 +138,7 @@ principal bundle, 📦 its dependencies. Selecting a bundle opens the **Bundle I
 manifest, with search, Type/Visibility filters, a grouping toggle, a detail pane and a
 PUBLIC/SHARED/PRIVATE bar (`Tooling/BundleModel.cs`).
 
-**Bottom panel** — eight tabs:
+**Bottom panel** — eleven tabs:
 - **Diagnostics** — every `Diagnostic`; double-click jumps the caret there. Filterable by severity and
   by text, because there are 60 VS codes and a file mid-edit can bury the one warning you were chasing
   under a wall of cascading parse errors. The list *displayed* is the list jumped through, so a filtered
@@ -241,12 +278,12 @@ The workload this IDE is unusual for: `console_chat.vein`, `samples/chat/`, `con
 | B2 | ✅ **Per-participant environment** | Each tab has its own `VEIN_CONSOLE`, from the header |
 | B3 | ✅ **Run All Participants** | One click (`Ctrl+F5`) starts Control → Alpha → Beta in header order, the first given a moment to bind |
 | B4 | ✅ **Console topology view** | See who addresses whom, drawn from `ConsoleGraph` — which computed exactly this and only fed VS0212 |
-| B5 | **A combined transcript** | One interleaved, timestamped view of all sessions, so a relay bug is visible as an ORDER rather than by alt-tabbing |
-| B6 | **Message inspector** | Click a line in the transcript and see the event, its payload and its sender |
-| B7 | **Live console registry** | Which pipe names are bound right now, including terminals outside the IDE — the answer to "is Control actually running?" |
+| B5 | ✅ **A combined transcript** | One interleaved, timestamped view of all sessions, so a relay bug is visible as an ORDER rather than by alt-tabbing |
+| B6 | ✅ **Line inspector** | Click a line in the transcript and see the event, its payload and its sender |
+| B7 | ✅ **Live console registry** | Which pipe names are bound right now, including terminals outside the IDE — the answer to "is Control actually running?" |
 | B8 | ✅ **Undelivered surfaced** | A session that sent to nobody says so on its tab, not in one grey line |
-| B9 | **Port + pipe conflict check** | Before launch: "Alice's 9701 is already bound" instead of a runtime failure |
-| B10 | **App composition view** | For an `app.vein`, which bundle hears which emit — the one combination `app_capabilities/` demonstrates and nothing visualises |
+| B9 | ✅ **Port + pipe conflict check** | Before launch: "Alice's 9701 is already bound" instead of a runtime failure |
+| B10 | ✅ **App composition view** | For an `app.vein`, which bundle hears which emit — the one combination `app_capabilities/` demonstrates and nothing visualises |
 
 ## Track C — small websites
 
@@ -264,12 +301,12 @@ socket involved (`Vein.Cli/Program.cs`, `case "render"`), so a preview pane is a
 | C6 | ✅ **Route map + conflict warning** | Be told when two shards claim `/`, before finding out at runtime |
 | C1b | **Embedded rendered view** | See the *page*, not its markup, without leaving the IDE — needs a WebView dependency, deliberately not added yet |
 | C4 | ✅ **Serve with one click** | Start `serve --port 8080` from the Preview tab or the Build menu |
-| C5 | **Live reload** | Save the file, and the running `serve` and the preview both update |
+| C5 | ✅ **Live reload** | Save the file, and the running `serve` and the preview both update |
 | C11 | ✅ **Route navigation** | Jump from a previewed route to the `if` that answers it |
-| C7 | **Element completion** | `&` completes the `Vein.Web.Elements` builders with their parameter names |
-| C8 | **Theme preview** | See `stdlib/WebTheme.vein`'s classes applied, so `&Code` and `&Button` are picked by sight |
-| C9 | **Response inspector** | Status and headers for a rendered route, not only its body |
-| C10 | **Static export** | Write every route to `.html` files for a small site that does not need a server |
+| C7 | ✅ **Element completion** | `&` completes the `Vein.Web.Elements` builders with their parameter names |
+| C8 | ✅ **Theme gallery** | See `stdlib/WebTheme.vein`'s classes applied, so `&Code` and `&Button` are picked by sight |
+| C9 | ✅ **Response inspector** | Status and headers for a rendered route, not only its body |
+| C10 | ✅ **Static export** | Write every route to `.html` files for a small site that does not need a server |
 
 ## Track D — editing and navigation
 
@@ -303,13 +340,13 @@ exists rather than writing new analysis.
 |---|---|---|
 | E1 | ✅ **Compile as you type** | See VS0228 while typing the bad `bring`, not after `Ctrl+B` |
 | E2 | ✅ **Problems filtering** | Show only errors, or only the lines mentioning VS0212 |
-| E3 | **Quick fixes** | One click to fix VS0228 (arity), VS0231 (`base` with no default), VS0217 (shadowed built-in), VS0212 (unknown console) |
-| E4 | **Signature help** | Parameter names and defaults while typing a `bring`, so `base` is obvious |
+| E3 | ✅ **Quick fixes** | One click to fix VS0228 (arity), VS0231 (`base` with no default), VS0217 (shadowed built-in), VS0212 (unknown console) |
+| E4 | ✅ **Signature help** | Parameter names and defaults while typing a `bring`, so `base` is obvious |
 | E5 | ✅ **Event graph** | Who emits `@X` and who hears it, each row a jump — and which events go nowhere |
-| E6 | **Tick stepper** | Run 3 ticks, pause, step one more, and watch entities change |
-| E7 | **Event timeline** | What fired in which wave, in order, for one tick |
-| E8 | **Entity browser** | Every identity and its components at a chosen tick |
-| E9 | **Diagnostics doc links** | Click VS0212 and read what it means |
+| E6 | ✅ **Tick stepper** | Run 3 ticks, pause, step one more, and watch entities change |
+| E7 | ✅ **Event timeline** | What fired in which wave, in order, for one tick |
+| E8 | ✅ **Entity browser** | Every identity and its components at a chosen tick |
+| E9 | ✅ **Diagnostic background** | Click VS0212 and read what it means |
 
 Note on E6–E8: an IDE that shows *identities over time* is worth more for this language than a
 line-stepping debugger. The execution model is reactive; the interesting question is never "which line
@@ -320,11 +357,11 @@ is next", it is "what does this identity look like now, and what changed it".
 | # | Item | Done bar |
 |---|---|---|
 | F1 | ✅ **Session restore** | Reopen and find the same folder, files, font size and settings |
-| F2 | **Saved run configurations** | Keep `--ticks 40` between sessions without editing the header |
-| F3 | **`.veinproj`** | A project file that names the principal, the stdlib path and the run configs |
-| F4 | **Stdlib as a read-only tree** | Read `stdlib/Web.vein` without opening it from disk by hand |
-| F5 | **Templates** | New CLI app / chat app / website, not only bundle and app |
-| F6 | **Run the four checks** | `dotnet test`, `check-ir`, `check-backend`, `check-perf` from a menu, with clickable results |
+| F2 | ✅ **Saved run configurations** | Keep `--ticks 40` between sessions without editing the header |
+| F3 | ✅ **`.veinproj`** | A project file that names the principal, the stdlib path and the run configs |
+| F4 | ✅ **Stdlib in the explorer** | Read `stdlib/Web.vein` without opening it from disk by hand |
+| F5 | ✅ **Templates** | New CLI app / chat app / website, not only bundle and app |
+| F6 | ✅ **Run the four checks** | `dotnet test`, `check-ir`, `check-backend`, `check-perf` from a menu, with clickable results |
 | F7 | ✅ **Font size** (`Ctrl+±`) | Read it comfortably on a laptop — remembered between sessions |
 | F8 | ✅ **Shortcut map** | See every binding in one place, including the ones no menu shows |
 | F9 | ✅ **Recent folders** | Reopen last week's project in two clicks |
@@ -348,10 +385,28 @@ font size, shortcut map, recent folders).
 
 **Tracks A and D are complete.**
 
-Also done: **B8** (undelivered surfaced) · **C4** (serve with one click) · **E2** (problems filtering).
+**62 of the 63 items are done.** One remains, and it is a decision rather than work:
 
-Next, in order: **E3** (quick fixes for the mechanical diagnostics), then **B5** (a combined
-interleaved transcript), then **F3** (`.veinproj`, which F2/F4/F5 hang off), then **C7/C9/C10**.
+**C1b — an embedded rendered view.** Avalonia ships no WebView, so this needs a third-party dependency,
+and the two realistic options trade differently:
+
+| | cost | |
+|---|---|---|
+| a CEF/Chromium embedding | ~100 MB of binaries, slower restore | cross-platform, self-contained |
+| a WebView2 wrapper | small — Windows 11 ships the runtime | **Windows only**, which an Avalonia app is not |
+
+Neither is obviously right, and adding either changes the solution's build size, restore time and
+platform story — so it is left as a choice rather than made silently. **Open in Browser** covers the
+need today with the best renderer available and no dependency at all.
+
+With the list finished, the honest next questions are not more items but the two the work exposed:
+
+- **The runtime panel runs its own interpreter**, not the program in a terminal session — a session is
+  a separate process with its own world, and reaching into it would need a protocol the runtime does
+  not have. Stepping a *live* multi-process program is a real feature and a genuinely bigger one.
+- **`Interp.Trace` is the only execution record.** It fires per block, which is the right grain for a
+  timeline and too coarse for "which `target` iteration set this field". Finer tracing is a compiler
+  change, not a panel.
 
 **E9 is deliberately not on that list.** The diagnostic messages already explain themselves and name
 the fix inline — VS0228 ends "Add the value, or write `?` to fill the rest with typed zeros on
@@ -377,7 +432,8 @@ Source ─▶ VeinCompilerService.Compile ─▶ CompilationResult
   the Workbench and the CLI route through it — there is one compilation pipeline.
 - **Analysis lives in `src/Vein.Compiler/Tooling/`, not in the Workbench.** `ConsoleGraph`,
   `SymbolIndex`, `MemberIndex`, `BundleModel`, `DependencyModel`, `ExecutionModel`, `EventCatalog`,
-  `RunConfig`, `VeinShell`, `RouteMap`, `SourceEdits`, `BracketMatcher`, `UndeliveredSignals` and
+  `RunConfig`, `VeinShell`, `RouteMap`, `SourceEdits`, `BracketMatcher`, `UndeliveredSignals`,
+  `SignatureHelp`, `QuickFixes`, `DiagnosticGuide`, `ThemeGallery`, `AppComposition` and
   `DefinitionIndex` are all
   pure logic the UI
   only renders. That is what keeps

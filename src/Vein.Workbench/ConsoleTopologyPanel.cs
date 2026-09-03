@@ -23,6 +23,42 @@ internal sealed class ConsoleTopologyPanel : UserControl
         Content = new ScrollViewer { Content = _body };
     }
 
+    /// The app's cross-bundle wiring, when the open folder is an app. Shown above the console topology
+    /// because it answers the larger question — which bundle hears which emit — and a capability bundle
+    /// reads as self-contained until you can see that.
+    public void ShowComposition(AppComposition composition)
+    {
+        _body.Children.Clear();
+
+        _body.Children.Add(Heading("App composition"));
+        foreach (var b in composition.Bundles)
+            _body.Children.Add(Row((b.IsPrincipal ? "★ " : "📦 ") + b.Bundle,
+                $"emits {b.Emits.Count}  ·  hears {b.Hears.Count}", Brushes.Gainsboro));
+
+        var crossing = composition.CrossBundle.ToList();
+        if (crossing.Count > 0)
+        {
+            _body.Children.Add(Heading("Events that cross a bundle"));
+            foreach (var e in crossing)
+                _body.Children.Add(Row("@" + e.Event,
+                    string.Join(", ", e.Emitters) + "  →  " + string.Join(", ", e.Hearers), Brushes.Gainsboro));
+        }
+
+        // Inside a linked app there is no "someone else" — one handler table, one queue — so an event
+        // nothing hears is dead in a way it would not be in a single bundle.
+        var unheard = composition.Unheard.ToList();
+        if (unheard.Count > 0)
+        {
+            _body.Children.Add(Heading("Emitted and heard by nobody"));
+            foreach (var e in unheard)
+                _body.Children.Add(Row("@" + e.Event, "from " + string.Join(", ", e.Emitters), Brushes.Goldenrod));
+        }
+
+        _body.Children.Add(Muted(
+            "An app links its bundles into ONE runtime — one handler table, one event queue — which is " +
+            "what lets a `hear` in a capability bundle see an `emit` from the principal."));
+    }
+
     public void Update(ConsoleGraph? graph)
     {
         _body.Children.Clear();

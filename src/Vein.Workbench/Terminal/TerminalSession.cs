@@ -29,6 +29,11 @@ public sealed class TerminalSession : IDisposable
     /// A line arrived from the process (stdout or stderr), already on the UI thread.
     public event Action<string>? Output;
 
+    /// The same line, with the session it came from and when. The combined transcript subscribes here
+    /// rather than re-reading logs, so its ORDER is the order lines actually arrived — which is the
+    /// whole reason to have one.
+    public event Action<TerminalSession, DateTime, string>? Line;
+
     /// The process ended. `code` is its exit code, or -1 if it could not be determined.
     public event Action<int>? Exited;
 
@@ -172,8 +177,15 @@ public sealed class TerminalSession : IDisposable
     public void Write(string line)
     {
         _log.AppendLine(line);
-        if (Dispatcher.UIThread.CheckAccess()) Output?.Invoke(line);
-        else Dispatcher.UIThread.Post(() => Output?.Invoke(line));
+
+        // Timestamped where it ARRIVES, not where it is drawn: the combined transcript exists to show
+        // an order, and stamping it after a dispatcher hop would record the order of redraws instead.
+        var at = DateTime.Now;
+
+        void Raise() { Output?.Invoke(line); Line?.Invoke(this, at, line); }
+
+        if (Dispatcher.UIThread.CheckAccess()) Raise();
+        else Dispatcher.UIThread.Post(Raise);
     }
 
     /// How to launch the CLI, best option first, as [executable, ...leading args].

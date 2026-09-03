@@ -69,6 +69,9 @@ public partial class MainWindow : Window
     private EditorTabs _tabs = null!;
     private WebPreviewPanel _webPreview = null!;
     private ConsoleTopologyPanel _consoles = null!;
+    private LiveConsolesPanel _live = null!;
+    private TranscriptPanel _transcript = null!;
+    private RuntimePanel _runtime = null!;
     private OutlinePanel _outline = null!;
     private EventGraphPanel _eventGraph = null!;
     private TabControl _inspector = null!;
@@ -106,8 +109,11 @@ public partial class MainWindow : Window
     private const int TabDependencies = 3;
     private const int TabExecution = 4;
     private const int TabConsoles = 5;
-    private const int TabPreview = 6;
-    private const int TabTerminal = 7;
+    private const int TabRuntime = 6;
+    private const int TabLive = 7;
+    private const int TabTranscript = 8;
+    private const int TabPreview = 9;
+    private const int TabTerminal = 10;
 
     private ComboBox _runConfigs = null!;
     private TextBlock _runHint = null!;
@@ -116,6 +122,10 @@ public partial class MainWindow : Window
     private CheckBox _showWarnings = null!;
     private TextBox _diagFilter = null!;
     private TextBlock _diagSummary = null!;
+    private Border _diagDetail = null!;
+    private TextBlock _diagWhy = null!;
+    private Button _quickFixButton = null!;
+    private TextBlock _signature = null!;
 
     /// The run configurations the open file declares in its own header, in header order.
     private IReadOnlyList<RunConfig> _configs = Array.Empty<RunConfig>();
@@ -140,7 +150,12 @@ public partial class MainWindow : Window
         _webPreview = this.FindControl<WebPreviewPanel>("WebPreview")!;
         _webPreview.Navigate = GoTo;
         _webPreview.Serve = () => OnServe(this, new RoutedEventArgs());
+        _webPreview.StdlibDir = Path.Combine(FindRepoRoot(), "stdlib");
         _consoles = this.FindControl<ConsoleTopologyPanel>("ConsoleTopology")!;
+        _live = this.FindControl<LiveConsolesPanel>("LiveConsoles")!;
+        _transcript = this.FindControl<TranscriptPanel>("Transcript")!;
+        _runtime = this.FindControl<RuntimePanel>("Runtime")!;
+        _terminal.AnyLine += (s, at, line) => _transcript.Add(s, at, line);
         _outline = this.FindControl<OutlinePanel>("Outline")!;
         _outline.Navigate = GoTo;
         _eventGraph = this.FindControl<EventGraphPanel>("EventGraph")!;
@@ -153,6 +168,10 @@ public partial class MainWindow : Window
         _showWarnings = this.FindControl<CheckBox>("ShowWarnings")!;
         _diagFilter = this.FindControl<TextBox>("DiagFilter")!;
         _diagSummary = this.FindControl<TextBlock>("DiagSummary")!;
+        _diagDetail = this.FindControl<Border>("DiagDetail")!;
+        _diagWhy = this.FindControl<TextBlock>("DiagWhy")!;
+        _quickFixButton = this.FindControl<Button>("QuickFixButton")!;
+        _signature = this.FindControl<TextBlock>("SignatureStrip")!;
         _diagFilter.TextChanged += (_, _) => ApplyDiagnosticFilter();
         _showErrors.IsCheckedChanged += (_, _) => ApplyDiagnosticFilter();
         _showWarnings.IsCheckedChanged += (_, _) => ApplyDiagnosticFilter();
@@ -182,6 +201,7 @@ public partial class MainWindow : Window
         {
             _brackets.Pair = BracketMatcher.Match(_editor.Text, _editor.CaretOffset);
             _editor.TextArea.TextView.InvalidateLayer(AvaloniaEdit.Rendering.KnownLayer.Selection);
+            ShowSignature();
         };
         _editor.TextArea.TextEntered += OnTextEntered;
         _editor.TextArea.TextView.PointerMoved += OnHover;
@@ -494,7 +514,14 @@ public partial class MainWindow : Window
     private void RefreshRunConfigs()
     {
         var previous = _runConfigs.SelectedItem as string;
-        _configs = RunConfig.From(_editor.Text, _currentPath ?? "untitled.vein");
+
+        // The file's own header first, then anything saved in .veinproj. Both, in that order: a saved
+        // config that has gone stale must not hide what the file itself says about how to run it.
+        var configs = RunConfig.From(_editor.Text, _currentPath ?? "untitled.vein").ToList();
+        if (_project is not null)
+            configs.AddRange(_project.Runs.Select(r =>
+                new RunConfig(r.Label, r.Command, r.Args, r.Env)));
+        _configs = configs;
 
         var labels = _configs.Select(c => c.Label).ToList();
         _runConfigs.ItemsSource = labels;
@@ -653,6 +680,95 @@ public partial class MainWindow : Window
     {
         _terminal.StopAll();
         SetStatus("Stopped every terminal session.");
+    }
+
+    // ---- project file, templates and checks -------------------------------
+
+    /// The open folder's `.veinproj`, when it has one. Null is the normal case.
+    private VeinProject? _project;
+
+    private void LoadProject()
+    {
+        _project = _rootFolder is null ? null : VeinProject.Load(_rootFolder);
+        if (_project?.PrincipalPath is { } principal && _tabs.Docs.Count == 0)
+            _ = OpenPathAsync(principal);
+    }
+
+    /// Save the toolbar's current command line as a run configuration in `.veinproj`.
+    ///
+    /// It lives in the project rather than the file header because it is a choice about THIS session —
+    /// `--ticks 40` while chasing something — and the header is a statement about the sample. Saved
+    /// configs are offered ALONGSIDE the header's, never instead: a stale save must not hide what the
+    /// file itself says.
+    private void OnSaveRunConfig(object? sender, RoutedEventArgs e)
+    {
+        if (_rootFolder is null) { SetStatus("Open a folder first — a run configuration is saved with the project."); return; }
+
+        var spec = VeinShell.Parse(_runArgs.Text ?? "", ResolveVeinFile);
+        if (spec.Kind != LaunchKind.Cli) { SetStatus(spec.Error ?? "That command line is not a veinc command."); return; }
+
+        _project ??= new VeinProject();
+        string label = (spec.ConsoleName ?? spec.Command) + " (saved)";
+        _project.Runs.RemoveAll(r => r.Label == label);
+        _project.Runs.Add(new SavedRun(label, spec.Command, spec.Args.ToList(), new Dictionary<string, string>(spec.Env)));
+
+        try { _project.Save(_rootFolder); SetStatus($"Saved '{label}' to {VeinProject.FileName}"); }
+        catch (Exception ex) { SetStatus($"Could not save the project: {ex.Message}"); }
+
+        RefreshRunConfigs();
+    }
+
+    private void OnNewFromTemplate(object? sender, RoutedEventArgs e) => _ = NewFromTemplateAsync();
+
+    /// A whole working program to start from, rather than a correct file that does nothing. The three
+    /// templates match the three workloads this IDE is scoped to.
+    private async Task NewFromTemplateAsync()
+    {
+        var top = TopLevel.GetTopLevel(this);
+        if (top is null) return;
+
+        string? picked = await TemplateDialog.ShowAsync(this);
+        if (picked is null) return;
+
+        string? parent = _rootFolder;
+        if (parent is null)
+        {
+            var dirs = await top.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            { AllowMultiple = false, Title = "Choose where to create it" });
+            if (dirs.Count == 0) return;
+            parent = dirs[0].Path.LocalPath;
+        }
+
+        string? name = await PromptDialog.ShowAsync(this, "New program", "Bundle name:", "Demo");
+        if (string.IsNullOrWhiteSpace(name)) return;
+
+        var template = WorkloadTemplates.All.First(t => t.Key == picked);
+        try
+        {
+            string dir = Path.Combine(parent, name.Trim());
+            Directory.CreateDirectory(dir);
+            string file = Path.Combine(dir, template.FileName);
+            await File.WriteAllTextAsync(file, WorkloadTemplates.Source(picked, name.Trim(), "you"));
+
+            _rootFolder = dir;
+            _settings.Remember(dir);
+            PopulateProjectTree(dir);
+            await OpenPathAsync(file);
+            SetStatus($"Created {template.Title} '{name.Trim()}' — press ▶.");
+        }
+        catch (Exception ex) { SetStatus($"Could not create it: {ex.Message}"); }
+    }
+
+    /// Run one of the repo's four checks in a terminal session. They are shell commands, so they go
+    /// through the same passthrough the prompt uses — the IDE runs them the way you would.
+    private void OnRunCheck(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string command }) return;
+
+        _bottomPanel.IsVisible = true;
+        _bottomPanel.SelectedIndex = TabTerminal;
+        _terminal.Run(VeinShell.Parse(command, ResolveVeinFile), command.Split(' ')[0]);
+        SetStatus($"Running {command}");
     }
 
     private void OnAbout(object? sender, RoutedEventArgs e) => new AboutWindow().ShowDialog(this);
@@ -826,6 +942,32 @@ public partial class MainWindow : Window
 
     private void SetStatus(string text) => _statusBar.Text = text;
 
+    /// Show the parameters of the `bring`/`emit` the caret is inside, in the signature strip.
+    ///
+    /// Its own strip rather than the status bar: the status bar is where build results and run messages
+    /// land, and a signature that came and went with those would flicker away exactly while being read.
+    private void ShowSignature()
+    {
+        var call = SignatureHelp.At(_editor.Text, _editor.CaretOffset);
+        if (call is null) { _signature.Text = ""; _signature.IsVisible = false; return; }
+
+        var fields = call.IsEvent
+            ? _catalogEvents.FirstOrDefault(x => x.Name == call.Name)?.Fields
+            : _catalogBuilders.FirstOrDefault(x => x.Name == call.Name)?.Fields;
+
+        // A name the catalog does not know is a typo or a symbol from somewhere not loaded. Saying
+        // nothing beats describing a different call that happens to share the name.
+        if (fields is null) { _signature.Text = ""; _signature.IsVisible = false; return; }
+
+        _signature.Text = SignatureHelp.Describe(call, fields) ?? "";
+        _signature.IsVisible = _signature.Text.Length > 0;
+    }
+
+    // The catalogs signature help reads, refreshed each build. Kept rather than recomputed per keystroke
+    // because they walk the whole unit including the stdlib.
+    private IReadOnlyList<EventEntry> _catalogEvents = Array.Empty<EventEntry>();
+    private IReadOnlyList<BuilderEntry> _catalogBuilders = Array.Empty<BuilderEntry>();
+
     private async Task OpenAsync()
     {
         var top = TopLevel.GetTopLevel(this);
@@ -917,7 +1059,12 @@ public partial class MainWindow : Window
             _tabs.MarkSaved(doc);
             if (_rootFolder is not null) PopulateProjectTree(_rootFolder);
             if (ReferenceEquals(doc, _tabs.Active)) Build();
-            SetStatus($"Saved {doc.Name}");
+
+            // Live reload. `veinc serve` reads the file once at boot and the runtime has no reload path
+            // to ask for, so the honest implementation is a restart — and only of a serve that is
+            // actually running, so saving an ordinary file does nothing surprising.
+            int reloaded = _terminal.RestartRunning("serve");
+            SetStatus(reloaded > 0 ? $"Saved {doc.Name} — reloaded {reloaded} server(s)" : $"Saved {doc.Name}");
         }
         catch (Exception ex) { SetStatus($"Save failed: {ex.Message}"); }
     }
@@ -961,14 +1108,39 @@ public partial class MainWindow : Window
         var dir = new DirectoryInfo(root);
         if (!dir.Exists) return;
 
+        LoadProject();
+
         // A project with an app.vein gets the semantic view (★ principal + 📦 dependencies); anything
         // else falls back to the plain folder tree.
         string appFile = Path.Combine(root, "app.vein");
-        if (File.Exists(appFile) && TryBuildSemanticTree(root, appFile)) return;
+        if (!(File.Exists(appFile) && TryBuildSemanticTree(root, appFile)))
+        {
+            var node = FolderNode(dir);
+            node.IsExpanded = true;
+            _projectTree.Items.Add(node);
+        }
 
-        var node = FolderNode(dir);
-        node.IsExpanded = true;
-        _projectTree.Items.Add(node);
+        AddStdlibNode();
+    }
+
+    /// The stdlib, as a collapsed branch at the bottom of the tree.
+    ///
+    /// Reading `stdlib/Web.vein` is a normal part of writing a site — the builders and their parameters
+    /// are declared there and nowhere else — and opening it from disk by hand every time is the kind of
+    /// friction that makes people guess instead. Read-only in the sense that matters: it is not part of
+    /// your project, so it is out of the way until wanted.
+    private void AddStdlibNode()
+    {
+        string stdlib = _project?.StdlibPath is { } custom && Directory.Exists(custom)
+            ? custom
+            : Path.Combine(FindRepoRoot(), "stdlib");
+        if (!Directory.Exists(stdlib)) return;
+
+        var node = new TreeViewItem { Header = "📚 stdlib", IsExpanded = false };
+        foreach (string file in Directory.EnumerateFiles(stdlib, "*.vein").OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+            node.Items.Add(new TreeViewItem { Header = Path.GetFileName(file), Tag = file });
+
+        if (node.Items.Count > 0) _projectTree.Items.Add(node);
     }
 
     private bool TryBuildSemanticTree(string root, string appFile)
@@ -1021,10 +1193,37 @@ public partial class MainWindow : Window
                 depHeader.Items.Add(new TreeViewItem { Header = $"📦 {d.Name}   —", Tag = new BundleRef(d.File, d.Name, false) });
             appNode.Items.Add(depHeader);
 
+            ShowAppComposition(principal, deps);
+
             _projectTree.Items.Add(appNode);
             return true;
         }
         catch { return false; }
+    }
+
+    /// Compile each linked bundle and show how they wire together.
+    ///
+    /// Each bundle is compiled with its own SourcePath so its fragments come in — a capability bundle is
+    /// often a main file plus shards/, and reading only the main file would miss most of its handlers.
+    private void ShowAppComposition((string File, string Name) principal, IReadOnlyList<(string File, string Name)> deps)
+    {
+        try
+        {
+            var units = new List<(string, CompilationUnit, bool)>();
+
+            foreach (var (file, name, isPrincipal) in
+                     new[] { (principal.File, principal.Name, true) }.Concat(deps.Select(d => (d.File, d.Name, false))))
+            {
+                if (file is null || !File.Exists(file)) continue;
+                var unit = _service.Compile(new CompileRequest(
+                    Path.GetFileName(file), File.ReadAllText(file),
+                    ProjectDir: Path.GetDirectoryName(file), SourcePath: file)).Ast;
+                if (unit is not null) units.Add((name, unit, isPrincipal));
+            }
+
+            if (units.Count > 0) _consoles.ShowComposition(AppComposition.Analyze(units));
+        }
+        catch { /* a half-written bundle; the tree is still worth showing */ }
     }
 
     private string? BundleNameOf(string file)
@@ -1281,10 +1480,17 @@ public partial class MainWindow : Window
             _webPreview.Update(result.Modules, result.Ast is null ? RouteMap.Empty : RouteMap.Analyze(result.Ast));
         _consoles.Update(result.Ast is null ? null : ConsoleGraph.Analyze(result.Ast));
         _terminal.UndeliveredPrefixes = result.Ast is null ? Array.Empty<string>() : UndeliveredSignals.Analyze(result.Ast);
+        _live.Expect(result.Ast is null ? null : ConsoleGraph.Analyze(result.Ast), ServePort);
+        _runtime.Update(result.Modules);
         _definitions = result.Ast is null ? DefinitionIndex.Empty : DefinitionIndex.Analyze(result.Ast);
         _outline.Update(_definitions);
         _eventGraph.Update(_definitions);
-        if (result.Ast is not null) _symbols = SymbolIndex.Collect(result.Ast);
+        if (result.Ast is not null)
+        {
+            _symbols = SymbolIndex.Collect(result.Ast);
+            try { _catalogEvents = EventCatalog.Catalog(result.Ast, ProjectDir); _catalogBuilders = EventCatalog.Builders(result.Ast, ProjectDir); }
+            catch { /* a half-written unit; keep the last good catalogs */ }
+        }
 
         Title = $"VeinScript Workbench — {name} — {(result.Success ? "ok" : $"{_diags.Count} error(s)")} ({result.ElapsedMs} ms)";
         SetStatus(result.Success
@@ -1669,6 +1875,55 @@ public partial class MainWindow : Window
               (hidden > 0 ? $"  ·  {hidden} hidden" : "");
     }
 
+    /// Selecting a diagnostic shows the background a message has no room for, and a fix when one is
+    /// mechanically certain.
+    private void OnDiagnosticSelected(object? sender, SelectionChangedEventArgs e)
+    {
+        _pendingFix = null;
+        _quickFixButton.IsVisible = false;
+
+        int i = _diagBox.SelectedIndex;
+        if (_references is not null || i < 0 || i >= _shownDiags.Count)
+        {
+            _diagDetail.IsVisible = false;
+            return;
+        }
+
+        var d = _shownDiags[i];
+        var note = DiagnosticGuide.For(d.Code);
+
+        _diagWhy.Text = note is null ? "" : $"{note.Why}   ·   {note.Doc}";
+
+        if (QuickFixes.For(d, _editor.Text).FirstOrDefault() is { } fix)
+        {
+            _pendingFix = fix;
+            _quickFixButton.Content = fix.Title;
+            _quickFixButton.IsVisible = true;
+        }
+
+        _diagDetail.IsVisible = note is not null || _pendingFix is not null;
+    }
+
+    private QuickFix? _pendingFix;
+
+    /// Apply the offered edit. One Replace, so Ctrl+Z undoes the whole fix.
+    private void OnApplyQuickFix(object? sender, RoutedEventArgs e)
+    {
+        if (_pendingFix is not { } fix) return;
+
+        var edit = fix.Edit;
+        if (edit.Offset < 0 || edit.Offset + edit.Length > _editor.Document.TextLength)
+        {
+            SetStatus("That fix no longer fits the file — build and try again.");
+            return;
+        }
+
+        _editor.Document.Replace(edit.Offset, edit.Length, edit.Text);
+        _editor.CaretOffset = Math.Min(edit.Offset + edit.Text.Length, _editor.Document.TextLength);
+        SetStatus($"Applied: {fix.Title}");
+        Build();
+    }
+
     private void OnDiagnosticActivated(object? sender, TappedEventArgs e)
     {
         int i = _diagBox.SelectedIndex;
@@ -1695,6 +1950,7 @@ public partial class MainWindow : Window
         if (e.Text == "?") { TryExpandOnQuestion(); return; }
         if (e.Text == ".") { ShowMemberCompletion(); return; }
         if (e.Text == "*") { ShowStarCompletion(); return; }   // qualified stdlib refs: *Vein.Console.Io.@Print
+        if (e.Text == "&") { ShowBuilderCompletion(); return; }  // &Elements — the Vein.Web builders and any local one
         if (e.Text is not ("$" or "#" or "@")) return;
 
         // Recompile lazily so completion reflects the current text (not just the last Build).
@@ -1953,6 +2209,23 @@ public partial class MainWindow : Window
 
     // Typing `*` offers the stdlib's cross-bundle symbols as full qualified paths (e.g.
     // `Vein.Console.Io.@Print`); selecting one completes `*Vein.Console.Io.@Print`.
+    /// `&` completes the builders in scope — the `Vein.Web.Elements` set for a site, plus any declared
+    /// locally. The parameter names come along, because a builder's list is flattened from someone
+    /// else's shape and is not visible in this file at all.
+    private void ShowBuilderCompletion()
+    {
+        var items = _catalogBuilders
+            .Select(b => (
+                Label: b.Fields.Count == 0
+                    ? b.Name
+                    : b.Name + "   " + string.Join(", ", b.Fields.Select(f => f.Name + ": " + f.Type)),
+                Insert: b.Name))
+            .OrderBy(x => x.Insert, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        ShowCompletion(items, "builder");
+    }
+
     private void ShowStarCompletion()
     {
         string? dir = _currentPath is not null ? Path.GetDirectoryName(_currentPath) : _rootFolder;
@@ -1979,12 +2252,19 @@ public partial class MainWindow : Window
         ShowCompletion(model.Resolve(tokens), "member");
     }
 
-    private void ShowCompletion(IReadOnlyList<string> names, string kind)
+    private void ShowCompletion(IReadOnlyList<string> names, string kind) =>
+        ShowCompletion(names.Select(n => (n, n)).ToList(), kind);
+
+    /// The list may SHOW more than it types. A builder entry reads `Panel   title: string, width: int`
+    /// so the flattened parameter list is visible while choosing — those names come from someone else's
+    /// shape and are not in this file — but inserts just `Panel`.
+    private void ShowCompletion(IReadOnlyList<(string Label, string Insert)> items, string kind)
     {
-        if (names.Count == 0) return;
+        if (items.Count == 0) return;
         _completion = new CompletionWindow(_editor.TextArea);
         _completion.CompletionList.IsFiltering = true;   // search-first: typing any segment narrows the list
-        foreach (var n in names) _completion.CompletionList.CompletionData.Add(new VeinCompletion(n, kind));
+        foreach (var (label, insert) in items)
+            _completion.CompletionList.CompletionData.Add(new VeinCompletion(label, kind, insert));
         _completion.Closed += (_, _) => _completion = null;
         _completion.Show();
     }

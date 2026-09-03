@@ -21,6 +21,7 @@
         <MenuItem Header="_New File" Click="OnNew" InputGesture="Ctrl+N" />
         <MenuItem Header="New _Bundle…" Click="OnNewBundle" />
         <MenuItem Header="New _App…" Click="OnNewApp" />
+        <MenuItem Header="New from _Template…" Click="OnNewFromTemplate" />
         <Separator />
         <MenuItem Header="_Open File…" Click="OnOpen" InputGesture="Ctrl+O" />
         <MenuItem Header="_Close Tab" Click="OnCloseTab" InputGesture="Ctrl+W" />
@@ -63,6 +64,13 @@
         <Separator />
         <MenuItem Header="_Publish Executable (veinc build)" Click="OnPublish" />
         <MenuItem Header="_Serve This Site (veinc serve)" Click="OnServe" />
+        <Separator />
+        <MenuItem Header="Run _Checks">
+          <MenuItem Header="dotnet test" Click="OnRunCheck" Tag="dotnet test src/Vein.Tests" />
+          <MenuItem Header="check-ir.sh" Click="OnRunCheck" Tag="bash tools/check-ir.sh" />
+          <MenuItem Header="check-backend.sh" Click="OnRunCheck" Tag="bash tools/check-backend.sh" />
+          <MenuItem Header="check-perf.sh" Click="OnRunCheck" Tag="bash tools/check-perf.sh" />
+        </MenuItem>
       </MenuItem>
       <MenuItem Header="_Run">
         <MenuItem Header="_Run" Click="OnRun" InputGesture="F5" />
@@ -70,6 +78,8 @@
         <MenuItem Header="Run in E_xternal Console" Click="OnRunExternal" InputGesture="Shift+F5" />
         <Separator />
         <MenuItem Header="_Stop All Sessions" Click="OnStopAll" />
+        <Separator />
+        <MenuItem Header="Sa_ve This Run Configuration" Click="OnSaveRunConfig" />
       </MenuItem>
       <MenuItem Header="_View">
         <MenuItem Header="Toggle _Project Explorer" Click="OnToggleExplorer" />
@@ -108,6 +118,13 @@
 
     <Border DockPanel.Dock="Bottom" Background="#252526" Padding="10,3">
       <TextBlock Name="StatusBar" Text="Ready" />
+    </Border>
+
+    <!-- Signature strip: its own row, because the status bar is where build and run messages land and a
+         signature sharing it would flicker away exactly while being read. -->
+    <Border DockPanel.Dock="Bottom" Background="#1E1E1E" Padding="10,2">
+      <TextBlock Name="SignatureStrip" IsVisible="False" Foreground="#9CDCFE" FontSize="12"
+                 FontFamily="Cascadia Code,Consolas,monospace" TextWrapping="NoWrap" />
     </Border>
 
     <Grid RowDefinitions="*,4,240">
@@ -157,7 +174,16 @@
                        Watermark="filter by code or text — VS0212, base, console…" />
               <TextBlock Name="DiagSummary" VerticalAlignment="Center" Foreground="Gray" FontSize="11" />
             </StackPanel>
+            <Border DockPanel.Dock="Bottom" Name="DiagDetail" IsVisible="False"
+                    Background="#1E1E1E" BorderBrush="#333" BorderThickness="0,1,0,0" Padding="10,6">
+              <StackPanel Orientation="Horizontal" Spacing="10">
+                <Button Name="QuickFixButton" Click="OnApplyQuickFix" Padding="10,2" IsVisible="False" />
+                <TextBlock Name="DiagWhy" TextWrapping="Wrap" Foreground="Gainsboro" FontSize="12"
+                           MaxWidth="900" VerticalAlignment="Center" />
+              </StackPanel>
+            </Border>
             <ListBox Name="Diagnostics" DoubleTapped="OnDiagnosticActivated"
+                     SelectionChanged="OnDiagnosticSelected"
                      FontFamily="Cascadia Code,Consolas,monospace" FontSize="13" />
           </DockPanel>
         </TabItem>
@@ -177,6 +203,15 @@
         </TabItem>
         <TabItem Header="Consoles">
           <local:ConsoleTopologyPanel Name="ConsoleTopology" />
+        </TabItem>
+        <TabItem Header="Runtime">
+          <local:RuntimePanel Name="Runtime" />
+        </TabItem>
+        <TabItem Header="Live">
+          <local:LiveConsolesPanel Name="LiveConsoles" />
+        </TabItem>
+        <TabItem Header="Transcript">
+          <local:TranscriptPanel Name="Transcript" />
         </TabItem>
         <TabItem Header="Preview">
           <local:WebPreviewPanel Name="WebPreview" />

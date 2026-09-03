@@ -513,8 +513,36 @@ public sealed class Interp
     ///
     /// `every N` is not part of a frame: it is defined in real seconds, so the wall clock drives it
     /// instead (StartEveryTimers).
+    // ---- stepping and tracing (the Workbench's tick stepper) ---------------
+    //
+    // An identity-oriented program has no "next line" worth stopping on: the interesting question is
+    // never where execution is, it is what the identities look like now and what changed them. So what
+    // is exposed is a TICK boundary and a record of which units ran — not a statement stepper.
+
+    /// One unit of user code that ran: which tick, whose block, what kind, and the event that caused it.
+    public sealed record TraceEvent(int Tick, string Owner, string Kind, string? Event);
+
+    /// Set to record execution. Null in an ordinary run, and the cost is then one null check per block.
+    public Action<TraceEvent>? Trace;
+
+    /// Which tick is running. `Frame` advances it, so a trace line can say when it happened.
+    private int _tick;
+    public int Tick => _tick;
+
+    /// Boot the world and settle it, WITHOUT running any frames — the state a stepper starts from.
+    ///
+    /// Separate from Run and Render because both of those decide for you how far to go: Run pumps stdin
+    /// forever and Render drains once and returns. Stepping needs the boot alone, and then control.
+    public void Boot(IrModule module)
+    {
+        Setup(module);
+        RunOnce();
+        Drain();
+    }
+
     public void Frame()
     {
+        _tick++;
         RunPhase("tick");
         RunPhase("frame");
         CommitPhase();
@@ -550,6 +578,12 @@ public sealed class Interp
     private void RunGuarded(IrBlock body, Instance owner, Dictionary<string, object?> locals,
                             string what, bool canRaise = true)
     {
+        // The trace point. RunGuarded is the ONE place a unit of user code runs — a schedule block or a
+        // single `hear` handler — so a hook here sees the whole execution without a second traversal,
+        // and sees it at the same granularity an author thinks in. Null in an ordinary run; the Workbench
+        // sets it to build the timeline.
+        Trace?.Invoke(new TraceEvent(_tick, owner.Name, what, _current is null ? null : Str(_current.GetValueOrDefault("__event"))));
+
         try { Exec(body, owner, locals); }
         catch (ReturnSignal) { /* a `return` that escaped its fn — the block simply ends */ }
         catch (Exception ex)

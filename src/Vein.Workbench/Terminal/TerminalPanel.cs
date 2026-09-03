@@ -71,10 +71,14 @@ internal sealed class TerminalPanel : UserControl
     /// ToolTip is an attached property in Avalonia — this keeps the control construction readable.
     private static Button Tip(Button b, string text) { ToolTip.SetTip(b, text); return b; }
 
+    /// Raised for every line from every session, in arrival order. The combined transcript listens.
+    public event Action<TerminalSession, DateTime, string>? AnyLine;
+
     /// Open a session and, if given, run something in it straight away.
     public TerminalSession NewSession(LaunchSpec? run = null, string? title = null)
     {
         var session = new TerminalSession();
+        session.Line += (s, at, line) => AnyLine?.Invoke(s, at, line);
 
         var output = new TextBox
         {
@@ -203,6 +207,26 @@ internal sealed class TerminalPanel : UserControl
 
     /// Focus the prompt of the visible session (Ctrl+`).
     public void FocusPrompt() => Current?.In.Focus();
+
+    /// Restart any session running `command` (e.g. "serve") with the same arguments.
+    ///
+    /// Restart rather than signal, because `veinc serve` reads the file once at boot — there is no
+    /// reload path in the runtime to ask for. Returns how many were restarted, so a caller can say
+    /// nothing happened rather than implying it did.
+    public int RestartRunning(string command)
+    {
+        int restarted = 0;
+        foreach (var tab in _sessions.ToList())
+        {
+            if (tab.Session.LastSpec is not { } spec || spec.Command != command || !tab.Session.IsRunning) continue;
+
+            tab.Session.Stop();
+            tab.Out.Text = "";
+            Launch(tab, spec);
+            restarted++;
+        }
+        return restarted;
+    }
 
     /// Stop everything. Called when the window closes so no console outlives the IDE.
     public void StopAll() { foreach (var t in _sessions) t.Session.Dispose(); }

@@ -36,6 +36,10 @@ internal sealed class WebPreviewPanel : UserControl
     private RouteMap _map = RouteMap.Empty;
     private string? _lastBody;
 
+    /// Status and headers for the rendered route — a 404 with a body reads as a working page in a
+    /// markup pane, which is the case most worth catching.
+    private readonly TextBlock _details = new() { Foreground = Brushes.Gainsboro, FontSize = 12, Margin = new Avalonia.Thickness(8, 2) };
+
     /// Jump to a source position. Wired by the window to the shared GoTo.
     public Action<int, int>? Navigate { get; set; }
 
@@ -67,6 +71,20 @@ internal sealed class WebPreviewPanel : UserControl
         var serve = new Button { Content = "Serve", Padding = new Avalonia.Thickness(10, 2) };
         serve.Click += (_, _) => Serve?.Invoke();
 
+        // Write every route to a folder. A site whose pages are all static does not need a process to
+        // stay up, and the routes are already known — so the export is the route list plus a render each.
+        var export = new Button { Content = "Export…", Padding = new Avalonia.Thickness(10, 2) };
+        export.Click += (_, _) => _ = ExportAsync();
+
+        // Every theme component, styled by the theme's own CSS. `.callout` and `.card` are equally
+        // opaque as words and instantly different as boxes, which is the whole reason to look.
+        var theme = new Button { Content = "Theme", Padding = new Avalonia.Thickness(10, 2) };
+        theme.Click += (_, _) => ShowTheme();
+
+        // Status and headers, not only the body. A 404 with a body reads as a working page in a markup
+        // pane, and that is exactly the case worth catching.
+        _details.IsVisible = false;
+
         _routes.SelectionChanged += (_, _) => Render();
 
         var bar = new StackPanel
@@ -77,12 +95,13 @@ internal sealed class WebPreviewPanel : UserControl
             Children =
             {
                 new TextBlock { Text = "Route", VerticalAlignment = VerticalAlignment.Center },
-                _routes, refresh, source, serve, browser, _status
+                _routes, refresh, source, serve, browser, export, theme, _status
             }
         };
 
         DockPanel.SetDock(bar, Dock.Top);
-        Content = new DockPanel { Children = { bar, _html } };
+        DockPanel.SetDock(_details, Dock.Top);
+        Content = new DockPanel { Children = { bar, _details, _html } };
     }
 
     /// Called after each Build. Rendering RUNS the program, so it only happens for a bundle that
@@ -136,6 +155,16 @@ internal sealed class WebPreviewPanel : UserControl
                 ? $"no @Response for {path}{dynamicNote}"
                 : $"HTTP {result.Status} · {result.Body.Length} bytes{conflicts}{dynamicNote}";
             _status.Foreground = result.Body is null || _map.Conflicts.Any() ? Brushes.IndianRed : Brushes.Gray;
+
+            // The response, not just its body. A 404 or a 500 that still returns markup looks like a
+            // working page in a text pane, and `veinc render` prints the status for the same reason.
+            _details.Text = result.Body is null
+                ? $"{path} — no response"
+                : $"{path} — status {result.Status}, {result.Body.Length} bytes, " +
+                  $"{(result.Body.TrimStart().StartsWith("<", StringComparison.Ordinal) ? "markup" : "text")}" +
+                  (result.Log.Count > 0 ? $"   ·   {result.Log.Count} log line(s) while rendering" : "");
+            _details.Foreground = result.Status is >= 200 and < 300 ? Brushes.Gainsboro : Brushes.Goldenrod;
+            _details.IsVisible = true;
         }
         catch (Exception ex)
         {
@@ -146,6 +175,66 @@ internal sealed class WebPreviewPanel : UserControl
             _status.Text = $"render failed: {ex.Message}";
             _status.Foreground = Brushes.IndianRed;
         }
+    }
+
+    /// Where `stdlib/` is. Set by the window, which knows the project.
+    public string? StdlibDir { get; set; }
+
+    /// Open the theme gallery in the browser — the only renderer that can show it as it is meant to look.
+    private void ShowTheme()
+    {
+        string? html = StdlibDir is null ? null : ThemeGallery.Build(StdlibDir);
+        if (html is null) { _status.Text = "stdlib/WebTheme.vein not found"; return; }
+
+        try
+        {
+            string file = Path.Combine(Path.GetTempPath(), "vein-theme.html");
+            File.WriteAllText(file, html);
+            Process.Start(new ProcessStartInfo(file) { UseShellExecute = true });
+            _status.Text = "theme gallery opened in your browser";
+        }
+        catch (Exception ex) { _status.Text = $"could not open: {ex.Message}"; }
+    }
+
+    /// Write every known route to an .html file.
+    ///
+    /// A site whose pages are all static does not need a process to stay up, and both halves already
+    /// exist: RouteMap knows the routes and Render answers each one. `/` becomes index.html, which is
+    /// what a static host looks for.
+    private async Task ExportAsync()
+    {
+        if (_modules.Count == 0 || !_map.IsWeb) { _status.Text = "nothing to export — this is not a web bundle"; return; }
+
+        var top = TopLevel.GetTopLevel(this);
+        if (top is null) return;
+
+        var dirs = await top.StorageProvider.OpenFolderPickerAsync(
+            new Avalonia.Platform.Storage.FolderPickerOpenOptions { AllowMultiple = false, Title = "Export the site to…" });
+        if (dirs.Count == 0) return;
+
+        string outDir = dirs[0].Path.LocalPath;
+        int written = 0, empty = 0;
+
+        foreach (string path in _map.Paths)
+        {
+            try
+            {
+                var result = new Interp().Render(_modules[0], path);
+                if (result.Body is null) { empty++; continue; }
+
+                // `/` → index.html; `/about` → about.html. A nested path keeps its folders.
+                string relative = path.Trim('/');
+                string file = Path.Combine(outDir, relative.Length == 0 ? "index.html" : relative + ".html");
+                Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                await File.WriteAllTextAsync(file, result.Body);
+                written++;
+            }
+            catch { empty++; }
+        }
+
+        _status.Text = $"exported {written} page(s) to {outDir}" +
+                       (empty > 0 ? $"; {empty} route(s) answered nothing" : "");
+        _status.Foreground = empty > 0 ? Brushes.Goldenrod : Brushes.Gray;
     }
 
     /// Hand the rendered page to the real browser. A temp file rather than a data: URL — a site's own
