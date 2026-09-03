@@ -54,17 +54,22 @@ public sealed class Resolve
     public static IrModule Run(IrModule module)
     {
         var r = new Resolve(module);
-        foreach (var f in module.Functions) r.Function(f);
+        foreach (var f in module.Functions) r.Function(f, null);
         foreach (var s in module.Shards)
             foreach (var m in s.Methods)
-                r.Function(m);
+                r.Function(m, s);
         return module;
     }
 
-    private void Function(IrFunction f)
+    /// `owner` is the shard a method belongs to, or null for a module-level `fn`. A shard's STATE is
+    /// referenced by bare name from its own methods — a `var` declared on the shard is a local as far as
+    /// the body is concerned — so it has to be in scope or every read of it goes untyped.
+    private void Function(IrFunction f, IrShard? owner)
     {
         _locals.Clear();
         _selfComponent = null;
+        if (owner is not null)
+            foreach (var st in owner.State) _locals[st.Name] = st.Type;
         foreach (var p in f.Params) _locals[p.Name] = p.Type;
         Block(f.Body);
     }
@@ -181,9 +186,18 @@ public sealed class Resolve
                 foreach (var (_, v) in si.Fields) Expr(v);
                 return IrTypeRef.Of(si.TypeName);
 
+            // A bare shape/event/mark reference — `attach $Shape to e` lowers the shape to one of these.
+            // It names a type, so that is its type.
+            case IrTypeNameExpr tn: return IrTypeRef.Of(tn.Name);
+
             case IrCall c:
+                // The CALLEE is an expression too, and skipping it left every `spawn`/`len`/`join`
+                // reference untyped even when the call itself resolved.
+                Expr(c.Callee);
                 foreach (var a in c.Args) Expr(a);
-                return c.Callee is IrLocalRef { Name: var fn } ? _funcs.GetValueOrDefault(fn) : null;
+                return c.Callee is IrLocalRef { Name: var fn }
+                    ? _funcs.GetValueOrDefault(fn) ?? Builtin(fn)
+                    : null;
 
             case IrRuntimeCall rc:
                 foreach (var a in rc.Args) Expr(a);
@@ -257,14 +271,29 @@ public sealed class Resolve
         return null;
     }
 
-    /// The builtins whose result type is fixed. Anything absent stays null rather than guessed —
-    /// `fromJson` genuinely has no static type, and saying so is the honest answer.
+    /// The desugared runtime calls. All but `random` are STATEMENTS — `emit @X { … }` and
+    /// `attach $C to e` produce a value nobody reads — so their type is `void`, and saying so is not a
+    /// technicality: these were two thirds of every untyped node in the tree, which made the coverage
+    /// number look like a typing problem when most of it was a vocabulary gap.
     private static IrTypeRef? Runtime(string name) => name switch
     {
+        "Emit" or "AddTag" or "RemoveTag" or "AddComponent" or "RemoveComponent" or "DestroyEntity"
+            => IrTypeRef.Of("void"),
+        "random" => IrTypeRef.Of("float"),
+        _ => null,
+    };
+
+    /// The built-in functions that return a value — `Interp.PrebuiltNames`, minus the ones whose result
+    /// genuinely has no static type. `fromJson` returns whatever the JSON held and `pick` returns an
+    /// element of a list that may be mixed; both stay null, which is the honest answer rather than a
+    /// guess a consumer would then trust.
+    private static IrTypeRef? Builtin(string name) => name switch
+    {
+        "spawn" => IrTypeRef.Of("Entity"),
         "len" => IrTypeRef.Of("int"),
         "random" => IrTypeRef.Of("float"),
-        "spawn" => IrTypeRef.Of("Entity"),
-        "toJson" or "join" => IrTypeRef.Of("string"),
+        "join" or "toJson" => IrTypeRef.Of("string"),
+        "here" => IrTypeRef.Of("Mark"),
         _ => null,
     };
 }

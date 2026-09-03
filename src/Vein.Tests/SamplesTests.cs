@@ -123,6 +123,7 @@ public class SamplesTests
     {
         var svc = new VeinCompilerService();
         int typed = 0, total = 0;
+        var untyped = new Dictionary<string, int>(StringComparer.Ordinal);
 
         foreach (var path in VeinFiles("samples"))
         {
@@ -134,17 +135,24 @@ public class SamplesTests
                 foreach (var e in AllExprs(m))
                 {
                     total++;
-                    if (e.ResolvedType is not null) typed++;
+                    if (e.ResolvedType is not null) { typed++; continue; }
+                    // Tallied by node kind, because a bare percentage says nothing about what to fix.
+                    string k = e.GetType().Name;
+                    untyped[k] = untyped.GetValueOrDefault(k) + 1;
                 }
         }
+
+        string worst = string.Join(", ", untyped.OrderByDescending(kv => kv.Value)
+                                                .Take(8).Select(kv => kv.Key + "=" + kv.Value));
 
         Assert.True(total > 1000, $"expected a meaningful sample of expressions, saw {total}");
 
         double pct = 100.0 * typed / total;
-        Assert.True(pct >= 80.0,   // 83.6% at the time of writing; the floor leaves room, the message shows the truth
+        Assert.True(pct >= 95.0,   // 98.5% today; the floor has headroom, the message names what is left
+        
         
             $"only {typed}/{total} ({pct:F1}%) of HIR expressions carry a type — Semantics/Resolve " +
-            "has regressed, and every consumer is back to guessing.");
+            "has regressed, and every consumer is back to guessing. Untyped: " + worst);
     }
 
     /// Every expression in a module, including the ones nested in statements.

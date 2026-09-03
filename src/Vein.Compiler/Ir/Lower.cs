@@ -187,6 +187,11 @@ public sealed class Lower
         foreach (var t in _importedShapes.Values)
             if (!types.Any(x => x.Name == t.Name && x.Kind == IrTypeKind.Component)) types.Add(t);
 
+        // …and imported EVENT payloads, so a `hear` binding's fields have types. Marked `imported`, so a
+        // consumer can tell "this event is declared elsewhere" from "this module owns it".
+        foreach (var t in _importedEvents.Values)
+            if (!types.Any(x => x.Name == t.Name && x.Kind == IrTypeKind.Message)) types.Add(t);
+
         // TYPES LAST, and unconditionally. `Semantics/Resolve` is its own class — IR-SPEC.md describes it
         // as its own stage — but it runs from HERE rather than from the ten call sites that lower a
         // bundle, because a consumer that received an unresolved module would look exactly like one that
@@ -782,8 +787,33 @@ public sealed class Lower
             false, null, new[] { attr });
     }
 
+    /// An event this bundle HEARS or EMITS but did not declare — `*Vein.Net.Http.@Fetched`.
+    ///
+    /// Registered so the payload's fields have types: `f.url` inside `hear @Fetched as f` was untyped
+    /// for the same reason a local was before scopes existed — nothing in the module said what `f` is.
+    /// Field accesses on imported payloads were the single largest group of untyped nodes left.
+    ///
+    /// Marked `imported` because a CONSUMER must be able to tell it apart from a local declaration. The
+    /// C# backend emits a payload class and a dispatch for every event it owns; doing that for a stdlib
+    /// transport would turn `emit @Fetch` into a queued no-op instead of the note that says the
+    /// transport lives on the interpreter — trading an honest gap for a silent one.
+    private void RegisterImportedEvent(IReadOnlyList<string> path, string name)
+    {
+        if (path.Count == 0 || _events.ContainsKey(name) || _importedEvents.ContainsKey(name)) return;
+        if (ResolveEvent(path, name) is not { } decl) return;
+
+        _importedEvents[name] = new IrType(
+            name, IrTypeKind.Message,
+            ExpandMembers(decl.Members).Select(m => new IrField(m.Name, Ty(m.Type), null, LowerDefault(m.Default))).ToList(),
+            Array.Empty<IrEnumCase>(), decl.Doc,
+            new[] { IrAttr.Of("message"), IrAttr.Of("imported") });
+    }
+
+    private readonly Dictionary<string, IrType> _importedEvents = new(StringComparer.Ordinal);
+
     private IrFunction LowerHear(HearBlock hb)
     {
+        RegisterImportedEvent(hb.EventPath, hb.Event);
         var attrs = new List<IrAttr> { IrAttr.Of("hear", hb.Event) };
         // An `audience #Mark` barrier names a mark too, and it is where a typo costs most: a misspelt
         // audience admits nobody, which reads exactly like a barrier doing its job.
@@ -858,6 +888,7 @@ public sealed class Lower
             }
             case EmitStmt em:
                 CheckEmitPayload(em);
+                RegisterImportedEvent(em.EventPath, em.Event);
                 return new IrExprStmt(new IrRuntimeCall("Emit",
                     new IrExpr[] { new IrStructInit(em.Event, em.Fields.Select(LowerFieldInit).ToList(), em.FillRest) }));
             case DestroyStmt d:
