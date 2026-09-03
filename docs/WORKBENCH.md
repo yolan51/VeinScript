@@ -20,10 +20,10 @@ Open a `.vein` file (`Ctrl+O`) or a folder (`Ctrl+K`), edit, Build (`Ctrl+B`), R
 
 ```
 ┌ [VS] File Edit Build Run View Help ────────────────────────────────────────┐
-│ [VS] ▶ ▶▶ ■ [ Control            ▾ ]  3 participants — run each            │
+│ [VS] ▶ ▶▶ ■ [ Control ▾ ] veinc run control_center.vein   3 participants   │
 ├──────────────┬─────────────────────────────┬───────────────────────────────┤
-│ Project      │ ●server.vein │ alice.vein ✕ │  Inspector — IR Tree          │
-│ Explorer     ├─────────────────────────────┤  (structured VeinIR)          │
+│ Project      │ ●server.vein │ alice.vein ✕ │  Outline │ IR Tree            │
+│ Explorer     ├─────────────────────────────┤  (declarations · VeinIR)      │
 │ (semantic or │  VeinScript editor          │                               │
 │  file tree)  │  (highlight · line# ·       │                               │
 │              │   red underlines ·          │                               │
@@ -56,8 +56,10 @@ in `Tooling/SourceEdits.cs` — all-or-nothing for the block, markers aligned at
 and an exact round trip — so they are tested without needing an editor to exist.
 
 **Navigation** — **F12** jumps from a use to its declaration, **Shift+F12** lists every site naming the
-same symbol, and **double-clicking an IR node** lands on the source line that produced it (`IrNode` has
-carried a `Span` since the tree was written, and nothing had ever read it).
+same symbol, **Ctrl+T** finds a declaration by typing a few letters of its name, the **Outline** pane
+lists everything the file declares grouped by kind, and **double-clicking an IR node** lands on the
+source line that produced it (`IrNode` has carried a `Span` since the tree was written, and nothing had
+ever read it).
 
 What makes this resolvable without a type checker is the **sigil**. `$Row` and `#Row` are different
 identities allowed to share a name (RULES 14e), and every use site says which one it means — so
@@ -100,6 +102,16 @@ open with a line like `//   veinc run samples/entities_chance.vein --ticks 4`, a
 `Tooling/RunConfig.cs` reads it back, so ▶ is correct for a sample needing `--ticks`, `--port` or a
 `VEIN_CONSOLE` — not just for the trivial ones. A file with no such line is usually a fragment loaded
 by an app, and the toolbar says so instead of offering a ▶ that cannot work.
+
+The toolbar shows that configuration as an **editable command line**, and the box is what ▶ actually
+runs — so changing `--ticks 4` to `--ticks 40` needs no edit to the header. It is parsed by the same
+`VeinShell` the terminal prompt uses, so what ▶ does and what you could type are the same thing by
+construction rather than by agreement. Typing into it stops the box being overwritten by the builds
+that now happen while you type; choosing another participant resets it.
+
+Each session shows its **exit code and duration** when it ends (`exited 2 · 1.4s`) and has a **↻** to
+run the same command again with the scrollback cleared — comparing a run against the one before it is
+the reason to re-run, and keeping the old output would make the two indistinguishable.
 
 **Terminal** — concurrent sessions, each with its own output pane, its own **stdin**, and ■ / EOF / ✕.
 `Tooling/VeinShell.cs` accepts what you would paste from a sample header in either dialect
@@ -170,9 +182,9 @@ The `veinc run` workload: `samples/console.vein`, `entities_*.vein`, anything wi
 |---|---|---|
 | A1 | ✅ **Run what the file declares** | ▶ on `entities_chance.vein` runs it with `--ticks 4` |
 | A2 | ✅ **A terminal with stdin** | Type a line into a running `console.vein` without leaving the IDE |
-| A3 | **Argument editing** | Change `--ticks 4` to `--ticks 40` in the toolbar without editing the header |
-| A4 | **Re-run (`Ctrl+F5`)** | Restart the last configuration in its existing tab, scrollback cleared |
-| A5 | **Exit code + duration in the tab** | See `exited 2 · 1.4s` without reading the last output line |
+| A3 | ✅ **Argument editing** | Change `--ticks 4` to `--ticks 40` in the toolbar without editing the header |
+| A4 | ✅ **Re-run** (↻ per session) | Restart the last command in its existing tab, scrollback cleared |
+| A5 | ✅ **Exit code + duration** | See `exited 2 · 1.4s` without reading back through the output |
 | A6 | **Output search + filter** | Find `error` in 4000 lines of tick output |
 | A7 | **Save output to a file** | Keep a run's transcript to diff against the next one |
 | A8 | **`veinc build` from the IDE** | Produce `console_roles.exe` and be told where it landed |
@@ -237,8 +249,8 @@ chat app of three files or a site of five shards means constant reopening.
 | D13 | ✅ **Duplicate / move line** | `Ctrl+D`, `Alt+↑`, `Alt+↓` |
 | D7 | ✅ **Go to definition** (`F12`) | Jump from a `$Worker` use to its `shape` |
 | D8 | ✅ **Find references** (`Shift+F12`) | Every place `@Message` is emitted or heard, listed and jumpable |
-| D9 | **Symbol search** (`Ctrl+T`) | Reach any shape/mark/event/shard by typing its name |
-| D10 | **Outline pane** | The current file's shards, shapes, events as a jumpable list |
+| D9 | ✅ **Symbol search** (`Ctrl+T`) | Reach any shape/mark/event/shard by typing its name |
+| D10 | ✅ **Outline pane** | The file's shapes, marks, events, shards as a jumpable list |
 | D11 | ✅ **IR → source click-through** | Double-click an `IrNode` and land on the line that produced it |
 | D12 | **Back / forward** | Return from an F12 jump |
 
@@ -287,14 +299,17 @@ line moves) · **E1** (compile as you type).
 That is a working editing loop, a working run story for all three workloads, and two views that answer
 questions the code alone does not. What is left is mostly *depth*.
 
-Also done: **D7 D8 D11** (go to definition, find references, IR → source).
+Also done: **A3 A4 A5** (argument editing, re-run, exit code + duration) · **D7 D8 D9 D10 D11**
+(go to definition, find references, symbol search, outline, IR → source).
+
+**Every item in tracks A and D is now done except bracket matching (D6b) and back/forward (D12).**
 
 Next, in order: **E3** (quick fixes for the mechanical diagnostics — VS0228 arity, VS0231 `base`,
-VS0217 shadowing; `DefinitionIndex` now supplies the positions they need), then **A3–A5** (argument
-editing, re-run, exit code and duration in the session tab), then **B5** (a combined interleaved
-transcript — what makes a relay bug visible as an *order* rather than by alt-tabbing), then **F1**
-(session restore), then **D9/D10** (symbol search and an outline, both nearly free now that every
-declaration's position is indexed).
+VS0217 shadowing; `DefinitionIndex` now supplies the positions they need), then **B5** (a combined
+interleaved transcript — what makes a relay bug visible as an *order* rather than by alt-tabbing),
+then **F1** (session restore), then **C4/C5** (serve with one click, live reload), then the E6–E8
+runtime inspection block, which is the largest remaining piece and the one most specific to this
+language.
 
 ---
 

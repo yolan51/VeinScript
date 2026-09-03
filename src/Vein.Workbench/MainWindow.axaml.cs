@@ -68,6 +68,8 @@ public partial class MainWindow : Window
     private EditorTabs _tabs = null!;
     private WebPreviewPanel _webPreview = null!;
     private ConsoleTopologyPanel _consoles = null!;
+    private OutlinePanel _outline = null!;
+    private TabControl _inspector = null!;
 
     /// Where every shape, mark, event, builder, shard and function is declared and used. Rebuilt each
     /// compile; go-to-definition and find-references both read it.
@@ -107,6 +109,7 @@ public partial class MainWindow : Window
 
     private ComboBox _runConfigs = null!;
     private TextBlock _runHint = null!;
+    private TextBox _runArgs = null!;
 
     /// The run configurations the open file declares in its own header, in header order.
     private IReadOnlyList<RunConfig> _configs = Array.Empty<RunConfig>();
@@ -130,8 +133,14 @@ public partial class MainWindow : Window
         _tabs = this.FindControl<EditorTabs>("FileTabs")!;
         _webPreview = this.FindControl<WebPreviewPanel>("WebPreview")!;
         _consoles = this.FindControl<ConsoleTopologyPanel>("ConsoleTopology")!;
+        _outline = this.FindControl<OutlinePanel>("Outline")!;
+        _outline.Navigate = GoTo;
+        _inspector = this.FindControl<TabControl>("Inspector")!;
         _runConfigs = this.FindControl<ComboBox>("RunConfigs")!;
         _runHint = this.FindControl<TextBlock>("RunHint")!;
+        _runArgs = this.FindControl<TextBox>("RunArgs")!;
+        _runArgs.TextChanged += (_, _) => { if (!_syncingRunArgs) _runArgsEdited = true; };
+        _runConfigs.SelectionChanged += (_, _) => { _runArgsEdited = false; SyncRunArgs(); };
 
         _terminal.RepoRoot = FindRepoRoot();
         _terminal.Resolve = ResolveVeinFile;
@@ -315,13 +324,14 @@ public partial class MainWindow : Window
         bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         switch (e.Key)
         {
-            case Key.B when shift: Build(); _bottomPanel.SelectedIndex = TabRawIr; e.Handled = true; break;
+            case Key.B when shift: OnBuildInspect(sender, e); e.Handled = true; break;
             case Key.B: Build(); e.Handled = true; break;
             case Key.S when shift: _ = SaveAsAsync(); e.Handled = true; break;
             case Key.S: _ = SaveAsync(); e.Handled = true; break;
             case Key.O: _ = OpenAsync(); e.Handled = true; break;
             case Key.W: OnCloseTab(sender, e); e.Handled = true; break;
             case Key.G: OnGoToLine(sender, e); e.Handled = true; break;
+            case Key.T: OnGoToSymbol(sender, e); e.Handled = true; break;
             case Key.D: EditorCommands.DuplicateLines(_editor); e.Handled = true; break;
             // Ctrl+/ — the key reports as OemQuestion on a US layout and Oem2 on several others.
             case Key.OemQuestion or Key.Oem2: EditorCommands.ToggleComment(_editor); e.Handled = true; break;
@@ -335,7 +345,7 @@ public partial class MainWindow : Window
     private void OnNewBundle(object? sender, RoutedEventArgs e) => _ = NewProjectAsync(app: false);
     private void OnNewApp(object? sender, RoutedEventArgs e) => _ = NewProjectAsync(app: true);
     private void OnBuild(object? sender, RoutedEventArgs e) => Build();
-    private void OnBuildInspect(object? sender, RoutedEventArgs e) { Build(); _bottomPanel.SelectedIndex = TabRawIr; }
+    private void OnBuildInspect(object? sender, RoutedEventArgs e) { Build(); _bottomPanel.SelectedIndex = TabRawIr; _inspector.SelectedIndex = 1; }
     private void OnOpen(object? sender, RoutedEventArgs e) => _ = OpenAsync();
     private void OnOpenFolder(object? sender, RoutedEventArgs e) => _ = OpenFolderAsync();
     private void OnSave(object? sender, RoutedEventArgs e) => _ = SaveAsync();
@@ -356,6 +366,17 @@ public partial class MainWindow : Window
     private void OnMoveLineUp(object? sender, RoutedEventArgs e) => EditorCommands.MoveLines(_editor, up: true);
     private void OnMoveLineDown(object? sender, RoutedEventArgs e) => EditorCommands.MoveLines(_editor, up: false);
     private void OnGoToLine(object? sender, RoutedEventArgs e) => _ = GoToLineAsync();
+    private void OnGoToSymbol(object? sender, RoutedEventArgs e) => _ = GoToSymbolAsync();
+
+    /// Ctrl+T — type a few letters, land on the declaration.
+    private async Task GoToSymbolAsync()
+    {
+        if (await SymbolSearchDialog.ShowAsync(this, _definitions) is { } pick)
+        {
+            GoTo(pick.Span.Line, pick.Span.Col);
+            SetStatus($"{pick.Kind} {pick.Name} — declared in {pick.Owner}, line {pick.Span.Line}");
+        }
+    }
 
     /// Jump to a line number. Clamped rather than refused — asking for line 900 of a 400-line file
     /// means "the end", and an error dialog would be a worse answer than the end of the file.
@@ -381,9 +402,19 @@ public partial class MainWindow : Window
     /// Reread the open file's header and repopulate the toolbar dropdown.
     private void RefreshRunConfigs()
     {
+        var previous = _runConfigs.SelectedItem as string;
         _configs = RunConfig.From(_editor.Text, _currentPath ?? "untitled.vein");
-        _runConfigs.ItemsSource = _configs.Select(c => c.Label).ToList();
-        if (_configs.Count > 0) _runConfigs.SelectedIndex = 0;
+
+        var labels = _configs.Select(c => c.Label).ToList();
+        _runConfigs.ItemsSource = labels;
+
+        // Keep the chosen participant across the auto-builds that now happen while you type — resetting
+        // to Control every 450 ms while editing would make the dropdown unusable.
+        _runConfigs.SelectedIndex = previous is not null && labels.Contains(previous)
+            ? labels.IndexOf(previous)
+            : labels.Count > 0 ? 0 : -1;
+
+        SyncRunArgs();
 
         // A file with no header line is usually a FRAGMENT — loaded into an app, never run alone. Saying
         // so is more use than a ▶ that cannot work.
@@ -391,9 +422,33 @@ public partial class MainWindow : Window
         {
             0 => "no run line in this file's header",
             1 => "",
-            var n => $"{n} participants — run each"
+            var n => $"{n} participants"
         };
     }
+
+    /// Show the selected configuration as an editable command line.
+    ///
+    /// Only when it is NOT hand-edited: the box is the thing ▶ actually runs, so overwriting a typed
+    /// `--ticks 40` on the next auto-build would undo the edit between pressing it and it taking effect.
+    private void SyncRunArgs()
+    {
+        if (_runArgsEdited) return;
+
+        // Setting Text raises TextChanged, which would mark the box hand-edited and freeze it after the
+        // first build. Suppressed rather than compared, because a legitimate edit can produce the same
+        // text the sync would have written.
+        _syncingRunArgs = true;
+        try
+        {
+            int i = _runConfigs.SelectedIndex;
+            _runArgs.Text = i >= 0 && i < _configs.Count ? _configs[i].Display : "";
+        }
+        finally { _syncingRunArgs = false; }
+    }
+
+    /// True once the command line has been typed into, until the selection changes.
+    private bool _runArgsEdited;
+    private bool _syncingRunArgs;
 
     /// Run the selected configuration in its own terminal session.
     private void OnRun(object? sender, RoutedEventArgs e)
@@ -419,11 +474,20 @@ public partial class MainWindow : Window
         if (_tabs.Active is { Path: not null } active) { File.WriteAllText(active.Path, active.Document.Text); _tabs.MarkSaved(active); }
 
         var cfg = _configs[Math.Max(0, Math.Min(_runConfigs.SelectedIndex, _configs.Count - 1))];
-        var spec = new LaunchSpec(LaunchKind.Cli, cfg.Command, cfg.Args, cfg.Env);
+
+        // The toolbar's command line is what runs, so an edited `--ticks 40` takes effect without
+        // touching the header. It goes through the same VeinShell the terminal prompt uses — one parser,
+        // so what ▶ does and what you could type are the same thing by construction.
+        var spec = VeinShell.Parse(_runArgs.Text ?? "", ResolveVeinFile);
+        if (spec.Kind != LaunchKind.Cli)
+        {
+            SetStatus(spec.Error ?? "That command line is not a veinc command.");
+            return;
+        }
 
         _bottomPanel.SelectedIndex = TabTerminal;
-        _terminal.Run(spec, cfg.Label);
-        SetStatus($"Running {cfg.Display}");
+        _terminal.Run(spec, spec.ConsoleName ?? cfg.Label);
+        SetStatus($"Running {_runArgs.Text}");
     }
 
     /// Start every configuration the file declares, in header order, each in its own session.
@@ -1050,6 +1114,7 @@ public partial class MainWindow : Window
             _webPreview.Update(result.Modules, result.Ast is null ? RouteMap.Empty : RouteMap.Analyze(result.Ast));
         _consoles.Update(result.Ast is null ? null : ConsoleGraph.Analyze(result.Ast));
         _definitions = result.Ast is null ? DefinitionIndex.Empty : DefinitionIndex.Analyze(result.Ast);
+        _outline.Update(_definitions);
         if (result.Ast is not null) _symbols = SymbolIndex.Collect(result.Ast);
 
         Title = $"VeinScript Workbench — {name} — {(result.Success ? "ok" : $"{_diags.Count} error(s)")} ({result.ElapsedMs} ms)";

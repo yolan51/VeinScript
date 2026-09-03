@@ -43,6 +43,7 @@
         <Separator />
         <MenuItem Header="_Find / Replace…" Click="OnFind" InputGesture="Ctrl+F" />
         <MenuItem Header="_Go to Line…" Click="OnGoToLine" InputGesture="Ctrl+G" />
+        <MenuItem Header="Go to _Symbol…" Click="OnGoToSymbol" InputGesture="Ctrl+T" />
         <Separator />
         <MenuItem Header="Toggle _Comment" Click="OnToggleComment" InputGesture="Ctrl+OemQuestion" />
         <MenuItem Header="_Duplicate Line" Click="OnDuplicateLine" InputGesture="Ctrl+D" />
@@ -83,8 +84,11 @@
         <Button Name="RunButton" Click="OnRun" Padding="10,2" ToolTip.Tip="Run the selected configuration (F5)">▶</Button>
         <Button Name="RunAllButton" Click="OnRunAll" Padding="10,2" ToolTip.Tip="Start every participant this file declares, in header order (Ctrl+F5)">&#x25B6;&#x25B6;</Button>
         <Button Name="StopButton" Click="OnStopAll" Padding="10,2" ToolTip.Tip="Stop every terminal session">■</Button>
-        <ComboBox Name="RunConfigs" MinWidth="320" VerticalAlignment="Center"
+        <ComboBox Name="RunConfigs" MinWidth="150" VerticalAlignment="Center"
                   ToolTip.Tip="Run configurations declared in this file's header" />
+        <TextBox Name="RunArgs" MinWidth="420" VerticalAlignment="Center" FontSize="12"
+                 FontFamily="Cascadia Code,Consolas,monospace"
+                 ToolTip.Tip="The command ▶ will run. Edit it to change --ticks or --port without touching the header." />
         <TextBlock Name="RunHint" VerticalAlignment="Center" Foreground="Gray" FontSize="11" />
       </StackPanel>
     </Border>
@@ -114,8 +118,14 @@
         <DockPanel Grid.Column="4">
           <Border DockPanel.Dock="Top" Name="BundleInspector" IsVisible="False"
                   Background="#1E1E1E" BorderBrush="#333" BorderThickness="0,0,0,1" Padding="12" />
-          <TextBlock DockPanel.Dock="Top" Text="Inspector — IR Tree" Margin="8,6" FontWeight="Bold" />
-          <TreeView Name="IrTree" DoubleTapped="OnIrNodeActivated" />
+          <TabControl Name="Inspector">
+            <TabItem Header="Outline">
+              <local:OutlinePanel Name="Outline" />
+            </TabItem>
+            <TabItem Header="IR Tree">
+              <TreeView Name="IrTree" DoubleTapped="OnIrNodeActivated" />
+            </TabItem>
+          </TabControl>
         </DockPanel>
       </Grid>
 

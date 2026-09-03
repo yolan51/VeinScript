@@ -75,6 +75,7 @@ internal sealed class TerminalPanel : UserControl
 
         var status = new TextBlock { Text = "idle", Margin = new Avalonia.Thickness(8, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = Brushes.Gray, FontSize = 11 };
 
+        var again = Tip(new Button { Content = "↻", Padding = new Avalonia.Thickness(8, 2) }, "Run the last command here again");
         var stop = Tip(new Button { Content = "■", Padding = new Avalonia.Thickness(8, 2) }, "Stop what is running here");
         var eof = Tip(new Button { Content = "EOF", Padding = new Avalonia.Thickness(8, 2) }, "Close stdin — the Ctrl+Z / Ctrl+D a console sample asks for");
         var close = Tip(new Button { Content = "✕", Padding = new Avalonia.Thickness(8, 2) }, "Close this session");
@@ -85,7 +86,7 @@ internal sealed class TerminalPanel : UserControl
             Orientation = Orientation.Horizontal,
             Spacing = 4,
             HorizontalAlignment = HorizontalAlignment.Right,
-            Children = { status, eof, stop, plus, close }
+            Children = { status, again, eof, stop, plus, close }
         };
 
         var item = new TabItem { Header = title ?? "shell" };
@@ -108,12 +109,26 @@ internal sealed class TerminalPanel : UserControl
         };
         session.Exited += code =>
         {
-            status.Text = code == 0 ? "exited" : $"exited {code}";
+            // Exit code AND duration. "It finished" is not the question; "did that work, and was it
+            // slow" is, and the answer was previously somewhere in the scrollback or nowhere at all.
+            string took = session.LastDuration is { } d ? $" · {d.TotalSeconds:0.0}s" : "";
+            status.Text = (code == 0 ? "exited 0" : $"exited {code}") + took;
             status.Foreground = code == 0 ? Brushes.Gray : Brushes.IndianRed;
             item.Header = Header(tab, running: false);
         };
 
         input.KeyDown += (_, e) => OnPromptKey(tab, e);
+
+        // Re-run in THIS tab, scrollback cleared. Comparing a run against the one before it is the
+        // reason to re-run at all, and keeping the previous output would make the two indistinguishable.
+        again.Click += (_, _) =>
+        {
+            if (session.LastSpec is not { } spec) { session.Write("(nothing has been run here yet)"); return; }
+            if (session.IsRunning) { session.Write("(still running — Stop it first)"); return; }
+            output.Text = "";
+            Launch(tab, spec);
+        };
+
         stop.Click += (_, _) => { session.Stop(); status.Text = "stopped"; };
         eof.Click += (_, _) => { session.EndInput(); status.Text = "stdin closed"; };
         plus.Click += (_, _) => NewSession();

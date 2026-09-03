@@ -43,6 +43,16 @@ public sealed class TerminalSession : IDisposable
     /// What the last started command was, for the ↑ history and the tab tooltip.
     public string? LastCommand { get; private set; }
 
+    /// The spec that was last started here, so it can be run again without retyping it.
+    public LaunchSpec? LastSpec { get; private set; }
+
+    /// How long the last run took. Paired with the exit code it answers "did that just work, and was
+    /// it slow" without reading back through the output for a line that may not exist.
+    public TimeSpan? LastDuration => _started is { } s ? (_ended ?? DateTime.UtcNow) - s : null;
+
+    private DateTime? _started;
+    private DateTime? _ended;
+
     /// Start `spec`. Returns false (with a line already written to Output) if it could not launch.
     public bool Start(LaunchSpec spec, string repoRoot, string cliProject)
     {
@@ -104,6 +114,10 @@ public sealed class TerminalSession : IDisposable
             ? "veinc " + spec.Command + (spec.Args.Count > 0 ? " " + string.Join(" ", spec.Args) : "")
             : spec.Command;
 
+        LastSpec = spec;
+        _started = DateTime.UtcNow;
+        _ended = null;
+
         try
         {
             _proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
@@ -111,6 +125,7 @@ public sealed class TerminalSession : IDisposable
             _proc.ErrorDataReceived += (_, e) => { if (e.Data is not null) Write(e.Data); };
             _proc.Exited += (_, _) =>
             {
+                _ended = DateTime.UtcNow;
                 int code = -1;
                 try { code = _proc!.ExitCode; } catch { /* raced with disposal */ }
                 Dispatcher.UIThread.Post(() => Exited?.Invoke(code));
@@ -124,6 +139,7 @@ public sealed class TerminalSession : IDisposable
         {
             Write($"could not start: {ex.Message}");
             _proc = null;
+            _started = null;   // nothing ran, so there is no duration — not one that grows forever
             return false;
         }
     }
