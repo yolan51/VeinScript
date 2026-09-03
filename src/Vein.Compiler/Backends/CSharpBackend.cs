@@ -317,10 +317,13 @@ public sealed class CSharpBackend : IVeinBackend
         foreach (var f in shard.State) sb.AppendLine($"    public {Cs(f.Type)} {Ident(f.Name)};");
         if (shard.State.Count > 0) sb.AppendLine();
 
-        // `hear` blocks, collected first so Subscribe can wire them.
+        // `hear` blocks, collected first so Subscribe can wire them — and only for events this module
+        // DECLARES. A `hear *Vein.Console.Io.@Input` has no payload class here, and emitting the cast
+        // anyway produced `(Events.Input)p` against a type that does not exist (CS0426). Guarding the
+        // emit side and not this one is how that slipped in.
         var hears = shard.Methods
             .Select(m => (Method: m, Event: m.Attrs.FirstOrDefault(a => a.Name == "hear")?.Args.FirstOrDefault()?.ToString()))
-            .Where(x => x.Event is not null)
+            .Where(x => x.Event is not null && _events.Contains(x.Event))
             .ToList();
 
         foreach (var m in shard.Methods)
@@ -344,6 +347,13 @@ public sealed class CSharpBackend : IVeinBackend
             // A `hear` handler: an ordinary method taking the payload, called from Subscribe below.
             if (m.Attrs.FirstOrDefault(a => a.Name == "hear")?.Args.FirstOrDefault()?.ToString() is { } ev)
             {
+                if (!_events.Contains(ev))
+                {
+                    _notes.Add($"{shard.Name}: hear @{ev} not emitted — the event is declared in another " +
+                               "bundle, so there is no payload type here and its transport lives on the " +
+                               "interpreter.");
+                    continue;
+                }
                 var p = m.Params.FirstOrDefault();
                 sb.AppendLine($"    private void {Ident(m.Name)}({EventType(ev)} {Ident(p?.Name ?? "e")})");
                 EmitBlock(sb, m.Body, 1);
