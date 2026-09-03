@@ -1,0 +1,148 @@
+// builder_defaults.vein — several shapes in one builder, and defaults so a call can leave most of it out.
+//
+//   veinc run samples/builder_defaults.vein --ticks 1
+//
+// Yes, it is possible, and the shape is where the default belongs — not the builder. A `$Shape` include
+// is a compile-time field expansion (docs/RULES.md 8), so the shape's defaults come with its fields, and
+// every builder that includes it inherits them. Declare `= ""` once and every call site gets shorter.
+//
+// THE ONE RULE THAT DECIDES YOUR LAYOUT: arguments bind POSITIONALLY, in declaration order, straight
+// across include boundaries (RULES.md 9). There are no named arguments. So an argument cannot skip past
+// a default to reach the parameter after it, and:
+//
+//     ONLY A TRAILING RUN OF DEFAULTS IS OPTIONAL.
+//
+// A default in the MIDDLE is not optional at all — it is a required slot that happens to have a fallback
+// nobody can reach. `builder T { $A $B }` where `$A { x, y = 99 }` and `$B { z }` gives (x, y, z), and
+// `bring T(1, 2)` puts 2 into `y` and leaves `z` empty. VS0228 says so, and it was written to count
+// defaults rather than find the last required slot, so it missed exactly this case until this file
+// caught it. Order your includes so everything optional ends up last.
+//
+// TWO WAYS TO SAY "FEWER ON PURPOSE", and they compose rather than compete:
+//
+//     a default        `body: string = "(none)"`      the DECLARATION supplies a value, once, for
+//                                                     every call site that stops short of it
+//     `?` (FillRest)   `bring Panel("hi", ?)`         the CALL says "fill the rest" — using each
+//                                                     field's default where it has one, and a typed
+//                                                     zero (0 / "" / false) where it does not
+//
+// So `?` is not "zeros instead of defaults" — it respects them. What `?` adds is permission: a field
+// with NO default is normally required, and `?` is how a call site says it is knowingly leaving it
+// empty. Without it that is VS0228; with it, nothing is reported, because you said so.
+//
+// The `?` goes INSIDE the argument list — `bring Panel("hi", ?)`, not `bring Panel("hi")?`.
+
+bundle BuilderDefaults by you {
+
+    // ---- three shapes, each with its own defaults ---------------------------------------------------
+    //
+    // Kept SEPARATE rather than merged into one big shape, because a shape is the thing you query
+    // (RULES.md 15b). `target $Style` finds everything styled, whatever else it is — which one merged
+    // $Card could never express.
+
+    shape $Content {
+        title: string
+        body: string = "(no description yet)"
+    }
+
+    shape $Style {
+        class: string = "panel"
+        accent: string = "#4444aa"
+        padded: bool = true
+    }
+
+    shape $Layout {
+        column: int = 0
+        order: int = 0
+    }
+
+    mark #Panel
+
+    // The include ORDER is the parameter order, and it is chosen so the required field comes first and
+    // everything optional trails it:
+    //
+    //     title, body, class, accent, padded, column, order
+    //     ^^^^^  ^-------------------------------------------^
+    //     required          all defaulted, so all skippable
+    //
+    // Swap `$Content` and `$Layout` here and `bring Panel("Welcome")` stops compiling cleanly: `title`
+    // would sit at position 3, behind two defaults nothing can skip.
+    builder Panel { $Content $Style $Layout   mark #Panel }
+
+    // ---- calling it, four ways ----------------------------------------------------------------------
+
+    shard Build {
+        run once {
+            // 1. ONE argument. The other six defaults apply — this is the payoff.
+            bring Panel("Welcome")
+
+            // 2. Two: override the body, keep the styling and layout.
+            bring Panel("Install", "Run veinc new, then veinc run.")
+
+            // 3. Down to `accent`. Everything up to it must be given, because binding is positional —
+            //    `body` and `class` are repeated here not because they changed, but because `accent`
+            //    cannot be reached without passing them. That is the cost of no named arguments, and
+            //    it is why the trailing-defaults layout above matters.
+            bring Panel("Danger", "This deletes the table.", "panel warn", "#aa4444")
+
+            // 4. All seven. Nothing is defaulted, and it reads as the full form the others abbreviate.
+            bring Panel("Footer", "MIT licensed.", "panel muted", "#888888", false, 1, 9)
+        }
+    }
+
+    // ---- what got built ------------------------------------------------------------------------------
+
+    shard Show {
+        settled {
+            emit *Vein.Console.Io.@Print { text: "-- panels, in the column/order the layout asked for --" }
+
+            // `by Style.class` would sort by appearance; `by Layout.order` is the one that means
+            // anything here. Three shapes on one identity, and the query picks which of them to sort by.
+            target $Content #Panel by Layout.order as p {
+                emit *Vein.Console.Io.@Print { text: "   " + p.Content.title }
+                emit *Vein.Console.Io.@Print { text: "      " + p.Content.body }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "-- the styling each one ended up with --" }
+            target $Style #Panel by Layout.order as p {
+                emit *Vein.Console.Io.@Print {
+                    text: "   class=" + p.Style.class + "  accent=" + p.Style.accent +
+                          "  padded=" + p.Style.padded + "  col=" + p.Layout.column
+                }
+            }
+        }
+    }
+
+    // ---- and the `?` form ----------------------------------------------------------------------------
+    //
+    // A DIFFERENT shape, so it does not mix into the query above — and deliberately one where the second
+    // field has NO default, because that is the case `?` exists for.
+    //
+    // `note` is required: `bring Draft("Untitled")` alone would be VS0228, "note will be empty". Adding
+    // `?` does not change what happens — `note` is empty either way — it changes who is responsible.
+    // The warning says "you may not have meant this"; `?` answers "I did".
+    //
+    // And `?` still honours defaults where they exist. `slug` below has one, and the output shows it
+    // filled in rather than blanked, which is why `?` is safe to reach for on a wide builder.
+
+    shape $Draft { title: string, note: string, slug: string = "untitled" }
+    mark #Draft
+
+    builder Draft { $Draft   mark #Draft }
+
+    shard Sketch {
+        run once { bring Draft("Untitled", ?) }
+    }
+
+    shard ShowDraft {
+        settled {
+            emit *Vein.Console.Io.@Print { text: "-- a `?` draft: zero where there is no default, default where there is --" }
+            target $Draft #Draft as d {
+                emit *Vein.Console.Io.@Print {
+                    text: "   title=[" + d.Draft.title + "] note=[" + d.Draft.note +
+                          "] slug=[" + d.Draft.slug + "]"
+                }
+            }
+        }
+    }
+}

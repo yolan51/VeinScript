@@ -178,9 +178,47 @@ public class DiagnosticsTests
     [Fact]
     public void Filling_the_rest_on_purpose_is_not_reported()
     {
-        // `?` is the author saying "the remaining parameters get typed zeros, and I mean it". A check
-        // that fired here would punish the one spelling that states the intent.
-        var d = Diagnose(RowDecl + "  shard S { run once { bring Row(\"only-title\")? } }");
+        // `?` is the author saying "I am knowingly leaving the rest empty". A check that fired here
+        // would punish the one spelling that states the intent.
+        //
+        // The `?` goes INSIDE the argument list. Written `bring Row("x")?` it is a parse error, and
+        // this test asserted only the ABSENCE of VS0228 — so it passed on a program that never
+        // compiled. Hence the second assertion: a test for "no warning" has to prove there was
+        // something to warn about.
+        var d = Diagnose(RowDecl + "  shard S { run once { bring Row(\"only-title\", ?) } }");
+
+        Assert.DoesNotContain(d, x => x.Severity == Vein.Compiler.Diagnostics.Severity.Error);
+        Assert.DoesNotContain(d, x => x.Code == "VS0228");
+    }
+
+    [Fact]
+    public void A_default_in_the_MIDDLE_is_still_a_required_slot()
+    {
+        // Arguments bind positionally and there are no named arguments, so nothing can skip past a
+        // default to reach what follows it. `{ x, y = 99, z }` is three required slots: `bring T(1, 2)`
+        // puts 2 into `y` and leaves `z` empty.
+        //
+        // The first version of this check counted defaulted params instead of finding the last required
+        // one, so it made exactly this case pass — samples/builder_defaults.vein caught it.
+        var d = Diagnose(
+            "  shape $A { x: int, y: int = 99 }\n  shape $B { z: int }\n  mark #T\n" +
+            "  builder T { $A $B   mark #T }\n" +
+            "  shard S { run once { bring T(1, 2) } }");
+
+        var hit = Assert.Single(d, x => x.Code == "VS0228");
+        Assert.Contains("needs 3", hit.Message);
+        Assert.Contains("z will be empty", hit.Message);
+    }
+
+    [Fact]
+    public void A_trailing_run_of_defaults_is_what_actually_makes_a_call_shorter()
+    {
+        // The layout that works, and the one the sample is built around: everything optional last.
+        var d = Diagnose(
+            "  shape $C { title: string, body: string = \"-\" }\n" +
+            "  shape $S { cls: string = \"panel\", accent: string = \"#00f\" }\n  mark #P\n" +
+            "  builder P { $C $S   mark #P }\n" +
+            "  shard S { run once { bring P(\"just a title\") } }");
 
         Assert.DoesNotContain(d, x => x.Code == "VS0228");
     }
@@ -360,5 +398,32 @@ public class DiagnosticsTests
 
         // Three kept out of four — the rejected one built nothing.
         Assert.Equal(3, output.Split("kept: rank").Length - 1);
+    }
+
+    [Fact]
+    public void The_defaults_sample_fills_in_what_each_call_left_out()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "stdlib"))) dir = dir.Parent;
+        string path = Path.Combine(dir!.FullName, "samples", "builder_defaults.vein");
+
+        var r = new VeinCompilerService().Compile(new CompileRequest(
+            Path.GetFileName(path), File.ReadAllText(path), SourcePath: path));
+        Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
+
+        var sw = new StringWriter();
+        new Interp { Ticks = 1 }.Run(r.Modules[0], new StringReader(""), sw);
+        string output = sw.ToString();
+
+        // One argument, six defaults.
+        Assert.Contains("(no description yet)", output);
+        Assert.Contains("class=panel  accent=#4444aa  padded=true", output);
+
+        // The full form overrides every one of them.
+        Assert.Contains("class=panel muted  accent=#888888  padded=false  col=1", output);
+
+        // `?` honours a default where there is one and zeroes only what has none — this is the line
+        // that corrected the sample: it was written claiming `?` ignores defaults, and it does not.
+        Assert.Contains("title=[Untitled] note=[] slug=[untitled]", output);
     }
 }

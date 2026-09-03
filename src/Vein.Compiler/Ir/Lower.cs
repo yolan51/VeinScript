@@ -556,10 +556,16 @@ public sealed class Lower
 
         if (br.FillRest) return;
 
-        int required = prms.Count(p => p.Default is null);
+        // Only a TRAILING run of defaulted parameters is optional, because binding is POSITIONAL and
+        // there are no named arguments: an argument cannot skip past a default to reach what follows it.
+        // So `{ x, y = 99, z }` is three required slots, not two — `bring T(1, 2)` puts 2 into `y` and
+        // leaves `z` empty. Counting defaults instead of finding the last required one made exactly that
+        // case pass silently, which is the bug this check exists to catch.
+        int required = 0;
+        for (int i = 0; i < prms.Count; i++) if (prms[i].Default is null) required = i + 1;
         if (br.Args.Count >= required) return;
 
-        var missing = prms.Where(p => p.Default is null).Skip(br.Args.Count).Select(p => p.Name);
+        var missing = prms.Take(required).Skip(br.Args.Count).Select(p => p.Name);
         _diag.Warning("VS0228",
             $"`bring {builder}` needs {required} argument(s) and got {br.Args.Count} — " +
             $"{string.Join(", ", missing)} will be empty. Add the value, or write `?` to fill the rest " +
