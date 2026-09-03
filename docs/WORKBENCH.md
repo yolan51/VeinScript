@@ -49,6 +49,12 @@ the window swaps `Editor.Document` on switch, which is what makes **undo per-fil
 lives on the document, so `Ctrl+Z` in one tab cannot eat an edit made in another. The caret position is
 remembered per tab. Opening a file already open focuses its tab rather than making a second view of it.
 
+**Editor commands** — find & replace (`Ctrl+F`, AvaloniaEdit's own `SearchPanel`), go to line
+(`Ctrl+G`), comment toggle (`Ctrl+/`), duplicate line (`Ctrl+D`), move line (`Alt+↑`/`Alt+↓`), and
+auto-indent that adds a level after `{` and pulls a `}` back out. The comment rules are pure functions
+in `Tooling/SourceEdits.cs` — all-or-nothing for the block, markers aligned at its shallowest indent,
+and an exact round trip — so they are tested without needing an editor to exist.
+
 **Editing** — AvaloniaEdit with VeinScript highlighting (`Assets/VeinScript.xshd`, keyword list
 mirroring `Lexing/Lexer.cs`), line numbers, and red underlines on every diagnostic span
 (`DiagnosticRenderer.cs`). Sigil completion: `$` shapes, `#` marks, `@` events, `.` members,
@@ -183,10 +189,12 @@ chat app of three files or a site of five shards means constant reopening.
 |---|---|---|
 | D1 | ✅ **Open-file tabs** | Have `server.vein`, `alice.vein` and `bob.vein` open at once, with per-file undo |
 | D2 | ✅ **Dirty marker + save prompt** | Close with unsaved edits and be asked, not silently lose them |
-| D3 | **Find & replace** (`Ctrl+F` / `Ctrl+H`) | Rename a local in one file without leaving the editor |
-| D4 | **Go to line** (`Ctrl+G`) | Jump to `:142` from a stack trace |
-| D5 | **Comment toggle** (`Ctrl+/`) | Comment a block of shard body |
-| D6 | **Auto-indent + bracket match** | A `{` on Enter indents; its partner highlights |
+| D3 | ✅ **Find & replace** (`Ctrl+F`) | Rename a local in one file without leaving the editor |
+| D4 | ✅ **Go to line** (`Ctrl+G`) | Jump to `:142` from a diagnostic |
+| D5 | ✅ **Comment toggle** (`Ctrl+/`) | Comment a shard body and uncomment it back to exactly what it was |
+| D6 | ✅ **Auto-indent** | Press Enter after `{` and land one level in; type `}` and it pulls itself back out |
+| D6b | **Bracket match** | See a `{`'s partner highlighted |
+| D13 | ✅ **Duplicate / move line** | `Ctrl+D`, `Alt+↑`, `Alt+↓` |
 | D7 | **Go to definition** (`F12`) | Jump from `$Worker` to its `shape` — across a fragment file |
 | D8 | **Find references** | Every place `@Message` is emitted or heard |
 | D9 | **Symbol search** (`Ctrl+T`) | Reach any shape/mark/event/shard by typing its name |
@@ -233,12 +241,12 @@ is next", it is "what does this identity look like now, and what changed it".
 
 Done so far: **A1 A2** (run what the file declares, terminal with stdin) · **B1 B2** (concurrent
 sessions, per-participant environment) · **C1 C2 C3 C6** (preview, routes, markup, conflicts) ·
-**D1 D2** (tabs, dirty marker).
+**D1–D6 D13** (tabs, dirty marker, find, go-to-line, comment toggle, auto-indent, line moves).
 
-Next, in order: **D3–D6** (find, go-to-line, comment toggle, auto-indent — small, constant use), then
-**E1** (compile as you type), then **B3 + B4** (Run All Participants, and the console topology view
-`ConsoleGraph` can already draw), then **D7/D11** (go-to-definition, and source↔IR — `IrNode.Span`
-exists and nothing reads it), then **A3–A5**.
+Next, in order: **E1** (compile as you type — the last piece of a normal editing loop), then
+**B3 + B4** (Run All Participants, and the console topology view `ConsoleGraph` can already draw),
+then **D7 / D11** (go-to-definition, and source↔IR — `IrNode.Span` exists and nothing reads it),
+then **A3–A5** (argument editing, re-run, exit code in the tab).
 
 ---
 

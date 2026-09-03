@@ -66,6 +66,7 @@ public partial class MainWindow : Window
     private Terminal.TerminalPanel _terminal = null!;
     private EditorTabs _tabs = null!;
     private WebPreviewPanel _webPreview = null!;
+    private AvaloniaEdit.Search.SearchPanel _search = null!;
 
     // Bottom-panel tabs, by name. They were bare indices until inserting Preview silently moved
     // Terminal from 5 to 6 — a magic number that points at the wrong tab is exactly the bug that
@@ -114,6 +115,11 @@ public partial class MainWindow : Window
         Closing += OnClosing;
 
         LoadHighlighting();
+
+        // AvaloniaEdit ships find & replace (Ctrl+F / Ctrl+H); installing it is one call, and writing
+        // a second search over the same document would be work spent to end up behind.
+        _search = AvaloniaEdit.Search.SearchPanel.Install(_editor);
+        _editor.TextArea.IndentationStrategy = new VeinIndentationStrategy();
         _editor.TextArea.TextView.BackgroundRenderers.Add(_marker);
         _editor.TextArea.TextEntered += OnTextEntered;
         _editor.TextArea.TextView.PointerMoved += OnHover;
@@ -236,6 +242,15 @@ public partial class MainWindow : Window
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.F5) { OnRun(sender, e); e.Handled = true; return; }
+
+        // Alt+Up/Down move lines. Checked before the Control block, which would otherwise swallow them.
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Alt) && e.Key is Key.Up or Key.Down)
+        {
+            EditorCommands.MoveLines(_editor, up: e.Key == Key.Up);
+            e.Handled = true;
+            return;
+        }
+
         if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
         bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         switch (e.Key)
@@ -246,6 +261,10 @@ public partial class MainWindow : Window
             case Key.S: _ = SaveAsync(); e.Handled = true; break;
             case Key.O: _ = OpenAsync(); e.Handled = true; break;
             case Key.W: OnCloseTab(sender, e); e.Handled = true; break;
+            case Key.G: OnGoToLine(sender, e); e.Handled = true; break;
+            case Key.D: EditorCommands.DuplicateLines(_editor); e.Handled = true; break;
+            // Ctrl+/ — the key reports as OemQuestion on a US layout and Oem2 on several others.
+            case Key.OemQuestion or Key.Oem2: EditorCommands.ToggleComment(_editor); e.Handled = true; break;
             case Key.K: _ = OpenFolderAsync(); e.Handled = true; break;
         }
     }
@@ -271,6 +290,27 @@ public partial class MainWindow : Window
     private void OnCopy(object? sender, RoutedEventArgs e) => _editor.Copy();
     private void OnPaste(object? sender, RoutedEventArgs e) => _editor.Paste();
     private void OnSelectAll(object? sender, RoutedEventArgs e) => _editor.SelectAll();
+    private void OnFind(object? sender, RoutedEventArgs e) => _search.Open();
+    private void OnToggleComment(object? sender, RoutedEventArgs e) => EditorCommands.ToggleComment(_editor);
+    private void OnDuplicateLine(object? sender, RoutedEventArgs e) => EditorCommands.DuplicateLines(_editor);
+    private void OnMoveLineUp(object? sender, RoutedEventArgs e) => EditorCommands.MoveLines(_editor, up: true);
+    private void OnMoveLineDown(object? sender, RoutedEventArgs e) => EditorCommands.MoveLines(_editor, up: false);
+    private void OnGoToLine(object? sender, RoutedEventArgs e) => _ = GoToLineAsync();
+
+    /// Jump to a line number. Clamped rather than refused — asking for line 900 of a 400-line file
+    /// means "the end", and an error dialog would be a worse answer than the end of the file.
+    private async Task GoToLineAsync()
+    {
+        string? entered = await PromptDialog.ShowAsync(this, "Go to line",
+            $"Line number (1–{_editor.Document.LineCount}):");
+        if (!int.TryParse(entered, out int n)) return;
+
+        n = Math.Clamp(n, 1, _editor.Document.LineCount);
+        var line = _editor.Document.GetLineByNumber(n);
+        _editor.CaretOffset = line.Offset;
+        _editor.ScrollToLine(n);
+        _editor.TextArea.Focus();
+    }
 
     // ---- running ---------------------------------------------------------
     //

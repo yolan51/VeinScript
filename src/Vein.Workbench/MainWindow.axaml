@@ -40,6 +40,14 @@
         <MenuItem Header="_Paste" Click="OnPaste" InputGesture="Ctrl+V" />
         <Separator />
         <MenuItem Header="Select _All" Click="OnSelectAll" InputGesture="Ctrl+A" />
+        <Separator />
+        <MenuItem Header="_Find / Replace…" Click="OnFind" InputGesture="Ctrl+F" />
+        <MenuItem Header="_Go to Line…" Click="OnGoToLine" InputGesture="Ctrl+G" />
+        <Separator />
+        <MenuItem Header="Toggle _Comment" Click="OnToggleComment" InputGesture="Ctrl+OemQuestion" />
+        <MenuItem Header="_Duplicate Line" Click="OnDuplicateLine" InputGesture="Ctrl+D" />
+        <MenuItem Header="Move Line _Up" Click="OnMoveLineUp" InputGesture="Alt+Up" />
+        <MenuItem Header="Move Line Do_wn" Click="OnMoveLineDown" InputGesture="Alt+Down" />
       </MenuItem>
       <MenuItem Header="_Build">
         <MenuItem Header="_Build" Click="OnBuild" InputGesture="Ctrl+B" />
