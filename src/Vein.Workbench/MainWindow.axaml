@@ -53,10 +53,15 @@
         <Separator />
         <MenuItem Header="Go to De_finition" Click="OnGoToDefinition" InputGesture="F12" />
         <MenuItem Header="Find _References" Click="OnFindReferences" InputGesture="Shift+F12" />
+        <Separator />
+        <MenuItem Header="Navigate _Back" Click="OnNavigateBack" InputGesture="Alt+Left" />
+        <MenuItem Header="Navigate F_orward" Click="OnNavigateForward" InputGesture="Alt+Right" />
       </MenuItem>
       <MenuItem Header="_Build">
         <MenuItem Header="_Build" Click="OnBuild" InputGesture="Ctrl+B" />
         <MenuItem Header="Build + _Inspect IR" Click="OnBuildInspect" InputGesture="Ctrl+Shift+B" />
+        <Separator />
+        <MenuItem Header="_Publish Executable (veinc build)" Click="OnPublish" />
       </MenuItem>
       <MenuItem Header="_Run">
         <MenuItem Header="_Run" Click="OnRun" InputGesture="F5" />

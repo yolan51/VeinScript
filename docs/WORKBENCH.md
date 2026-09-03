@@ -68,20 +68,27 @@ working code and neither is: an event **emitted but never heard** (dead, or a ty
 **heard but never emitted** (a handler that never runs). An event this file only uses is marked as
 declared elsewhere rather than shown as local and undeclared.
 
-**Session** — the folder, the open files, the active tab, the font size and the compile-as-you-type
-setting come back on the next launch. Written on every change to the open set, not only on close: a
-close handler alone covers a clean exit, and a kill or a crash would lose the session it exists to
-preserve. **File ▸ Open Recent** keeps the last eight folders.
-
-What makes this resolvable without a type checker is the **sigil**. `$Row` and `#Row` are different
-identities allowed to share a name (RULES 14e), and every use site says which one it means — so
-`Tooling/DefinitionIndex.cs` keys on (name, kind), never on name alone. A lookup by name would land on
-whichever was declared first and be wrong half the time in exactly the files that use the pattern.
+What makes navigation resolvable without a type checker is the **sigil**. `$Row` and `#Row` are
+different identities allowed to share a name (RULES 14e), and every use site says which one it means —
+so `Tooling/DefinitionIndex.cs` keys on (name, kind), never on name alone. A lookup by name would land
+on whichever was declared first and be wrong half the time in exactly the files that use the pattern.
 
 A symbol declared elsewhere — the stdlib, another bundle — resolves to **nothing**, and the status bar
 says so. Jumping somewhere plausible and wrong is worse than not jumping. Local bindings (`let`,
 `target … as w`, `hear … as m`) are deliberately out of scope for the same reason: half-handling them
 would give confident wrong answers inside a shard body.
+
+**Alt+←/→** walk back and forward through jumps, across files — an F12 you cannot return from is half a
+feature, since you jumped precisely because you were reading something else.
+
+**Brackets** — the brace at the caret and its partner are boxed. `Tooling/BracketMatcher.cs` skips
+strings and comments, which is not fussiness: this repo's own samples emit HTML, and one `{` inside a
+string literal would point every brace after it one level wrong.
+
+**Session** — the folder, the open files, the active tab, the font size and the compile-as-you-type
+setting come back on the next launch. Written on every change to the open set, not only on close: a
+close handler alone covers a clean exit, and a kill or a crash would lose the session it exists to
+preserve. **File ▸ Open Recent** keeps the last eight folders.
 
 **Editing** — AvaloniaEdit with VeinScript highlighting (`Assets/VeinScript.xshd`, keyword list
 mirroring `Lexing/Lexer.cs`), line numbers, and red underlines on every diagnostic span
@@ -124,6 +131,17 @@ that now happen while you type; choosing another participant resets it.
 Each session shows its **exit code and duration** when it ends (`exited 2 · 1.4s`) and has a **↻** to
 run the same command again with the scrollback cleared — comparing a run against the one before it is
 the reason to re-run, and keeping the old output would make the two indistinguishable.
+
+A session also has a **filter** and a **⤓**. The filter narrows the pane while keeping the session's
+full log, so clearing it brings the whole transcript back rather than the tail that arrived after you
+cleared it; **⤓** saves that *whole* log, not the filtered view, since a file quietly missing what you
+were not looking at is worse than no file. **Build ▸ Publish Executable** runs `veinc build` in a
+session, so what you read is the CLI's own account of where the exe landed.
+
+↑ and ↓ recall from **whichever history the prompt is currently for**: commands while nothing is
+running, and what you last typed *at* the program while one is. They are separate vocabularies — a chat
+sample's `hello` has nothing to do with `veinc run`, and one shared list makes ↑ mostly offer the wrong
+kind of thing.
 
 **Terminal** — concurrent sessions, each with its own output pane, its own **stdin**, and ■ / EOF / ✕.
 `Tooling/VeinShell.cs` accepts what you would paste from a sample header in either dialect
@@ -197,10 +215,10 @@ The `veinc run` workload: `samples/console.vein`, `entities_*.vein`, anything wi
 | A3 | ✅ **Argument editing** | Change `--ticks 4` to `--ticks 40` in the toolbar without editing the header |
 | A4 | ✅ **Re-run** (↻ per session) | Restart the last command in its existing tab, scrollback cleared |
 | A5 | ✅ **Exit code + duration** | See `exited 2 · 1.4s` without reading back through the output |
-| A6 | **Output search + filter** | Find `error` in 4000 lines of tick output |
-| A7 | **Save output to a file** | Keep a run's transcript to diff against the next one |
-| A8 | **`veinc build` from the IDE** | Produce `console_roles.exe` and be told where it landed |
-| A9 | **Input history per session** | ↑ recalls what you typed *into the program*, not just commands |
+| A6 | ✅ **Output filter** | Find `error` in 4000 lines of tick output; clearing it brings the whole log back |
+| A7 | ✅ **Save transcript** (⤓) | Keep a run to diff against the next one — the whole log, not the filtered view |
+| A8 | ✅ **Publish executable** | Produce `console_roles.exe` and read the CLI's own account of where it landed |
+| A9 | ✅ **Input history per session** | ↑ recalls what you typed *into the program*, kept apart from commands |
 
 ## Track B — chat and multi-process apps
 
@@ -237,7 +255,7 @@ socket involved (`Vein.Cli/Program.cs`, `case "render"`), so a preview pane is a
 | C1b | **Embedded rendered view** | See the *page*, not its markup, without leaving the IDE — needs a WebView dependency, deliberately not added yet |
 | C4 | **Serve with one click** | ▶ starts `serve --port 8080` and the status bar links to it |
 | C5 | **Live reload** | Save the file, and the running `serve` and the preview both update |
-| C11 | **Route navigation** | Click a route in the picker and jump to the `if` that answers it — `Route.Span` is already recorded |
+| C11 | ✅ **Route navigation** | Jump from a previewed route to the `if` that answers it |
 | C7 | **Element completion** | `&` completes the `Vein.Web.Elements` builders with their parameter names |
 | C8 | **Theme preview** | See `stdlib/WebTheme.vein`'s classes applied, so `&Code` and `&Button` are picked by sight |
 | C9 | **Response inspector** | Status and headers for a rendered route, not only its body |
@@ -257,14 +275,14 @@ chat app of three files or a site of five shards means constant reopening.
 | D4 | ✅ **Go to line** (`Ctrl+G`) | Jump to `:142` from a diagnostic |
 | D5 | ✅ **Comment toggle** (`Ctrl+/`) | Comment a shard body and uncomment it back to exactly what it was |
 | D6 | ✅ **Auto-indent** | Press Enter after `{` and land one level in; type `}` and it pulls itself back out |
-| D6b | **Bracket match** | See a `{`'s partner highlighted |
+| D6b | ✅ **Bracket match** | See a `{`'s partner boxed — and not a `{` inside a string or comment |
 | D13 | ✅ **Duplicate / move line** | `Ctrl+D`, `Alt+↑`, `Alt+↓` |
 | D7 | ✅ **Go to definition** (`F12`) | Jump from a `$Worker` use to its `shape` |
 | D8 | ✅ **Find references** (`Shift+F12`) | Every place `@Message` is emitted or heard, listed and jumpable |
 | D9 | ✅ **Symbol search** (`Ctrl+T`) | Reach any shape/mark/event/shard by typing its name |
 | D10 | ✅ **Outline pane** | The file's shapes, marks, events, shards as a jumpable list |
 | D11 | ✅ **IR → source click-through** | Double-click an `IrNode` and land on the line that produced it |
-| D12 | **Back / forward** | Return from an F12 jump |
+| D12 | ✅ **Back / forward** (`Alt+←/→`) | Return from an F12 jump, across files |
 
 ## Track E — understanding and fixing
 
@@ -314,17 +332,21 @@ questions the code alone does not. What is left is mostly *depth*.
 Also done: **A3 A4 A5** (argument editing, re-run, exit code + duration) · **D7 D8 D9 D10 D11**
 (go to definition, find references, symbol search, outline, IR → source).
 
-Also done: **E5** (event graph) · **F1 F7 F8 F9** (session restore, font size, shortcut map, recent
-folders).
+Also done: **A6–A9** (filter, save transcript, publish, input history) · **C11** (route navigation) ·
+**D6b D12** (bracket match, back/forward) · **E5** (event graph) · **F1 F7 F8 F9** (session restore,
+font size, shortcut map, recent folders).
 
-**Every item in tracks A and D is done except bracket matching (D6b) and back/forward (D12).**
+**Tracks A and D are complete.**
 
-Next, in order: **E3** (quick fixes for the mechanical diagnostics — VS0228 arity, VS0231 `base`,
-VS0217 shadowing; `DefinitionIndex` now supplies the positions they need), then **B5** (a combined
-interleaved transcript — what makes a relay bug visible as an *order* rather than by alt-tabbing),
-then **F1** (session restore), then **C4/C5** (serve with one click, live reload), then the E6–E8
-runtime inspection block, which is the largest remaining piece and the one most specific to this
-language.
+Next, in order: **E2/E3/E9** (problems filtering, quick fixes for the mechanical diagnostics, and
+diagnostic explanations — `DefinitionIndex` now supplies the positions they need), then **C4/C5**
+(serve with one click, live reload), then **B5/B8** (a combined interleaved transcript, and
+`@Undelivered` surfaced as a warning rather than a printed line), then **F3** (`.veinproj`, which
+F2/F4/F5 hang off).
+
+**E6–E8** — the tick stepper, event timeline and entity browser — is the largest remaining piece and
+the most specific to this language, and it is not UI work: it needs `Interp` to expose stepping and
+state inspection, which it does not today. That is a compiler change first and a panel second.
 
 ---
 
@@ -341,7 +363,8 @@ Source ─▶ VeinCompilerService.Compile ─▶ CompilationResult
   the Workbench and the CLI route through it — there is one compilation pipeline.
 - **Analysis lives in `src/Vein.Compiler/Tooling/`, not in the Workbench.** `ConsoleGraph`,
   `SymbolIndex`, `MemberIndex`, `BundleModel`, `DependencyModel`, `ExecutionModel`, `EventCatalog`,
-  `RunConfig`, `VeinShell`, `RouteMap`, `SourceEdits` and `DefinitionIndex` are all pure logic the UI
+  `RunConfig`, `VeinShell`, `RouteMap`, `SourceEdits`, `BracketMatcher` and `DefinitionIndex` are all
+  pure logic the UI
   only renders. That is what keeps
   them testable from `Vein.Tests`, which references only `Vein.Compiler` — and it is why the route
   recovery has nine tests while the panel that shows it has none.

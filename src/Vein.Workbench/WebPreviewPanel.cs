@@ -36,6 +36,9 @@ internal sealed class WebPreviewPanel : UserControl
     private RouteMap _map = RouteMap.Empty;
     private string? _lastBody;
 
+    /// Jump to a source position. Wired by the window to the shared GoTo.
+    public Action<int, int>? Navigate { get; set; }
+
     public WebPreviewPanel()
     {
         var refresh = new Button { Content = "Refresh", Padding = new Avalonia.Thickness(10, 2) };
@@ -43,6 +46,17 @@ internal sealed class WebPreviewPanel : UserControl
 
         var browser = new Button { Content = "Open in Browser", Padding = new Avalonia.Thickness(10, 2) };
         browser.Click += (_, _) => OpenInBrowser();
+
+        // The question after "what does /about answer" is always "where is that written". RouteMap
+        // already records the span of the `if` that claims each path.
+        var source = new Button { Content = "Go to route", Padding = new Avalonia.Thickness(10, 2) };
+        source.Click += (_, _) =>
+        {
+            if (_routes.SelectedItem is not string path) return;
+            var site = _map.Routes.FirstOrDefault(r => r.Path == path);
+            if (site is null) { _status.Text = $"{path} is not claimed by a literal condition in this file"; return; }
+            Navigate?.Invoke(site.Span.Line, site.Span.Col);
+        };
 
         _routes.SelectionChanged += (_, _) => Render();
 
@@ -54,7 +68,7 @@ internal sealed class WebPreviewPanel : UserControl
             Children =
             {
                 new TextBlock { Text = "Route", VerticalAlignment = VerticalAlignment.Center },
-                _routes, refresh, browser, _status
+                _routes, refresh, source, browser, _status
             }
         };
 

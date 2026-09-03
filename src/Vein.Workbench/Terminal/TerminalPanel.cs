@@ -37,6 +37,13 @@ internal sealed class TerminalPanel : UserControl
         public required TextBox Out { get; init; }
         public required TextBox In { get; init; }
         public required TextBlock Status { get; init; }
+        public required TextBox Filter { get; init; }
+
+        /// What was typed INTO the running program, as opposed to commands. Separate histories because
+        /// they are separate vocabularies — a chat sample's `hello` has nothing to do with `veinc run`,
+        /// and one shared list makes ↑ mostly recall the wrong kind of thing.
+        public List<string> Sent { get; } = new();
+        public int SentAt { get; set; }
     }
 
     public TerminalPanel()
@@ -75,6 +82,19 @@ internal sealed class TerminalPanel : UserControl
 
         var status = new TextBlock { Text = "idle", Margin = new Avalonia.Thickness(8, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = Brushes.Gray, FontSize = 11 };
 
+        // A tick-limited run prints thousands of lines and the interesting one is `error` or a single
+        // entity id. Filtering beats scrolling, and it filters the LOG rather than the view so it still
+        // works after the process has exited.
+        var filter = new TextBox
+        {
+            Watermark = "filter…",
+            Width = 150,
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        var save = Tip(new Button { Content = "⤓", Padding = new Avalonia.Thickness(8, 2) }, "Save this transcript to a file");
+
         var again = Tip(new Button { Content = "↻", Padding = new Avalonia.Thickness(8, 2) }, "Run the last command here again");
         var stop = Tip(new Button { Content = "■", Padding = new Avalonia.Thickness(8, 2) }, "Stop what is running here");
         var eof = Tip(new Button { Content = "EOF", Padding = new Avalonia.Thickness(8, 2) }, "Close stdin — the Ctrl+Z / Ctrl+D a console sample asks for");
@@ -86,11 +106,11 @@ internal sealed class TerminalPanel : UserControl
             Orientation = Orientation.Horizontal,
             Spacing = 4,
             HorizontalAlignment = HorizontalAlignment.Right,
-            Children = { status, again, eof, stop, plus, close }
+            Children = { status, filter, save, again, eof, stop, plus, close }
         };
 
         var item = new TabItem { Header = title ?? "shell" };
-        var tab = new Tab { Session = session, Item = item, Out = output, In = input, Status = status };
+        var tab = new Tab { Session = session, Item = item, Out = output, In = input, Status = status, Filter = filter };
 
         item.Content = new DockPanel
         {
@@ -104,9 +124,17 @@ internal sealed class TerminalPanel : UserControl
 
         session.Output += line =>
         {
+            // While a filter is set, only matching lines are shown — but the session's own log keeps
+            // everything, so clearing the filter brings the full transcript back rather than the tail
+            // that happened to arrive after you cleared it.
+            if (!Matches(tab, line)) return;
             output.Text += line + "\n";
             output.CaretIndex = output.Text.Length;
         };
+
+        filter.TextChanged += (_, _) => Refilter(tab);
+
+        save.Click += (_, _) => _ = SaveTranscriptAsync(tab);
         session.Exited += code =>
         {
             // Exit code AND duration. "It finished" is not the question; "did that work, and was it
@@ -155,6 +183,39 @@ internal sealed class TerminalPanel : UserControl
 
     private Tab? Current => _sessions.FirstOrDefault(t => ReferenceEquals(t.Item, _tabs.SelectedItem));
 
+    private static bool Matches(Tab tab, string line)
+    {
+        string q = (tab.Filter.Text ?? "").Trim();
+        return q.Length == 0 || line.Contains(q, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// Redraw the pane from the session's full log through the current filter.
+    private static void Refilter(Tab tab)
+    {
+        var lines = tab.Session.Log.Split('\n').Where(l => Matches(tab, l));
+        tab.Out.Text = string.Join("\n", lines);
+        tab.Out.CaretIndex = tab.Out.Text.Length;
+    }
+
+    /// Write the transcript out. Keeping a run to diff against the next one is the reason — so it saves
+    /// the WHOLE log, not the filtered view, which would silently produce a file missing what you were
+    /// not looking at.
+    private async Task SaveTranscriptAsync(Tab tab)
+    {
+        var top = TopLevel.GetTopLevel(this);
+        if (top is null) return;
+
+        var file = await top.StorageProvider.SaveFilePickerAsync(new Avalonia.Platform.Storage.FilePickerSaveOptions
+        {
+            SuggestedFileName = $"{tab.Session.Name}-{DateTime.Now:yyyyMMdd-HHmmss}.txt",
+            DefaultExtension = "txt"
+        });
+        if (file is null) return;
+
+        try { await File.WriteAllTextAsync(file.Path.LocalPath, tab.Session.Log); tab.Session.Write($"(saved to {file.Path.LocalPath})"); }
+        catch (Exception ex) { tab.Session.Write($"(could not save: {ex.Message})"); }
+    }
+
     private void OnPromptKey(Tab tab, KeyEventArgs e)
     {
         switch (e.Key)
@@ -170,6 +231,7 @@ internal sealed class TerminalPanel : UserControl
                 {
                     tab.Session.Write("❯ " + text);
                     tab.Session.SendLine(text);
+                    if (text.Trim().Length > 0) { tab.Sent.Add(text); tab.SentAt = tab.Sent.Count; }
                     return;
                 }
 
@@ -184,20 +246,28 @@ internal sealed class TerminalPanel : UserControl
                 break;
             }
 
-            case Key.Up when _history.Count > 0:
-                _historyAt = Math.Max(0, _historyAt - 1);
-                tab.In.Text = _history[_historyAt];
-                tab.In.CaretIndex = tab.In.Text.Length;
-                e.Handled = true;
-                break;
-
-            case Key.Down when _history.Count > 0:
-                _historyAt = Math.Min(_history.Count, _historyAt + 1);
-                tab.In.Text = _historyAt >= _history.Count ? "" : _history[_historyAt];
-                tab.In.CaretIndex = (tab.In.Text ?? "").Length;
-                e.Handled = true;
-                break;
+            // ↑/↓ recall from whichever history matches what the prompt is currently for. While a
+            // program is running you are typing AT it, so ↑ should give back what you last said to it —
+            // not `veinc run`, which is what one shared list would mostly offer.
+            case Key.Up: Recall(tab, -1); e.Handled = true; break;
+            case Key.Down: Recall(tab, +1); e.Handled = true; break;
         }
+    }
+
+    /// Step through the history the prompt is currently addressing. `by` is -1 for older, +1 for newer;
+    /// walking past the newest entry clears the box, which is how a shell behaves and how you get back
+    /// to typing something new.
+    private void Recall(Tab tab, int by)
+    {
+        bool sending = tab.Session.IsRunning;
+        var list = sending ? tab.Sent : _history;
+        if (list.Count == 0) return;
+
+        int at = Math.Clamp((sending ? tab.SentAt : _historyAt) + by, 0, list.Count);
+        if (sending) tab.SentAt = at; else _historyAt = at;
+
+        tab.In.Text = at >= list.Count ? "" : list[at];
+        tab.In.CaretIndex = (tab.In.Text ?? "").Length;
     }
 
     private void Launch(Tab tab, LaunchSpec spec)

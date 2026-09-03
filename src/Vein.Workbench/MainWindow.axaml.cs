@@ -29,6 +29,7 @@ public partial class MainWindow : Window
 {
     private readonly VeinCompilerService _service = new();
     private readonly DiagnosticRenderer _marker = new();
+    private readonly BracketRenderer _brackets = new();
     private IReadOnlyList<Diagnostic> _diags = Array.Empty<Diagnostic>();
     private string? _rootFolder;
 
@@ -133,6 +134,7 @@ public partial class MainWindow : Window
         _terminal = this.FindControl<Terminal.TerminalPanel>("TerminalPanel")!;
         _tabs = this.FindControl<EditorTabs>("FileTabs")!;
         _webPreview = this.FindControl<WebPreviewPanel>("WebPreview")!;
+        _webPreview.Navigate = GoTo;
         _consoles = this.FindControl<ConsoleTopologyPanel>("ConsoleTopology")!;
         _outline = this.FindControl<OutlinePanel>("Outline")!;
         _outline.Navigate = GoTo;
@@ -160,6 +162,15 @@ public partial class MainWindow : Window
         _search = AvaloniaEdit.Search.SearchPanel.Install(_editor);
         _editor.TextArea.IndentationStrategy = new VeinIndentationStrategy();
         _editor.TextArea.TextView.BackgroundRenderers.Add(_marker);
+        _editor.TextArea.TextView.BackgroundRenderers.Add(_brackets);
+
+        // Match on every caret move rather than on a timer: it is a scan of one line plus a walk to the
+        // partner, and a highlight that lags the caret reads as a bug.
+        _editor.TextArea.Caret.PositionChanged += (_, _) =>
+        {
+            _brackets.Pair = BracketMatcher.Match(_editor.Text, _editor.CaretOffset);
+            _editor.TextArea.TextView.InvalidateLayer(AvaloniaEdit.Rendering.KnownLayer.Selection);
+        };
         _editor.TextArea.TextEntered += OnTextEntered;
         _editor.TextArea.TextView.PointerMoved += OnHover;
         KeyDown += OnKeyDown;
@@ -369,6 +380,13 @@ public partial class MainWindow : Window
         }
 
         // Alt+Up/Down move lines. Checked before the Control block, which would otherwise swallow them.
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Alt) && e.Key is Key.Left or Key.Right)
+        {
+            if (e.Key == Key.Left) OnNavigateBack(sender, e); else OnNavigateForward(sender, e);
+            e.Handled = true;
+            return;
+        }
+
         if (e.KeyModifiers.HasFlag(KeyModifiers.Alt) && e.Key is Key.Up or Key.Down)
         {
             EditorCommands.MoveLines(_editor, up: e.Key == Key.Up);
@@ -585,6 +603,19 @@ public partial class MainWindow : Window
         }
 
         SetStatus($"Started all {_configs.Count} participants — type into a session to drive it.");
+    }
+
+    /// `veinc build` — publish a standalone executable. Runs in a terminal session like everything else,
+    /// so the CLI's own account of where it landed is what you read, rather than a summary of it.
+    private void OnPublish(object? sender, RoutedEventArgs e)
+    {
+        if (_currentPath is null) { SetStatus("Save the file first — build publishes a file, not a buffer."); return; }
+        if (_tabs.Active is { } doc) { File.WriteAllText(_currentPath, doc.Document.Text); _tabs.MarkSaved(doc); }
+
+        _bottomPanel.IsVisible = true;
+        _bottomPanel.SelectedIndex = TabTerminal;
+        _terminal.Run(new LaunchSpec(LaunchKind.Cli, "build", new[] { _currentPath }, new Dictionary<string, string>()), "build");
+        SetStatus($"Building {Path.GetFileName(_currentPath)} — the terminal says where it lands.");
     }
 
     private void OnStopAll(object? sender, RoutedEventArgs e)
@@ -1441,10 +1472,49 @@ public partial class MainWindow : Window
             GoTo(span.Line, span.Col);
     }
 
+    // ---- back / forward --------------------------------------------------
+    //
+    // A jump you cannot come back from is half a feature: F12 into a shape declaration is useful exactly
+    // because you were reading something else, and Alt+← is how you resume it. Two stacks, the ordinary
+    // browser model — going somewhere new clears the forward side, because there is no longer a forward.
+
+    private readonly Stack<(string? File, int Offset)> _back = new();
+    private readonly Stack<(string? File, int Offset)> _forward = new();
+
+    /// Push where the caret is now, before moving it.
+    private void RecordPosition()
+    {
+        _back.Push((_currentPath, _editor.CaretOffset));
+        _forward.Clear();
+        if (_back.Count > 100) { var keep = _back.Take(100).Reverse().ToList(); _back.Clear(); foreach (var p in keep) _back.Push(p); }
+    }
+
+    private void OnNavigateBack(object? sender, RoutedEventArgs e) => Step(_back, _forward);
+    private void OnNavigateForward(object? sender, RoutedEventArgs e) => Step(_forward, _back);
+
+    private void Step(Stack<(string? File, int Offset)> from, Stack<(string? File, int Offset)> to)
+    {
+        if (from.Count == 0) { SetStatus(ReferenceEquals(from, _back) ? "Nothing to go back to." : "Nothing to go forward to."); return; }
+
+        to.Push((_currentPath, _editor.CaretOffset));
+        var (file, offset) = from.Pop();
+
+        // The position may belong to another tab. Switching to it is the point — a jump across files is
+        // exactly the one worth being able to undo.
+        if (file is not null && !string.Equals(file, _currentPath, StringComparison.OrdinalIgnoreCase) &&
+            _tabs.Docs.FirstOrDefault(d => d.Path is not null && string.Equals(d.Path, file, StringComparison.OrdinalIgnoreCase)) is { } doc)
+            _tabs.Activate(doc);
+
+        _editor.CaretOffset = Math.Clamp(offset, 0, _editor.Document.TextLength);
+        _editor.ScrollToLine(_editor.Document.GetLineByOffset(_editor.CaretOffset).LineNumber);
+        _editor.TextArea.Focus();
+    }
+
     /// Move the caret to a source position and show it. Clamped: a span from a stale compile can point
     /// past the end of a document being edited, and scrolling nowhere is better than throwing.
     private void GoTo(int line, int col)
     {
+        RecordPosition();
         int n = Math.Clamp(line, 1, Math.Max(1, _editor.Document.LineCount));
         var target = _editor.Document.GetLineByNumber(n);
         _editor.CaretOffset = Math.Clamp(target.Offset + Math.Max(0, col - 1), target.Offset, target.EndOffset);
