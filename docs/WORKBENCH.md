@@ -20,7 +20,7 @@ Open a `.vein` file (`Ctrl+O`) or a folder (`Ctrl+K`), edit, Build (`Ctrl+B`), R
 
 ```
 ┌ [VS] File Edit Build Run View Help ────────────────────────────────────────┐
-│ [VS] ▶ ■ [ run --ticks 4          ▾ ]                                      │
+│ [VS] ▶ ▶▶ ■ [ Control            ▾ ]  3 participants — run each            │
 ├──────────────┬─────────────────────────────┬───────────────────────────────┤
 │ Project      │ ●server.vein │ alice.vein ✕ │  Inspector — IR Tree          │
 │ Explorer     ├─────────────────────────────┤  (structured VeinIR)          │
@@ -29,7 +29,7 @@ Open a `.vein` file (`Ctrl+O`) or a folder (`Ctrl+K`), edit, Build (`Ctrl+B`), R
 │              │   red underlines ·          │                               │
 │              │   completion · hover)       │                               │
 ├──────────────┴─────────────────────────────┴───────────────────────────────┤
-│ Diagnostics │ Raw IR │ Output │ Dependencies │ Execution │ Preview │ Terminal│
+│ Diagnostics │ Raw IR │ Output │ Deps │ Execution │ Consoles │ Preview │ Term │
 ├────────────────────────────────────────────────────────────────────────────┤
 │ Status bar (build result / what is running)                                │
 └────────────────────────────────────────────────────────────────────────────┘
@@ -66,7 +66,7 @@ principal bundle, 📦 its dependencies. Selecting a bundle opens the **Bundle I
 manifest, with search, Type/Visibility filters, a grouping toggle, a detail pane and a
 PUBLIC/SHARED/PRIVATE bar (`Tooling/BundleModel.cs`).
 
-**Bottom panel** — six tabs:
+**Bottom panel** — eight tabs:
 - **Diagnostics** — every `Diagnostic`; double-click jumps the caret there.
 - **Raw IR** — the VeinIR ASCII tree, identical to `veinc ir`.
 - **Output** — in-process run output (the fallback path for an unsaved file).
@@ -75,6 +75,8 @@ PUBLIC/SHARED/PRIVATE bar (`Tooling/BundleModel.cs`).
 - **Execution** — the derived execution model: one badged row per trigger block, the class
   distribution, scheduling totals, conflicts and emit cycles (`Tooling/ExecutionModel.cs`). Nothing
   here runs the program.
+- **Consoles** — which addresses this bundle names, who sends to whom, and which sends resolve to
+  nothing. See below.
 - **Preview** — for a bundle that hears `@Request`: pick a route, see the markup it answers with, and
   Open in Browser. See below.
 - **Terminal** — see below.
@@ -98,6 +100,30 @@ launches of one file talking to each other, and a single-pane terminal would mak
 
 **Run ▸ In External Console** (`Shift+F5`) still launches a real OS console window, which is the better
 way to *demo* a multi-console sample and the only way `bring Console` opens real windows.
+
+**Compile as you type** — a build runs after ~450 ms of quiet, so diagnostics arrive when you stop
+typing rather than when you remember `Ctrl+B`. The timer is *restarted* on each keystroke, so exactly
+one build happens after the pause instead of one per character. Toggle it in **View ▸ Compile as You
+Type**. An auto-build deliberately does **not** refresh the Preview — rendering runs the program, and
+executing a half-written site after every pause is not what anyone asked for; the preview refreshes on
+an explicit Build, or continuously while its tab is the one you are looking at.
+
+**Consoles** — a relay is a *shape*, and reading it out of `emit @Send { to: … }` scattered across four
+shards is the part that is genuinely hard. `Tooling/ConsoleGraph.cs` had computed this for a long time
+and only ever fed one warning; this draws it. Every address the bundle names, who names it, who
+addresses it, and — in red — any send that resolves to nothing (VS0212).
+
+It is honest about its own limits, because a topology diagram gets believed. Only *literal* addresses
+appear. `control_center.vein`'s relay sends to `w.Worker.addr`, a value, which cannot be read
+statically — so the panel says the picture is the shape of the code and not a census of its messages.
+Without that line a reader would conclude the relay never sends anything, which is the opposite of what
+that sample does.
+
+**Run All Participants** (`Ctrl+F5`) starts every configuration the file declares, in header order,
+each in its own session. The order is load-bearing and the file knows it: `control_center.vein` says
+"start this first" about Control, because a worker launched ahead of it gets `@Undelivered` instead of
+a relay. There is a short pause between launches for the same reason — the first process needs a moment
+to bind its pipe before the next one addresses it.
 
 **Preview** — a VeinScript site declares no route table: routing IS `if r.path == "/about"` inside a
 `hear @Request` block. `Tooling/RouteMap.cs` recovers the list of routes by reading those conditions,
@@ -147,8 +173,8 @@ The workload this IDE is unusual for: `console_chat.vein`, `samples/chat/`, `con
 |---|---|---|
 | B1 | ✅ **Concurrent sessions** | Control, Alpha and Beta running as three tabs at once |
 | B2 | ✅ **Per-participant environment** | Each tab has its own `VEIN_CONSOLE`, from the header |
-| B3 | **Run All Participants** | One click starts Control → Alpha → Beta in header order, with the first given a moment to bind |
-| B4 | **Console topology view** | See a diagram of who addresses whom, drawn from `Tooling/ConsoleGraph.cs` — which already computes exactly this and is only used for VS0212 |
+| B3 | ✅ **Run All Participants** | One click (`Ctrl+F5`) starts Control → Alpha → Beta in header order, the first given a moment to bind |
+| B4 | ✅ **Console topology view** | See who addresses whom, drawn from `ConsoleGraph` — which computed exactly this and only fed VS0212 |
 | B5 | **A combined transcript** | One interleaved, timestamped view of all sessions, so a relay bug is visible as an ORDER rather than by alt-tabbing |
 | B6 | **Message inspector** | Click a line in the transcript and see the event, its payload and its sender |
 | B7 | **Live console registry** | Which pipe names are bound right now, including terminals outside the IDE — the answer to "is Control actually running?" |
@@ -209,7 +235,7 @@ exists rather than writing new analysis.
 
 | # | Item | Done bar |
 |---|---|---|
-| E1 | **Compile as you type** (debounced) | See VS0228 while typing the bad `bring`, not after `Ctrl+B` |
+| E1 | ✅ **Compile as you type** | See VS0228 while typing the bad `bring`, not after `Ctrl+B` |
 | E2 | **Problems filtering** | Show only errors; group by code; hide a noisy warning |
 | E3 | **Quick fixes** | One click to fix VS0228 (arity), VS0231 (`base` with no default), VS0217 (shadowed built-in), VS0212 (unknown console) |
 | E4 | **Signature help** | Parameter names and defaults while typing a `bring`, so `base` is obvious |
@@ -239,14 +265,19 @@ is next", it is "what does this identity look like now, and what changed it".
 
 ## Suggested order
 
-Done so far: **A1 A2** (run what the file declares, terminal with stdin) · **B1 B2** (concurrent
-sessions, per-participant environment) · **C1 C2 C3 C6** (preview, routes, markup, conflicts) ·
-**D1–D6 D13** (tabs, dirty marker, find, go-to-line, comment toggle, auto-indent, line moves).
+Done so far: **A1 A2** (run what the file declares, terminal with stdin) · **B1–B4** (concurrent
+sessions, per-participant environment, Run All, console topology) · **C1 C2 C3 C6** (preview, routes,
+markup, conflicts) · **D1–D6 D13** (tabs, dirty marker, find, go-to-line, comment toggle, auto-indent,
+line moves) · **E1** (compile as you type).
 
-Next, in order: **E1** (compile as you type — the last piece of a normal editing loop), then
-**B3 + B4** (Run All Participants, and the console topology view `ConsoleGraph` can already draw),
-then **D7 / D11** (go-to-definition, and source↔IR — `IrNode.Span` exists and nothing reads it),
-then **A3–A5** (argument editing, re-run, exit code in the tab).
+That is a working editing loop, a working run story for all three workloads, and two views that answer
+questions the code alone does not. What is left is mostly *depth*.
+
+Next, in order: **D7 / D11** — go-to-definition, and source↔IR click-through; `IrNode.Span` and
+`Route.Span` are both recorded and nothing reads either, so this is the largest ratio of value to work
+left on the list. Then **E3** (quick fixes for the mechanical diagnostics), **A3–A5** (argument
+editing, re-run, exit code in the tab), **B5** (a combined interleaved transcript — the thing that
+makes a relay bug visible as an *order*), then **F1** (session restore).
 
 ---
 

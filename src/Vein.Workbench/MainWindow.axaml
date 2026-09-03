@@ -55,6 +55,7 @@
       </MenuItem>
       <MenuItem Header="_Run">
         <MenuItem Header="_Run" Click="OnRun" InputGesture="F5" />
+        <MenuItem Header="Run _All Participants" Click="OnRunAll" InputGesture="Ctrl+F5" />
         <MenuItem Header="Run in E_xternal Console" Click="OnRunExternal" InputGesture="Shift+F5" />
         <Separator />
         <MenuItem Header="_Stop All Sessions" Click="OnStopAll" />
@@ -63,6 +64,8 @@
         <MenuItem Header="Toggle _Project Explorer" Click="OnToggleExplorer" />
         <MenuItem Header="Toggle _Bottom Panel" Click="OnToggleBottom" />
         <MenuItem Header="Focus _Terminal" Click="OnFocusTerminal" InputGesture="Ctrl+OemTilde" />
+        <Separator />
+        <MenuItem Header="Compile as You _Type" Click="OnToggleAutoBuild" />
       </MenuItem>
       <MenuItem Header="_Help">
         <MenuItem Header="_About VeinScript Workbench" Click="OnAbout" />
@@ -75,6 +78,7 @@
         <Image Source="avares://Vein.Workbench/Assets/VSLOGO.png" Height="24" Width="26"
                Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,6,0" />
         <Button Name="RunButton" Click="OnRun" Padding="10,2" ToolTip.Tip="Run the selected configuration (F5)">▶</Button>
+        <Button Name="RunAllButton" Click="OnRunAll" Padding="10,2" ToolTip.Tip="Start every participant this file declares, in header order (Ctrl+F5)">&#x25B6;&#x25B6;</Button>
         <Button Name="StopButton" Click="OnStopAll" Padding="10,2" ToolTip.Tip="Stop every terminal session">■</Button>
         <ComboBox Name="RunConfigs" MinWidth="320" VerticalAlignment="Center"
                   ToolTip.Tip="Run configurations declared in this file's header" />
@@ -132,6 +136,9 @@
         </TabItem>
         <TabItem Header="Execution">
           <ScrollViewer Name="ExecPanel" Padding="12,8" />
+        </TabItem>
+        <TabItem Header="Consoles">
+          <local:ConsoleTopologyPanel Name="ConsoleTopology" />
         </TabItem>
         <TabItem Header="Preview">
           <local:WebPreviewPanel Name="WebPreview" />

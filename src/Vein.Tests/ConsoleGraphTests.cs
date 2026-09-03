@@ -220,6 +220,37 @@ public class ConsoleGraphTests
     }
 
     [Fact]
+    public void The_control_centre_topology_reads_as_a_relay()
+    {
+        // The Workbench's Consoles tab renders exactly this graph, so the shape it shows is pinned here
+        // rather than only by eye. control_center is the interesting case: every participant is launched
+        // by hand, so the addresses come from `match here()` arms and not from any spawn.
+        string path = Path.Combine(RepoRoot(), "samples", "control_center.vein");
+        var graph = ConsoleGraph.Analyze(
+            new VeinCompilerService().Compile(new CompileRequest("control_center.vein", File.ReadAllText(path), SourcePath: path)).Ast!)!;
+
+        // #Control is known (a role this program can run as) and addressed by the two shards that send.
+        Assert.Contains("Control", graph.Known);
+        Assert.Equal(new[] { "Boot", "Typing" },
+            graph.Addresses.Where(a => a.Target == "Control").Select(a => a.Owner).Distinct().OrderBy(o => o, StringComparer.Ordinal));
+
+        // Nothing resolves to nothing — that is what makes the sample warning-free.
+        Assert.Empty(graph.Unresolved);
+
+        // And the relay itself is INVISIBLE to this analysis: Relay sends to `w.Worker.addr`, a value.
+        // The panel says so rather than letting the picture read as complete — a reader who trusted it
+        // would conclude the relay never sends anything, which is the opposite of what the sample does.
+        Assert.DoesNotContain(graph.Addresses, a => a.Owner == "Relay");
+    }
+
+    private static string RepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "stdlib"))) dir = dir.Parent;
+        return dir?.FullName ?? throw new DirectoryNotFoundException("repo root with stdlib/ not found");
+    }
+
+    [Fact]
     public void Only_a_match_on_here_names_a_role()
     {
         // `match` on anything else is an ordinary switch over values, and its arms claim no identity.

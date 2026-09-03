@@ -10,6 +10,7 @@ using Avalonia.Layout;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using AvaloniaEdit;
 using AvaloniaEdit.CodeCompletion;
 using AvaloniaEdit.Highlighting;
@@ -66,7 +67,24 @@ public partial class MainWindow : Window
     private Terminal.TerminalPanel _terminal = null!;
     private EditorTabs _tabs = null!;
     private WebPreviewPanel _webPreview = null!;
+    private ConsoleTopologyPanel _consoles = null!;
     private AvaloniaEdit.Search.SearchPanel _search = null!;
+
+    // ---- compile as you type ---------------------------------------------
+    //
+    // Diagnostics that arrive when you stop typing rather than when you remember to press Ctrl+B. The
+    // whole feature is a timer that is RESTARTED on each keystroke, so it fires once after a pause
+    // instead of once per character — compiling every keystroke would fight the typing it is meant to
+    // help, and half the compiles would be of text nobody meant.
+    private DispatcherTimer? _autoBuild;
+    private bool _autoBuildOn = true;
+
+    /// True while a tab switch is swapping documents. AvaloniaEdit raises TextChanged when the document
+    /// is replaced, which is not an edit and must not schedule a build — the switch already builds.
+    private bool _switchingTabs;
+
+    /// Long enough that ordinary typing never triggers it, short enough to feel immediate when you stop.
+    private static readonly TimeSpan AutoBuildDelay = TimeSpan.FromMilliseconds(450);
 
     // Bottom-panel tabs, by name. They were bare indices until inserting Preview silently moved
     // Terminal from 5 to 6 — a magic number that points at the wrong tab is exactly the bug that
@@ -76,8 +94,9 @@ public partial class MainWindow : Window
     private const int TabOutput = 2;
     private const int TabDependencies = 3;
     private const int TabExecution = 4;
-    private const int TabPreview = 5;
-    private const int TabTerminal = 6;
+    private const int TabConsoles = 5;
+    private const int TabPreview = 6;
+    private const int TabTerminal = 7;
 
     private ComboBox _runConfigs = null!;
     private TextBlock _runHint = null!;
@@ -103,6 +122,7 @@ public partial class MainWindow : Window
         _terminal = this.FindControl<Terminal.TerminalPanel>("TerminalPanel")!;
         _tabs = this.FindControl<EditorTabs>("FileTabs")!;
         _webPreview = this.FindControl<WebPreviewPanel>("WebPreview")!;
+        _consoles = this.FindControl<ConsoleTopologyPanel>("ConsoleTopology")!;
         _runConfigs = this.FindControl<ComboBox>("RunConfigs")!;
         _runHint = this.FindControl<TextBlock>("RunHint")!;
 
@@ -125,6 +145,10 @@ public partial class MainWindow : Window
         _editor.TextArea.TextView.PointerMoved += OnHover;
         KeyDown += OnKeyDown;
 
+        _autoBuild = new DispatcherTimer { Interval = AutoBuildDelay };
+        _autoBuild.Tick += (_, _) => { _autoBuild!.Stop(); Build(renderPreview: false); };
+        _editor.TextChanged += (_, _) => ScheduleBuild();
+
         // Populate the explorer on launch so files are visible without Open Folder first.
         if (!TryOpenDefaultProject())
         {
@@ -138,6 +162,22 @@ public partial class MainWindow : Window
     /// A tab became current: point the editor at ITS document. Swapping the document rather than the
     /// text is what keeps undo per-file — the undo stack belongs to the document, so Ctrl+Z here can
     /// never reach into another tab's history.
+    /// Restart the quiet timer. Restarting rather than starting is the debounce: while you keep typing
+    /// the deadline keeps moving, so exactly one build happens, after you stop.
+    private void ScheduleBuild()
+    {
+        if (!_autoBuildOn || _switchingTabs || _autoBuild is null) return;
+        _autoBuild.Stop();
+        _autoBuild.Start();
+    }
+
+    private void OnToggleAutoBuild(object? sender, RoutedEventArgs e)
+    {
+        _autoBuildOn = !_autoBuildOn;
+        if (!_autoBuildOn) _autoBuild?.Stop();
+        SetStatus(_autoBuildOn ? "Compile as you type: on" : "Compile as you type: off — Ctrl+B to build");
+    }
+
     private void OnTabActivated(EditorTabs.Doc doc)
     {
         // Remember where the caret was in the tab we are leaving, so coming back lands where you were
@@ -145,9 +185,16 @@ public partial class MainWindow : Window
         if (_tabs.Docs.FirstOrDefault(d => !ReferenceEquals(d, doc) && ReferenceEquals(_editor.Document, d.Document)) is { } leaving)
             leaving.Caret = _editor.CaretOffset;
 
-        _editor.Document = doc.Document;
-        _editor.CaretOffset = Math.Clamp(doc.Caret, 0, doc.Document.TextLength);
-        _bundleInspector.IsVisible = false;   // editing a file → the IR inspector, not the bundle card
+        // Replacing the document raises TextChanged, which is not an edit. Without this guard every tab
+        // switch would also queue an auto-build of the file it just left.
+        _switchingTabs = true;
+        try
+        {
+            _editor.Document = doc.Document;
+            _editor.CaretOffset = Math.Clamp(doc.Caret, 0, doc.Document.TextLength);
+            _bundleInspector.IsVisible = false;   // editing a file → the IR inspector, not the bundle card
+        }
+        finally { _switchingTabs = false; }
 
         Build();
     }
@@ -364,6 +411,42 @@ public partial class MainWindow : Window
         _bottomPanel.SelectedIndex = TabTerminal;
         _terminal.Run(spec, cfg.Label);
         SetStatus($"Running {cfg.Display}");
+    }
+
+    /// Start every configuration the file declares, in header order, each in its own session.
+    ///
+    /// The order is the file's, and it is load-bearing: samples/control_center.vein says "start this
+    /// first" about Control because a worker launched before it gets @Undelivered instead of a relay.
+    /// The pause between launches is for the same reason — the first process needs a moment to bind its
+    /// pipe before the next one addresses it. Short enough not to feel like a wait.
+    private async void OnRunAll(object? sender, RoutedEventArgs e)
+    {
+        if (_configs.Count < 2) { OnRun(sender, e); return; }
+
+        var result = _service.Compile(new CompileRequest(
+            _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath),
+            _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath));
+        if (!result.Success)
+        {
+            _bottomPanel.SelectedIndex = TabDiagnostics;
+            SetStatus($"Run All: fix {result.Diagnostics.Count} error(s) first.");
+            return;
+        }
+
+        if (_tabs.Active is { Path: not null } doc) { File.WriteAllText(doc.Path, doc.Document.Text); _tabs.MarkSaved(doc); }
+
+        _bottomPanel.IsVisible = true;
+        _bottomPanel.SelectedIndex = TabTerminal;
+
+        for (int i = 0; i < _configs.Count; i++)
+        {
+            var cfg = _configs[i];
+            _terminal.Run(new LaunchSpec(LaunchKind.Cli, cfg.Command, cfg.Args, cfg.Env), cfg.Label);
+            SetStatus($"Started {cfg.Label} ({i + 1} of {_configs.Count})");
+            if (i < _configs.Count - 1) await Task.Delay(900);
+        }
+
+        SetStatus($"Started all {_configs.Count} participants — type into a session to drive it.");
     }
 
     private void OnStopAll(object? sender, RoutedEventArgs e)
@@ -925,7 +1008,13 @@ public partial class MainWindow : Window
 
     // ---- compile + present ---------------------------------------------
 
-    private void Build()
+    /// Compile and refresh every panel.
+    ///
+    /// `renderPreview` is false for an auto-build, and the distinction matters more than it looks:
+    /// rendering the preview RUNS the program. Doing that after every pause in typing would execute a
+    /// half-written site continuously — so the preview refreshes only when you are looking at it, or
+    /// when you asked for a build.
+    private void Build(bool renderPreview = true)
     {
         // The scope covers resolution sites too deep to take a parameter (Sig.Lookup, reached from
         // ProjectLoader and BundleModel); CompileRequest.ProjectDir covers the rest. Both, deliberately:
@@ -943,7 +1032,9 @@ public partial class MainWindow : Window
         PopulateExecution(result.Ast);
         UpdateMarks();
         RefreshRunConfigs();
-        _webPreview.Update(result.Modules, result.Ast is null ? RouteMap.Empty : RouteMap.Analyze(result.Ast));
+        if (renderPreview || _bottomPanel.SelectedIndex == TabPreview)
+            _webPreview.Update(result.Modules, result.Ast is null ? RouteMap.Empty : RouteMap.Analyze(result.Ast));
+        _consoles.Update(result.Ast is null ? null : ConsoleGraph.Analyze(result.Ast));
         if (result.Ast is not null) _symbols = SymbolIndex.Collect(result.Ast);
 
         Title = $"VeinScript Workbench — {name} — {(result.Success ? "ok" : $"{_diags.Count} error(s)")} ({result.ElapsedMs} ms)";
