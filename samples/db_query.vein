@@ -5,16 +5,16 @@
 // PostgREST there is no query language and no request body — the whole question is the query string, so
 // learning the format IS learning the API.
 //
-//   1. Put your project URL and anon key in base() and key() below.
+//   1. Put your project URL and anon key in site() and key() below.
 //   2. Two tables:
 //        create table tasks (id bigserial primary key, title text, rank int, done bool);
 //        create table comments (id bigserial primary key, task_id bigint references tasks, body text);
 //   3. veinc run samples/db_query.vein
 //
-// THE CONNECTION IS DECLARED ONCE. `bring *Vein.Rest.Db.&Connect(base(), key())` announces it, and every
+// THE CONNECTION IS DECLARED ONCE. `bring *Vein.Rest.Db.&Connect(site(), key())` announces it, and every
 // shard that cares hears @Connect and reads `c.base`/`c.key` off the event. That is the point of the
 // builder: the two values are written in one place, and a shard added later needs no argument threaded
-// to it. Nothing forces this — Db.get takes base and key directly — but a program with several query
+// to it. Nothing forces this — Db.get takes root and key directly — but a program with several query
 // shards would otherwise repeat them in each.
 //
 // FILTER VALUES HERE ARE ALL LITERALS, and that is a rule. VeinScript cannot look at a character, so it
@@ -33,7 +33,7 @@
 
 bundle DbQuery by you {
 
-    fn base() -> string { return "https://YOUR-PROJECT.supabase.co" }
+    fn site() -> string { return "https://YOUR-PROJECT.supabase.co" }
     fn key() -> string { return "PASTE-YOUR-ANON-KEY" }
 
     fn tasks() -> string { return "/rest/v1/tasks" }
@@ -83,13 +83,13 @@ bundle DbQuery by you {
         return tasks() + "?select=id,title,comments(id,body)&order=rank.asc"
     }
 
-    fn embedUrl() -> string { return base() + qEmbed() }
+    fn embedUrl() -> string { return site() + qEmbed() }
 
     // ---- announce the connection -----------------------------------------------------------------
 
     shard Boot {
         run once {
-            bring *Vein.Rest.Db.&Connect(base(), key())
+            bring *Vein.Rest.Db.&Connect(site(), key())
         }
     }
 

@@ -241,6 +241,11 @@ public enum LiteralKind { Int, Float, Percent, String, Bool }
 public sealed record LiteralExpr(object? Value, LiteralKind Kind, SourceSpan Span) : Expr(Span);
 public sealed record NameExpr(string Name, SourceSpan Span) : Expr(Span);
 public sealed record EntityExpr(SourceSpan Span) : Expr(Span);                          // Entity — nearest entity's id
+
+// `base` in a `bring` argument list: "use this parameter's declared default". Positional binding has no
+// named arguments, so reaching a late parameter otherwise means retyping every value before it — this is
+// the placeholder that says "whatever the declaration said" without repeating it.
+public sealed record DefaultArgExpr(SourceSpan Span) : Expr(Span);
 public sealed record LoopIndexExpr(SourceSpan Span) : Expr(Span);                       // Index — nearest loop's 0-based counter
 
 /// The sigil of the final member of a `*` qualified path.

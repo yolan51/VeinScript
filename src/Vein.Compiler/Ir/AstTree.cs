@@ -233,6 +233,7 @@ public sealed class AstTree
                     _ => ("Str", Quote(l.Value as string ?? ""), New())
                 };
             case NameExpr n: return ("Ref", n.Name, New());
+            case DefaultArgExpr: return ("Ref", "base", New());
             case EntityExpr: return ("Ref", "Entity", New());
             case LoopIndexExpr: return ("Ref", "Index", New());
             case StarRefExpr sr: return ("Ref", AstPrinter.StarText(sr), New());

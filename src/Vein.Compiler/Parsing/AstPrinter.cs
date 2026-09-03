@@ -182,6 +182,7 @@ public static class AstPrinter
     {
         LiteralExpr l => l.Kind == LiteralKind.String ? $"\"{l.Value}\"" : $"{l.Value}",
         NameExpr n => n.Name,
+        DefaultArgExpr => "base",
         EntityExpr => "Entity",
         StarRefExpr sr => StarText(sr),
         ShapeRefExpr sr => $"${sr.Name}",

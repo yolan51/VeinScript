@@ -191,6 +191,74 @@ public class DiagnosticsTests
         Assert.DoesNotContain(d, x => x.Code == "VS0228");
     }
 
+    // ---- `base` — "the value this parameter's declaration gave it" ---------------------------------
+
+    [Fact]
+    public void base_takes_the_declared_default_for_that_slot()
+    {
+        // Why it exists: binding is positional with no named arguments, so reaching `accent` meant
+        // retyping `body` — copying a declared default into a call site, where it can drift from the
+        // declaration it came from.
+        var output = Run(
+            "  shape $C { title: string, body: string = \"(none)\" }\n" +
+            "  shape $S { cls: string = \"panel\", accent: string = \"#00f\" }\n  mark #P\n" +
+            "  builder P { $C $S   mark #P }\n" +
+            "  shard S { run once { bring P(\"Danger\", base, \"warn\", \"#f00\") } }\n" +
+            "  shard R { settled { target $C #P as p {\n" +
+            "    " + P("\"body=[\" + p.C.body + \"]\"") + " } } }");
+
+        Assert.Contains("body=[(none)]", output);
+    }
+
+    [Fact]
+    public void base_fills_a_slot_and_does_not_skip_one()
+    {
+        // The distinction that keeps it honest: `base` is an ARGUMENT, so the count still has to match.
+        // Three params, two arguments — one of them `base` — is still two arguments.
+        var d = Diagnose(
+            "  shape $C { a: string, b: string = \"-\", c: string }\n  mark #P\n" +
+            "  builder P { $C   mark #P }\n" +
+            "  shard S { run once { bring P(\"x\", base) } }");
+
+        Assert.Contains(d, x => x.Code == "VS0228");
+    }
+
+    [Fact]
+    public void base_on_a_parameter_with_no_default_is_VS0231()
+    {
+        // `base` is a claim about the DECLARATION — that there is a default to take. When there is not,
+        // the author has the wrong picture of the signature, so it says so instead of quietly zeroing.
+        var d = Diagnose(RowDecl + "  shard S { run once { bring Row(\"t\", base) } }");
+
+        var hit = Assert.Single(d, x => x.Code == "VS0231");
+        Assert.Contains("'rank' has no default", hit.Message);
+    }
+
+    [Fact]
+    public void base_is_a_bring_argument_and_nothing_else()
+    {
+        // There is nothing it could evaluate to elsewhere: what it means is decided by the parameter it
+        // lands on, and outside an argument list there is no parameter.
+        var d = Diagnose("  shard S { run once { let x = base } }");
+
+        Assert.Contains(d, x => x.Severity == Vein.Compiler.Diagnostics.Severity.Error);
+    }
+
+    [Fact]
+    public void base_is_still_legal_as_a_field_and_member_name()
+    {
+        // It is a keyword in EXPRESSION position only — the same treatment `from`, `count` and `to`
+        // get. stdlib/Rest.vein's `$Connection { base: string }` depends on this, and so does every
+        // program that reads `c.Connection.base`.
+        var output = Run(
+            "  shape $Conn { base: string, key: string }\n  mark #C\n" +
+            "  builder Conn { $Conn   mark #C }\n" +
+            "  shard S { run once { bring Conn(\"https://x.test\", \"k\") } }\n" +
+            "  shard R { settled { target $Conn #C as c { " + P("\"base=\" + c.Conn.base") + " } } }");
+
+        Assert.Contains("base=https://x.test", output);
+    }
+
     [Fact]
     public void A_default_in_the_MIDDLE_is_still_a_required_slot()
     {
@@ -419,8 +487,8 @@ public class DiagnosticsTests
         Assert.Contains("(no description yet)", output);
         Assert.Contains("class=panel  accent=#4444aa  padded=true", output);
 
-        // The full form overrides every one of them.
-        Assert.Contains("class=panel muted  accent=#888888  padded=false  col=1", output);
+        // The `base` form: padded/col are given, and body/class/accent keep their declared values.
+        Assert.Contains("class=panel  accent=#4444aa  padded=false  col=1", output);
 
         // `?` honours a default where there is one and zeroes only what has none — this is the line
         // that corrected the sample: it was written claiming `?` ignores defaults, and it does not.

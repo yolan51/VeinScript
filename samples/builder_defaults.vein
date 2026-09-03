@@ -18,6 +18,20 @@
 // defaults rather than find the last required slot, so it missed exactly this case until this file
 // caught it. Order your includes so everything optional ends up last.
 //
+// `base` IS HOW YOU REACH PAST ONE. Positional binding with no named arguments means a late parameter
+// can only be reached by filling every slot in front of it, and before `base` that meant copying the
+// declared defaults out by hand — the same value in two places, free to drift. `base` in an argument
+// position means "whatever the declaration said for this one":
+//
+//     bring Panel("Danger", base, "panel warn", "#aa4444")
+//
+// It fills a slot; it does not skip one. The commas stay, and the argument count still has to match.
+// On a parameter that has NO default it is VS0231 and a typed zero — `base` is a claim that a default
+// exists, and when it does not, the author is holding a wrong picture of the signature.
+//
+// `base` stays legal as a FIELD name (`shape S { base: string }`, `c.S.base`), like `from`, `count` and
+// `to` — only a bare `base` in expression position is the keyword.
+//
 // TWO WAYS TO SAY "FEWER ON PURPOSE", and they compose rather than compete:
 //
 //     a default        `body: string = "(none)"`      the DECLARATION supplies a value, once, for
@@ -79,14 +93,23 @@ bundle BuilderDefaults by you {
             // 2. Two: override the body, keep the styling and layout.
             bring Panel("Install", "Run veinc new, then veinc run.")
 
-            // 3. Down to `accent`. Everything up to it must be given, because binding is positional —
-            //    `body` and `class` are repeated here not because they changed, but because `accent`
-            //    cannot be reached without passing them. That is the cost of no named arguments, and
-            //    it is why the trailing-defaults layout above matters.
-            bring Panel("Danger", "This deletes the table.", "panel warn", "#aa4444")
+            // 3. Down to `accent`. Binding is positional, so every slot before it must be filled — but
+            //    `base` fills one with whatever the declaration said, instead of you retyping it. Read
+            //    it as "the usual value here":
+            bring Panel("Danger", base, "panel warn", "#aa4444")
 
-            // 4. All seven. Nothing is defaulted, and it reads as the full form the others abbreviate.
-            bring Panel("Footer", "MIT licensed.", "panel muted", "#888888", false, 1, 9)
+            //    Without `base` that line is the same call with the default copied out by hand, which
+            //    is a value that now exists in two places and can drift:
+            //
+            //        bring Panel("Danger", "(no description yet)", "panel warn", "#aa4444")
+            //
+            //    `base` is the answer to "I only want to change the LAST argument". It is not a way to
+            //    skip a slot — the comma is still there, and the count still has to match.
+
+            // 4. All seven, with `base` for the three that keep their declared value. This is the line
+            //    that motivated the keyword: reaching `column` and `order` used to mean retyping the
+            //    body, the class and the accent, none of which were changing.
+            bring Panel("Footer", base, base, base, false, 1, 9)
         }
     }
 

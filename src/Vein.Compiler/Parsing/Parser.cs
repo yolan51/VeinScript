@@ -913,7 +913,14 @@ public sealed class Parser
                 while (true)
                 {
                     if (Match(TokenKind.Question)) { fill = true; break; }
-                    args.Add(ParseExpr());
+
+                    // `base` is admitted HERE and nowhere else. It is not a value — there is nothing it
+                    // could evaluate to outside an argument list, because what it means is decided by
+                    // the parameter it lands on. Parsing it as an ordinary expression would let it
+                    // appear in `let x = def`, where no parameter exists to take a default from.
+                    if (Check(TokenKind.KwBase)) { args.Add(new DefaultArgExpr(Here)); Advance(); }
+                    else args.Add(ParseExpr());
+
                     if (!Match(TokenKind.Comma)) break;
                 }
             Expect(TokenKind.RParen, "')'");

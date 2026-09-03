@@ -473,6 +473,40 @@ public sealed class Lower
     /// `add(1, 2, 3, 4)` returned 3 (the extras ignored), `add(1)` returned 1 (the missing `b` read as
     /// nothing), and `add()` returned 0. Every one of those is a plausible-looking number.
     ///
+    /// What actually lands in one parameter slot, from the five things that can decide it.
+    ///
+    /// Binding is POSITIONAL and there are no named arguments, so reaching a late parameter meant
+    /// retyping every value in front of it — `bring Panel("Danger", "This deletes the table.",
+    /// "panel warn", "#aa4444")` repeats a body and a class that were not changing, purely to arrive at
+    /// `accent`. `base` is the placeholder for that: "whatever the declaration said", written once per
+    /// slot instead of copied.
+    ///
+    ///   `base` with a default      the declared default
+    ///   `base` without one        a typed zero, and VS0231 — the author expected a default to exist
+    ///   an ordinary expression   itself
+    ///   nothing, with a default  the declared default (the trailing-defaults case)
+    ///   nothing, with `?`        a typed zero
+    private IrExpr BindArg(Expr? arg, Expr? paramDefault, TypeRef? type, bool fillRest,
+                           string owner, string param)
+    {
+        if (arg is DefaultArgExpr d)
+        {
+            if (paramDefault is not null) return LowerExpr(paramDefault);
+
+            // Not silently a zero. `base` is a claim about the DECLARATION — that there is a default to
+            // take — and when there is not, the author is holding a wrong picture of the signature.
+            _diag.Warning("VS0231",
+                $"'{owner}' parameter '{param}' has no default, so `base` fills it with a typed zero. " +
+                "Give the field a default in its shape, or pass a value.", d.Span);
+            return ZeroLiteral(type?.Name ?? "string");
+        }
+
+        if (arg is not null) return LowerExpr(arg);
+        if (paramDefault is not null) return LowerExpr(paramDefault);
+        if (fillRest) return ZeroLiteral(type?.Name ?? "string");
+        return new IrLiteral(null, IrLiteralKind.Int);
+    }
+
     /// A LITERAL argument against the type its parameter declares.
     ///
     /// Deliberately literals only, and deliberately not a type checker. `IrExpr.ResolvedType` is never
@@ -976,10 +1010,8 @@ public sealed class Lower
                     var init = new List<(string, IrExpr)>();
                     foreach (var f in take)
                     {
-                        IrExpr value = arg < br.Args.Count ? LowerExpr(br.Args[arg])
-                                     : f.Default is not null ? LowerExpr(f.Default)
-                                     : br.FillRest ? ZeroLiteral(f.Type?.Name ?? "string")
-                                     : new IrLiteral(null, IrLiteralKind.Int);
+                        IrExpr value = BindArg(arg < br.Args.Count ? br.Args[arg] : null,
+                                               f.Default, f.Type, br.FillRest, b.Name, f.Name);
                         arg++;
                         init.Add((f.Name, value));
                     }
@@ -1164,10 +1196,8 @@ public sealed class Lower
         for (int i = 0; i < prms.Count; i++)
         {
             var (name, type, def, _) = prms[i];
-            IrExpr value = i < br.Args.Count ? LowerExpr(br.Args[i])
-                         : def is not null ? LowerExpr(def)
-                         : br.FillRest ? ZeroLiteral(type?.Name ?? "string")
-                         : new IrLiteral(null, IrLiteralKind.Int);
+            IrExpr value = BindArg(i < br.Args.Count ? br.Args[i] : null, def, type,
+                                   br.FillRest, b.Name, name);
             stmts.Add(new IrLet(name, null, value, false));
         }
 
@@ -1296,6 +1326,15 @@ public sealed class Lower
             case UnaryExpr u: return new IrUnary(u.Op == UnOp.Neg ? IrUnOp.Neg : IrUnOp.Not, LowerExpr(u.Operand));
             case StructLitExpr sl: return new IrStructInit(sl.TypeName, sl.Fields.Select(LowerFieldInit).ToList());
             case ListLitExpr ll: return new IrList(ll.Items.Select(LowerExpr).ToList());
+            // Only reachable if `base` escaped a bring argument list — the one place the parser admits
+            // it. Worth its own message rather than "cannot lower DefaultArgExpr", because the fix is
+            // about where it was written, not about what it is.
+            case DefaultArgExpr:
+                _diag.Error("VS0232",
+                    "`base` means \"this parameter's declared default\", so it only has a meaning as a " +
+                    "`bring` argument. There is no parameter here for it to take a default from.", e.Span);
+                return new IrLiteral(null, IrLiteralKind.Int);
+
             default:
                 _diag.Error("VS0202", $"Cannot lower expression {e.GetType().Name}.", e.Span);
                 return new IrLiteral(null, IrLiteralKind.Int);

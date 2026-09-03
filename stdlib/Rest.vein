@@ -140,18 +140,24 @@ bundle Rest by Vein {
         shared("Announce a connection: bring Connect(\"https://xyz.supabase.co\", \"anon-key\") — hear *Vein.Rest.Db.@Connect in your own shard(s) to react, or skip bring and call get/post directly with the same two values.")
         builder Connect { $Connection }
 
+        // THE PARAMETER IS `root`, NOT `base`, and the shape's field above still is `base`. Both are
+        // right: `base` is a keyword only in EXPRESSION position (`bring X(base)` = "the declared
+        // default"), and it stays legal as a field or member name — `$Connection { base: … }` and
+        // `c.Connection.base` are unaffected. A `SF` parameter is different because its BODY reads the
+        // name bare: `url: base + path` would parse `base` as the keyword. So the public surface keeps
+        // the good name and only the local binding moves.
         shared("GET base+path, with the paired apikey/bearer headers built from key.")
-        SF get(base: string, key: string, path: string) {
-            emit *Vein.Net.Http.@Fetch { url: base + path, method: "GET", body: "", headers: *Vein.Rest.Auth.keyed("apikey", key) }
+        SF get(root: string, key: string, path: string) {
+            emit *Vein.Net.Http.@Fetch { url: root + path, method: "GET", body: "", headers: *Vein.Rest.Auth.keyed("apikey", key) }
         }
 
         // `Prefer: return=representation` makes an insert answer with the row(s) it wrote, including
         // whatever the service generated (an id, a default, a computed column). Without it PostgREST
         // answers 201 with an empty body, and a caller reading the reply for the new id finds nothing.
         shared("POST a JSON body to base+path — paired auth headers, plus Prefer: return=representation.")
-        SF post(base: string, key: string, path: string, body: string) {
+        SF post(root: string, key: string, path: string, body: string) {
             emit *Vein.Net.Http.@Fetch {
-                url: base + path, method: "POST", body: body,
+                url: root + path, method: "POST", body: body,
                 headers: *Vein.Rest.Headers.also(*Vein.Rest.Auth.keyed("apikey", key), "Prefer", "return=representation")
             }
         }
