@@ -29,8 +29,11 @@ public partial class MainWindow : Window
     private readonly VeinCompilerService _service = new();
     private readonly DiagnosticRenderer _marker = new();
     private IReadOnlyList<Diagnostic> _diags = Array.Empty<Diagnostic>();
-    private string? _currentPath;
     private string? _rootFolder;
+
+    /// The file being edited — now DERIVED from the active tab rather than stored, so the two can never
+    /// disagree. They did not disagree before only because there was exactly one file.
+    private string? _currentPath => _tabs?.Active?.Path;
 
     /// Anchors cross-bundle resolution: the open file's folder, else the project root. Without it the
     /// compiler walks up from the Workbench's own bin/ directory and can only ever find the stdlib —
@@ -61,6 +64,20 @@ public partial class MainWindow : Window
     private TextBlock _statusBar = null!;
     private Border _bundleInspector = null!;
     private Terminal.TerminalPanel _terminal = null!;
+    private EditorTabs _tabs = null!;
+    private WebPreviewPanel _webPreview = null!;
+
+    // Bottom-panel tabs, by name. They were bare indices until inserting Preview silently moved
+    // Terminal from 5 to 6 — a magic number that points at the wrong tab is exactly the bug that
+    // does not announce itself.
+    private const int TabDiagnostics = 0;
+    private const int TabRawIr = 1;
+    private const int TabOutput = 2;
+    private const int TabDependencies = 3;
+    private const int TabExecution = 4;
+    private const int TabPreview = 5;
+    private const int TabTerminal = 6;
+
     private ComboBox _runConfigs = null!;
     private TextBlock _runHint = null!;
 
@@ -83,12 +100,18 @@ public partial class MainWindow : Window
         _statusBar = this.FindControl<TextBlock>("StatusBar")!;
         _bundleInspector = this.FindControl<Border>("BundleInspector")!;
         _terminal = this.FindControl<Terminal.TerminalPanel>("TerminalPanel")!;
+        _tabs = this.FindControl<EditorTabs>("FileTabs")!;
+        _webPreview = this.FindControl<WebPreviewPanel>("WebPreview")!;
         _runConfigs = this.FindControl<ComboBox>("RunConfigs")!;
         _runHint = this.FindControl<TextBlock>("RunHint")!;
 
         _terminal.RepoRoot = FindRepoRoot();
         _terminal.Resolve = ResolveVeinFile;
         Closed += (_, _) => _terminal.StopAll();   // no console outlives the IDE that opened it
+
+        _tabs.Activated += OnTabActivated;
+        _tabs.ConfirmClose = ConfirmDiscardAsync;
+        Closing += OnClosing;
 
         LoadHighlighting();
         _editor.TextArea.TextView.BackgroundRenderers.Add(_marker);
@@ -99,9 +122,67 @@ public partial class MainWindow : Window
         // Populate the explorer on launch so files are visible without Open Folder first.
         if (!TryOpenDefaultProject())
         {
-            _editor.Text = Sample;
+            _tabs.Open(null, Sample);
             Build();
         }
+    }
+
+    // ---- open files ------------------------------------------------------
+
+    /// A tab became current: point the editor at ITS document. Swapping the document rather than the
+    /// text is what keeps undo per-file — the undo stack belongs to the document, so Ctrl+Z here can
+    /// never reach into another tab's history.
+    private void OnTabActivated(EditorTabs.Doc doc)
+    {
+        // Remember where the caret was in the tab we are leaving, so coming back lands where you were
+        // rather than at the top of the file.
+        if (_tabs.Docs.FirstOrDefault(d => !ReferenceEquals(d, doc) && ReferenceEquals(_editor.Document, d.Document)) is { } leaving)
+            leaving.Caret = _editor.CaretOffset;
+
+        _editor.Document = doc.Document;
+        _editor.CaretOffset = Math.Clamp(doc.Caret, 0, doc.Document.TextLength);
+        _bundleInspector.IsVisible = false;   // editing a file → the IR inspector, not the bundle card
+
+        Build();
+    }
+
+    /// Asked before a tab with unsaved edits closes. Save actually saves — an editor that offers only
+    /// "lose it or keep it open" makes you close twice for no reason.
+    private async Task<bool> ConfirmDiscardAsync(EditorTabs.Doc doc)
+    {
+        var choice = await ConfirmDialog.AskAsync(this, "Unsaved changes",
+            $"{doc.Name} has unsaved changes.", "Save");
+
+        if (choice == SaveChoice.Cancel) return false;
+        if (choice == SaveChoice.Discard) return true;
+
+        await SaveDocAsync(doc);
+        return !doc.Dirty;   // a cancelled Save As leaves it dirty, and must not then close
+    }
+
+    /// Closing the window with unsaved work in ANY tab. Cancel the close, ask once, then close for real
+    /// — the second Close must not re-enter this, hence the flag.
+    private bool _closing;
+    private async void OnClosing(object? sender, WindowClosingEventArgs e)
+    {
+        if (_closing) return;
+        var dirty = _tabs.DirtyDocs.ToList();
+        if (dirty.Count == 0) return;
+
+        e.Cancel = true;
+
+        string names = string.Join(", ", dirty.Select(d => d.Name));
+        var choice = await ConfirmDialog.AskAsync(this, "Unsaved changes",
+            dirty.Count == 1
+                ? $"{names} has unsaved changes."
+                : $"{dirty.Count} files have unsaved changes: {names}.",
+            dirty.Count == 1 ? "Save" : "Save All");
+
+        if (choice == SaveChoice.Cancel) return;
+        if (choice == SaveChoice.Save) foreach (var d in dirty) await SaveDocAsync(d);
+
+        _closing = true;
+        Close();
     }
 
     private bool TryOpenDefaultProject()
@@ -159,21 +240,23 @@ public partial class MainWindow : Window
         bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         switch (e.Key)
         {
-            case Key.B when shift: Build(); _bottomPanel.SelectedIndex = 1; e.Handled = true; break;
+            case Key.B when shift: Build(); _bottomPanel.SelectedIndex = TabRawIr; e.Handled = true; break;
             case Key.B: Build(); e.Handled = true; break;
             case Key.S when shift: _ = SaveAsAsync(); e.Handled = true; break;
             case Key.S: _ = SaveAsync(); e.Handled = true; break;
             case Key.O: _ = OpenAsync(); e.Handled = true; break;
+            case Key.W: OnCloseTab(sender, e); e.Handled = true; break;
             case Key.K: _ = OpenFolderAsync(); e.Handled = true; break;
         }
     }
 
     // File
-    private void OnNew(object? sender, RoutedEventArgs e) { _currentPath = null; _editor.Text = ""; Build(); }
+    private void OnNew(object? sender, RoutedEventArgs e) { _tabs.Open(null, ""); Build(); }
+    private void OnCloseTab(object? sender, RoutedEventArgs e) { if (_tabs.Active is { } d) _ = _tabs.CloseAsync(d); }
     private void OnNewBundle(object? sender, RoutedEventArgs e) => _ = NewProjectAsync(app: false);
     private void OnNewApp(object? sender, RoutedEventArgs e) => _ = NewProjectAsync(app: true);
     private void OnBuild(object? sender, RoutedEventArgs e) => Build();
-    private void OnBuildInspect(object? sender, RoutedEventArgs e) { Build(); _bottomPanel.SelectedIndex = 1; }
+    private void OnBuildInspect(object? sender, RoutedEventArgs e) { Build(); _bottomPanel.SelectedIndex = TabRawIr; }
     private void OnOpen(object? sender, RoutedEventArgs e) => _ = OpenAsync();
     private void OnOpenFolder(object? sender, RoutedEventArgs e) => _ = OpenFolderAsync();
     private void OnSave(object? sender, RoutedEventArgs e) => _ = SaveAsync();
@@ -220,7 +303,7 @@ public partial class MainWindow : Window
             _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath));
         if (!result.Success)
         {
-            _bottomPanel.SelectedIndex = 0;   // Diagnostics
+            _bottomPanel.SelectedIndex = TabDiagnostics;
             SetStatus($"Run: fix {result.Diagnostics.Count} error(s) first.");
             return;
         }
@@ -231,12 +314,14 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (_currentPath is not null) File.WriteAllText(_currentPath, _editor.Text);   // run what is on screen
+        // Run what is on screen, and mark the tab saved — writing the file while leaving the dot
+        // showing would claim there is still something unsaved.
+        if (_tabs.Active is { Path: not null } active) { File.WriteAllText(active.Path, active.Document.Text); _tabs.MarkSaved(active); }
 
         var cfg = _configs[Math.Max(0, Math.Min(_runConfigs.SelectedIndex, _configs.Count - 1))];
         var spec = new LaunchSpec(LaunchKind.Cli, cfg.Command, cfg.Args, cfg.Env);
 
-        _bottomPanel.SelectedIndex = 5;   // Terminal
+        _bottomPanel.SelectedIndex = TabTerminal;
         _terminal.Run(spec, cfg.Label);
         SetStatus($"Running {cfg.Display}");
     }
@@ -252,7 +337,7 @@ public partial class MainWindow : Window
     private void OnFocusTerminal(object? sender, RoutedEventArgs e)
     {
         _bottomPanel.IsVisible = true;
-        _bottomPanel.SelectedIndex = 5;
+        _bottomPanel.SelectedIndex = TabTerminal;
         _terminal.FocusPrompt();
     }
 
@@ -293,7 +378,7 @@ public partial class MainWindow : Window
         var result = _service.Compile(new CompileRequest(name, _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath));
         if (!result.Success)
         {
-            _bottomPanel.SelectedIndex = 0;   // Diagnostics
+            _bottomPanel.SelectedIndex = TabDiagnostics;
             SetStatus($"Run: fix {result.Diagnostics.Count} error(s) first.");
             return;
         }
@@ -303,7 +388,7 @@ public partial class MainWindow : Window
         {
             try
             {
-                await File.WriteAllTextAsync(_currentPath, _editor.Text);   // run the current content
+                if (_tabs.Active is { Path: not null } cur) { await File.WriteAllTextAsync(cur.Path, cur.Document.Text); _tabs.MarkSaved(cur); }
 
                 // The selected configuration, not a bare `run` — an external window that ignored
                 // `--ticks` or VEIN_CONSOLE would disagree with what ▶ next to it just did.
@@ -344,7 +429,7 @@ public partial class MainWindow : Window
         finally { ConsoleLauncher.Hook = prevHook; }
 
         _runOutput.Text = sb.ToString();
-        _bottomPanel.SelectedIndex = 2;   // Output
+        _bottomPanel.SelectedIndex = TabOutput;
         SetStatus($"Ran {name} in-process (save it to open real console windows).");
     }
 
@@ -391,9 +476,9 @@ public partial class MainWindow : Window
 
     private async Task OpenPathAsync(string path)
     {
-        _currentPath = path;
-        _bundleInspector.IsVisible = false;   // editing a file → show the IR inspector, not the bundle card
-        _editor.Text = await File.ReadAllTextAsync(path);
+        // Open reuses a tab that already holds this file, so double-clicking the explorer twice cannot
+        // produce two views of one file that then disagree about its contents.
+        _tabs.Open(path, await File.ReadAllTextAsync(path));
         _rootFolder ??= Path.GetDirectoryName(path);
         if (_rootFolder is not null) PopulateProjectTree(_rootFolder);
         Build();
@@ -450,27 +535,51 @@ public partial class MainWindow : Window
 
     private async Task SaveAsync()
     {
-        if (_currentPath is null) { await SaveAsAsync(); return; }
-        await File.WriteAllTextAsync(_currentPath, _editor.Text);
-        if (_rootFolder is not null) PopulateProjectTree(_rootFolder);
-        Build();
+        if (_tabs.Active is { } doc) await SaveDocAsync(doc);
     }
 
-    private async Task SaveAsAsync()
+    /// Write one document, whichever tab it is in. Taking the doc rather than reading the editor is what
+    /// lets Save All on close write a background tab — the editor only ever shows one of them.
+    private async Task SaveDocAsync(EditorTabs.Doc doc)
     {
+        if (doc.Path is null) { await SaveAsAsync(doc); return; }
+
+        try
+        {
+            await File.WriteAllTextAsync(doc.Path, doc.Document.Text);
+            _tabs.MarkSaved(doc);
+            if (_rootFolder is not null) PopulateProjectTree(_rootFolder);
+            if (ReferenceEquals(doc, _tabs.Active)) Build();
+            SetStatus($"Saved {doc.Name}");
+        }
+        catch (Exception ex) { SetStatus($"Save failed: {ex.Message}"); }
+    }
+
+    private async Task SaveAsAsync(EditorTabs.Doc? target = null)
+    {
+        var doc = target ?? _tabs.Active;
+        if (doc is null) return;
+
         var top = TopLevel.GetTopLevel(this);
         if (top is null) return;
         var file = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
-            SuggestedFileName = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath),
+            SuggestedFileName = doc.Name,
             DefaultExtension = "vein"
         });
-        if (file is null) return;
-        _currentPath = file.Path.LocalPath;
-        await File.WriteAllTextAsync(_currentPath, _editor.Text);
-        _rootFolder ??= Path.GetDirectoryName(_currentPath);
-        if (_rootFolder is not null) PopulateProjectTree(_rootFolder);
-        Build();
+        if (file is null) return;   // cancelled — the document stays dirty and unnamed, which is correct
+
+        string path = file.Path.LocalPath;
+        try
+        {
+            await File.WriteAllTextAsync(path, doc.Document.Text);
+            _tabs.MarkSaved(doc, path);
+            _rootFolder ??= Path.GetDirectoryName(path);
+            if (_rootFolder is not null) PopulateProjectTree(_rootFolder);
+            if (ReferenceEquals(doc, _tabs.Active)) Build();
+            SetStatus($"Saved {doc.Name}");
+        }
+        catch (Exception ex) { SetStatus($"Save failed: {ex.Message}"); }
     }
 
     // ---- project explorer ----------------------------------------------
@@ -794,6 +903,7 @@ public partial class MainWindow : Window
         PopulateExecution(result.Ast);
         UpdateMarks();
         RefreshRunConfigs();
+        _webPreview.Update(result.Modules, result.Ast is null ? RouteMap.Empty : RouteMap.Analyze(result.Ast));
         if (result.Ast is not null) _symbols = SymbolIndex.Collect(result.Ast);
 
         Title = $"VeinScript Workbench — {name} — {(result.Success ? "ok" : $"{_diags.Count} error(s)")} ({result.ElapsedMs} ms)";

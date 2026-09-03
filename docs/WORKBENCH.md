@@ -22,20 +22,32 @@ Open a `.vein` file (`Ctrl+O`) or a folder (`Ctrl+K`), edit, Build (`Ctrl+B`), R
 ┌ [VS] File Edit Build Run View Help ────────────────────────────────────────┐
 │ [VS] ▶ ■ [ run --ticks 4          ▾ ]                                      │
 ├──────────────┬─────────────────────────────┬───────────────────────────────┤
-│ Project      │  VeinScript editor          │  Inspector — IR Tree          │
-│ Explorer     │  (highlight · line# ·       │  (structured VeinIR)          │
-│ (semantic or │   red error underlines ·    │                               │
-│  file tree)  │   completion · hover)       │                               │
+│ Project      │ ●server.vein │ alice.vein ✕ │  Inspector — IR Tree          │
+│ Explorer     ├─────────────────────────────┤  (structured VeinIR)          │
+│ (semantic or │  VeinScript editor          │                               │
+│  file tree)  │  (highlight · line# ·       │                               │
+│              │   red underlines ·          │                               │
+│              │   completion · hover)       │                               │
 ├──────────────┴─────────────────────────────┴───────────────────────────────┤
-│ Diagnostics │ Raw IR │ Output │ Dependencies │ Execution │ Terminal         │
+│ Diagnostics │ Raw IR │ Output │ Dependencies │ Execution │ Preview │ Terminal│
 ├────────────────────────────────────────────────────────────────────────────┤
 │ Status bar (build result / what is running)                                │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
+The `●` on a tab is the dirty marker — present or absent, in the same place, so a glance says what
+would be lost. Closing a dirty tab, or the window, asks first, with **three** answers: Save, Discard,
+Cancel. "Don't close" and "close and lose it" are different, and collapsing them is how editors lose
+people's work.
+
 ## What works today
 
 Read this as the baseline the roadmap is measured against.
+
+**Open files** — several at once, one tab each. Every tab owns its own AvaloniaEdit `TextDocument` and
+the window swaps `Editor.Document` on switch, which is what makes **undo per-file**: the undo stack
+lives on the document, so `Ctrl+Z` in one tab cannot eat an edit made in another. The caret position is
+remembered per tab. Opening a file already open focuses its tab rather than making a second view of it.
 
 **Editing** — AvaloniaEdit with VeinScript highlighting (`Assets/VeinScript.xshd`, keyword list
 mirroring `Lexing/Lexer.cs`), line numbers, and red underlines on every diagnostic span
@@ -57,6 +69,8 @@ PUBLIC/SHARED/PRIVATE bar (`Tooling/BundleModel.cs`).
 - **Execution** — the derived execution model: one badged row per trigger block, the class
   distribution, scheduling totals, conflicts and emit cycles (`Tooling/ExecutionModel.cs`). Nothing
   here runs the program.
+- **Preview** — for a bundle that hears `@Request`: pick a route, see the markup it answers with, and
+  Open in Browser. See below.
 - **Terminal** — see below.
 
 **Running** — ▶ runs the configuration the **file itself declares in its header**. 49 of the 63 samples
@@ -78,6 +92,23 @@ launches of one file talking to each other, and a single-pane terminal would mak
 
 **Run ▸ In External Console** (`Shift+F5`) still launches a real OS console window, which is the better
 way to *demo* a multi-console sample and the only way `bring Console` opens real windows.
+
+**Preview** — a VeinScript site declares no route table: routing IS `if r.path == "/about"` inside a
+`hear @Request` block. `Tooling/RouteMap.cs` recovers the list of routes by reading those conditions,
+so the Preview tab can offer one entry per route. Selecting one calls `Interp.Render(module, path)` —
+the same one-shot pipeline `veinc render` uses, with no socket and no `serve` — and shows the markup
+it answered with, plus its status and size. **Open in Browser** writes it to a temp file and hands it
+to the real browser.
+
+Two things the route map is careful about, both visible in the status line: a handler that routes on
+something not statically readable is *counted*, never guessed at (a guessed route would open a page
+the site does not serve and be believed), and two shards claiming one path are flagged — whichever
+runs last wins the `@Response`, which is a confusing bug at runtime and an obvious one on paper.
+
+There is no embedded browser. Avalonia ships no WebView, and embedding Chromium to read a page is a
+large dependency for a small IDE; the real browser is a better renderer than anything that could be
+embedded here. The markup view earns its place regardless — what `&Open`/`&Close` assembled is the
+question a `Vein.Web` author actually has.
 
 ---
 
@@ -129,12 +160,14 @@ socket involved (`Vein.Cli/Program.cs`, `case "render"`), so a preview pane is a
 
 | # | Item | Done bar |
 |---|---|---|
-| C1 | **Preview pane** | See `/` rendered beside the source, refreshed on Build |
-| C2 | **Route picker** | Switch the preview between `/`, `/about`, `/contact` from a dropdown built from the bundle's `@Request` handlers |
-| C3 | **Rendered-HTML tab** | Read the actual markup `veinc render` produced, to see what `&Open`/`&Close` assembled |
+| C1 | ✅ **Preview, refreshed on Build** | See what `/` answers beside the source, without starting a server |
+| C2 | ✅ **Route picker** | Switch the preview between `/`, `/about`, `/greet` from a dropdown built from the bundle's own conditions |
+| C3 | ✅ **The markup itself** | Read what `&Open`/`&Close` assembled |
+| C6 | ✅ **Route map + conflict warning** | Be told when two shards claim `/`, before finding out at runtime |
+| C1b | **Embedded rendered view** | See the *page*, not its markup, without leaving the IDE — needs a WebView dependency, deliberately not added yet |
 | C4 | **Serve with one click** | ▶ starts `serve --port 8080` and the status bar links to it |
 | C5 | **Live reload** | Save the file, and the running `serve` and the preview both update |
-| C6 | **Route map** | Every `@Request` path in the bundle, with the shard that answers it, and a warning for two shards claiming one path |
+| C11 | **Route navigation** | Click a route in the picker and jump to the `if` that answers it — `Route.Span` is already recorded |
 | C7 | **Element completion** | `&` completes the `Vein.Web.Elements` builders with their parameter names |
 | C8 | **Theme preview** | See `stdlib/WebTheme.vein`'s classes applied, so `&Code` and `&Button` are picked by sight |
 | C9 | **Response inspector** | Status and headers for a rendered route, not only its body |
@@ -148,8 +181,8 @@ chat app of three files or a site of five shards means constant reopening.
 
 | # | Item | Done bar |
 |---|---|---|
-| D1 | **Open-file tabs** | Have `server.vein`, `alice.vein` and `bob.vein` open at once |
-| D2 | **Dirty marker + save prompt** | Close with unsaved edits and be asked, not silently lose them |
+| D1 | ✅ **Open-file tabs** | Have `server.vein`, `alice.vein` and `bob.vein` open at once, with per-file undo |
+| D2 | ✅ **Dirty marker + save prompt** | Close with unsaved edits and be asked, not silently lose them |
 | D3 | **Find & replace** (`Ctrl+F` / `Ctrl+H`) | Rename a local in one file without leaving the editor |
 | D4 | **Go to line** (`Ctrl+G`) | Jump to `:142` from a stack trace |
 | D5 | **Comment toggle** (`Ctrl+/`) | Comment a block of shard body |
@@ -198,9 +231,14 @@ is next", it is "what does this identity look like now, and what changed it".
 
 ## Suggested order
 
-**D1 + D2** first — one open file is the tightest constraint in daily use, and every other track pays
-for it. Then **C1** (preview pane; small, high visibility, unblocks the website workload), then **E1**
-(compile as you type), then **B3/B4** (the chat workload's two obvious gaps), then A3–A5.
+Done so far: **A1 A2** (run what the file declares, terminal with stdin) · **B1 B2** (concurrent
+sessions, per-participant environment) · **C1 C2 C3 C6** (preview, routes, markup, conflicts) ·
+**D1 D2** (tabs, dirty marker).
+
+Next, in order: **D3–D6** (find, go-to-line, comment toggle, auto-indent — small, constant use), then
+**E1** (compile as you type), then **B3 + B4** (Run All Participants, and the console topology view
+`ConsoleGraph` can already draw), then **D7/D11** (go-to-definition, and source↔IR — `IrNode.Span`
+exists and nothing reads it), then **A3–A5**.
 
 ---
 
@@ -217,8 +255,9 @@ Source ─▶ VeinCompilerService.Compile ─▶ CompilationResult
   the Workbench and the CLI route through it — there is one compilation pipeline.
 - **Analysis lives in `src/Vein.Compiler/Tooling/`, not in the Workbench.** `ConsoleGraph`,
   `SymbolIndex`, `MemberIndex`, `BundleModel`, `DependencyModel`, `ExecutionModel`, `EventCatalog`,
-  `RunConfig` and `VeinShell` are all pure logic the UI only renders. That is what keeps them testable
-  from `Vein.Tests`, which references only `Vein.Compiler`.
+  `RunConfig`, `VeinShell` and `RouteMap` are all pure logic the UI only renders. That is what keeps
+  them testable from `Vein.Tests`, which references only `Vein.Compiler` — and it is why the route
+  recovery has nine tests while the panel that shows it has none.
 - **The terminal reimplements no command.** It launches the built `veinc` apphost, so what it prints is
   what `veinc` prints. An in-process fast path was considered and dropped: it would have created a
   second definition of what `veinc ir` outputs — the exact drift `tools/check-ir.sh` exists to catch —
@@ -237,9 +276,14 @@ The service is exercised headlessly: compile succeeds and the tree root is `Bund
 yields diagnostics; a `shape` appears as a `Shape` node and a `Component` type; a `shard` with `target`
 carries `@query`; emit/hear events are discoverable; a defaulted event field is optional.
 
-The run-configuration and terminal parsing have their own suites — `RunConfigTests`, `VeinShellTests`
-and `RunConfigSweepTests`. The sweep runs over the **real** samples and asserts that every declared
-header line parses, round-trips through `VeinShell`, and names its own file, so a sample added tomorrow
-is covered the moment it lands.
+The run-configuration, terminal and routing analyses have their own suites — `RunConfigTests`,
+`VeinShellTests`, `RunConfigSweepTests` and `RouteMapTests`. The sweep runs over the **real** samples
+and asserts that every declared header line parses, round-trips through `VeinShell`, and names its own
+file, so a sample added tomorrow is covered the moment it lands; `RouteMapTests` likewise ends on the
+shipped `web_site.vein` rather than only on strings these tests wrote.
+
+One thing those tests pinned that is worth knowing while writing a site: **`match` cannot route on a
+path.** An arm's case name is an identifier or a `#Mark` (`Parsing/Parser.cs`), so `when "/about"` does
+not parse. Routing is `if`, and only `if`.
 
 The Avalonia window itself is verified by launching it on a machine with a display.
