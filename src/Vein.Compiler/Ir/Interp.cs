@@ -1136,7 +1136,8 @@ public sealed class Interp
     public static readonly IReadOnlySet<string> PrebuiltNames =
         new HashSet<string>(StringComparer.Ordinal)
         { "spawn", "here", "pick", "len", "random", "join", "toJson", "fromJson",
-          "split", "lines", "words", "chars", "trim", "code", "chr", "upper", "lower" };
+          "split", "lines", "words", "chars", "trim", "code", "chr", "upper", "lower",
+          "contains", "startsWith", "endsWith", "indexOf", "substring", "replace" };
 
     /// Prebuilt (built-in) functions that DO return a value — the only functions that return.
     ///
@@ -1225,8 +1226,43 @@ public sealed class Interp
         "upper" => args.Count > 0 ? Str(args[0]).ToUpperInvariant() : "",
         "lower" => args.Count > 0 ? Str(args[0]).ToLowerInvariant() : "",
 
+        // ---- looking inside a string ------------------------------------------------------------
+        //
+        // These are what a file-handling program actually reaches for, and their absence — not any
+        // missing syntax — is what made `if the line mentions ERROR` unwritable. Each is ORDINAL, never
+        // culture-sensitive, so they agree with `<` and with how the store sorts.
+        //
+        // `contains` on the empty needle is TRUE, matching every other language and set theory: every
+        // string contains the empty string. Worth stating because the opposite reading — "an empty
+        // search matches nothing" — silently drops every line when a filter box is blank.
+        "contains" => args.Count > 1 && Str(args[0]).Contains(Str(args[1]), StringComparison.Ordinal),
+        "startsWith" => args.Count > 1 && Str(args[0]).StartsWith(Str(args[1]), StringComparison.Ordinal),
+        "endsWith" => args.Count > 1 && Str(args[0]).EndsWith(Str(args[1]), StringComparison.Ordinal),
+
+        // -1 for absent, which is the one value a valid position can never be — so `indexOf(s, x) >= 0`
+        // reads as "is in there" without a second call.
+        "indexOf" => args.Count > 1 ? (long)Str(args[0]).IndexOf(Str(args[1]), StringComparison.Ordinal) : -1L,
+
+        // CLAMPED rather than throwing. A runtime is not a place to crash a user's console app over an
+        // index, and every other string operation here already answers out-of-range with an empty value.
+        "substring" => Substring(args),
+
+        "replace" => args.Count > 2 ? Str(args[0]).Replace(Str(args[1]), Str(args[2]), StringComparison.Ordinal) : "",
+
         _ => null
     };
+
+    /// `substring(s, start)` to the end, or `substring(s, start, length)`. Both clamped to the string:
+    /// a start past the end gives "", a length past the end gives what is there.
+    private static string Substring(List<object?> args)
+    {
+        if (args.Count < 2) return "";
+        string s = Str(args[0]);
+
+        int start = (int)Math.Clamp(AsLong(args[1]), 0, s.Length);
+        int take = args.Count > 2 ? (int)Math.Clamp(AsLong(args[2]), 0, s.Length - start) : s.Length - start;
+        return s.Substring(start, take);
+    }
 
     /// Ordinal comparison when BOTH sides are strings, else null so the caller falls back to numbers.
     ///

@@ -208,6 +208,29 @@ public sealed class CSharpBackend : IVeinBackend
             sb.AppendLine("    public static string Upper(object? v) => S(v).ToUpperInvariant();");
             sb.AppendLine("    public static string Lower(object? v) => S(v).ToLowerInvariant();");
             sb.AppendLine();
+
+            // Looking inside a string. ORDINAL throughout, matching Interp — a culture-sensitive
+            // Contains would answer differently on a machine in Turkey, which is the class of divergence
+            // that only ever shows up on someone else's computer.
+            sb.AppendLine("    public static bool Has(object? v, object? n) => S(v).Contains(S(n), System.StringComparison.Ordinal);");
+            sb.AppendLine("    public static bool Starts(object? v, object? n) => S(v).StartsWith(S(n), System.StringComparison.Ordinal);");
+            sb.AppendLine("    public static bool Ends(object? v, object? n) => S(v).EndsWith(S(n), System.StringComparison.Ordinal);");
+            sb.AppendLine("    public static long IndexOf(object? v, object? n) => S(v).IndexOf(S(n), System.StringComparison.Ordinal);");
+            sb.AppendLine("    public static string Replace(object? v, object? a, object? b) =>");
+            sb.AppendLine("        S(v).Replace(S(a), S(b), System.StringComparison.Ordinal);");
+            sb.AppendLine();
+            sb.AppendLine("    /// `substring`, clamped rather than throwing — the interpreter does the same.");
+            sb.AppendLine("    public static string Sub(object? v, object? from) => Sub(v, from, null);");
+            sb.AppendLine("    public static string Sub(object? v, object? from, object? count)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        var s = S(v);");
+            sb.AppendLine("        var start = (int)System.Math.Clamp(I(from), 0, s.Length);");
+            sb.AppendLine("        var take = count is null");
+            sb.AppendLine("            ? s.Length - start");
+            sb.AppendLine("            : (int)System.Math.Clamp(I(count), 0, s.Length - start);");
+            sb.AppendLine("        return s.Substring(start, take);");
+            sb.AppendLine("    }");
+            sb.AppendLine();
             sb.AppendLine("    /// `chars(s)` — one entry per character.");
             sb.AppendLine("    public static System.Collections.Generic.List<object?> Chars(object? v) =>");
             sb.AppendLine("        System.Linq.Enumerable.ToList(System.Linq.Enumerable.Select(S(v), c => (object?)c.ToString()));");
@@ -943,7 +966,8 @@ public sealed class CSharpBackend : IVeinBackend
     /// to be reproduced rather than approximated, and an approximation here is the one failure the
     /// backend contract forbids.
     private static bool IsPrebuilt(string name) =>
-        name is "spawn" or "random" or "len" or "code" or "chr" or "chars" or "upper" or "lower";
+        name is "spawn" or "random" or "len" or "code" or "chr" or "chars" or "upper" or "lower"
+             or "contains" or "startsWith" or "endsWith" or "indexOf" or "substring" or "replace";
 
     private string RuntimeCall(IrRuntimeCall c)
     {
@@ -959,6 +983,16 @@ public sealed class CSharpBackend : IVeinBackend
             case "chars": return $"__VeinText.Chars({Expr(c.Args[0])})";
             case "upper": return $"__VeinText.Upper({Expr(c.Args[0])})";
             case "lower": return $"__VeinText.Lower({Expr(c.Args[0])})";
+
+            case "contains": return $"__VeinText.Has({Expr(c.Args[0])}, {Expr(c.Args[1])})";
+            case "startsWith": return $"__VeinText.Starts({Expr(c.Args[0])}, {Expr(c.Args[1])})";
+            case "endsWith": return $"__VeinText.Ends({Expr(c.Args[0])}, {Expr(c.Args[1])})";
+            case "indexOf": return $"__VeinText.IndexOf({Expr(c.Args[0])}, {Expr(c.Args[1])})";
+            case "replace": return $"__VeinText.Replace({Expr(c.Args[0])}, {Expr(c.Args[1])}, {Expr(c.Args[2])})";
+            case "substring":
+                return c.Args.Count > 2
+                    ? $"__VeinText.Sub({Expr(c.Args[0])}, {Expr(c.Args[1])}, {Expr(c.Args[2])})"
+                    : $"__VeinText.Sub({Expr(c.Args[0])}, {Expr(c.Args[1])})";
 
             // `attach $C to e { … }` carries a struct init and emits directly. `attach $C to e` with no
             // initialiser carries a bare TYPE NAME instead, which through Expr would emit as a string

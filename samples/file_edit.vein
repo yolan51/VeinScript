@@ -1,0 +1,173 @@
+// file_edit.vein — editing a config file, and scanning a log. The two jobs files are actually for.
+//
+//   veinc run samples/file_edit.vein --ticks 2
+//
+// THE SHAPE THIS IS ANSWERING. A sketch for file handling might read:
+//
+//     open "config.txt" as file            read file as text
+//     text replace "a" with "b"            write text to file      close file
+//     text lines where contains "ERROR" emit @ErrorLine
+//
+// The GOAL there is right and this file delivers it. The mechanism is different, and the difference is
+// worth stating once because it is the same judgement D12 makes about C syntax: a construct earns its
+// place on its own merits, not on reading nicely in the one example that inspired it.
+//
+// NO `open` / `close`. A file here is an EVENT — `@ReadFile` answers `@FileLoaded` or `@FileMissing`,
+// the way `@Fetch` answers `@Fetched` or `@Failed`. A handle you must remember to close would be a
+// SECOND I/O model contradicting the first, in a language with no resource lifetimes, no destructors
+// and no scope that ends. And the failure would go back to being an error to check rather than a
+// message to hear.
+//
+// NO `where … emit` SUBLANGUAGE. `target` + `if` + `emit` already say it, and they compose:
+//
+//     text lines where contains "ERROR" emit @ErrorLine      // reads well, and stops there
+//
+//     target lines(f.text) as l {                            // one line longer, and keeps going:
+//         if contains(l, "ERROR") and not contains(l, "test") {
+//             bring Problem(Index + 1, l) as e
+//             if contains(l, "FATAL") { mark e #Fatal }
+//         }
+//     }
+//
+// The second condition, the position, the identity, the mark — none of those fit the first form, and a
+// reader who learned it would have to unlearn it at the first real filter. Three known keywords beat one
+// new one that only works for the example that motivated it.
+//
+// WHAT WAS ACTUALLY MISSING was neither: `contains`, `replace`, `startsWith`, `endsWith`, `indexOf` and
+// `substring` did not exist. That — not syntax — is why `if the line mentions ERROR` could not be
+// written. They are ordinary functions, they compile to C# like the character ones, and with them both
+// scenarios above are ordinary VeinScript.
+
+bundle FileEdit by you {
+
+    // One log line worth keeping. `n` is its 1-based number, so the report reads back in file order.
+    shape $Problem { n: int, text: string }
+    mark #Fatal
+    builder Problem { $Problem   mark #Problem }
+    mark #Problem
+
+    event @Seeded { }
+    event @Scanned { count: int }
+
+    // ---- 1. write the two files this sample edits -------------------------------------------------
+
+    shard Seed {
+        run once {
+            emit *Vein.Files.Io.@WriteFile {
+                path: "config.txt",
+                append: false,
+                text: "# demo config\n" +
+                      "fullscreen = false\n" +
+                      "vsync = true\n" +
+                      "volume = 80\n"
+            }
+
+            emit *Vein.Files.Io.@WriteFile {
+                path: "server.log",
+                append: false,
+                text: "INFO  started\n" +
+                      "ERROR disk full\n" +
+                      "INFO  retrying\n" +
+                      "FATAL out of memory\n" +
+                      "DEBUG ERROR appears in this test line\n"
+            }
+        }
+    }
+
+    // ---- 2. edit a config file --------------------------------------------------------------------
+    //
+    // `open` / `read` / `replace` / `write` / `close` as one statement each, in the shape the language
+    // already has: a request, an answer, and a write.
+
+    shard Config {
+        hear *Vein.Files.Io.@FileLoaded as f {
+            if f.path == "config.txt" {
+                // The whole of `text replace "a" with "b"`.
+                let updated = replace(f.text, "fullscreen = false", "fullscreen = true")
+
+                // ONLY WRITE IF SOMETHING CHANGED, and this is the trap a file API invites rather than
+                // a detail. Writing answers @FileWritten, and anything that reads on @FileWritten reads
+                // this file again, edits it again and writes it again — a loop that never settles and
+                // that no single line of it looks wrong.
+                //
+                // The guard is what makes the edit IDEMPOTENT: the second pass finds nothing to replace,
+                // `updated` equals what was read, and the cycle stops on its own. A handle-and-close API
+                // would not have helped here; the loop is in the events, not the file.
+                if not (updated == f.text) {
+                    emit *Vein.Console.Io.@Print { text: "config: fullscreen switched on" }
+
+                    // The whole of `write text to file`. There is no `close` because there is no handle.
+                    emit *Vein.Files.Io.@WriteFile { path: f.path, text: updated, append: false }
+                }
+            }
+        }
+    }
+
+    // ---- 3. scan a log ----------------------------------------------------------------------------
+
+    shard Scan {
+        var seen: int
+
+        var scanned: bool
+
+        hear *Vein.Files.Io.@FileLoaded as f {
+            // Scan the log ONCE. Same reasoning as the config guard: without it a re-read would bring a
+            // second copy of every problem, and the report would double with nothing looking wrong.
+            if f.path == "server.log" and not scanned {
+                scanned = true
+                seen = 0
+
+                target lines(f.text) as l {
+                    // The condition the sketch could not have grown into: mentions ERROR, but is not
+                    // the test line. A second clause costs a word here and a new keyword there.
+                    if contains(l, "ERROR") and not contains(l, "test") {
+                        seen = seen + 1
+                        bring Problem(Index + 1, l) as e
+
+                        // And a decision made once, remembered as a mark rather than re-tested later.
+                        if startsWith(l, "FATAL") { mark e #Fatal }
+                    }
+
+                    // `startsWith` on a whole word, which `l[0] == "F"` cannot do.
+                    if startsWith(l, "FATAL") {
+                        seen = seen + 1
+                        bring Problem(Index + 1, l) as fatal
+                        mark fatal #Fatal
+                    }
+                }
+
+                emit @Scanned { count: seen }
+            }
+        }
+    }
+
+    // ---- 4. read the findings back ----------------------------------------------------------------
+
+    shard Report {
+        hear @Scanned as s {
+            emit *Vein.Console.Io.@Print { text: "log: " + s.count + " line(s) worth keeping" }
+
+            target $Problem #Problem as p {
+                emit *Vein.Console.Io.@Print { text: "  line " + p.Problem.n + ": " + p.Problem.text }
+            }
+
+            // The reason marking beat re-testing: this query repeats no condition.
+            target $Problem #Fatal as p {
+                emit *Vein.Console.Io.@Print { text: "  FATAL at line " + p.Problem.n }
+            }
+        }
+    }
+
+    // ---- 5. reading the edited file back, to prove the write --------------------------------------
+
+    shard Verify {
+        hear *Vein.Files.Io.@FileWritten as w {
+            if w.path == "config.txt" { emit *Vein.Files.Io.@ReadFile { path: w.path } }
+            if w.path == "server.log" { emit *Vein.Files.Io.@ReadFile { path: w.path } }
+        }
+
+        hear *Vein.Files.Io.@FileMissing as m {
+            emit *Vein.Console.Io.@Print { text: "could not use " + m.path + ": " + m.reason }
+        }
+    }
+}
