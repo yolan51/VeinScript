@@ -11,6 +11,11 @@
 // `target $Line #Heading` is a sentence about a document. `if lines[i].startsWith("#")` is a sentence
 // about a string, and VeinScript cannot write it. That is the whole trade this sample demonstrates.
 //
+// LINES AND WORDS ARE BROUGHT, NOT SPAWNED BY HAND. `bring Line(n, text, words) as e` is the whole of
+// `spawn` + `attach $Line` + `mark #Line` (rule 7), and each one gets an identity in the order it was
+// brought — e1, e2, e3 — so the document reads back in the order it was written with nothing sorting
+// it (rule 14b). The report prints the first few ids to make that visible.
+//
 // THE PHASES ARE NOT DECORATION. Structural changes — spawn, attach, mark — are deferred to the commit
 // point at the end of the unit that made them (RULES 11), and Drain commits per EVENT (RULES 12b). So a
 // handler that spawns `$Line` entities cannot then `target` them: they do not exist yet. Each phase
@@ -35,6 +40,28 @@ bundle FileWords by you {
 
     shape $Line { n: int, text: string, words: int }
     shape $Word { n: int, line: int, text: string }
+
+    // What a line and a word ARE, as identity tags. `$Line` and `#Line` are different things sharing a
+    // name — different keyword, different sigil (rule 14e) — and both are wanted: the shape is the data,
+    // the mark is the membership. `target $Line #Line` reads as the sentence it is.
+    mark #Line
+    mark #Word
+
+    // The templates. `bring Line(3, "…", 7)` IS `spawn` + `attach $Line` + `mark #Line` — rule 7 spells
+    // that equivalence out — and writing the shorthand is the point: a document is made of lines and
+    // words, so making one should be one statement naming the thing being made, not three describing
+    // how it is assembled.
+    //
+    // THE `mark` MEMBER IS WHAT MAKES THESE IDENTITY TEMPLATES. A builder with only an include builds a
+    // FRAGMENT — the include is a compile-time field expansion and attaches nothing (rule 8) — so
+    // `bring Line(…) as e` is VS0221 against it, which is precisely the diagnostic that says the
+    // template is not making the thing you meant.
+    //
+    // Arguments bind POSITIONALLY across the include, in the shape's declaration order (rule 9): `&Line`
+    // takes (n, text, words), `&Word` takes (n, line, text). `veinc scaffold samples/file_words.vein
+    // '&Line'` prints each slot with the shape it came from, which beats counting fields by eye.
+    builder Line { $Line   mark #Line }
+    builder Word { $Word   mark #Word }
 
     // A line that looks like a heading. Marking is the cheap way to remember a decision made once, so
     // the test that produced it does not have to be repeated at every later query.
@@ -108,12 +135,14 @@ bundle FileWords by you {
                 let number = Index + 1
                 seen = seen + 1
 
-                let e = spawn()
-
+                // `as e` binds what the template built (rule 7b), which is what lets the marks below
+                // refer to it. Without `as` the identity lives in a local the program never sees, and
+                // `spawn`/`attach` by hand was the only way to name it.
+                //
                 // `words` rather than `split(line, " ")`: on "a  b" split gives three pieces with an
                 // empty middle, and a program that cannot inspect characters has no honest way to tell
                 // that empty apart from a real word afterwards.
-                attach $Line to e { n: number, text: line, words: len(words(line)) }
+                bring Line(number, line, len(words(line))) as e
 
                 if line == "" { mark e #Blank }
 
@@ -123,9 +152,11 @@ bundle FileWords by you {
                 // otherwise is how you get a check that silently never matches.
                 target words(line) as w {
                     let position = Index + 1
-                    let we = spawn()
-                    attach $Word to we { n: position, line: number, text: w }
+                    bring Word(position, number, w)
 
+                    // No `as` here: nothing needs to refer to the word afterwards. The mark goes on
+                    // `e`, the LINE from the enclosing loop — a heading is a property of the line, and
+                    // its first word is only the evidence.
                     if position == 1 {
                         if w == "#" { mark e #Heading }
                     }
@@ -157,6 +188,23 @@ bundle FileWords by you {
             target $Line #Heading as l {
                 body = body + "  line " + l.Line.n + ": " + l.Line.text + "\n"
                 emit *Vein.Console.Io.@Print { text: "  heading at line " + l.Line.n + ": " + l.Line.text }
+            }
+
+            // The identities themselves. `Entity` is the nearest entity's id, and the ids are in BRING
+            // ORDER: a query yields ascending by id, ids are handed out by spawn, and `bring` spawns —
+            // so query order == spawn order == the order the lines were brought (rule 14b). The document
+            // reads back in the order it was written without anything sorting it.
+            //
+            // THE IDS ARE NOT CONSECUTIVE PER LINE, and the gaps are the point: `e1  e4  e5` for the
+            // first three lines, because line 1's two words took e2 and e3 between them. One counter
+            // hands out ids across every template, so the sequence records the order things were MADE —
+            // a line, then its words, then the next line. Sorting is still by id and still correct;
+            // nothing here needs the numbers to be dense.
+            body = body + "\nline identities, in bring order:\n"
+            target $Line #Line as l {
+                if l.Line.n < 4 {
+                    body = body + "  e" + Entity + "  line " + l.Line.n + ": " + l.Line.text + "\n"
+                }
             }
 
             // Blank lines counted rather than listed — the count is the interesting part, and it is only
