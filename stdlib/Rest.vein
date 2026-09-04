@@ -17,12 +17,14 @@
 //
 // WHAT IS DELIBERATELY MISSING, and each is a real limit rather than an oversight:
 //
-//   URL BUILDING. There is no `query(url, key, value)`, because it could not percent-encode: VeinScript
-//     cannot look at a character (no `s[i]`, no char comparison), so a value containing a space or an `&`
-//     would silently produce a broken URL. A function that is correct only for values you already know
-//     are safe is a trap with a helpful name. Concatenate the query string yourself, from literals.
-//   BASIC AUTH. `Authorization: Basic …` needs base64, which is the same character problem. If you need
-//     it, the encoding has to come from the host, not from here.
+//   URL BUILDING. There is no `query(url, key, value)`, because it could not percent-encode CORRECTLY.
+//     A program can look at characters — `s[0]` yields one and `code`/`chr` convert (RULES 28) — so the
+//     ASCII half is writable. The blocker is that percent-encoding is defined over BYTES and `code(c)`
+//     gives a UTF-16 code unit: `é` must become `%C3%A9` and the obvious implementation emits `%E9`,
+//     which is a different character. A function that is correct only for input you already know is
+//     ASCII is a trap with a helpful name. Concatenate the query string yourself, from literals.
+//   BASIC AUTH. `Authorization: Basic …` needs base64, which is the same byte problem. If you need it,
+//     the encoding has to come from the host, not from here.
 //   RETRIES AND TIMEOUTS. A shard cannot be `shared` (STDLIB.md), so any policy declared here would be
 //     invisible behaviour handed to everyone who only wanted the vocabulary. Retry in your own shard, on
 //     @Failed, where you can see it.

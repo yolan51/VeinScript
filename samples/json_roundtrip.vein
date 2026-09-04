@@ -5,10 +5,11 @@
 //
 //   veinc run samples/json_roundtrip.vein --ticks 1
 //
-// WHY THEY ARE BUILTINS AND NOT A STDLIB BUNDLE. VeinScript cannot look at a character — there is no
-// `s[i]` on a string, no comparison of one char to another — so neither parsing nor escaping can be
-// written in the language. `toJson` also has to escape a tab or a newline inside a value, and a program
-// has no way to find one.
+// WHY THEY ARE BUILTINS AND NOT A STDLIB BUNDLE. Not because character work is impossible — `s[0]`
+// yields a character and `==` compares it (RULES 28) — but because a parser written that way would walk
+// every character through the interpreter, building the result one concatenation at a time, to arrive
+// at what the host already has. `toJson` also has to escape a tab or a newline inside every value,
+// which doubles the work for something no program should be spending its ticks on.
 //
 // THE READ DIRECTION NEEDED NO LANGUAGE CHANGE AT ALL. An object parses to a dictionary, and field
 // access already resolves against a dictionary, so `row.title` below is the ordinary `.` — the same one

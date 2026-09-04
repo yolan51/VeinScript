@@ -3,10 +3,9 @@
 //   veinc run samples/file_words.vein --ticks 3
 //
 // WHAT THIS IS FOR. A file arrives as one string, and a string is the least useful shape a document can
-// have in this language: you cannot look at a character (no `s[i]`, no character comparison), so
-// everything interesting about text has to happen before it becomes VeinScript's problem. `lines` and
-// `words` are the two host splits that do that, and after them a document is entities — and entities
-// are what this language is good at.
+// have in this language. `lines` and `words` turn it into pieces, and after them a document is entities
+// — which is what this language is actually good at. See samples/characters.vein for going the other
+// way, down to individual characters.
 //
 // `target $Line #Heading` is a sentence about a document. `if lines[i].startsWith("#")` is a sentence
 // about a string, and VeinScript cannot write it. That is the whole trade this sample demonstrates.
@@ -146,10 +145,11 @@ bundle FileWords by you {
 
                 if line == "" { mark e #Blank }
 
-                // There is no `startsWith`, so a heading is recognised by its first WORD being exactly
-                // "#" — which is why the sample document writes `# VeinScript` with a space. A language
-                // that cannot look at a character cannot look at a prefix either, and pretending
-                // otherwise is how you get a check that silently never matches.
+                // A heading is recognised by its first WORD being exactly "#", which is why the sample
+                // document writes `# VeinScript` with a space. That is a CHOICE, not a limit: `line[0]
+                // == "#"` works and would catch `#VeinScript` too (RULES 28). Matching the word keeps
+                // this loop working in `words` alone, and a `#` with no space after it is a different
+                // convention worth not silently accepting.
                 target words(line) as w {
                     let position = Index + 1
                     bring Word(position, number, w)

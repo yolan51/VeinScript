@@ -14,19 +14,19 @@
 // program would declare itself, and quietly hijacking them would be a trap with no diagnostic. The
 // longer names cost a word and belong to nobody else.
 //
-// WHY `lines` AND `words` ARE BUILT-IN. VeinScript cannot look at a character — there is no `s[i]` and
-// no character comparison, which is the same limit stdlib/Rest.vein cites for having no URL builder. So
-// splitting text is a host capability or it does not exist, and these are the two splits that carry a
-// trap a program could not work around afterwards:
+// WHY `lines` AND `words` ARE BUILT-IN. Not because a program could not walk characters itself — `s[0]`
+// yields one and `<` orders it (RULES 28) — but because doing it interpreted, one concatenation at a
+// time, is slow, and because these two carry a trap nothing can undo afterwards:
 //
 //   `lines(text)` strips the line ending WHICHEVER IT WAS. `split(text, "\n")` looks equivalent and is
 //     not: a file written on Windows leaves `\r` on every line, so `line == "end"` fails against
 //     `"end\r"` with both sides looking identical in any output you print to check.
 //   `words(line)` splits on runs of whitespace and drops empties. `split(line, " ")` on `"a  b"` gives
-//     three pieces with an empty middle, and a program that cannot inspect characters has no honest way
-//     to tell that empty apart from a real one.
+//     three pieces with an empty middle, and the empty one is indistinguishable from a real word once
+//     you have it.
 //
 // `split(text, sep)` keeps everything, empties included — a CSV column that is blank is still a column.
+// `chars(text)` is the fourth: one entry per character, for when you do want to walk them.
 //
 // WHAT IS DELIBERATELY MISSING:
 //

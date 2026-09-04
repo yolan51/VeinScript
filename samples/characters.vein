@@ -1,0 +1,148 @@
+// characters.vein — comparing characters, with no type and no ceremony.
+//
+//   veinc run samples/characters.vein --ticks 1
+//
+// A CHARACTER IS A ONE-CHARACTER STRING. `s[0]` yields one, `==` compares it, and `<` orders it — so a
+// character needs no `char` type, no `'a'` literal, no `$Char` shape and no `&Char` builder. All of
+// that would be ceremony around something the language already has: a shape is for data an identity
+// carries, and a character carried by nothing is just a value.
+//
+// WHAT WAS ACTUALLY MISSING was not a type. `<` `>` `<=` `>=` used to convert both sides with AsDouble,
+// which is 0 for any non-numeric string — so `c >= "a" and c <= "z"` was `0 >= 0 and 0 <= 0`, TRUE FOR
+// EVERY STRING. An is-a-letter test written the obvious way said yes to "!" and to "5", and said it
+// silently. Two strings now compare ORDINALLY, the same way `target … by Shape.field` already sorted
+// them, so an operator and the sort cannot disagree.
+//
+// THE FOUR SPLITS, all handing back a list so `target` walks any of them:
+//
+//   split(text, sep)   exact separator, keeps empties      a blank CSV column is still a column
+//   lines(text)        strips the line ending              a Windows file leaves \r on every line
+//   words(text)        runs of whitespace, no empties      "a  b" is two words
+//   chars(text)        one entry per character             this file
+//
+// AND THE THREE THAT ORDERING CANNOT DO:
+//
+//   code(c) / chr(n)   codepoint out and back              `chr(code(c) + 1)` is the next letter
+//   upper / lower      case                                comparison is ordinal, so "A" is not "a"
+//
+// INTERPRETER ONLY. None of these emit to C# — `veinc emit` says so per call rather than producing a
+// file that quietly computes something else. Character work belongs in a shard you run, not one you
+// compile to the backend.
+
+bundle Characters by you {
+
+    // ---- classification, written the obvious way ------------------------------------------------
+    //
+    // These are ordinary `fn`s. That is the whole argument against a `char` keyword: with ordering
+    // fixed, every classifier anyone needs is one comparison, and a language that added a type for this
+    // would be charging a type for something a range test already answers.
+
+    fn isDigit(c: string) -> bool { return c >= "0" and c <= "9" }
+    fn isLower(c: string) -> bool { return c >= "a" and c <= "z" }
+    fn isUpper(c: string) -> bool { return c >= "A" and c <= "Z" }
+    fn isLetter(c: string) -> bool { return isLower(c) or isUpper(c) }
+
+    // `_` is one character and compares like any other. No escape, no special case.
+    fn isIdentChar(c: string) -> bool { return isLetter(c) or isDigit(c) or c == "_" }
+
+    // ---- a real use: is this a legal identifier? ------------------------------------------------
+    //
+    // The rule every language has and none can express without looking at characters: a letter or `_`
+    // first, then letters, digits and underscores. `words()` cannot answer it and neither can `split`.
+
+    shape $Word { text: string, ok: bool, why: string }
+    mark #Rejected
+    builder Candidate { $Word   mark #Checked }
+    mark #Checked
+
+    shard Check {
+        var ok: bool
+        var why: string
+
+        run once {
+            emit *Vein.Console.Io.@Print { text: "identifier check" }
+
+            target words("count _x 9lives has-dash ok_2 Zeta") as w {
+                ok = true
+                why = ""
+
+                // The first character decides whether it can start at all.
+                if not (isLetter(w[0]) or w[0] == "_") {
+                    ok = false
+                    why = "starts with '" + w[0] + "'"
+                }
+
+                // Then every character, including the first again — cheap, and it keeps the two rules
+                // separate rather than making the loop remember which position it is on.
+                if ok {
+                    target chars(w) as c {
+                        if not isIdentChar(c) {
+                            ok = false
+                            why = "contains '" + c + "'"
+                        }
+                    }
+                }
+
+                bring Candidate(w, ok, why)
+            }
+
+            emit @Checked { }
+        }
+    }
+
+    event @Checked { }
+
+    shard Report {
+        hear @Checked as c {
+            target $Word #Checked as w {
+                if w.Word.ok {
+                    emit *Vein.Console.Io.@Print { text: "  ok       " + w.Word.text }
+                }
+                if not w.Word.ok {
+                    emit *Vein.Console.Io.@Print { text: "  rejected  " + w.Word.text + "   " + w.Word.why }
+                }
+            }
+        }
+    }
+
+    // ---- arithmetic on letters -------------------------------------------------------------------
+    //
+    // What ordering alone cannot do. `code` gives the number, `chr` gives it back, and everything in
+    // between is ordinary integer maths — a shift cipher is one modulo.
+
+    shard Shift {
+        var out: string
+
+        hear @Checked as c {
+            out = ""
+            target chars("attack at dawn") as ch {
+                if isLower(ch) {
+                    // ROT13. `code(ch) - code("a")` is the letter's position, +13 wraps at 26.
+                    out = out + chr(code("a") + (code(ch) - code("a") + 13) % 26)
+                }
+                if not isLower(ch) { out = out + ch }
+            }
+            emit *Vein.Console.Io.@Print { text: "rot13: " + out }
+        }
+    }
+
+    // ---- case, and why it needs a function ------------------------------------------------------
+    //
+    // Comparison is ORDINAL, so "A" and "a" are different characters — 32 apart, and "Z" sorts before
+    // "a". A case-insensitive test is `lower(x) == lower(y)`, which is one call rather than a second
+    // comparison operator that quietly means something else.
+
+    shard Casing {
+        hear @Checked as c {
+            if not ("Zeta" == "zeta") {
+                emit *Vein.Console.Io.@Print { text: "ordinal: Zeta is not zeta" }
+            }
+            if lower("Zeta") == lower("zeta") {
+                emit *Vein.Console.Io.@Print { text: "lowered: Zeta is zeta" }
+            }
+            if "Z" < "a" {
+                emit *Vein.Console.Io.@Print { text: "and every capital sorts before every lowercase" }
+            }
+        }
+    }
+}

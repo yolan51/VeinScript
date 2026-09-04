@@ -17,10 +17,11 @@
 // to it. Nothing forces this — Db.get takes root and key directly — but a program with several query
 // shards would otherwise repeat them in each.
 //
-// FILTER VALUES HERE ARE ALL LITERALS, and that is a rule. VeinScript cannot look at a character, so it
-// cannot percent-encode: a value from a search box containing a space, an `&` or a `#` would silently
-// produce a different query than the one you meant. Interpolate only values you control; filter
-// anything user-supplied in the `if` inside the target loop instead, where no encoding is involved.
+// FILTER VALUES HERE ARE ALL LITERALS, and that is a rule. Percent-encoding is defined over BYTES, and
+// `code(c)` gives a UTF-16 code unit — so `é` would be encoded as `%E9` rather than `%C3%A9`, and a
+// value from a search box containing a space, an `&` or a `#` would silently produce a different query
+// than the one you meant. Interpolate only values you control; filter anything user-supplied in the `if`
+// inside the target loop instead, where no encoding is involved.
 //
 // WHAT YOU CANNOT READ BACK. `Prefer: count=exact` makes PostgREST report the total row count in a
 // `Content-Range` RESPONSE header — and @Fetched carries url, status and body, not headers. So the

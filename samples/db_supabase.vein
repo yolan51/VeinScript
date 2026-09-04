@@ -64,10 +64,11 @@ bundle DbSupabase by you {
     fn selectPath() -> string { return tablePath() + "?select=id,title,rank,done&order=rank.asc" }
 
     // NO QUERY PARAMETER IS BUILT FROM DATA HERE, and that is a rule rather than a convenience. There is
-    // no percent-encoding in VeinScript — the language cannot look at a character — so a filter built
-    // from a title, a search box or a name would break on the first space or `&`. Filter in the `if`
-    // inside the target loop, or add the encoded parameter from the host. stdlib/Rest.vein says the same
-    // thing, and refuses to offer a `query(url, key, value)` for exactly this reason.
+    // no percent-encoding in VeinScript: encoding is defined over BYTES and `code(c)` gives a UTF-16
+    // code unit, so anything non-ASCII would be encoded wrongly and a filter built from a title, a
+    // search box or a name would break on the first space or `&`. Filter in the `if` inside the target
+    // loop, or add the encoded parameter from the host. stdlib/Rest.vein says the same thing, and
+    // refuses to offer a `query(url, key, value)` for exactly this reason.
 
     // ---- talking to it -----------------------------------------------------------------------------
     //

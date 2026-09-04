@@ -393,27 +393,64 @@ target rows as row: $Task { bring Task(row.id, row.title, row.rank, row.done) }
 - It pairs with a guard rather than replacing one: *the ascription says what you EXPECT, the guard
   checks what ARRIVED* (`samples/diagnostics_guard.vein`).
 
-**28. Text is split by the HOST, because the language cannot look at a character.** There is no `s[i]`
-and no character comparison — a program compares whole strings and concatenates them, and that is all.
-So `split`, `lines` and `words` are built-ins, and the exact rule each follows is part of the language
-rather than a convenience:
+**28. A CHARACTER IS A ONE-CHARACTER STRING.** `s[0]` yields one, `==` compares it, `<` orders it. There
+is no `char` type, no `'a'` literal, no `$Char` shape and no `&Char` builder, because none of those buy
+anything a one-character string does not already do — and a shape is for data an identity carries, while
+a character carried by nothing is just a value.
+
+So every classifier is an ordinary `fn`:
+
+```
+fn isDigit(c: string)  -> bool { return c >= "0" and c <= "9" }
+fn isLetter(c: string) -> bool { return (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") }
+```
+
+**Two strings compare ORDINALLY; anything else compares numerically.** This was a real bug until it was
+not: all four of `< > <= >=` went through `AsDouble`, which is 0 for a non-numeric string, so
+`c >= "a" and c <= "z"` was `0 >= 0 and 0 <= 0` — **true for every string**, silently. Ordinal and never
+culture-sensitive, matching `EntityStore.OrderKey`, so an operator cannot disagree with the sort.
+
+A **mixed** comparison is still numeric and a string operand is still 0, so `"5" > 3` is false. That is
+a known wart, left alone: making it parse would add a loose coercion reaching every mixed comparison in
+every existing program.
+
+Capitals sort before lowercase, so a case-insensitive test is `lower(a) == lower(b)`.
+
+**28a. Splitting is done by the HOST, and the exact rule each follows is part of the language** — not
+because a program could not walk characters itself, but because doing so interpreted, one concatenation
+at a time, is slow and because two of these carry a trap nothing can undo afterwards:
 
 | | rule | for |
 |---|---|---|
 | `split(text, sep)` | exact separator, **keeps empties** | a blank CSV column is still a column |
 | `lines(text)` | splits on line endings, **strips `\r`** | a file written on Windows |
 | `words(text)` | runs of whitespace, **drops empties** | `"a  b"` is two words |
+| `chars(text)` | one entry per character | walking a word |
 | `trim(text)` | surrounding whitespace | |
+
+All four hand back a **list**, so `target chars(word) as c { … }` is the same statement that walks
+anything else. Alongside them, `code(c)` / `chr(n)` convert to and from a codepoint — what ordering
+alone cannot do, since `chr(code(c) + 1)` is the next letter — and `upper` / `lower` fold case.
 
 `lines` is not `split(text, "\n")`, and the difference is the trap: with `split`, a CRLF file leaves a
 `\r` on every line, so `line == "end"` is false against `"end\r"` and **both sides look identical in
 any output you print to check**. `words` is not `split(line, " ")` for the mirror reason — `"a  b"`
-gives three pieces with an empty middle, and a program that cannot inspect characters has no honest way
-to tell that empty from a real word afterwards.
+gives three pieces with an empty middle, and the empty one is indistinguishable from a real word once
+you have it.
 
-There is no `startsWith`, no `indexOf` and no substring, for the same underlying reason. A prefix test
-is `words(line)` and comparing the first word, which is why `samples/file_words.vein` writes its
-headings as `# Title` with a space.
+**All of these are interpreter-only.** `veinc emit` reports each call it cannot translate rather than
+emitting C# that computes something else; string indexing is the same. Character work belongs in a
+program you `run`, not one you compile to the backend.
+
+There is no `startsWith`, no `indexOf` and no substring **in the standard library** — but you can write
+the first of those yourself, which is the point of 28:
+
+```
+fn startsWith(s: string, prefix: string) -> bool { return len(s) > 0 and s[0] == prefix }
+```
+
+`samples/characters.vein` is the whole of this rule as a running program: classification, an identifier
+validator, ROT13 with `code`/`chr`, and why case folding needs a function.
 
 **28b. A file is an event, and a failure is a message.** `*Vein.Files.Io.@ReadFile { path }` answers
 with `@FileLoaded` or `@FileMissing`; `@WriteFile` answers with `@FileWritten` or `@FileMissing`. That

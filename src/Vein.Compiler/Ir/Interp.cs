@@ -1135,7 +1135,8 @@ public sealed class Interp
     /// Keep the two in step — a name added below and not here is silently rebindable by `use`.
     public static readonly IReadOnlySet<string> PrebuiltNames =
         new HashSet<string>(StringComparer.Ordinal)
-        { "spawn", "here", "pick", "len", "random", "join", "toJson", "fromJson", "split", "lines", "words", "trim" };
+        { "spawn", "here", "pick", "len", "random", "join", "toJson", "fromJson",
+          "split", "lines", "words", "chars", "trim", "code", "chr", "upper", "lower" };
 
     /// Prebuilt (built-in) functions that DO return a value — the only functions that return.
     ///
@@ -1197,8 +1198,42 @@ public sealed class Interp
 
         "trim" => args.Count > 0 ? Str(args[0]).Trim() : "",
 
+        // ---- characters -------------------------------------------------------------------------
+        //
+        // A CHARACTER IS A ONE-CHARACTER STRING. There is no `char` type and no `'a'` literal, and that
+        // is the point: `s[0]` already yields one, `==` already compares it, and ordering now works — so
+        // a character needs no type, no shape, no builder and no ceremony of its own. Adding a type
+        // would buy a second way to say the same thing plus a literal syntax to learn.
+        //
+        // `chars` completes the family: split by separator, lines, words, characters. All four hand back
+        // a list, so `target chars(word) as c { … }` is the same statement that walks anything else.
+        "chars" => args.Count > 0
+            ? Str(args[0]).Select(c => (object?)c.ToString()).ToList()
+            : new List<object?>(),
+
+        // Codepoint out and back. What ordering alone cannot do: arithmetic on letters — `chr(code(c) +
+        // 1)` is the next letter, and a shift cipher is that plus a modulo.
+        //
+        // The FIRST character, not the whole string, so `code(s)` on a longer one reads its head rather
+        // than failing — `code(c)` is almost always called on something that came from `s[i]` already.
+        "code" => args.Count > 0 && Str(args[0]).Length > 0 ? (long)Str(args[0])[0] : 0L,
+        "chr" => args.Count > 0 ? ((char)AsLong(args[0])).ToString() : "",
+
+        // Case, whole-string. Needed because comparison is ORDINAL: "A" and "a" are different characters
+        // and 32 apart, so a case-insensitive test is `lower(a) == lower(b)` rather than a second
+        // comparison operator that quietly means something else.
+        "upper" => args.Count > 0 ? Str(args[0]).ToUpperInvariant() : "",
+        "lower" => args.Count > 0 ? Str(args[0]).ToLowerInvariant() : "",
+
         _ => null
     };
+
+    /// Ordinal comparison when BOTH sides are strings, else null so the caller falls back to numbers.
+    ///
+    /// Both, deliberately: `rank > 3` where rank happens to hold "5" is arithmetic the program means,
+    /// and turning one string operand into a string comparison would change what mixed code already does.
+    private static int? Both(object? l, object? r) =>
+        l is string a && r is string b ? string.CompareOrdinal(a, b) : null;
 
     private object? EvalRuntime(IrRuntimeCall rc, Instance self, Dictionary<string, object?> locals)
     {
@@ -1300,10 +1335,19 @@ public sealed class Interp
             case IrBinOp.Mod: return (long)AsDouble(l) % (long)AsDouble(r);
             case IrBinOp.Eq: return LooseEq(l, r);
             case IrBinOp.Ne: return !LooseEq(l, r);
-            case IrBinOp.Lt: return AsDouble(l) < AsDouble(r);
-            case IrBinOp.Gt: return AsDouble(l) > AsDouble(r);
-            case IrBinOp.Le: return AsDouble(l) <= AsDouble(r);
-            case IrBinOp.Ge: return AsDouble(l) >= AsDouble(r);
+            // TWO STRINGS COMPARE ORDINALLY, everything else numerically.
+            //
+            // Without this every comparison went through AsDouble, which is 0 for a non-numeric string —
+            // so `c >= "a" and c <= "z"` was `0 >= 0 and 0 <= 0`, TRUE FOR EVERY STRING. An is-a-letter
+            // test written the obvious way said yes to "!" and "5", and said it silently.
+            //
+            // Ordinal, never culture-sensitive: `EntityStore.OrderKey` already sorts strings that way so
+            // the C# backend produces the same sequence, and an operator that disagreed with the sort
+            // would be a second answer to the same question.
+            case IrBinOp.Lt: return Both(l, r) is { } lt ? lt < 0 : AsDouble(l) < AsDouble(r);
+            case IrBinOp.Gt: return Both(l, r) is { } gt ? gt > 0 : AsDouble(l) > AsDouble(r);
+            case IrBinOp.Le: return Both(l, r) is { } le ? le <= 0 : AsDouble(l) <= AsDouble(r);
+            case IrBinOp.Ge: return Both(l, r) is { } ge ? ge >= 0 : AsDouble(l) >= AsDouble(r);
             default: return null;
         }
     }
