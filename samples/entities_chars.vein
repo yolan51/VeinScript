@@ -1,0 +1,129 @@
+// entities_chars.vein — characters by their ASCII value, in the subset the BACKEND compiles.
+//
+//   veinc run samples/entities_chars.vein --ticks 1
+//
+// WHY THIS ONE IS IN check-backend.sh. Reading text a character at a time is exactly the kind of work
+// that wants compiling rather than interpreting, and it was interpreter-only until this sample existed:
+// `s[i]`, `code`, `chr`, `chars`, `len`, `upper`/`lower` and — quietly the most important — ORDERING
+// between two strings all had no C# emission. The check emits this file, compiles it, runs it, and
+// diffs against `veinc run`, so "both runtimes agree about characters" is verified rather than claimed.
+//
+// A CHARACTER IS A ONE-CHARACTER STRING and its value is `code(c)` — the number in the ASCII table.
+// That is the whole vocabulary: no `char` type, no `'a'` literal, and no shape or builder wrapping a
+// value that no identity carries.
+//
+//     "A"            a one-character string
+//     code("A")      65        the ASCII value
+//     chr(65)        "A"       back again
+//     c >= "a"       ordinal, so it agrees with the number
+//
+// ORDINAL AND NUMERIC AGREE, and that is why both forms are shown side by side below. `"a" < "b"` and
+// `code("a") < code("b")` are the same question — comparison is ordinal on the code units, which for
+// ASCII is the table order. The number is the one to reach for when the next step is arithmetic; the
+// character is the one to reach for when it is a range.
+
+bundle EntitiesChars by you {
+
+    // One character of the input, with its ASCII value alongside. `n` is its 1-based position, so the
+    // query reads back in the order the text was written without anything sorting it.
+    shape $Ch { n: int, text: string, value: int }
+
+    // The three classes the ASCII table separates by range, decided once while scanning so the queries
+    // below do not repeat the test.
+    mark #Letter
+    mark #Digit
+    mark #Other
+
+    builder Ch { $Ch   mark #Scanned }
+    mark #Scanned
+
+    event @Scanned { count: int }
+
+    // ---- scan ------------------------------------------------------------------------------------
+
+    shard Scan {
+        var seen: int
+
+        run once {
+            seen = 0
+
+            // `chars` hands back a list and `target` walks it — the same statement that walks a query.
+            target chars("Vein 42!") as c {
+                let position = Index + 1
+                seen = seen + 1
+
+                bring Ch(position, c, code(c)) as e
+
+                // RANGE TESTS ON THE CHARACTER. Ordinal comparison means these read as the ASCII table
+                // does: 'A'..'Z' is 65..90, 'a'..'z' is 97..122, '0'..'9' is 48..57.
+                if (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") { mark e #Letter }
+                if c >= "0" and c <= "9" { mark e #Digit }
+                if not ((c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9")) {
+                    mark e #Other
+                }
+            }
+
+            emit @Scanned { count: seen }
+        }
+    }
+
+    // ---- read it back ----------------------------------------------------------------------------
+    //
+    // A phase boundary: everything brought above is deferred to the commit point, so it becomes real
+    // between one event and the next.
+
+    shard Report {
+        hear @Scanned as s {
+            emit *Vein.Console.Io.@Print { text: "scanned " + s.count + " characters" }
+
+            target $Ch #Scanned as c {
+                emit *Vein.Console.Io.@Print {
+                    text: "  " + c.Ch.n + " '" + c.Ch.text + "' = " + c.Ch.value
+                }
+            }
+        }
+    }
+
+    shard Letters {
+        var total: int
+
+        hear @Scanned as s {
+            // ARITHMETIC ON THE VALUE, which is what having the number is for. In ASCII a letter's
+            // case differs by exactly 32, so lowering is `+ 32` and the sum below is over the lowered
+            // values — a thing no range test can compute.
+            total = 0
+            target $Ch #Letter as c {
+                if c.Ch.value >= 65 and c.Ch.value <= 90 { total = total + c.Ch.value + 32 }
+                if c.Ch.value >= 97 { total = total + c.Ch.value }
+            }
+            emit *Vein.Console.Io.@Print { text: "lowered letter values sum to " + total }
+        }
+    }
+
+    shard Digits {
+        var value: int
+
+        hear @Scanned as s {
+            // '7' is not 7. Subtracting the code of '0' is how a digit character becomes its number,
+            // and it is the same subtraction every low-level parser does.
+            value = 0
+            target $Ch #Digit as c {
+                value = value * 10 + (c.Ch.value - 48)
+            }
+            emit *Vein.Console.Io.@Print { text: "digits read as the number " + value }
+        }
+    }
+
+    shard Others {
+        hear @Scanned as s {
+            target $Ch #Other as c {
+                emit *Vein.Console.Io.@Print { text: "  not alphanumeric: '" + c.Ch.text + "' = " + c.Ch.value }
+            }
+
+            // Round trip, and case folding — both emitted, so both runtimes agree on them.
+            emit *Vein.Console.Io.@Print { text: "chr(code(\"V\")) = " + chr(code("V")) }
+            emit *Vein.Console.Io.@Print { text: "upper/lower = " + upper("vein") + " " + lower("VEIN") }
+            emit *Vein.Console.Io.@Print { text: "len(\"Vein\") = " + len("Vein") + ", \"Vein\"[0] = " + "Vein"[0] }
+        }
+    }
+}

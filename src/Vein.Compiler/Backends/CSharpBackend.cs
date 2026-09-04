@@ -85,7 +85,6 @@ public sealed class CSharpBackend : IVeinBackend
     /// Set when a concatenation or a `@Print` is emitted, so the text formatter is appended to the file.
     /// Emitted INTO the generated code for the same reason __VeinOrder is: the rules travel with the
     /// code that depends on them, rather than being a runtime version this file happens to meet.
-    private bool _needsText;
 
     public BackendResult Emit(IrModule module)
     {
@@ -96,7 +95,6 @@ public sealed class CSharpBackend : IVeinBackend
         _componentTypes.Clear();
         _functions.Clear();
         _needsOrder = false;
-        _needsText = false;
         _orderList = "";
         _selfVars.Clear();
         _selfComps.Clear();
@@ -158,7 +156,9 @@ public sealed class CSharpBackend : IVeinBackend
         // `bool.ToString()` is "True" where VeinScript writes `true`, and a double formats in the CURRENT
         // culture, so a machine using a comma decimal separator would print "3,5" against the
         // interpreter's "3.5" — a divergence that appears only on someone else's computer.
-        if (_needsText)
+        // ALWAYS emitted, not only when a concatenation needs it. Field coercion and character work
+        // both call into it, and a helper that appears conditionally is a helper that is missing from
+        // exactly the file that turns out to need it â which is how bench_folds stopped compiling.
         {
             sb.AppendLine();
             sb.AppendLine("internal static class __VeinText");
@@ -171,6 +171,74 @@ public sealed class CSharpBackend : IVeinBackend
             sb.AppendLine("        double d => d.ToString(System.Globalization.CultureInfo.InvariantCulture),");
             sb.AppendLine("        float f => ((double)f).ToString(System.Globalization.CultureInfo.InvariantCulture),");
             sb.AppendLine("        _ => v.ToString() ?? \"\",");
+            sb.AppendLine("    };");
+            sb.AppendLine();
+
+            // CHARACTER OPERATIONS, mirroring Interp exactly. They live in the emitted file rather than
+            // the runtime assembly so the generated code stays self-contained, and each one is written
+            // against `object?` for the same reason the interpreter is: a VeinScript value is not
+            // statically typed here, and a helper that assumed a string would differ from the
+            // interpreter on the first program that passed something else.
+            //
+            // tools/check-backend.sh runs both and diffs the output, so "mirrors exactly" is a claim
+            // the build checks rather than one this comment makes.
+            sb.AppendLine("    /// `s[i]` — a one-character string, or null when out of range.");
+            sb.AppendLine("    public static object? At(object? v, long i) => v switch");
+            sb.AppendLine("    {");
+            sb.AppendLine("        string s => i >= 0 && i < s.Length ? s[(int)i].ToString() : null,");
+            sb.AppendLine("        System.Collections.IList l => i >= 0 && i < l.Count ? l[(int)i] : null,");
+            sb.AppendLine("        _ => null,");
+            sb.AppendLine("    };");
+            sb.AppendLine();
+            sb.AppendLine("    /// `len(x)` — characters of a string, or entries of a list.");
+            sb.AppendLine("    public static long Len(object? v) => v switch");
+            sb.AppendLine("    {");
+            sb.AppendLine("        string s => s.Length,");
+            sb.AppendLine("        System.Collections.ICollection c => c.Count,");
+            sb.AppendLine("        _ => 0,");
+            sb.AppendLine("    };");
+            sb.AppendLine();
+            sb.AppendLine("    /// `code(c)` — the FIRST character's code point, 0 for an empty string.");
+            sb.AppendLine("    public static long Code(object? v) => S(v) is { Length: > 0 } s ? s[0] : 0L;");
+            sb.AppendLine();
+            sb.AppendLine("    /// `chr(n)` — the character with that code point.");
+            sb.AppendLine("    public static string Chr(object? v) =>");
+            sb.AppendLine("        ((char)(v switch { long l => l, double d => (long)d, int i => i, _ => 0 })).ToString();");
+            sb.AppendLine();
+            sb.AppendLine("    public static string Upper(object? v) => S(v).ToUpperInvariant();");
+            sb.AppendLine("    public static string Lower(object? v) => S(v).ToLowerInvariant();");
+            sb.AppendLine();
+            sb.AppendLine("    /// `chars(s)` — one entry per character.");
+            sb.AppendLine("    public static System.Collections.Generic.List<object?> Chars(object? v) =>");
+            sb.AppendLine("        System.Linq.Enumerable.ToList(System.Linq.Enumerable.Select(S(v), c => (object?)c.ToString()));");
+            sb.AppendLine();
+
+            // Ordinal when BOTH sides are strings, numeric otherwise — the same rule as Interp, and the
+            // same rule EntityStore.OrderKey sorts by, so an operator cannot disagree with a sort.
+            sb.AppendLine("    /// Comparison: two strings compare ORDINALLY, anything else numerically.");
+            sb.AppendLine("    public static int Cmp(object? a, object? b) =>");
+            sb.AppendLine("        a is string x && b is string y");
+            sb.AppendLine("            ? string.CompareOrdinal(x, y)");
+            sb.AppendLine("            : Num(a).CompareTo(Num(b));");
+            sb.AppendLine();
+            sb.AppendLine("    private static double Num(object? v) => v switch");
+            sb.AppendLine("    {");
+            sb.AppendLine("        double d => d, long l => l, int i => i, bool b => b ? 1 : 0, _ => 0,");
+            sb.AppendLine("    };");
+            sb.AppendLine();
+
+            // Coercion to a field's declared type. A VeinScript value is untyped at runtime and some
+            // expressions arrive as `object?` — a `chars()` element, `s[i]` — so assigning one to a typed
+            // field needs converting where the interpreter simply stores it.
+            sb.AppendLine("    public static long I(object? v) => v switch");
+            sb.AppendLine("    {");
+            sb.AppendLine("        long l => l, int i => i, double d => (long)d, bool b => b ? 1 : 0,");
+            sb.AppendLine("        string s => long.TryParse(s, out var p) ? p : 0, _ => 0,");
+            sb.AppendLine("    };");
+            sb.AppendLine("    public static double D(object? v) => Num(v);");
+            sb.AppendLine("    public static bool B(object? v) => v switch");
+            sb.AppendLine("    {");
+            sb.AppendLine("        bool b => b, long l => l != 0, double d => d != 0, null => false, _ => true,");
             sb.AppendLine("    };");
             sb.AppendLine("}");
         }
@@ -794,7 +862,19 @@ public sealed class CSharpBackend : IVeinBackend
         // culture, so the same program printed "True" here and "true" there, and would have printed
         // "3,5" on a machine in France. Both runtimes now format through the same rules.
         IrBinary b when b.Op == IrBinOp.Add && IsConcat(b) => Concat(b),
+
+        // ORDERING GOES THROUGH THE HELPER, for the same reason concatenation does: C# would compare two
+        // strings with `<` as a compile error and two objects by reference, while the interpreter
+        // compares strings ORDINALLY and everything else numerically. `c >= "a" and c <= "z"` has to mean
+        // the same thing in both runtimes or character code cannot be compiled at all.
+        IrBinary b when b.Op is IrBinOp.Lt or IrBinOp.Gt or IrBinOp.Le or IrBinOp.Ge
+            => $"(__VeinText.Cmp({Expr(b.Left)}, {Expr(b.Right)}) {Op(b.Op)} 0)",
+
         IrBinary b => $"({Expr(b.Left)} {Op(b.Op)} {Expr(b.Right)})",
+
+        // `s[i]` — a character out of a string, or an entry out of a list. Was unemitted, which made
+        // every program that reads text a character at a time interpreter-only.
+        IrIndex ix => $"__VeinText.At({Expr(ix.Receiver)}, {Expr(ix.Index)})",
         IrUnary u => u.Op == IrUnOp.Neg ? $"(-{Expr(u.Operand)})" : $"(!{Expr(u.Operand)})",
         IrRuntimeCall rc => RuntimeCall(rc),
         IrStructInit si => StructInit(si),
@@ -854,13 +934,31 @@ public sealed class CSharpBackend : IVeinBackend
                    "program on `veinc run`.");
         return $"{Ident(name)}({string.Join(", ", call.Args.Select(Expr))})";
     }
-    private static bool IsPrebuilt(string name) => name is "spawn" or "random";
+    /// Built-ins the backend can emit. The character ones are here because a program that reads text a
+    /// character at a time is exactly the kind that wants compiling rather than interpreting — and
+    /// because each is a one-liner whose meaning the emitted helper can match exactly.
+    ///
+    /// `split`/`lines`/`words`/`trim`/`join`/`pick`/`toJson`/`fromJson` are deliberately still absent:
+    /// they are not hard, but each carries a rule (which empties survive, which line endings) that has
+    /// to be reproduced rather than approximated, and an approximation here is the one failure the
+    /// backend contract forbids.
+    private static bool IsPrebuilt(string name) =>
+        name is "spawn" or "random" or "len" or "code" or "chr" or "chars" or "upper" or "lower";
 
     private string RuntimeCall(IrRuntimeCall c)
     {
         switch (c.Name)
         {
             case "spawn": return "World.Spawn()";
+
+            // The character built-ins. Each defers to the emitted helper rather than inlining C#, so
+            // there is one definition per operation and check-backend diffs it against the interpreter.
+            case "len": return $"__VeinText.Len({Expr(c.Args[0])})";
+            case "code": return $"__VeinText.Code({Expr(c.Args[0])})";
+            case "chr": return $"__VeinText.Chr({Expr(c.Args[0])})";
+            case "chars": return $"__VeinText.Chars({Expr(c.Args[0])})";
+            case "upper": return $"__VeinText.Upper({Expr(c.Args[0])})";
+            case "lower": return $"__VeinText.Lower({Expr(c.Args[0])})";
 
             // `attach $C to e { … }` carries a struct init and emits directly. `attach $C to e` with no
             // initialiser carries a bare TYPE NAME instead, which through Expr would emit as a string
@@ -974,14 +1072,12 @@ public sealed class CSharpBackend : IVeinBackend
 
     private string Concat(IrBinary b)
     {
-        _needsText = true;
         return $"(__VeinText.S({Expr(b.Left)}) + __VeinText.S({Expr(b.Right)}))";
     }
 
     private string Str(IrExpr? e)
     {
         if (e is null) return "\"\"";
-        _needsText = true;
         return $"__VeinText.S({Expr(e)})";
     }
 
@@ -994,9 +1090,46 @@ public sealed class CSharpBackend : IVeinBackend
             _notes.Add($"struct literal {si.TypeName} not emitted.");
             return "null";
         }
-        var sets = si.Fields.Select(f => $"{Ident(f.Field)} = {Expr(f.Value)}");
+        var sets = si.Fields.Select(f => $"{Ident(f.Field)} = {Coerce(si.TypeName, f.Field, f.Value)}");
         string type = _events.Contains(si.TypeName) ? EventType(si.TypeName) : Ident(si.TypeName);
         return $"new {type} {{ {string.Join(", ", sets)} }}";
+    }
+
+    /// Convert a value to the field's DECLARED type when C# would not do it implicitly.
+    ///
+    /// A VeinScript value is untyped at runtime, and some expressions arrive as `object?` — an element of
+    /// the list `chars()` returns, or `s[i]`. Assigning one to a typed field is a compile error in C#
+    /// and no error at all in the interpreter, which is exactly the kind of divergence the backend
+    /// contract exists to prevent: the generated file simply would not build.
+    ///
+    /// Only the untyped cases are wrapped. A field already holding a `string` expression stays as it was,
+    /// so nothing that compiled before changes shape.
+    private string Coerce(string typeName, string field, IrExpr value)
+    {
+        string emitted = Expr(value);
+
+        // Only what is UNTYPED at runtime gets wrapped. A literal, an arithmetic expression or a
+        // concatenation already has a C# type the field accepts, and wrapping those would put a call
+        // around every field in every emitted struct — noise, and a needless indirection in the hot
+        // path the backend exists to make fast.
+        //
+        // `Resolve` would answer this properly, but nothing runs it before emit (`IrExpr.ResolvedType`
+        // is null here), so the test is on the expression's FORM.
+        if (value is IrLiteral or IrBinary or IrUnary or IrStructInit or IrList) return emitted;
+
+        if (!_componentTypes.TryGetValue(typeName, out var decl)) return emitted;
+        var f = decl.Fields.FirstOrDefault(x => x.Name == field);
+
+        return f?.Type.Name switch
+        {
+            "string" => $"__VeinText.S({emitted})",
+            "int" => $"__VeinText.I({emitted})",
+            // `Entity` is a C# `int` here, not the 64-bit `int` VeinScript means by the word.
+            "Entity" => $"(int)__VeinText.I({emitted})",
+            "float" or "percent" => $"__VeinText.D({emitted})",
+            "bool" => $"__VeinText.B({emitted})",
+            _ => emitted
+        };
     }
 
     private static string Literal(IrLiteral l) => l.Kind switch

@@ -438,9 +438,13 @@ any output you print to check**. `words` is not `split(line, " ")` for the mirro
 gives three pieces with an empty middle, and the empty one is indistinguishable from a real word once
 you have it.
 
-**All of these are interpreter-only.** `veinc emit` reports each call it cannot translate rather than
-emitting C# that computes something else; string indexing is the same. Character work belongs in a
-program you `run`, not one you compile to the backend.
+**CHARACTER WORK COMPILES; the splits do not.** `s[i]`, `len`, `code`, `chr`, `chars`, `upper`, `lower`
+and string ORDERING all emit to C# and are diffed against the interpreter by
+`samples/entities_chars.vein` in tools/check-backend.sh â so a program that reads text a character at a
+time can go down the compiled path. `split`/`lines`/`words`/`trim`/`join`/`toJson`/`fromJson` stay
+interpreter-only: each carries a rule (which empties survive, which line endings) that would have to be
+reproduced rather than approximated, and `veinc emit` reports each call rather than emitting something
+that computes a different answer.
 
 There is no `startsWith`, no `indexOf` and no substring **in the standard library** — but you can write
 the first of those yourself, which is the point of 28:
