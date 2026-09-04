@@ -35,10 +35,15 @@ public class ScaffoldTests
 
             Assert.True(File.Exists(mainFile));
             Assert.Equal("Combat.vein", Path.GetFileName(mainFile));
-            // The fragment folders exist even while empty — BundleLoader merges whatever lands in them.
+            // The fragment folders, and they are SEEDED rather than empty. Two bare directories say
+            // where files go and nothing about what goes in them, and the rule is not guessable:
+            // publicators/ is API, shards/ is behaviour, and a shape in the wrong one is VS0321.
             Assert.Equal(new[] { "publicators", "shards" }, ProjectScaffold.BundleFolders);
             foreach (var folder in ProjectScaffold.BundleFolders)
                 Assert.True(Directory.Exists(Path.Combine(bundleDir, folder)), $"missing folder {folder}");
+
+            Assert.NotEmpty(Directory.GetFiles(Path.Combine(bundleDir, "publicators"), "*.vein"));
+            Assert.NotEmpty(Directory.GetFiles(Path.Combine(bundleDir, "shards"), "*.vein"));
             Assert.True(ParsesClean(mainFile), "scaffolded bundle should parse with no diagnostics");
 
             // A standalone bundle is its own workspace root, so it gets a discovery policy.
@@ -65,7 +70,11 @@ public class ScaffoldTests
             var diag = new DiagnosticBag();
             var model = ProjectLoader.Load(appFile, diag);
             Assert.False(diag.HasErrors);
-            Assert.Contains(model.Symbols, s => s.Bundle == "MyGame" && s.Name == "Started");
+            // The principal's seeded API, reached through the app. This is the assertion that proves the
+            // manifest really loads the bundle AND that the bundle's publicators/ fragments merged —
+            // `@Drained` is declared in publicators/Events.vein, not in the main file.
+            Assert.Contains(model.Symbols, s => s.Bundle == "MyGame" && s.Name == "Drained");
+            Assert.Contains(model.Symbols, s => s.Bundle == "MyGame" && s.Name == "Gauge");
         }
         finally { Directory.Delete(root, recursive: true); }
     }

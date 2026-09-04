@@ -22,17 +22,21 @@ public static class WorkloadTemplates
             "Answers `@Request` with markup. Serve it, or preview a route in the IDE.")
     };
 
-    public static string Source(string key, string name, string author) => key switch
+    /// `entryPath` is where the file will actually live, relative to the folder you would run from —
+    /// `Demo/main.vein` for a scratch project, `Demo/Demo/Demo.vein` for the principal of a solution.
+    /// It goes into the header run line, which RunConfig reads to drive the Workbench toolbar, so a
+    /// hardcoded path would break the toolbar run button on the very first file someone makes.
+    public static string Source(string key, string name, string author, string entryPath) => key switch
     {
-        "chat" => Chat(name, author),
-        "site" => Site(name, author),
-        _ => Cli(name, author)
+        "chat" => Chat(name, author, entryPath),
+        "site" => Site(name, author, entryPath),
+        _ => Cli(name, author, entryPath)
     };
 
-    private static string Cli(string name, string author) => $$"""
+    private static string Cli(string name, string author, string entryPath) => $$"""
 // {{name}} — a CLI app. Type a line and it answers.
 //
-//   veinc run {{name}}/main.vein
+//   veinc run {{entryPath}}
 
 bundle {{name}} by {{author}} {
 
@@ -50,12 +54,12 @@ bundle {{name}} by {{author}} {
 
 """;
 
-    private static string Chat(string name, string author) => $$"""
+    private static string Chat(string name, string author, string entryPath) => $$"""
 // {{name}} — ONE program, launched once per participant, relaying between them.
 //
-//   Terminal 1:   VEIN_CONSOLE=Control veinc run {{name}}/relay.vein     ← start this first
-//   Terminal 2:   VEIN_CONSOLE=Alpha   veinc run {{name}}/relay.vein
-//   Terminal 3:   VEIN_CONSOLE=Beta    veinc run {{name}}/relay.vein
+//   Terminal 1:   VEIN_CONSOLE=Control veinc run {{entryPath}}     ← start this first
+//   Terminal 2:   VEIN_CONSOLE=Alpha   veinc run {{entryPath}}
+//   Terminal 3:   VEIN_CONSOLE=Beta    veinc run {{entryPath}}
 //
 // `here()` is this process's own console address, read from the VEIN_CONSOLE environment variable, so
 // `match here()` is a ROLE SWITCH across separately launched processes. A console's pipe name is
@@ -127,10 +131,10 @@ bundle {{name}} by {{author}} {
 
 """;
 
-    private static string Site(string name, string author) => $$"""
+    private static string Site(string name, string author, string entryPath) => $$"""
 // {{name}} — a small website. Routing is `if r.path == "/x"`; there is no route table.
 //
-//   veinc serve {{name}}/site.vein --port 8080
+//   veinc serve {{entryPath}} --port 8080
 
 bundle {{name}} by {{author}} {
 

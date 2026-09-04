@@ -19,9 +19,7 @@
       </MenuItem>
       <MenuItem Header="_File">
         <MenuItem Header="_New File" Click="OnNew" InputGesture="Ctrl+N" />
-        <MenuItem Header="New _Bundle…" Click="OnNewBundle" />
-        <MenuItem Header="New _App…" Click="OnNewApp" />
-        <MenuItem Header="New from _Template…" Click="OnNewFromTemplate" />
+        <MenuItem Header="New _Project…" Click="OnNewProject" InputGesture="Ctrl+Shift+N" />
         <Separator />
         <MenuItem Header="_Open File…" Click="OnOpen" InputGesture="Ctrl+O" />
         <MenuItem Header="_Close Tab" Click="OnCloseTab" InputGesture="Ctrl+W" />

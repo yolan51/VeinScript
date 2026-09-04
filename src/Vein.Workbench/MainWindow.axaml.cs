@@ -453,8 +453,7 @@ public partial class MainWindow : Window
     private void OnCloseTab(object? sender, RoutedEventArgs e) { if (_tabs.Active is { } d) _ = CloseTabAsync(d); }
 
     private async Task CloseTabAsync(EditorTabs.Doc doc) { await _tabs.CloseAsync(doc); SaveSession(); }
-    private void OnNewBundle(object? sender, RoutedEventArgs e) => _ = NewProjectAsync(app: false);
-    private void OnNewApp(object? sender, RoutedEventArgs e) => _ = NewProjectAsync(app: true);
+    private void OnNewProject(object? sender, RoutedEventArgs e) => _ = NewProjectAsync();
     private void OnBuild(object? sender, RoutedEventArgs e) => Build();
     private void OnBuildInspect(object? sender, RoutedEventArgs e) { Build(); _bottomPanel.SelectedIndex = TabRawIr; _inspector.SelectedIndex = 2; }
     private void OnOpen(object? sender, RoutedEventArgs e) => _ = OpenAsync();
@@ -718,47 +717,6 @@ public partial class MainWindow : Window
         RefreshRunConfigs();
     }
 
-    private void OnNewFromTemplate(object? sender, RoutedEventArgs e) => _ = NewFromTemplateAsync();
-
-    /// A whole working program to start from, rather than a correct file that does nothing. The three
-    /// templates match the three workloads this IDE is scoped to.
-    private async Task NewFromTemplateAsync()
-    {
-        var top = TopLevel.GetTopLevel(this);
-        if (top is null) return;
-
-        string? picked = await TemplateDialog.ShowAsync(this);
-        if (picked is null) return;
-
-        string? parent = _rootFolder;
-        if (parent is null)
-        {
-            var dirs = await top.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-            { AllowMultiple = false, Title = "Choose where to create it" });
-            if (dirs.Count == 0) return;
-            parent = dirs[0].Path.LocalPath;
-        }
-
-        string? name = await PromptDialog.ShowAsync(this, "New program", "Bundle name:", "Demo");
-        if (string.IsNullOrWhiteSpace(name)) return;
-
-        var template = WorkloadTemplates.All.First(t => t.Key == picked);
-        try
-        {
-            string dir = Path.Combine(parent, name.Trim());
-            Directory.CreateDirectory(dir);
-            string file = Path.Combine(dir, template.FileName);
-            await File.WriteAllTextAsync(file, WorkloadTemplates.Source(picked, name.Trim(), "you"));
-
-            _rootFolder = dir;
-            _settings.Remember(dir);
-            PopulateProjectTree(dir);
-            await OpenPathAsync(file);
-            SetStatus($"Created {template.Title} '{name.Trim()}' — press ▶.");
-        }
-        catch (Exception ex) { SetStatus($"Could not create it: {ex.Message}"); }
-    }
-
     /// Run one of the repo's four checks in a terminal session. They are shell commands, so they go
     /// through the same passthrough the prompt uses — the IDE runs them the way you would.
     private void OnRunCheck(object? sender, RoutedEventArgs e)
@@ -994,39 +952,49 @@ public partial class MainWindow : Window
 
     /// Scaffold a new bundle or app: pick where to create it, name it, lay down the skeleton, then show
     /// it in the explorer and open its main file. Reuses ProjectScaffold (shared with `veinc new`).
-    private async Task NewProjectAsync(bool app)
+    /// One entry point for every new project. Structure and starting point are asked together because
+    /// they are independent — a Solution that starts as a website is a normal choice, and separate menu
+    /// items for "New Bundle" and "New from Template" made that combination unreachable.
+    private async Task NewProjectAsync()
     {
         var top = TopLevel.GetTopLevel(this);
         if (top is null) return;
 
+        if (await NewProjectDialog.ShowAsync(this) is not { } choice) return;
+
+        // Where to put it. The open folder when there is one, since a project made while a project is
+        // open is almost always meant to sit beside it.
         string? parentDir = _rootFolder;
         if (parentDir is null)
         {
             var dirs = await top.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
             {
                 AllowMultiple = false,
-                Title = app ? "Choose where to create the app" : "Choose where to create the bundle"
+                Title = $"Choose where to create {choice.Name}"
             });
             if (dirs.Count == 0) return;
             parentDir = dirs[0].Path.LocalPath;
         }
 
-        string? name = await PromptDialog.ShowAsync(this, app ? "New App" : "New Bundle", "Name:");
-        if (string.IsNullOrWhiteSpace(name)) return;
-
         try
         {
-            string mainFile = app
-                ? ProjectScaffold.NewApp(parentDir, name.Trim(), "you").AppFile
-                : ProjectScaffold.NewBundle(parentDir, name.Trim(), "you").MainFile;
-            _rootFolder = Path.Combine(parentDir, name.Trim());
-            PopulateProjectTree(_rootFolder);
+            var (dir, mainFile) = ProjectScaffold.New(choice.Kind, parentDir, choice.Name, "you", choice.Workload);
+
+            _rootFolder = dir;
+            _settings.Remember(dir);
+            PopulateProjectTree(dir);
             await OpenPathAsync(mainFile);
-            SetStatus($"Created {(app ? "app" : "bundle")} {name.Trim()} at {_rootFolder}");
+
+            string what = choice.Workload is null
+                ? choice.Kind.ToString().ToLowerInvariant()
+                : $"{choice.Kind.ToString().ToLowerInvariant()} · {WorkloadTemplates.All.First(t => t.Key == choice.Workload).Title}";
+            SetStatus($"Created {what} '{choice.Name}' at {dir} — press ▶.");
         }
         catch (Exception ex)
         {
-            SetStatus($"New {(app ? "app" : "bundle")} failed: {ex.Message}");
+            // ValidateName and RequireEmpty both throw with a sentence worth showing: a name with a
+            // space in it, or a folder that already exists.
+            SetStatus($"Could not create {choice.Name}: {ex.Message}");
         }
     }
 

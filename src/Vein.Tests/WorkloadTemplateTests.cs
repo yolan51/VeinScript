@@ -16,7 +16,7 @@ public class WorkloadTemplateTests
     [MemberData(nameof(Keys))]
     public void A_template_compiles_with_no_diagnostics(string key)
     {
-        string src = WorkloadTemplates.Source(key, "Demo", "you");
+        string src = WorkloadTemplates.Source(key, "Demo", "you", "Demo/demo.vein");
         var r = new VeinCompilerService().Compile(new CompileRequest("demo.vein", src));
 
         Assert.True(r.Success, $"{key}: " + string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
@@ -33,7 +33,7 @@ public class WorkloadTemplateTests
     {
         // The header convention RunConfig reads. A template whose own header did not follow it would
         // teach the convention wrongly, and ▶ would be wrong on the very first file someone makes.
-        string src = WorkloadTemplates.Source(key, "Demo", "you");
+        string src = WorkloadTemplates.Source(key, "Demo", "you", "Demo/demo.vein");
         var configs = RunConfig.From(src, "C:/p/demo.vein");
 
         Assert.NotEmpty(configs);
@@ -43,7 +43,7 @@ public class WorkloadTemplateTests
     [Fact]
     public void The_chat_template_offers_its_three_participants()
     {
-        var configs = RunConfig.From(WorkloadTemplates.Source("chat", "Demo", "you"), "C:/p/relay.vein");
+        var configs = RunConfig.From(WorkloadTemplates.Source("chat", "Demo", "you", "Demo/relay.vein"), "C:/p/relay.vein");
 
         Assert.Equal(3, configs.Count);
         Assert.Equal(new[] { "Control", "Alpha", "Beta" }, configs.Select(c => c.Env["VEIN_CONSOLE"]));
@@ -53,7 +53,7 @@ public class WorkloadTemplateTests
     public void The_site_template_answers_the_routes_it_advertises()
     {
         // Not just "it has routes" — it renders them. This is the template's whole promise.
-        string src = WorkloadTemplates.Source("site", "Demo", "you");
+        string src = WorkloadTemplates.Source("site", "Demo", "you", "Demo/site.vein");
         var result = new VeinCompilerService().Compile(new CompileRequest("site.vein", src));
 
         var map = RouteMap.Analyze(result.Ast!);
@@ -74,7 +74,7 @@ public class WorkloadTemplateTests
     {
         // #Control has to be a KNOWN address or the template ships with a VS0212 on its own relay.
         var result = new VeinCompilerService().Compile(
-            new CompileRequest("relay.vein", WorkloadTemplates.Source("chat", "Demo", "you")));
+            new CompileRequest("relay.vein", WorkloadTemplates.Source("chat", "Demo", "you", "Demo/relay.vein")));
 
         var graph = ConsoleGraph.Analyze(result.Ast!)!;
         Assert.Contains("Control", graph.Known);

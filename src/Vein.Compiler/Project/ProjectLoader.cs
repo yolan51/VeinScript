@@ -18,7 +18,11 @@ public static class ProjectLoader
 
         CompilationUnit? appUnit = null;
         if (File.Exists(appFilePath))
-            appUnit = Parse(File.ReadAllText(appFilePath), Path.GetFileName(appFilePath), diag);
+            // Through BundleLoader for the same reason as the loads below. `veinc symbols <bundle>.vein`
+            // comes here too — the path is only called `appFilePath` because an app manifest is the usual
+            // case — and a bundle asked about directly must show the API in its folders. Harmless for a
+            // real manifest: an app root has `<name>/` and `bundles/`, never `publicators/`.
+            appUnit = BundleLoader.Load(appFilePath, diag);
         else
             diag.Error("VS0300", $"app file not found: {appFilePath}", span);
 
@@ -35,7 +39,12 @@ public static class ProjectLoader
             {
                 var full = Path.GetFullPath(Path.Combine(baseDir, load.Path));
                 if (!File.Exists(full)) { diag.Error("VS0301", $"app '{appName}' load target not found: {load.Path}", app.Span); continue; }
-                var lu = Parse(File.ReadAllText(full), Path.GetFileName(full), diag);
+                // BundleLoader, not a bare parse: a bundle is its main file PLUS its publicators/ and
+                // shards/ fragments, and reading only the main file made a fragment-shaped bundle look
+                // like it had no public API at all. It went unnoticed because the scaffold used to
+                // declare its `publicator Api` inline, so the one bundle anyone generated had nothing in
+                // its folders — `veinc symbols` and the Bundle Inspector both read this.
+                var lu = BundleLoader.Load(full, diag);
                 Collect(lu, symbols);
                 CollectEventRefs(lu, refs);
 
