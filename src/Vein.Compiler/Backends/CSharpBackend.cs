@@ -158,7 +158,7 @@ public sealed class CSharpBackend : IVeinBackend
         // interpreter's "3.5" — a divergence that appears only on someone else's computer.
         // ALWAYS emitted, not only when a concatenation needs it. Field coercion and character work
         // both call into it, and a helper that appears conditionally is a helper that is missing from
-        // exactly the file that turns out to need it â which is how bench_folds stopped compiling.
+        // exactly the file that turns out to need it — which is how bench_folds stopped compiling.
         {
             sb.AppendLine();
             sb.AppendLine("internal static class __VeinText");

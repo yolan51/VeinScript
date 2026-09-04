@@ -169,4 +169,168 @@ public class TextAndFileTests
         }
         finally { if (File.Exists(path)) File.Delete(path); }
     }
+
+    // ---- the tag ----------------------------------------------------------------------------------
+    //
+    // `hear @FileLoaded` fires for EVERY file. With nineteen files, routing on `f.path` means nineteen
+    // string comparisons that must each be spelled right in two places, where a missing one does not
+    // fail — it silently processes the wrong file. The tag rides the request into the answer so a
+    // handler routes on what the read was FOR, and the runtime never looks at it.
+
+    [Fact]
+    public void A_tag_rides_the_request_into_the_answer()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "vein-test-" + Guid.NewGuid().ToString("N") + ".txt");
+        string escaped = path.Replace("\\", "\\\\");
+        File.WriteAllText(path, "x");
+
+        try
+        {
+            string output = Run($$"""
+                    mark #Config
+                    shard S {
+                        run once {
+                            emit *Vein.Files.Io.@ReadFile { path: "{{escaped}}", tag: #Config }
+                        }
+                        hear *Vein.Files.Io.@FileLoaded as f {
+                            emit *Vein.Console.Io.@Print { text: "tag=[" + f.tag + "]" }
+                        }
+                    }
+                """, ticks: 3);
+
+            // `#Config` in value position is its own name, so the emit and the `when` below are the same
+            // string with no quoting at either end.
+            Assert.Contains("tag=[Config]", output);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public void A_read_with_no_tag_answers_with_an_empty_one()
+    {
+        // The field defaults, so every file program written before the tag existed still compiles and
+        // still runs — and `match f.tag` on an untagged read falls to `else` rather than matching an arm.
+        string path = Path.Combine(Path.GetTempPath(), "vein-test-" + Guid.NewGuid().ToString("N") + ".txt");
+        string escaped = path.Replace("\\", "\\\\");
+        File.WriteAllText(path, "x");
+
+        try
+        {
+            string output = Run($$"""
+                    shard S {
+                        run once {
+                            emit *Vein.Files.Io.@ReadFile { path: "{{escaped}}" }
+                        }
+                        hear *Vein.Files.Io.@FileLoaded as f {
+                            emit *Vein.Console.Io.@Print { text: "tag=[" + f.tag + "]" }
+                        }
+                    }
+                """, ticks: 3);
+
+            Assert.Contains("tag=[]", output);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public void A_failure_carries_the_tag_it_was_asked_for()
+    {
+        // The half that a path comparison makes worst: without this the error path needs its own
+        // nineteen guards, and it is the path nobody tests.
+        string missing = Path.Combine(Path.GetTempPath(), "vein-missing-" + Guid.NewGuid().ToString("N") + ".txt");
+        string escaped = missing.Replace("\\", "\\\\");
+
+        string output = Run($$"""
+                mark #Config
+                shard S {
+                    run once {
+                        emit *Vein.Files.Io.@ReadFile { path: "{{escaped}}", tag: #Config }
+                    }
+                    hear *Vein.Files.Io.@FileMissing as m {
+                        match m.tag {
+                            when #Config { emit *Vein.Console.Io.@Print { text: "no config; using defaults" } }
+                            else { emit *Vein.Console.Io.@Print { text: "unrouted" } }
+                        }
+                    }
+                }
+            """, ticks: 3);
+
+        Assert.Contains("no config; using defaults", output);
+        Assert.DoesNotContain("unrouted", output);
+    }
+
+    [Fact]
+    public void Many_files_route_by_tag_with_no_path_comparison()
+    {
+        // The whole point, in one handler: two files, two destinations, and not one path spelled twice.
+        string dir = Path.Combine(Path.GetTempPath(), "vein-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        string conf = Path.Combine(dir, "app.conf"), log = Path.Combine(dir, "server.log");
+        File.WriteAllText(conf, "fullscreen = false\n");
+        File.WriteAllText(log, "INFO ok\nERROR disk full\n");
+
+        try
+        {
+            string output = Run($$"""
+                    mark #Config
+                    mark #Log
+                    shard S {
+                        run once {
+                            emit *Vein.Files.Io.@ReadFile { path: "{{conf.Replace("\\", "\\\\")}}", tag: #Config }
+                            emit *Vein.Files.Io.@ReadFile { path: "{{log.Replace("\\", "\\\\")}}",  tag: #Log }
+                        }
+                        hear *Vein.Files.Io.@FileLoaded as f {
+                            match f.tag {
+                                when #Config { emit *Vein.Console.Io.@Print { text: "config: " + trim(f.text) } }
+                                when #Log {
+                                    target lines(f.text) as l {
+                                        if contains(l, "ERROR") { emit *Vein.Console.Io.@Print { text: "log: " + l } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                """, ticks: 4);
+
+            Assert.Contains("config: fullscreen = false", output);
+            Assert.Contains("log: ERROR disk full", output);
+        }
+        finally { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public void A_computed_tag_is_why_the_field_is_a_string()
+    {
+        // Nineteen save slots want `"slot" + n`, which no mark can spell. A string takes both, and
+        // `#Config` still works because that is exactly what a mark evaluates to.
+        string dir = Path.Combine(Path.GetTempPath(), "vein-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        string escaped = dir.Replace("\\", "\\\\");
+        for (int i = 1; i <= 3; i++) File.WriteAllText(Path.Combine(dir, "slot" + i + ".dat"), "level=" + (i * 3));
+
+        try
+        {
+            string output = Run($$"""
+                    shard S {
+                        run once {
+                            repeat 3 as i {
+                                emit *Vein.Files.Io.@ReadFile {
+                                    path: "{{escaped}}" + "/slot" + (i + 1) + ".dat",
+                                    tag: "slot" + (i + 1)
+                                }
+                            }
+                        }
+                        hear *Vein.Files.Io.@FileLoaded as f {
+                            if startsWith(f.tag, "slot") {
+                                emit *Vein.Console.Io.@Print { text: f.tag + " -> " + trim(f.text) }
+                            }
+                        }
+                    }
+                """, ticks: 4);
+
+            Assert.Contains("slot1 -> level=3", output);
+            Assert.Contains("slot3 -> level=9", output);
+        }
+        finally { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); }
+    }
 }

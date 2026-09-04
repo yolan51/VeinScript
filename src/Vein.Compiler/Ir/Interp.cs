@@ -449,6 +449,10 @@ public sealed class Interp
     {
         string path = Str(payload.GetValueOrDefault("path"));
 
+        // The tag rides the REQUEST through to the ANSWER untouched, so a program with many files routes
+        // on what the read was FOR rather than on where it lived. The runtime never reads it.
+        string tag = Str(payload.GetValueOrDefault("tag"));
+
         try
         {
             string text = File.ReadAllText(path);
@@ -456,18 +460,22 @@ public sealed class Interp
             {
                 ["path"] = path,
                 ["text"] = text,
-                ["bytes"] = (long)text.Length
+                ["bytes"] = (long)text.Length,
+                ["tag"] = tag
             });
         }
         catch (Exception ex)
         {
             // Missing, locked, no permission, a directory — all one event with the reason, because a
             // program that wants to know WHICH can read the reason, and one that does not can hear the
-            // failure without a second handler per cause.
+            // failure without a second handler per cause. The tag comes back here too: a failure has to
+            // be routable by the same match that routes the success, or nineteen files means nineteen
+            // more path comparisons in the error path.
             Emit("FileMissing", new Dictionary<string, object?>(StringComparer.Ordinal)
             {
                 ["path"] = path,
-                ["reason"] = ex.Message
+                ["reason"] = ex.Message,
+                ["tag"] = tag
             });
         }
     }
@@ -477,6 +485,9 @@ public sealed class Interp
         string path = Str(payload.GetValueOrDefault("path"));
         string text = Str(payload.GetValueOrDefault("text"));
         bool append = payload.GetValueOrDefault("append") is bool b && b;
+
+        // The tag rides along untouched, so a write can be routed by the same `match` as a read.
+        string tag = Str(payload.GetValueOrDefault("tag"));
 
         try
         {
@@ -491,7 +502,8 @@ public sealed class Interp
             Emit("FileWritten", new Dictionary<string, object?>(StringComparer.Ordinal)
             {
                 ["path"] = path,
-                ["bytes"] = (long)text.Length
+                ["bytes"] = (long)text.Length,
+                ["tag"] = tag
             });
         }
         catch (Exception ex)
@@ -499,7 +511,8 @@ public sealed class Interp
             Emit("FileMissing", new Dictionary<string, object?>(StringComparer.Ordinal)
             {
                 ["path"] = path,
-                ["reason"] = ex.Message
+                ["reason"] = ex.Message,
+                ["tag"] = tag
             });
         }
     }

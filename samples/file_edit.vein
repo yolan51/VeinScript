@@ -37,6 +37,11 @@
 // `substring` did not exist. That — not syntax — is why `if the line mentions ERROR` could not be
 // written. They are ordinary functions, they compile to C# like the character ones, and with them both
 // scenarios above are ordinary VeinScript.
+//
+// TWO FILES IS WHERE `if f.path == "…"` STILL READS FINE, and this sample keeps it so the guard and the
+// idempotence lesson below stay in one frame. It does not scale: at nineteen files every handler is a
+// wall of path comparisons, none of which fail loudly when they are wrong. `samples/file_tags.vein` is
+// the same job routed by `tag` instead — one handler, no path spelled twice (RULES 28c).
 
 bundle FileEdit by you {
 

@@ -1,0 +1,157 @@
+// file_tags.vein — many files, two handlers. The `tag` field, and why routing by path does not scale.
+//
+//   veinc run samples/file_tags.vein --ticks 6
+//
+// THE PROBLEM THIS SOLVES. `hear @FileLoaded` fires for EVERY file the program ever reads. With one
+// file that is invisible. With nineteen it is the whole design:
+//
+//     hear *Vein.Files.Io.@FileLoaded as f {
+//         if f.path == "conf/app.conf"    { … }        // nineteen of these
+//         if f.path == "logs/server.log"  { … }        // each one a string that must be spelled right
+//         if f.path == "saves/slot1.dat"  { … }        // in two places, forever
+//         …
+//     }
+//
+// Nothing there fails loudly. A typo means the block never runs; a path that changes on Windows means it
+// never runs on Windows; a file renamed means every handler that mentioned it has to be found. And the
+// handler is keyed on WHERE the file lives, when what it actually wants to know is WHAT the read was for.
+//
+// THE FIX IS ONE FIELD. `@ReadFile` carries a `tag`, and the runtime hands it straight back on
+// @FileLoaded / @FileMissing / @FileWritten without looking at it. So the request says what it is for:
+//
+//     emit @ReadFile { path: settingsPath, tag: #Config }
+//
+// and the handler routes on that instead of on a path:
+//
+//     match f.tag { when #Config { … } when #Log { … } }
+//
+// A mark in value position evaluates to its own name, so `#Config` at the emit and `when #Config` at the
+// handler are the same string with no quoting at either end — and `when` is checked against declared
+// marks, so a misspelled tag is a compile error rather than a block that silently never runs.
+//
+// WHY THE FIELD IS A STRING AND NOT A MARK TYPE. Because tags are often computed. Three save slots — or
+// nineteen — want `"slot" + n`, which no mark can spell. A string takes both, and `#Config` still works,
+// since that is exactly what a mark evaluates to.
+//
+// WHAT THE TAG IS NOT. It is not a handle and it is not an identity: nothing is allocated, nothing has to
+// be closed, and two reads may share a tag on purpose (that is how "all nineteen configs" is written).
+// `f.path` is still there when a handler wants to know which file it actually got.
+
+bundle FileTags by you {
+
+    // The tags. Declaring them is what makes `when #Config` checkable — an undeclared mark is VS0210,
+    // so the compiler catches the typo that a path comparison would have swallowed.
+    mark #Config
+    mark #Log
+    mark #Save
+
+    // One save slot read back, so the report can be sorted and counted like anything else.
+    shape $Slot { n: int, text: string }
+    mark #Slot
+    builder Slot { $Slot   mark #Slot }
+
+    // Fired when the last slot has been read back, so the report runs once and at the right moment.
+    event @SavesLoaded { count: int }
+
+    // ---- 1. write the five files ------------------------------------------------------------------
+    //
+    // The write carries a tag too, so step 2 can route the confirmations without a second set of path
+    // comparisons.
+
+    shard Seed {
+        run once {
+            emit *Vein.Files.Io.@WriteFile {
+                path: "out/conf/app.conf", append: false, tag: #Config,
+                text: "fullscreen = false\nvolume = 80\n"
+            }
+
+            emit *Vein.Files.Io.@WriteFile {
+                path: "out/logs/server.log", append: false, tag: #Log,
+                text: "INFO  started\nERROR disk full\nFATAL out of memory\n"
+            }
+
+            // THE COMPUTED TAG, and the reason the field is a string. Three here; the same three lines
+            // write nineteen, and not one handler below changes.
+            repeat 3 as i {
+                emit *Vein.Files.Io.@WriteFile {
+                    path: "out/saves/slot" + (i + 1) + ".dat",
+                    append: false,
+                    tag: "slot" + (i + 1),
+                    text: "level=" + ((i + 1) * 3) + "\n"
+                }
+            }
+        }
+    }
+
+    // ---- 2. ask for them back ---------------------------------------------------------------------
+    //
+    // ONE handler for five files. It does not name a single path: the tag it hands to @ReadFile is the
+    // one that came back on @FileWritten, so a file whose location changes changes only in Seed.
+
+    shard Ask {
+        hear *Vein.Files.Io.@FileWritten as w {
+            emit *Vein.Files.Io.@ReadFile { path: w.path, tag: w.tag }
+        }
+    }
+
+    // ---- 3. one handler, routed by what the read was for ------------------------------------------
+
+    shard Route {
+        var slots: int
+
+        hear *Vein.Files.Io.@FileLoaded as f {
+            match f.tag {
+
+                when #Config {
+                    target lines(f.text) as l {
+                        if startsWith(l, "fullscreen") {
+                            emit *Vein.Console.Io.@Print { text: "config: " + l }
+                        }
+                    }
+                }
+
+                when #Log {
+                    target lines(f.text) as l {
+                        if contains(l, "ERROR") or startsWith(l, "FATAL") {
+                            emit *Vein.Console.Io.@Print { text: "log line " + (Index + 1) + ": " + l }
+                        }
+                    }
+                }
+
+                // The slots land here, because their tags are computed and no `when` can name them all.
+                // `else` is the arm a nineteen-`if` handler never had: a file that arrives tagged with
+                // something nobody wrote a case for is visible instead of silently ignored.
+                else {
+                    if startsWith(f.tag, "slot") {
+                        slots = slots + 1
+                        bring Slot(slots, trim(f.text)) as s
+                        mark s #Save
+                        if slots == 3 { emit @SavesLoaded { count: slots } }
+                    } else {
+                        emit *Vein.Console.Io.@Print { text: "untagged read: " + f.path }
+                    }
+                }
+            }
+        }
+
+        // AND THE FAILURE ROUTES THE SAME WAY. This is the half a path comparison makes worst: the
+        // error path needs its own nineteen guards, and it is the path nobody tests.
+        hear *Vein.Files.Io.@FileMissing as m {
+            match m.tag {
+                when #Config { emit *Vein.Console.Io.@Print { text: "no config; using defaults" } }
+                when #Log    { emit *Vein.Console.Io.@Print { text: "no log to scan" } }
+                else         { emit *Vein.Console.Io.@Print { text: "lost " + m.tag + ": " + m.reason } }
+            }
+        }
+    }
+
+    // ---- 4. what came back ------------------------------------------------------------------------
+
+    shard Report {
+        hear @SavesLoaded as a {
+            target $Slot #Save as s {
+                emit *Vein.Console.Io.@Print { text: "save " + s.Slot.n + ": " + s.Slot.text }
+            }
+        }
+    }
+}

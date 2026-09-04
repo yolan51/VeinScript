@@ -440,18 +440,21 @@ you have it.
 
 **CHARACTER WORK COMPILES; the splits do not.** `s[i]`, `len`, `code`, `chr`, `chars`, `upper`, `lower`
 and string ORDERING all emit to C# and are diffed against the interpreter by
-`samples/entities_chars.vein` in tools/check-backend.sh â so a program that reads text a character at a
+`samples/entities_chars.vein` in tools/check-backend.sh — so a program that reads text a character at a
 time can go down the compiled path. `split`/`lines`/`words`/`trim`/`join`/`toJson`/`fromJson` stay
 interpreter-only: each carries a rule (which empties survive, which line endings) that would have to be
 reproduced rather than approximated, and `veinc emit` reports each call rather than emitting something
 that computes a different answer.
 
-There is no `startsWith`, no `indexOf` and no substring **in the standard library** — but you can write
-the first of those yourself, which is the point of 28:
+`contains`, `startsWith`, `endsWith`, `indexOf`, `substring` and `replace` are built in alongside them,
+and they compile. Their ABSENCE — not any missing syntax — is what made "if the line mentions ERROR"
+unwritable, which is most of what a file-handling program spends its time doing. `s[0] == "F"` can only
+ever test one character; a multi-character prefix needs `startsWith`, and writing it by hand
+(`fn startsWith(s, p) { … }`) walks the string one interpreted concatenation at a time.
 
-```
-fn startsWith(s: string, prefix: string) -> bool { return len(s) > 0 and s[0] == prefix }
-```
+`indexOf` answers `-1` when the needle is absent — the one value a valid position can never be, so
+`indexOf(s, x) >= 0` reads as "is in there" without a second call — and `substring` CLAMPS rather than
+throwing, because a runtime is not a place to crash a console app over an index.
 
 `samples/characters.vein` is the whole of this rule as a running program: classification, an identifier
 validator, ROT13 with `code`/`chr`, and why case folding needs a function.
@@ -467,3 +470,35 @@ names for an event a program would declare itself.
 
 Writing creates missing folders on the way. There is no sandbox, no directory listing (the answer would
 be a list and a payload field holds a scalar) and no binary mode (`text` is a string).
+
+**28c. Route files by `tag`, not by path.** `hear @FileLoaded` fires for **every** file the program ever
+reads. With one file that is invisible; with nineteen, every handler opens `if f.path == "…"` — and
+nothing there fails loudly. A typo means the block never runs, a renamed file has to be found in every
+handler that mentioned it, and the error path needs its own nineteen guards.
+
+So every file event carries a `tag` that the runtime hands back untouched:
+
+```
+emit *Vein.Files.Io.@ReadFile { path: settings, tag: #Config }
+
+hear *Vein.Files.Io.@FileLoaded as f {
+    match f.tag {
+        when #Config { … }
+        when #Log    { … }
+        else         { … }          // the arm nineteen `if`s never had
+    }
+}
+```
+
+A mark in value position is its own name, so `#Config` at the emit and `when #Config` at the handler are
+the same string with no quoting at either end — and `when` is checked against declared marks, so a
+misspelled tag is a **compile error** instead of a block that silently never runs. `@FileMissing` and
+`@FileWritten` carry it too, so the failure routes through the same `match` as the success.
+
+The field is a **string** and not a mark type because tags are often computed: nineteen save slots want
+`"slot" + n`, which no mark can spell. It defaults to `""`, so a program written before it existed is
+unchanged. It is not a handle — nothing is allocated, nothing is closed, and two reads may share a tag
+on purpose, which is how "all nineteen configs" is written. `f.path` is still there when a handler wants
+to know which file it actually got.
+
+`samples/file_tags.vein` is five files through two handlers, including a computed tag.

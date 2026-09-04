@@ -45,24 +45,48 @@ bundle Files by Vein {
         // ---- reading ------------------------------------------------------------------------------
 
         shared("Ask for a file's contents. The answer arrives as @FileLoaded, or @FileMissing.")
-        event @ReadFile { path: string }
+        event @ReadFile {
+            path: string
+            tag: string = ""
+        }
 
-        shared("A file was read. `text` is all of it; `bytes` is its length.")
-        event @FileLoaded { path: string, text: string, bytes: int }
+        shared("A file was read. `text` is all of it; `bytes` is its length; `tag` is whatever the request carried.")
+        event @FileLoaded {
+            path: string
+            text: string
+            bytes: int
+            tag: string = ""
+        }
 
         shared("A file could not be read or written — missing, locked, a directory, no permission. `reason` says which.")
-        event @FileMissing { path: string, reason: string }
+        event @FileMissing {
+            path: string
+            reason: string
+            tag: string = ""
+        }
 
         shared("Read a file.")
         SF read(path: string) { emit @ReadFile { path: path } }
 
+        shared("Read a file under a tag, so the answer can be routed by `match` instead of by path.")
+        SF readAs(path: string, tag: string) { emit @ReadFile { path: path, tag: tag } }
+
         // ---- writing ------------------------------------------------------------------------------
 
         shared("Write text to a file, replacing it. Missing folders are created. Answers @FileWritten.")
-        event @WriteFile { path: string, text: string, append: bool }
+        event @WriteFile {
+            path: string
+            text: string
+            append: bool
+            tag: string = ""
+        }
 
         shared("A file was written.")
-        event @FileWritten { path: string, bytes: int }
+        event @FileWritten {
+            path: string
+            bytes: int
+            tag: string = ""
+        }
 
         shared("Replace a file's contents.")
         SF write(path: string, text: string) { emit @WriteFile { path: path, text: text, append: false } }
@@ -70,6 +94,35 @@ bundle Files by Vein {
         shared("Add to the end of a file, creating it if it is not there.")
         SF append(path: string, text: string) { emit @WriteFile { path: path, text: text, append: true } }
     }
+
+    // WHY A `tag`, AND WHY IT IS THE ANSWER TO "I HAVE 19 FILES".
+    //
+    // Every `hear @FileLoaded` fires for EVERY file. With one file that is invisible; with nineteen,
+    // every handler opens with `if f.path == "…"` — nineteen string comparisons that must each be right,
+    // where a missing one does not fail but silently processes the wrong file.
+    //
+    // The tag rides the REQUEST through to the ANSWER, so a handler routes on what the read was FOR
+    // rather than on where it happened to live:
+    //
+    //     emit @ReadFile { path: "conf/user.txt", tag: #Config }
+    //
+    //     hear @FileLoaded as f {
+    //         match f.tag {
+    //             when #Config { … }
+    //             when #Save   { … }
+    //             when #Log    { … }
+    //         }
+    //     }
+    //
+    // A mark in value position evaluates to its own name, so `#Config` written at the emit and `when
+    // #Config` written at the handler are the same string with no quoting on either side — and the
+    // match is exhaustive-looking in a way nineteen `if`s are not.
+    //
+    // It is a STRING rather than a Mark type because a tag is often computed: nineteen save slots want
+    // `"slot" + n`, which no mark can spell. `#Config` still works, since that is what a mark evaluates
+    // to.
+    //
+    // Renaming a file now changes one emit instead of every handler that mentioned it.
 
     // NO $Line OR $Word HERE, and that is a decision rather than an omission.
     //
