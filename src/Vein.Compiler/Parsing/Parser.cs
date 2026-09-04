@@ -62,6 +62,7 @@ public sealed class Parser
         SkipTerms();
         while (!AtEnd)
         {
+            int before = _i;
             try
             {
                 if (Check(TokenKind.KwBundle)) bundles.Add(ParseBundle());
@@ -69,6 +70,14 @@ public sealed class Parser
                 else { _diag.Error("VS0101", $"Expected 'bundle' or 'app', found '{Cur.Text}'.", Here); Synchronize(); }
             }
             catch (ParseError) { Synchronize(); }
+
+            // Guarantee progress; never hang on bad input. The same guard the member and statement loops
+            // carry, and it was missing here — `Synchronize` RETURNS WITHOUT ADVANCING when it lands on a
+            // declaration keyword, which is the common case: a parse error inside one shard leaves the
+            // next `shard` at top level, where it is neither `bundle` nor `app`. VS0101 was then reported
+            // against the same token forever, and the run died on memory rather than on the error it had
+            // already found. Nine lines were enough to reproduce it.
+            if (_i == before && !AtEnd) Advance();
             SkipTerms();
         }
         return new CompilationUnit(bundles, start) { Apps = apps };

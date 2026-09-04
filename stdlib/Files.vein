@@ -1,0 +1,87 @@
+// stdlib/Files.vein — VeinScript Standard Library : Vein.Files
+// Reading and writing files, and turning what comes back into identities.
+// Discover:  veinc symbols stdlib/Files.vein
+//
+// WHY A FILE IS AN EVENT. Reading is a request whose answer arrives later, exactly like `@Fetch`, and
+// the answer to a request that went wrong is a MESSAGE — @FileMissing, the way Vein.Net answers with
+// @Failed and a console send with @Undelivered. That is the language's failure idiom; there is no
+// `catch` to write and nothing to encircle. A program that only cares about the happy path hears
+// @FileLoaded and never mentions the other one.
+//
+// WHY THE EVENTS ARE NAMED @ReadFile AND NOT @Read. The runtime routes on the UNQUALIFIED event name —
+// `*Vein.Files.Io.@ReadFile` and a bare `@ReadFile` are the same handler — so a host-handled name is
+// taken for every program at once. `@Read` and `@Write` are the two most likely names for an event a
+// program would declare itself, and quietly hijacking them would be a trap with no diagnostic. The
+// longer names cost a word and belong to nobody else.
+//
+// WHY `lines` AND `words` ARE BUILT-IN. VeinScript cannot look at a character — there is no `s[i]` and
+// no character comparison, which is the same limit stdlib/Rest.vein cites for having no URL builder. So
+// splitting text is a host capability or it does not exist, and these are the two splits that carry a
+// trap a program could not work around afterwards:
+//
+//   `lines(text)` strips the line ending WHICHEVER IT WAS. `split(text, "\n")` looks equivalent and is
+//     not: a file written on Windows leaves `\r` on every line, so `line == "end"` fails against
+//     `"end\r"` with both sides looking identical in any output you print to check.
+//   `words(line)` splits on runs of whitespace and drops empties. `split(line, " ")` on `"a  b"` gives
+//     three pieces with an empty middle, and a program that cannot inspect characters has no honest way
+//     to tell that empty apart from a real one.
+//
+// `split(text, sep)` keeps everything, empties included — a CSV column that is blank is still a column.
+//
+// WHAT IS DELIBERATELY MISSING:
+//
+//   NO SANDBOX. A path is a path and the program runs with your permissions. `veinc run` already implies
+//     that trust, but nothing here narrows it.
+//   NO DIRECTORY LISTING. `@ReadFile` answers with text; there is no `@ListFiles`, because the answer
+//     would be a list of paths and an event payload field holds a scalar. It wants a design, not a
+//     field.
+//   NO BINARY. `text` is a string, so a file that is not text comes back mangled or fails. Reading bytes
+//     needs a type the language does not have.
+
+bundle Files by Vein {
+
+    publicator Io {
+
+        // ---- reading ------------------------------------------------------------------------------
+
+        shared("Ask for a file's contents. The answer arrives as @FileLoaded, or @FileMissing.")
+        event @ReadFile { path: string }
+
+        shared("A file was read. `text` is all of it; `bytes` is its length.")
+        event @FileLoaded { path: string, text: string, bytes: int }
+
+        shared("A file could not be read or written — missing, locked, a directory, no permission. `reason` says which.")
+        event @FileMissing { path: string, reason: string }
+
+        shared("Read a file.")
+        SF read(path: string) { emit @ReadFile { path: path } }
+
+        // ---- writing ------------------------------------------------------------------------------
+
+        shared("Write text to a file, replacing it. Missing folders are created. Answers @FileWritten.")
+        event @WriteFile { path: string, text: string, append: bool }
+
+        shared("A file was written.")
+        event @FileWritten { path: string, bytes: int }
+
+        shared("Replace a file's contents.")
+        SF write(path: string, text: string) { emit @WriteFile { path: path, text: text, append: false } }
+
+        shared("Add to the end of a file, creating it if it is not there.")
+        SF append(path: string, text: string) { emit @WriteFile { path: path, text: text, append: true } }
+    }
+
+    // NO $Line OR $Word HERE, and that is a decision rather than an omission.
+    //
+    // Turning text into identities is the point — a line that IS an identity can be marked, folded over
+    // and queried alongside everything else, which is what `lines` and `words` are for. But the SHAPE of
+    // those identities belongs to the program. A document that is source code wants a line to carry its
+    // indent; one that is a log wants a timestamp; one that is CSV wants columns, not words at all.
+    //
+    // Declaring `$Line { n, text }` here would not merely be unhelpful, it would be actively in the way:
+    // components unify by name, so a program declaring its own `$Line` with one extra field collides
+    // with this one (VS0220) and an app linking both makes them one component with two meanings
+    // (VS0332). A stdlib shape you must match field-for-field is a shape you cannot use.
+    //
+    // samples/file_words.vein declares its own, which is the intended shape of the thing.
+}

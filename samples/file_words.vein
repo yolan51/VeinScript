@@ -1,0 +1,203 @@
+// file_words.vein — writing a file, reading it back, and turning it into identities.
+//
+//   veinc run samples/file_words.vein --ticks 3
+//
+// WHAT THIS IS FOR. A file arrives as one string, and a string is the least useful shape a document can
+// have in this language: you cannot look at a character (no `s[i]`, no character comparison), so
+// everything interesting about text has to happen before it becomes VeinScript's problem. `lines` and
+// `words` are the two host splits that do that, and after them a document is entities — and entities
+// are what this language is good at.
+//
+// `target $Line #Heading` is a sentence about a document. `if lines[i].startsWith("#")` is a sentence
+// about a string, and VeinScript cannot write it. That is the whole trade this sample demonstrates.
+//
+// THE PHASES ARE NOT DECORATION. Structural changes — spawn, attach, mark — are deferred to the commit
+// point at the end of the unit that made them (RULES 11), and Drain commits per EVENT (RULES 12b). So a
+// handler that spawns `$Line` entities cannot then `target` them: they do not exist yet. Each phase
+// therefore ends by emitting the next one, and the boundary between two events is what makes the
+// previous phase's entities real:
+//
+//   @FileWritten  →  read it back
+//   @FileLoaded   →  spawn a $Line per line and a $Word per word
+//   @Parsed       →  now they exist: count, mark, and report
+//   @Reported     →  write the report out
+//
+// Trying to do it in one handler is the mistake this ordering exists to prevent, and it fails quietly:
+// the `target` simply matches nothing and you get an empty report with no error.
+
+bundle FileWords by you {
+
+    // ---- the document, as identities ----------------------------------------------------------
+    //
+    // One entity per line and one per word. That is a lot of entities for a big file, and it is the
+    // point: once a line IS an identity it can be marked, folded over, and queried alongside anything
+    // else — `target $Line #Heading` needs no parsing pass of its own.
+
+    shape $Line { n: int, text: string, words: int }
+    shape $Word { n: int, line: int, text: string }
+
+    // A line that looks like a heading. Marking is the cheap way to remember a decision made once, so
+    // the test that produced it does not have to be repeated at every later query.
+    mark #Heading
+
+    // A line with nothing on it. Worth marking rather than deleting: "how many blank lines" is a real
+    // question about a document, and an entity that is not there cannot answer it.
+    mark #Blank
+
+    event @Parsed { path: string, lines: int }
+    event @Reported { text: string }
+
+    // ---- 1. write something to read -------------------------------------------------------------
+
+    shard Seed {
+        run once {
+            emit *Vein.Console.Io.@Print { text: "writing sample-doc.txt…" }
+
+            // `\n` is a real escape in a VeinScript string literal, so a whole document is one literal.
+            // The trailing `+` continuation is the rule: the operator ends the line, never starts it.
+            emit *Vein.Files.Io.@WriteFile {
+                path: "sample-doc.txt",
+                append: false,
+                text: "# VeinScript\n" +
+                      "\n" +
+                      "A file is one string until you split it.\n" +
+                      "Then it is identities.\n" +
+                      "\n" +
+                      "# Why identities\n" +
+                      "A line that is an identity can be marked and queried.\n" +
+                      "A line that is a string cannot even be looked at.\n"
+            }
+        }
+    }
+
+    // ---- 2. read it back --------------------------------------------------------------------------
+
+    shard Loader {
+        hear *Vein.Files.Io.@FileWritten as w {
+            // Only the document. The report is written later by this same program, and hearing our own
+            // write would read it back and parse the report as if it were the source.
+            if w.path == "sample-doc.txt" {
+                emit *Vein.Console.Io.@Print { text: "wrote " + w.bytes + " bytes; reading it back…" }
+                emit *Vein.Files.Io.@ReadFile { path: w.path }
+            }
+        }
+
+        // The failure is a MESSAGE, like @Undelivered for a send or @Failed for a request. There is no
+        // block to encircle and no `catch` to write — this is what VeinScript has instead.
+        hear *Vein.Files.Io.@FileMissing as m {
+            emit *Vein.Console.Io.@Print { text: "could not use " + m.path + ": " + m.reason }
+        }
+    }
+
+    // ---- 3. text into identities ------------------------------------------------------------------
+
+    shard Parser {
+        var seen: int
+
+        hear *Vein.Files.Io.@FileLoaded as f {
+            seen = 0
+
+            // `lines` rather than `split(f.text, "\n")`. They look equivalent and are not: a file
+            // written on Windows ends every line with `\r\n`, and `split` would leave the `\r` attached
+            // — so `line.text == ""` would be false for a blank line, and both sides would look
+            // identical in any output printed to check. `lines` strips the ending whichever it was.
+            target lines(f.text) as line {
+
+                // `Index` is the nearest loop's 0-based counter, so this is the line number. Captured
+                // into a `let` because the nested loop below rebinds `Index` to its own position.
+                let number = Index + 1
+                seen = seen + 1
+
+                let e = spawn()
+
+                // `words` rather than `split(line, " ")`: on "a  b" split gives three pieces with an
+                // empty middle, and a program that cannot inspect characters has no honest way to tell
+                // that empty apart from a real word afterwards.
+                attach $Line to e { n: number, text: line, words: len(words(line)) }
+
+                if line == "" { mark e #Blank }
+
+                // There is no `startsWith`, so a heading is recognised by its first WORD being exactly
+                // "#" — which is why the sample document writes `# VeinScript` with a space. A language
+                // that cannot look at a character cannot look at a prefix either, and pretending
+                // otherwise is how you get a check that silently never matches.
+                target words(line) as w {
+                    let position = Index + 1
+                    let we = spawn()
+                    attach $Word to we { n: position, line: number, text: w }
+
+                    if position == 1 {
+                        if w == "#" { mark e #Heading }
+                    }
+                }
+            }
+
+            // The phase boundary. Everything spawned above is still deferred; emitting hands control
+            // back to Drain, which commits before the next event is handled.
+            emit @Parsed { path: f.path, lines: seen }
+        }
+    }
+
+    // ---- 4. now they exist ------------------------------------------------------------------------
+
+    shard Report {
+        var body: string
+        var wordCount: int
+        var longest: string
+        var longestLen: int
+
+        hear @Parsed as p {
+            emit *Vein.Console.Io.@Print { text: "parsed " + p.lines + " line(s) of " + p.path }
+
+            body = "report for " + p.path + "\n" +
+                   "lines: " + p.lines + "\n"
+
+            // Headings. The mark was decided once while parsing; this query does not repeat the test.
+            body = body + "\nheadings:\n"
+            target $Line #Heading as l {
+                body = body + "  line " + l.Line.n + ": " + l.Line.text + "\n"
+                emit *Vein.Console.Io.@Print { text: "  heading at line " + l.Line.n + ": " + l.Line.text }
+            }
+
+            // Blank lines counted rather than listed — the count is the interesting part, and it is only
+            // answerable because a blank line is still an entity.
+            var blanks: int
+            blanks = 0
+            target $Line #Blank as b { blanks = blanks + 1 }
+            body = body + "\nblank lines: " + blanks + "\n"
+
+            // Every word, for the totals. One entity per word is a lot of entities and it is what makes
+            // "the longest word" a query rather than a parsing pass.
+            wordCount = 0
+            longest = ""
+            longestLen = 0
+            target $Word as w {
+                wordCount = wordCount + 1
+                if len(w.Word.text) > longestLen {
+                    longestLen = len(w.Word.text)
+                    longest = w.Word.text
+                }
+            }
+
+            body = body + "words: " + wordCount + "\n" +
+                          "longest word: " + longest + " (" + longestLen + ")\n"
+
+            emit *Vein.Console.Io.@Print { text: "  " + wordCount + " words; longest is '" + longest + "'" }
+            emit @Reported { text: body }
+        }
+    }
+
+    // ---- 5. write the report back out -------------------------------------------------------------
+
+    shard Writer {
+        hear @Reported as r {
+            emit *Vein.Files.Io.@WriteFile { path: "sample-doc.report.txt", text: r.text, append: false }
+        }
+
+        hear *Vein.Files.Io.@FileWritten as w {
+            if w.path == "sample-doc.report.txt" {
+                emit *Vein.Console.Io.@Print { text: "report written to " + w.path + " (" + w.bytes + " bytes)" }
+            }
+        }
+    }
+}

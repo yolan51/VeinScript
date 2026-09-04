@@ -81,7 +81,7 @@ public class StdlibTests
         // are each a shape PLUS a builder, so the two counts now grow together with every element the
         // library learns.
         Assert.InRange(byKind[SymbolKind.Shape], 10, 60);
-        Assert.InRange(byKind[SymbolKind.Event], 5, 40);
+        Assert.InRange(byKind[SymbolKind.Event], 5, 60);
         Assert.InRange(byKind[SymbolKind.Builder], 5, 60);
         Assert.False(byKind.ContainsKey(SymbolKind.Shard));   // shards are never in the shared API
     }

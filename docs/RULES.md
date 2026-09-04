@@ -392,3 +392,37 @@ target rows as row: $Task { bring Task(row.id, row.title, row.rank, row.done) }
   so a typo silently switching that off would be its worst failure.
 - It pairs with a guard rather than replacing one: *the ascription says what you EXPECT, the guard
   checks what ARRIVED* (`samples/diagnostics_guard.vein`).
+
+**28. Text is split by the HOST, because the language cannot look at a character.** There is no `s[i]`
+and no character comparison — a program compares whole strings and concatenates them, and that is all.
+So `split`, `lines` and `words` are built-ins, and the exact rule each follows is part of the language
+rather than a convenience:
+
+| | rule | for |
+|---|---|---|
+| `split(text, sep)` | exact separator, **keeps empties** | a blank CSV column is still a column |
+| `lines(text)` | splits on line endings, **strips `\r`** | a file written on Windows |
+| `words(text)` | runs of whitespace, **drops empties** | `"a  b"` is two words |
+| `trim(text)` | surrounding whitespace | |
+
+`lines` is not `split(text, "\n")`, and the difference is the trap: with `split`, a CRLF file leaves a
+`\r` on every line, so `line == "end"` is false against `"end\r"` and **both sides look identical in
+any output you print to check**. `words` is not `split(line, " ")` for the mirror reason — `"a  b"`
+gives three pieces with an empty middle, and a program that cannot inspect characters has no honest way
+to tell that empty from a real word afterwards.
+
+There is no `startsWith`, no `indexOf` and no substring, for the same underlying reason. A prefix test
+is `words(line)` and comparing the first word, which is why `samples/file_words.vein` writes its
+headings as `# Title` with a space.
+
+**28b. A file is an event, and a failure is a message.** `*Vein.Files.Io.@ReadFile { path }` answers
+with `@FileLoaded` or `@FileMissing`; `@WriteFile` answers with `@FileWritten` or `@FileMissing`. That
+is the same shape as `@Fetch`/`@Fetched`/`@Failed` and a console send's `@Undelivered` — there is no
+`catch` to write and no block to encircle.
+
+The events are named `@ReadFile` and not `@Read` because the runtime routes on the UNQUALIFIED name, so
+a host-handled name is taken for every program at once — and `@Read`/`@Write` are the two most likely
+names for an event a program would declare itself.
+
+Writing creates missing folders on the way. There is no sandbox, no directory listing (the answer would
+be a list and a payload field holds a scalar) and no binary mode (`text` is a string).

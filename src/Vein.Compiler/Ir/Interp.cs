@@ -430,6 +430,80 @@ public sealed class Interp
         { IsBackground = true, Name = "vein-fetch" }.Start();
     }
 
+    // ---- files ------------------------------------------------------------
+    //
+    // Same shape as @Fetch, and for the same reason: the request is an event and so is the answer, so a
+    // failure is a MESSAGE the program hears rather than an exception that ends the run. That is the
+    // language's failure idiom — @Failed for a request, @Undelivered for a send, @FileMissing here.
+    //
+    // SYNCHRONOUS, unlike @Fetch. Fetch threads because a network round trip is slow enough that
+    // blocking the event loop would be felt; a local file is not, and a thread per read would buy
+    // nothing while making the order of two reads unpredictable. The answer is queued rather than
+    // delivered inline, so it is heard in the same drain as any other event.
+    //
+    // NO SANDBOX. A path is a path, and the program runs with the permissions you started it with. This
+    // is the same trust `veinc run` already implies, but it is worth naming: nothing here stops a
+    // program reading outside its folder.
+
+    private void DoReadFile(Dictionary<string, object?> payload)
+    {
+        string path = Str(payload.GetValueOrDefault("path"));
+
+        try
+        {
+            string text = File.ReadAllText(path);
+            Emit("FileLoaded", new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = path,
+                ["text"] = text,
+                ["bytes"] = (long)text.Length
+            });
+        }
+        catch (Exception ex)
+        {
+            // Missing, locked, no permission, a directory — all one event with the reason, because a
+            // program that wants to know WHICH can read the reason, and one that does not can hear the
+            // failure without a second handler per cause.
+            Emit("FileMissing", new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = path,
+                ["reason"] = ex.Message
+            });
+        }
+    }
+
+    private void DoWriteFile(Dictionary<string, object?> payload)
+    {
+        string path = Str(payload.GetValueOrDefault("path"));
+        string text = Str(payload.GetValueOrDefault("text"));
+        bool append = payload.GetValueOrDefault("append") is bool b && b;
+
+        try
+        {
+            // The folder is created on the way. Writing to `out/report.txt` when `out/` does not exist
+            // is a mistake nobody makes on purpose, and the alternative is an error the program has to
+            // handle before it can do the thing it asked for.
+            if (Path.GetDirectoryName(Path.GetFullPath(path)) is { Length: > 0 } dir)
+                Directory.CreateDirectory(dir);
+
+            if (append) File.AppendAllText(path, text); else File.WriteAllText(path, text);
+
+            Emit("FileWritten", new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = path,
+                ["bytes"] = (long)text.Length
+            });
+        }
+        catch (Exception ex)
+        {
+            Emit("FileMissing", new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = path,
+                ["reason"] = ex.Message
+            });
+        }
+    }
+
     /// Turn a finished request into the event the program hears.
     private void Deliver(string url, NetHttp.Result r)
     {
@@ -650,6 +724,8 @@ public sealed class Interp
             if (name == "Listen") { DoListen(payload); continue; }
             if (name == "Link") { DoLink(payload); continue; }
             if (name == "Fetch") { DoFetch(payload); continue; }
+            if (name == "ReadFile") { DoReadFile(payload); continue; }
+            if (name == "WriteFile") { DoWriteFile(payload); continue; }
 
             // A DIAGNOSTIC IS NEVER DROPPED. Every other unheard event vanishing is the design — an
             // emit is not addressed to anyone. This one is different: a diagnostics library that loses
@@ -1058,7 +1134,8 @@ public sealed class Interp
     /// built-in already resolves, so a `use`d bundle exporting the same name must not capture it (VS0217).
     /// Keep the two in step — a name added below and not here is silently rebindable by `use`.
     public static readonly IReadOnlySet<string> PrebuiltNames =
-        new HashSet<string>(StringComparer.Ordinal) { "spawn", "here", "pick", "len", "random", "join", "toJson", "fromJson" };
+        new HashSet<string>(StringComparer.Ordinal)
+        { "spawn", "here", "pick", "len", "random", "join", "toJson", "fromJson", "split", "lines", "words", "trim" };
 
     /// Prebuilt (built-in) functions that DO return a value — the only functions that return.
     ///
@@ -1086,6 +1163,40 @@ public sealed class Interp
         // An object comes back as a dictionary, and field access already resolves against one, so
         // `fromJson(body).title` needs nothing further. Malformed input is null rather than a crash.
         "fromJson" => Json.Parse(args.Count > 0 ? Str(args[0]) : ""),
+
+        // ---- text into pieces -------------------------------------------------------------------
+        //
+        // These are built-ins because they CANNOT be written in VeinScript. There is no `s[i]` and no
+        // character comparison (stdlib/Rest.vein says so where it explains why it has no URL builder),
+        // so a program can compare whole strings and concatenate them and nothing else. Splitting text
+        // is therefore a host capability or it does not exist.
+        //
+        // A list is the right answer rather than a stream of events, because `target <expr> as x` walks
+        // any list already — the same statement that walks `row.comments`.
+
+        // Exact separator, exact pieces: `split("a,,b", ",")` is three, the middle one empty. Nothing is
+        // discarded, because a caller counting fields in a CSV needs the empty column to still be there.
+        "split" => args.Count > 1
+            ? Str(args[0]).Split(Str(args[1])).Select(s => (object?)s).ToList()
+            : new List<object?>(),
+
+        // Lines, with the line ENDING removed whichever it was. `split(text, "\n")` looks equivalent and
+        // is not: a file written on Windows leaves a `\r` on the end of every line, and `line == "end"`
+        // then fails against `"end\r"` with both sides looking identical in any output. That is the trap
+        // this exists to close.
+        "lines" => args.Count > 0
+            ? Str(args[0]).Replace("\r\n", "\n").Replace('\r', '\n').Split('\n').Select(s => (object?)s).ToList()
+            : new List<object?>(),
+
+        // Words: runs of whitespace, with no empties. `split(line, " ")` on "a  b" gives three pieces,
+        // the middle one empty, and a program that cannot inspect characters has no good way to tell an
+        // empty word from a real one after the fact.
+        "words" => args.Count > 0
+            ? Str(args[0]).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Select(s => (object?)s).ToList()
+            : new List<object?>(),
+
+        "trim" => args.Count > 0 ? Str(args[0]).Trim() : "",
+
         _ => null
     };
 
