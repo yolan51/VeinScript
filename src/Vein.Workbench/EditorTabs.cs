@@ -37,7 +37,8 @@ internal sealed class EditorTabs : UserControl
     private readonly List<Doc> _docs = new();
 
     /// A different tab became current. The window swaps the editor's document.
-    public event Action<Doc>? Activated;
+    /// Raised on every tab switch, and with NULL when the last tab closes and nothing is open.
+    public event Action<Doc?>? Activated;
 
     /// A tab is about to close and has unsaved edits — return true to proceed with closing.
     public Func<Doc, Task<bool>>? ConfirmClose;
@@ -79,9 +80,10 @@ internal sealed class EditorTabs : UserControl
         return doc;
     }
 
-    public void Activate(Doc doc)
+    /// Activate a document, or null for "nothing is open" — the state after the last tab is closed.
+    public void Activate(Doc? doc)
     {
-        if (!_docs.Contains(doc)) return;
+        if (doc is not null && !_docs.Contains(doc)) return;
         Active = doc;
         Refresh();
         Activated?.Invoke(doc);
@@ -95,8 +97,7 @@ internal sealed class EditorTabs : UserControl
         Refresh();
     }
 
-    /// Close a tab, asking first when it has unsaved edits. Closing the last one leaves an empty buffer
-    /// rather than an editor bound to nothing.
+    /// Close a tab, asking first when it has unsaved edits. Closing the last one leaves nothing open.
     public async Task CloseAsync(Doc doc)
     {
         if (doc.Dirty && ConfirmClose is not null && !await ConfirmClose(doc)) return;
@@ -104,7 +105,12 @@ internal sealed class EditorTabs : UserControl
         int at = _docs.IndexOf(doc);
         _docs.Remove(doc);
 
-        if (_docs.Count == 0) { Open(null, ""); return; }
+        // CLOSING THE LAST TAB LEAVES NOTHING OPEN. It used to reopen an empty buffer immediately, so
+        // "close everything" always left one `untitled.vein` behind that could not be got rid of —
+        // close it and another appeared. The window handles a null active document by emptying the
+        // editor, which is the honest picture of a workbench with no file in it.
+        if (_docs.Count == 0) { Activate(null); return; }
+
         if (ReferenceEquals(Active, doc)) Activate(_docs[Math.Clamp(at, 0, _docs.Count - 1)]);
         else Refresh();
     }

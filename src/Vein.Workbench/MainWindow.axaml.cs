@@ -308,8 +308,35 @@ public partial class MainWindow : Window
         SetStatus(_autoBuildOn ? "Compile as you type: on" : "Compile as you type: off — Ctrl+B to build");
     }
 
-    private void OnTabActivated(EditorTabs.Doc doc)
+    private void OnTabActivated(EditorTabs.Doc? doc)
     {
+        // NOTHING OPEN. The editor is emptied and locked rather than left showing the text of the file
+        // that was just closed — which is what it did, editable, with no tab to save it back to.
+        //
+        // Not compiled, either: an empty buffer is VS0101 "expected bundle or app", and a diagnostics
+        // list complaining about a file nobody has is noise about nothing.
+        if (doc is null)
+        {
+            _switchingTabs = true;
+            try
+            {
+                _editor.Document = new AvaloniaEdit.Document.TextDocument("");
+                _editor.IsReadOnly = true;
+            }
+            finally { _switchingTabs = false; }
+
+            _diags = Array.Empty<Diagnostic>();
+            ApplyDiagnosticFilter();
+            _configs = Array.Empty<RunConfig>();
+            _runConfigs.ItemsSource = null;
+            _bundleInspector.IsVisible = false;
+            Title = "VeinScript Workbench";
+            SetStatus("No file open — Ctrl+O to open one, Ctrl+N for a new buffer.");
+            return;
+        }
+
+        _editor.IsReadOnly = false;
+
         // Remember where the caret was in the tab we are leaving, so coming back lands where you were
         // rather than at the top of the file.
         if (_tabs.Docs.FirstOrDefault(d => !ReferenceEquals(d, doc) && ReferenceEquals(_editor.Document, d.Document)) is { } leaving)
