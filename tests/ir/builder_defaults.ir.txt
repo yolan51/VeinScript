@@ -28,14 +28,22 @@ Bundle BuilderDefaults  author=you
 |         |    |--- Arg = Ref base
 |         |    |--- Arg = Str "panel warn"
 |         |    `--- Arg = Str "#aa4444"
+|         |--- Bring Panel
+|         |    |--- Arg = Str "Footer"
+|         |    |--- Arg = Ref base
+|         |    |--- Arg = Ref base
+|         |    |--- Arg = Ref base
+|         |    |--- Arg = Bool false
+|         |    |--- Arg = Int 1
+|         |    `--- Arg = Int 9
 |         `--- Bring Panel
-|              |--- Arg = Str "Footer"
+|              |--- Arg = Str "salu"
 |              |--- Arg = Ref base
 |              |--- Arg = Ref base
 |              |--- Arg = Ref base
-|              |--- Arg = Bool false
-|              |--- Arg = Int 1
-|              `--- Arg = Int 9
+|              |--- Arg = Ref base
+|              |--- Arg = Ref base
+|              `--- Arg = Ref base
 |--- Shard Show
 |    `--- Settled
 |         |--- Emit *Vein.Console.Io.@Print

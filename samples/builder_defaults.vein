@@ -110,6 +110,16 @@ bundle BuilderDefaults by you {
             //    that motivated the keyword: reaching `column` and `order` used to mean retyping the
             //    body, the class and the accent, none of which were changing.
             bring Panel("Footer", base, base, base, false, 1, 9)
+
+            bring Panel (
+                "salu",     // title: string   from $Content   REQUIRED — give it a value
+                base,     // body: string   from $Content   optional — default "(no description yet)"
+                base,     // class: string   from $Style   optional — default "panel"
+                base,     // accent: string   from $Style   optional — default "#4444aa"
+                base,     // padded: bool   from $Style   optional — default true
+                base,     // column: int   from $Layout   optional — default 0
+                base      // order: int   from $Layout   optional — default 0
+            )
         }
     }
 
