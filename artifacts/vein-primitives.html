@@ -1,0 +1,541 @@
+<title>VeinScript Primitives</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<style>
+:root {
+  --ground:      #F1F2F5;
+  --surface:     #FFFFFF;
+  --surface-alt: #F7F8FA;
+  --ink:         #14161A;
+  --muted:       #5A626E;
+  --faint:       #878E99;
+  --line:        #DFE2E8;
+  --line-strong: #C3C9D2;
+  --accent:      #B3122B;
+  --accent-soft: #FBE9EC;
+
+  --shape:  #7A3E9D;
+  --mark:   #0F6E52;
+  --event:  #1F5FA8;
+  --builder:#A05A00;
+
+  --shadow: 0 1px 2px rgba(20,22,26,.05), 0 8px 24px -12px rgba(20,22,26,.14);
+
+  --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --sans:  "Archivo", "Segoe UI", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:      #15171B;
+    --surface:     #1C1F24;
+    --surface-alt: #22262C;
+    --ink:         #E7EAEE;
+    --muted:       #99A1AD;
+    --faint:       #737B87;
+    --line:        #2B3037;
+    --line-strong: #3C434C;
+    --accent:      #FF7285;
+    --accent-soft: #33191E;
+    --shape:   #C79BE6;
+    --mark:    #58C99E;
+    --event:   #7FB4EE;
+    --builder: #E0A94F;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground:      #15171B;
+  --surface:     #1C1F24;
+  --surface-alt: #22262C;
+  --ink:         #E7EAEE;
+  --muted:       #99A1AD;
+  --faint:       #737B87;
+  --line:        #2B3037;
+  --line-strong: #3C434C;
+  --accent:      #FF7285;
+  --accent-soft: #33191E;
+  --shape:   #C79BE6;
+  --mark:    #58C99E;
+  --event:   #7FB4EE;
+  --builder: #E0A94F;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 16.5px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page { max-width: 1180px; margin: 0 auto; padding: 0 24px 96px; }
+
+/* ---------- masthead ---------- */
+
+.masthead {
+  padding: 56px 0 30px;
+  border-bottom: 2px solid var(--ink);
+  display: flex; flex-wrap: wrap;
+  align-items: flex-end; justify-content: space-between;
+  gap: 22px 40px;
+}
+.masthead h1 {
+  font-family: var(--sans); font-weight: 700;
+  font-size: clamp(2.1rem, 5vw, 3.1rem);
+  line-height: 1.02; letter-spacing: -0.028em; margin: 0;
+  text-wrap: balance;
+}
+.masthead h1 .thin { display: block; font-weight: 500; color: var(--muted); }
+.masthead p { margin: 10px 0 0; max-width: 48ch; color: var(--muted); font-size: 1.02rem; }
+
+.sigil-strip { display: flex; gap: 8px; flex-wrap: wrap; }
+.sigil-chip {
+  font-family: var(--mono); font-weight: 700;
+  border: 1px solid var(--line-strong); border-radius: 3px;
+  padding: 9px 12px; line-height: 1; text-align: center;
+  background: var(--surface);
+  display: flex; flex-direction: column; gap: 5px; align-items: center;
+}
+.sigil-chip b { font-size: 1.2rem; }
+.sigil-chip span { font-size: .6rem; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+.sig-shape b   { color: var(--shape); }
+.sig-mark b    { color: var(--mark); }
+.sig-event b   { color: var(--event); }
+.sig-builder b { color: var(--builder); }
+.sig-ref b     { color: var(--accent); }
+
+/* ---------- layout ---------- */
+
+.body-grid { display: grid; grid-template-columns: 190px minmax(0,1fr); gap: 56px; align-items: start; }
+@media (max-width: 900px) {
+  .body-grid { grid-template-columns: 1fr; gap: 0; }
+  nav.rail { position: static; padding-top: 24px; }
+  nav.rail ol { display: flex; flex-wrap: wrap; gap: 6px; }
+}
+
+nav.rail { position: sticky; top: 24px; padding-top: 44px; font-family: var(--mono); font-size: .78rem; }
+nav.rail .rail-label { font-size: .68rem; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); margin-bottom: 12px; }
+nav.rail ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+nav.rail a { display: block; padding: 4px 8px; color: var(--muted); text-decoration: none; border-left: 2px solid var(--line); }
+nav.rail a:hover, nav.rail a:focus-visible { color: var(--accent); border-left-color: var(--accent); background: var(--accent-soft); outline: none; }
+
+main { min-width: 0; padding-top: 44px; }
+
+h2 {
+  font-family: var(--sans); font-weight: 700; font-size: 1.02rem;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--accent);
+  margin: 0 0 8px; padding-bottom: 9px; border-bottom: 1px solid var(--line-strong);
+}
+h2 + p.lede { margin-top: 0; margin-bottom: 18px; color: var(--muted); font-size: .97rem; max-width: 68ch; }
+
+p { margin: 0 0 1em; max-width: 68ch; }
+p:last-child { margin-bottom: 0; }
+section + section { margin-top: 50px; }
+
+code, .m { font-family: var(--mono); font-size: .87em; }
+p code, li code, td code {
+  background: var(--surface-alt); border: 1px solid var(--line);
+  border-radius: 3px; padding: .07em .34em;
+}
+strong { font-weight: 600; }
+
+/* ---------- tables ---------- */
+
+.tbl { background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); margin-bottom: 26px; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+th {
+  font-family: var(--mono); font-size: .66rem; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--faint); text-align: left; font-weight: 500;
+  padding: 10px 18px; border-bottom: 1px solid var(--line); white-space: nowrap;
+  background: var(--surface-alt);
+}
+td { padding: 10px 18px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: none; }
+td.kw { font-family: var(--mono); font-weight: 500; white-space: nowrap; }
+td.sg { font-family: var(--mono); font-weight: 700; text-align: center; white-space: nowrap; }
+td.form { font-family: var(--mono); font-size: .82rem; color: var(--muted); }
+td.why { color: var(--muted); }
+td.why strong { color: var(--ink); font-weight: 600; }
+
+.s-shape { color: var(--shape); }
+.s-mark { color: var(--mark); }
+.s-event { color: var(--event); }
+.s-builder { color: var(--builder); }
+.s-none { color: var(--faint); }
+
+.yes { color: var(--mark); font-family: var(--mono); font-size: .8rem; }
+.no  { color: var(--accent); font-family: var(--mono); font-size: .8rem; }
+
+/* ---------- code block ---------- */
+
+pre {
+  font-family: var(--mono); font-size: .84rem; line-height: 1.65;
+  background: var(--surface); border: 1px solid var(--line);
+  padding: 16px 18px; overflow-x: auto; margin: 0 0 22px;
+}
+pre .c { color: var(--faint); }
+pre .k { color: var(--accent); font-weight: 500; }
+pre .sh { color: var(--shape); }
+pre .mk { color: var(--mark); }
+pre .ev { color: var(--event); }
+pre .bd { color: var(--builder); }
+
+/* ---------- built-ins ---------- */
+
+.builtins { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px,1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); }
+.builtins > div { background: var(--surface); padding: 13px 16px; }
+.builtins .n { font-family: var(--mono); font-weight: 700; font-size: .9rem; display: flex; align-items: baseline; gap: 7px; margin-bottom: 4px; }
+.builtins .d { font-size: .87rem; color: var(--muted); }
+.compiles {
+  font-family: var(--sans); font-size: .56rem; font-weight: 700; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--mark); border: 1px solid var(--mark);
+  border-radius: 2px; padding: 2px 5px; line-height: 1; white-space: nowrap;
+}
+
+/* ---------- callout ---------- */
+
+.note {
+  background: var(--surface); border: 1px solid var(--line);
+  border-left: 3px solid var(--accent); padding: 16px 20px; margin-bottom: 22px;
+}
+.note h4 { font-family: var(--sans); font-size: 1rem; font-weight: 700; margin: 0 0 7px; letter-spacing: -.01em; }
+.note p { font-size: .95rem; }
+
+ul.tight { margin: 0 0 1em; padding-left: 1.15em; max-width: 68ch; }
+ul.tight li { margin-bottom: .45em; color: var(--muted); }
+ul.tight li strong { color: var(--ink); }
+
+footer {
+  margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line);
+  font-family: var(--mono); font-size: .74rem; color: var(--faint);
+  display: flex; flex-wrap: wrap; gap: 6px 18px;
+}
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <div>
+      <h1>VeinScript Primitives<span class="thin">what the language declares</span></h1>
+      <p>Read off <code>Lexer.cs</code> and <code>Parser.cs</code>, not the docs — <strong>62 keywords</strong>,
+      four sigils, and 24 built-ins. Where the docs disagree, they are listed at the end.</p>
+    </div>
+    <div class="sigil-strip">
+      <div class="sigil-chip sig-shape"><b>$</b><span>shape</span></div>
+      <div class="sigil-chip sig-mark"><b>#</b><span>mark</span></div>
+      <div class="sigil-chip sig-event"><b>@</b><span>event</span></div>
+      <div class="sigil-chip sig-builder"><b>&amp;</b><span>builder</span></div>
+      <div class="sigil-chip sig-ref"><b>*</b><span>qualified</span></div>
+    </div>
+  </header>
+
+  <div class="body-grid">
+
+    <nav class="rail" aria-label="Sections">
+      <div class="rail-label">Contents</div>
+      <ol>
+        <li><a href="#declare">Declarations</a></li>
+        <li><a href="#schedules">Schedules</a></li>
+        <li><a href="#statements">Statements</a></li>
+        <li><a href="#operators">Operators</a></li>
+        <li><a href="#builtins">Built-ins</a></li>
+        <li><a href="#reserved">Reserved names</a></li>
+        <li><a href="#disk">On disk</a></li>
+        <li><a href="#naming">Published names</a></li>
+        <li><a href="#codes">VS codes</a></li>
+        <li><a href="#stale">Stale docs</a></li>
+      </ol>
+    </nav>
+
+    <main>
+
+      <section id="declare">
+        <h2>Declaration primitives</h2>
+        <p class="lede">Only <code>shape</code>, <code>mark</code> and <code>event</code> take a sigil on
+        the name they declare. A builder is declared bare and only wears its <code>&amp;</code> at the
+        use site.</p>
+
+        <div class="tbl"><div class="scroll">
+          <table>
+            <thead><tr><th>Keyword</th><th>Sigil</th><th>Form</th><th>What it is</th><th>publicators/</th><th>shards/</th></tr></thead>
+            <tbody>
+              <tr><td class="kw">bundle</td><td class="sg s-none">—</td><td class="form">bundle N by author { }</td><td class="why">The module. <code>by</code> roots the qualified name.</td><td class="why">top level</td><td class="why">top level</td></tr>
+              <tr><td class="kw">app</td><td class="sg s-none">—</td><td class="form">app N { load "f.vein" }</td><td class="why">The manifest composing bundles into one runtime. First <code>load</code> is the <strong>principal</strong>; only its <code>start</code> fires.</td><td class="no">no</td><td class="no">no</td></tr>
+              <tr><td class="kw">publicator</td><td class="sg s-none">—</td><td class="form">publicator N { }</td><td class="why">The public grouping. A <code>publicators/</code> file <em>becomes</em> one, named after the file.</td><td class="why">is one</td><td class="no">VS0321</td></tr>
+              <tr><td class="kw">shape</td><td class="sg s-shape">$</td><td class="form">shape $Health { hp: int folds sum }</td><td class="why"><strong>Identity data</strong> — a component that attaches to an entity.</td><td class="yes">yes</td><td class="no">VS0321</td></tr>
+              <tr><td class="kw">mark</td><td class="sg s-mark">#</td><td class="form">mark #Enemy</td><td class="why">A tag name, declared so it becomes checkable. No body.</td><td class="yes">yes</td><td class="no">VS0321</td></tr>
+              <tr><td class="kw">event</td><td class="sg s-event">@</td><td class="form">event @Damaged { by: int }</td><td class="why">A message and its payload signature.</td><td class="yes">yes</td><td class="no">VS0321</td></tr>
+              <tr><td class="kw">builder</td><td class="sg s-builder">&amp;</td><td class="form">builder Unit { $Gauge mark #Active }</td><td class="why">An identity template. <strong>Declared bare</strong>; the <code>&amp;</code> appears only at <code>bring &amp;Unit(…)</code>. Needs a <code>mark</code> member or VS0221.</td><td class="yes">yes</td><td class="no">VS0321</td></tr>
+              <tr><td class="kw">shard</td><td class="sg s-none">—</td><td class="form">shard N [$Shape] [#Mark] { }</td><td class="why"><strong>Behaviour</strong> — schedules and <code>hear</code> blocks.</td><td class="no">VS0108</td><td class="yes">yes</td></tr>
+              <tr><td class="kw">ShardView</td><td class="sg s-none">—</td><td class="form">ShardView N { hear … }</td><td class="why">Output assembly. <strong>The keyword is <code>ShardView</code>, not <code>view</code>.</strong> Body admits only <code>hear</code>/<code>var</code>/<code>let</code>/<code>fn</code>/<code>SF</code>.</td><td class="no">behaviour</td><td class="yes">yes</td></tr>
+              <tr><td class="kw">bridge</td><td class="sg s-none">—</td><td class="form">bridge N { }</td><td class="why">A first-class object that hears and re-emits.</td><td class="no">behaviour</td><td class="yes">yes</td></tr>
+              <tr><td class="kw">fn</td><td class="sg s-none">—</td><td class="form">fn f(p: T) -&gt; R { return e }</td><td class="why">Computes and <strong>returns</strong>.</td><td class="yes">yes</td><td class="yes">yes</td></tr>
+              <tr><td class="kw">SF</td><td class="sg s-none">—</td><td class="form">SF f(p: T) { emit … }</td><td class="why">Shard-function: <strong>emits, never returns</strong>. A <code>-&gt; T</code> is VS0105.</td><td class="yes">yes</td><td class="yes">yes</td></tr>
+              <tr><td class="kw">type</td><td class="sg s-none">—</td><td class="form">type N { a: int }</td><td class="why">Plain value data — not a component, never attached.</td><td class="yes">yes</td><td class="no">VS0321</td></tr>
+              <tr><td class="kw">enum</td><td class="sg s-none">—</td><td class="form">enum N { A, B }</td><td class="why"><strong>Only inside a <code>shape</code> body.</strong></td><td class="why">in a shape</td><td class="no">—</td></tr>
+              <tr><td class="kw">use</td><td class="sg s-none">—</td><td class="form">use N [as M]</td><td class="why">Import. Cannot rebind a built-in — VS0217.</td><td class="yes">yes</td><td class="yes">yes</td></tr>
+              <tr><td class="kw">start</td><td class="sg s-none">—</td><td class="form">start @E { … }  ·  start ?</td><td class="why">The bundle's single entry event. One per bundle, or VS0219.</td><td class="why">bundle level</td><td class="no">VS0321</td></tr>
+              <tr><td class="kw">shared</td><td class="sg s-none">—</td><td class="form">shared("doc")</td><td class="why">An annotation above a declaration, making it cross-bundle public. Outside a publicator it is VS0107.</td><td class="yes">yes</td><td class="no">—</td></tr>
+              <tr><td class="kw">load</td><td class="sg s-none">—</td><td class="form">load "f.vein" [start { }]</td><td class="why"><strong>Contextual, not a keyword.</strong> Only inside <code>app { }</code>.</td><td class="no">—</td><td class="no">—</td></tr>
+            </tbody>
+          </table>
+        </div></div>
+
+        <div class="note">
+          <h4>The folder decides the kind</h4>
+          <p><code>publicators/</code> is API and <code>shards/</code> is behaviour, and putting a
+          declaration in the wrong one is <strong>VS0321</strong>. Both folders are <em>structural</em>:
+          <code>BundleLoader</code> merges everything under them into the bundle, fragments first, so
+          "declared last in the main file runs last" holds across files.</p>
+        </div>
+      </section>
+
+      <section id="schedules">
+        <h2>Schedules</h2>
+        <p class="lede">A shard member, not a statement. Several of these words are contextual
+        identifiers rather than reserved keywords.</p>
+
+        <div class="tbl"><div class="scroll">
+          <table>
+            <thead><tr><th>Form</th><th>Fires</th><th>Note</th></tr></thead>
+            <tbody>
+              <tr><td class="kw">run once { }</td><td class="why">Once, at start.</td><td class="why"><code>run</code> and <code>once</code> are <strong>contextual</strong> — neither is a keyword.</td></tr>
+              <tr><td class="kw">each tick { }</td><td class="why">Every simulation tick.</td><td class="why">Both words are real keywords.</td></tr>
+              <tr><td class="kw">each frame { }</td><td class="why">Every frame.</td><td class="why"><code>frame</code> is contextual. Nothing in samples or stdlib uses it.</td></tr>
+              <tr><td class="kw">every N { }</td><td class="why">Every N <strong>seconds</strong>.</td><td class="why"><code>every</code> is contextual; a non-numeric operand is VS0110.</td></tr>
+              <tr><td class="kw">settled { }</td><td class="why">When the world stops changing.</td><td class="why">A real keyword.</td></tr>
+            </tbody>
+          </table>
+        </div></div>
+      </section>
+
+      <section id="statements">
+        <h2>Behaviour statements</h2>
+
+        <div class="tbl"><div class="scroll">
+          <table>
+            <thead><tr><th>Keyword</th><th>Form</th><th>What it does</th></tr></thead>
+            <tbody>
+              <tr><td class="kw">hear</td><td class="form">hear @E as d [audience $S #M] { }</td><td class="why">Receive an event. <code>audience</code> is a real barrier: the <em>emitter</em> must carry all of them.</td></tr>
+              <tr><td class="kw">emit</td><td class="form">emit @E { a: 1, ? }</td><td class="why">Send one. <code>?</code> fills the rest with typed zeros on purpose.</td></tr>
+              <tr><td class="kw">bring</td><td class="form">bring [n] Unit(args) [as name]</td><td class="why"><strong>spawn + attach + mark in one.</strong> Too few args is VS0228.</td></tr>
+              <tr><td class="kw">attach</td><td class="form">attach $Health to e { hp: 5 }</td><td class="why">Add a component to an existing entity.</td></tr>
+              <tr><td class="kw">unattach</td><td class="form">unattach $Health from e</td><td class="why">Remove one.</td></tr>
+              <tr><td class="kw">mark</td><td class="form">mark e #Enemy</td><td class="why">Tag an entity. Also a declaration keyword — a shape and a mark may share a name.</td></tr>
+              <tr><td class="kw">unmark</td><td class="form">unmark e #Enemy</td><td class="why">Untag.</td></tr>
+              <tr><td class="kw">destroy</td><td class="form">destroy self</td><td class="why">Remove the entity. In the chat sample, existence <em>is</em> membership.</td></tr>
+              <tr><td class="kw">target</td><td class="form">target $S #M [by S.field] as e { }</td><td class="why"><strong>The identity query.</strong> One activation per entity, in spawn order.</td></tr>
+              <tr><td class="kw">target</td><td class="form">target lines(t) as l [: $S] { }</td><td class="why">The same word over a collection — no overlay, and it nests.</td></tr>
+              <tr><td class="kw">match</td><td class="form">match e { when C { } when #M { } else { } }</td><td class="why">A <code>when</code> arm is an enum case or a <code>#Mark</code>. A mark in value position is its own name.</td></tr>
+              <tr><td class="kw">if / else</td><td class="form">if c { } else if c { } else { }</td><td class="why"><code>} else {</code> stays on one line — a newline ends the statement.</td></tr>
+              <tr><td class="kw">while</td><td class="form">while c { }</td><td class="why">Parses and runs. No sample or stdlib file uses it.</td></tr>
+              <tr><td class="kw">repeat</td><td class="form">repeat n [as i] { }</td><td class="why">Counted loop; <code>Index</code> works inside it too.</td></tr>
+              <tr><td class="kw">chance</td><td class="form">chance 30% { }</td><td class="why">The operand must be a percent literal.</td></tr>
+              <tr><td class="kw">ordered by</td><td class="form">ordered by &amp;Row.$Row.rank { bring … }</td><td class="why"><code>ordered</code> is contextual. Body admits only <code>bring</code> and <code>target</code>, else VS0223.</td></tr>
+              <tr><td class="kw">break / continue</td><td class="form">break</td><td class="why">Bare.</td></tr>
+              <tr><td class="kw">let / var</td><td class="form">let x: T = e</td><td class="why">Declarations are <code>name: Type</code>, never type-first.</td></tr>
+              <tr><td class="kw">return</td><td class="form">return e</td><td class="why"><strong>Only inside an <code>fn</code></strong> — inside an <code>SF</code> it is VS0107.</td></tr>
+            </tbody>
+          </table>
+        </div></div>
+
+        <div class="note">
+          <h4><code>spawn</code> is not a keyword</h4>
+          <p>It is an ordinary built-in function: <code>let e = spawn()</code>. It is the only way to make
+          a bare entity, and <code>bring</code> is the shorthand that does it together with attaching and
+          marking.</p>
+        </div>
+      </section>
+
+      <section id="operators">
+        <h2>Operators</h2>
+        <p class="lede">Logic is words. C-family spellings are not adopted on the strength of being
+        familiar.</p>
+
+        <div class="tbl"><div class="scroll">
+          <table>
+            <thead><tr><th>Level</th><th>Operators</th><th>Note</th></tr></thead>
+            <tbody>
+              <tr><td class="kw">or</td><td class="form">or</td><td class="why">A keyword. <strong>There is no <code>||</code>.</strong></td></tr>
+              <tr><td class="kw">and</td><td class="form">and</td><td class="why">A keyword. <strong>There is no <code>&amp;&amp;</code></strong> — <code>&amp;</code> is the builder sigil.</td></tr>
+              <tr><td class="kw">compare</td><td class="form">== &lt; &gt; &lt;= &gt;=</td><td class="why">Two strings compare <strong>ordinally</strong>, which is what makes <code>c &gt;= "a"</code> mean what you expect.</td></tr>
+              <tr><td class="kw">add</td><td class="form">+ -</td><td class="why"><code>+</code> concatenates when either side is a string.</td></tr>
+              <tr><td class="kw">multiply</td><td class="form">* / %</td><td class="why"><code>*</code> in operand position is re-read as the qualified-reference prefix.</td></tr>
+              <tr><td class="kw">unary</td><td class="form">not  -</td><td class="why"><code>not</code> is a keyword.</td></tr>
+              <tr><td class="kw">postfix</td><td class="form">.member  [i]  (args)</td><td class="why"><code>s[0]</code> yields a one-character string; out of range is empty, never a crash.</td></tr>
+              <tr><td class="kw">assign</td><td class="form">=  +=  -=  *=  /=</td><td class="why"></td></tr>
+            </tbody>
+          </table>
+        </div></div>
+
+        <div class="note">
+          <h4>There is no <code>!=</code></h4>
+          <p><code>!</code> is never lexed at all — it falls through to VS0005 <em>unexpected character</em>.
+          Inequality is <code>not (a == b)</code>. The strongest confirmation is in the compiler itself:
+          a <code>Ne</code> token kind exists and the parser and interpreter both handle it, and nothing
+          anywhere produces one.</p>
+        </div>
+      </section>
+
+      <section id="builtins">
+        <h2>Built-in functions</h2>
+        <p class="lede">24 names, and <code>use</code> cannot rebind any of them (VS0217). The badge marks
+        the 14 that the C# backend emits — the rest stay interpreter-only because each carries a rule
+        about empties or line endings that would have to be reproduced rather than approximated.</p>
+
+        <div class="builtins">
+          <div><div class="n">spawn() <span class="compiles">compiles</span></div><div class="d">Make an entity. The only way.</div></div>
+          <div><div class="n">here()</div><div class="d">This process's own console address, a Mark.</div></div>
+          <div><div class="n">len(x) <span class="compiles">compiles</span></div><div class="d">Length of a string or collection.</div></div>
+          <div><div class="n">random() <span class="compiles">compiles</span></div><div class="d">Float in [0,1). See the stale-docs note.</div></div>
+          <div><div class="n">pick(list)</div><div class="d">A random element, same seeded source as <code>chance</code>.</div></div>
+          <div><div class="n">join(list, sep)</div><div class="d">Concatenate with a separator.</div></div>
+          <div><div class="n">split(s, sep)</div><div class="d">Exact separator, <strong>keeps empties</strong> — a blank CSV column is a column.</div></div>
+          <div><div class="n">lines(s)</div><div class="d">Splits on line endings and <strong>strips <code>\r</code></strong>. Not <code>split(s,"\n")</code>.</div></div>
+          <div><div class="n">words(s)</div><div class="d">Whitespace runs, <strong>drops empties</strong>.</div></div>
+          <div><div class="n">chars(s) <span class="compiles">compiles</span></div><div class="d">One entry per character.</div></div>
+          <div><div class="n">trim(s)</div><div class="d">Strip surrounding whitespace.</div></div>
+          <div><div class="n">code(c) <span class="compiles">compiles</span></div><div class="d">Codepoint of the first character.</div></div>
+          <div><div class="n">chr(n) <span class="compiles">compiles</span></div><div class="d">The character for a codepoint.</div></div>
+          <div><div class="n">upper(s) <span class="compiles">compiles</span></div><div class="d">Invariant case fold.</div></div>
+          <div><div class="n">lower(s) <span class="compiles">compiles</span></div><div class="d">Invariant case fold.</div></div>
+          <div><div class="n">contains(s, n) <span class="compiles">compiles</span></div><div class="d">Ordinal. Everything contains the empty string.</div></div>
+          <div><div class="n">startsWith(s, p) <span class="compiles">compiles</span></div><div class="d">A multi-character prefix, which <code>s[0]</code> cannot test.</div></div>
+          <div><div class="n">endsWith(s, p) <span class="compiles">compiles</span></div><div class="d">Ordinal suffix.</div></div>
+          <div><div class="n">indexOf(s, n) <span class="compiles">compiles</span></div><div class="d">Position, or <code>-1</code> — the one value a real position never is.</div></div>
+          <div><div class="n">substring(s, i[, n]) <span class="compiles">compiles</span></div><div class="d"><strong>Clamps</strong> rather than throwing.</div></div>
+          <div><div class="n">replace(s, a, b) <span class="compiles">compiles</span></div><div class="d">Ordinal replace-all.</div></div>
+          <div><div class="n">toJson(x)</div><div class="d">Serialise a value or a whole component.</div></div>
+          <div><div class="n">fromJson(s)</div><div class="d">Parse. <strong>Malformed input is a silent <code>null</code></strong> — no diagnostic, no event.</div></div>
+        </div>
+      </section>
+
+      <section id="reserved">
+        <h2>Reserved and contextual names</h2>
+
+        <div class="tbl"><div class="scroll">
+          <table>
+            <thead><tr><th>Name</th><th>Kind</th><th>Meaning</th></tr></thead>
+            <tbody>
+              <tr><td class="kw">Index</td><td class="why">keyword</td><td class="why">The nearest loop's 0-based counter. Works in <code>target</code> and <code>repeat</code> alike.</td></tr>
+              <tr><td class="kw">Entity</td><td class="why">keyword</td><td class="why">A <em>type</em> in type position, and an <em>expression</em> yielding the nearest entity's id.</td></tr>
+              <tr><td class="kw">base</td><td class="why">keyword</td><td class="why">"this parameter's declared default" — admitted <strong>only</strong> as a <code>bring</code> argument, else VS0232.</td></tr>
+              <tr><td class="kw">?</td><td class="why">token</td><td class="why">Fill-the-rest, in <code>emit</code>, <code>bring</code> and an app's <code>load … start</code>.</td></tr>
+              <tr><td class="kw">self</td><td class="why"><strong>convention only</strong></td><td class="why">Not reserved. Any name in <code>target … as X</code> behaves identically.</td></tr>
+              <tr><td class="kw">run once frame every ordered load</td><td class="why">contextual</td><td class="why">Matched by text, deliberately not reserved, so they stay usable as ordinary names.</td></tr>
+            </tbody>
+          </table>
+        </div></div>
+      </section>
+
+      <section id="disk">
+        <h2>A bundle on disk</h2>
+        <p class="lede">Three folder names are read by the compiler. There are no others — a
+        <code>shapes/</code> or <code>events/</code> directory would be invisible.</p>
+
+<pre>Combat/
+  Combat.vein            <span class="c">the main file — `bundle Combat by alice { … }`</span>
+  publicators/
+    Shapes.vein          <span class="c">becomes `publicator Shapes` — the FILE names it</span>
+    Marks.vein
+    Events.vein
+    Builders.vein
+  shards/
+    Boot.vein            <span class="c">behaviour only, or VS0321</span>
+  .veinproj              <span class="c">entry, saved runs, stdlib path, cloud link — all optional</span>
+  vein.discovery         <span class="c">wildcard discovery policy; `shared` still governs use</span>
+
+MyGame/
+  app.vein               <span class="c">`app MyGame { load "…" }` — first load is the principal</span>
+  MyGame/                <span class="c">the principal bundle</span>
+  bundles/               <span class="c">other people's bundles, a resolution root</span></pre>
+      </section>
+
+      <section id="naming">
+        <h2>The published name</h2>
+        <p class="lede">A file's name in the catalogue is its address: author, bundle, then the path
+        inside the bundle. It round-trips, so a pull can rebuild a project that compiles.</p>
+
+<pre><span class="c">// name                                     path it restores to</span>
+alice.Combat.vein                        →  Combat.vein
+alice.Combat.publicators.Shapes.vein     →  publicators/Shapes.vein
+alice.Combat.shards.Boot.vein            →  shards/Boot.vein
+alice.MyGame.app.vein                    →  app.vein
+alice.Combat.publicators.ui.Panels.vein  →  publicators/ui/Panels.vein</pre>
+
+        <div class="note">
+          <h4>Why the folder segment cannot be dropped</h4>
+          <p>Every bundle the New Project scaffold makes contains <code>shards/Boot.vein</code>. Keyed on
+          the bare filename, publishing a second bundle would <em>overwrite</em> the first's — and report
+          success. And because <code>publicators/</code> and <code>shards/</code> decide whether a
+          declaration is API or behaviour, a name that loses the folder is a name nothing can restore
+          into a project that compiles.</p>
+        </div>
+
+        <p><strong>What a catalogue could index.</strong> Classifying a file by the declarations inside it
+        currently means <code>shard</code>, <code>bridge</code>, <code>bundle</code>,
+        <code>ShardView</code> and <code>publicator</code>. That misses every
+        <span class="s-shape">$Shape</span>, <span class="s-mark">#Mark</span>,
+        <span class="s-event">@Event</span>, <span class="s-builder">&amp;Builder</span>, <code>fn</code>
+        and <code>SF</code> — and it sees nothing at all in a <code>publicators/</code> fragment, which
+        carries no <code>bundle</code> header. Indexing the declarations above would answer "has anyone
+        published a <code>$Health</code>?", which is not idle curiosity: two bundles declaring one with
+        different fields is <strong>VS0220</strong>, and <strong>VS0332</strong> once they are linked.</p>
+      </section>
+
+      <section id="codes">
+        <h2>Diagnostic bands</h2>
+
+        <div class="tbl"><div class="scroll">
+          <table>
+            <thead><tr><th>Band</th><th>Raised in</th><th>What it covers</th></tr></thead>
+            <tbody>
+              <tr><td class="kw">VS0001–0005</td><td class="why">Lexer</td><td class="why">Unterminated comment or string, a sigil with no name, an unexpected character (this is what <code>!</code> produces).</td></tr>
+              <tr><td class="kw">VS0100–0111</td><td class="why">Parser</td><td class="why">Syntax and structure. VS0107 is <code>shared</code> outside a publicator <em>and</em> <code>return</code> outside an <code>fn</code>; VS0108 is a shard inside a publicator.</td></tr>
+              <tr><td class="kw">VS0200–0233</td><td class="why">Lowering</td><td class="why">Semantics — mostly <strong>warnings</strong>. Unknown builders, bad folds, arity, ambiguity, undeclared marks.</td></tr>
+              <tr><td class="kw">VS0300–0306</td><td class="why">Project</td><td class="why">The app manifest: a <code>load</code> that resolves to nothing, an ambiguous start override, a qualified event that resolves to no shared event.</td></tr>
+              <tr><td class="kw">VS0320–0321</td><td class="why">Bundle loader</td><td class="why">A primitive declared twice after the fragment merge; API placed in <code>shards/</code>.</td></tr>
+              <tr><td class="kw">VS0331–0335</td><td class="why">App linker</td><td class="why">Cross-bundle collisions and a non-principal <code>start</code> that will not fire.</td></tr>
+            </tbody>
+          </table>
+        </div></div>
+      </section>
+
+      <section id="stale">
+        <h2>Where the docs are wrong</h2>
+        <p class="lede">Everything above was read off the lexer and parser. These are the places
+        <code>docs/KEYWORDS.md</code> and friends will mislead you.</p>
+
+        <ul class="tight">
+          <li><strong>"61 keywords"</strong> — there are <strong>62</strong>. <code>docs/RULES.md</code> has it right.</li>
+          <li><strong><code>bring</code>, <code>builder</code>, <code>bridge</code>, <code>audience</code> are listed as "reserved, no assigned meaning yet"</strong> — all four are fully implemented, with parser cases, AST nodes and their own diagnostics.</li>
+          <li><strong><code>if</code> and <code>while</code> are marked "not in the lexer yet"</strong> — both are, and both parse.</li>
+          <li><strong><code>random()</code> and <code>count()</code> are documented as callable</strong> — both are lexed as <em>keywords</em>, and a call target must be an identifier, so writing either is VS0104. <code>random</code> is reachable only through what <code>chance 30%</code> lowers to.</li>
+          <li><strong><code>map&lt;K,V&gt;</code> is documented as a type</strong> — the type parser accepts only an identifier, so any such annotation is VS0100.</li>
+          <li><strong><code>sync</code> is listed as a scheduling hint</strong> — it is lexed and has no parser case at all. Same for <code>on</code>, <code>mute</code>, <code>unmute</code>, <code>transform</code>.</li>
+          <li><strong><code>docs/OVERVIEW.md</code> still says "the lexer is the only stage that exists today"</strong> — the parser, lowering, interpreter and C# backend are all several hundred to a thousand lines each.</li>
+          <li><strong>Indexing <code>s[i]</code> is described as pending</strong> in two docs and one compiler comment. It parses, lowers, interprets and compiles.</li>
+        </ul>
+      </section>
+
+      <footer>
+        <span>VeinScript primitives</span>
+        <span>62 keywords · 4 sigils · 24 built-ins · 14 of them compile</span>
+        <span>read off Lexer.cs and Parser.cs</span>
+      </footer>
+
+    </main>
+  </div>
+</div>

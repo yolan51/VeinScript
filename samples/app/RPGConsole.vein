@@ -1,0 +1,74 @@
+bundle RpgMenu by you {
+
+  // A menu item as an identity: `key` is what you type, `order` is the line it prints on. Both are
+  // data on the entity rather than a position in a list, so the menu sorts itself.
+  shape $MenuItem { key: string, label: string, order: int }
+  mark #MenuItem
+  builder MenuItem { $MenuItem   mark #MenuItem }
+
+  shape $Player { name: string, hp: int, gold: int }
+  mark #Player
+  builder Player { $Player   mark #Player }
+
+  event @ShowMenu { }
+
+  start @ShowMenu { }
+
+  shard Seed {
+    run once {
+      bring MenuItem("1", "New Game", 1)
+      bring MenuItem("2", "Continue", 2)
+      bring MenuItem("3", "Inventory", 3)
+      bring MenuItem("4", "Quit", 4)
+
+      bring Player("Hero", 100, 50)
+    }
+  }
+
+  shard Menu {
+    hear @ShowMenu as s {
+      emit *Vein.Console.Io.@Print { text: "" }
+      emit *Vein.Console.Io.@Print { text: "===== RPG MAIN MENU =====" }
+
+      // `by MenuItem.order` takes the SHAPE's name, not the binding's — the query is ordered by a
+      // field of the shape it selects.
+      target $MenuItem #MenuItem by MenuItem.order as m {
+        emit *Vein.Console.Io.@Print { text: m.MenuItem.key + ". " + m.MenuItem.label }
+      }
+
+      emit *Vein.Console.Io.@Print { text: "=========================" }
+      emit *Vein.Console.Io.@Print { text: "Choose (1-4):" }
+    }
+  }
+
+  shard Choice {
+    hear *Vein.Console.Io.@Input as i {
+      // COMPARED AS A STRING, deliberately. There is no string-to-number built-in, so the typed line
+      // stays text — and `trim` matters because the line arrives with whatever whitespace you gave it,
+      // where `" 3"` would never equal `"3"`.
+      let choice = trim(i.text)
+
+      if choice == "1" {
+        emit *Vein.Console.Io.@Print { text: "Starting a new adventure..." }
+        emit @ShowMenu { }
+      } else if choice == "2" {
+        emit *Vein.Console.Io.@Print { text: "Loading your saved game..." }
+        emit @ShowMenu { }
+      } else if choice == "3" {
+        target $Player #Player as p {
+          emit *Vein.Console.Io.@Print {
+            text: p.Player.name + " | HP: " + p.Player.hp + " | Gold: " + p.Player.gold
+          }
+        }
+        emit @ShowMenu { }
+      } else if choice == "4" {
+        // The one branch that does NOT show the menu again — which is what ending looks like in a
+        // program with no loop to break out of.
+        emit *Vein.Console.Io.@Print { text: "Farewell, adventurer!" }
+      } else {
+        emit *Vein.Console.Io.@Print { text: "Invalid choice. Try again." }
+        emit @ShowMenu { }
+      }
+    }
+  }
+}

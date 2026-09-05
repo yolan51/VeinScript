@@ -1,0 +1,891 @@
+<title>VeinScript Cloud Schema</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<style>
+:root {
+  --ground:      #F1F2F5;
+  --surface:     #FFFFFF;
+  --surface-alt: #F7F8FA;
+  --ink:         #14161A;
+  --muted:       #5A626E;
+  --faint:       #878E99;
+  --line:        #DFE2E8;
+  --line-strong: #C3C9D2;
+  --accent:      #B3122B;
+  --accent-soft: #FBE9EC;
+  --allow:       #12684A;
+  --allow-soft:  #E3F1EB;
+  --mod:         #7E5200;
+  --mod-soft:    #F7EEDC;
+  --deny:        #5A626E;
+  --deny-soft:   #EAECF0;
+
+  --shadow: 0 1px 2px rgba(20,22,26,.05), 0 8px 24px -12px rgba(20,22,26,.14);
+
+  --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --sans:  "Archivo", "Segoe UI", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:      #15171B;
+    --surface:     #1C1F24;
+    --surface-alt: #22262C;
+    --ink:         #E7EAEE;
+    --muted:       #99A1AD;
+    --faint:       #737B87;
+    --line:        #2B3037;
+    --line-strong: #3C434C;
+    --accent:      #FF7285;
+    --accent-soft: #33191E;
+    --allow:       #4FC492;
+    --allow-soft:  #16291F;
+    --mod:         #DFAA4C;
+    --mod-soft:    #2A2214;
+    --deny:        #99A1AD;
+    --deny-soft:   #24282E;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground:      #15171B;
+  --surface:     #1C1F24;
+  --surface-alt: #22262C;
+  --ink:         #E7EAEE;
+  --muted:       #99A1AD;
+  --faint:       #737B87;
+  --line:        #2B3037;
+  --line-strong: #3C434C;
+  --accent:      #FF7285;
+  --accent-soft: #33191E;
+  --allow:       #4FC492;
+  --allow-soft:  #16291F;
+  --mod:         #DFAA4C;
+  --mod-soft:    #2A2214;
+  --deny:        #99A1AD;
+  --deny-soft:   #24282E;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 16.5px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 24px 96px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+
+/* ---------- masthead ---------- */
+
+.masthead {
+  padding: 56px 0 32px;
+  border-bottom: 2px solid var(--ink);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px 40px;
+}
+
+.masthead h1 {
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: clamp(2.1rem, 5vw, 3.1rem);
+  line-height: 1.02;
+  letter-spacing: -0.028em;
+  margin: 0;
+  text-wrap: balance;
+}
+
+.masthead h1 .thin {
+  display: block;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.masthead p {
+  margin: 10px 0 0;
+  max-width: 46ch;
+  color: var(--muted);
+  font-size: 1.02rem;
+}
+
+.stamp {
+  font-family: var(--mono);
+  font-size: .72rem;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  padding: 7px 11px;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+/* ---------- layout ---------- */
+
+.body-grid {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 56px;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .body-grid { grid-template-columns: 1fr; gap: 0; }
+  nav.rail { position: static; margin: 24px 0 0; }
+  nav.rail ol { display: flex; flex-wrap: wrap; gap: 6px; }
+}
+
+nav.rail {
+  position: sticky;
+  top: 24px;
+  padding-top: 44px;
+  font-family: var(--mono);
+  font-size: .78rem;
+}
+
+nav.rail .rail-label {
+  font-size: .68rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--faint);
+  margin-bottom: 12px;
+}
+
+nav.rail ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+
+nav.rail a {
+  display: block;
+  padding: 4px 8px;
+  color: var(--muted);
+  text-decoration: none;
+  border-left: 2px solid var(--line);
+  border-radius: 0 2px 2px 0;
+}
+
+nav.rail a:hover, nav.rail a:focus-visible {
+  color: var(--accent);
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
+  outline: none;
+}
+
+main { min-width: 0; padding-top: 44px; }
+
+/* ---------- typography ---------- */
+
+h2 {
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 1.02rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 18px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+h3 {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 1.22rem;
+  letter-spacing: -.01em;
+  margin: 0;
+}
+
+p { margin: 0 0 1em; max-width: 68ch; }
+p:last-child { margin-bottom: 0; }
+
+section + section { margin-top: 52px; }
+
+code, .m { font-family: var(--mono); font-size: .87em; }
+
+p code, li code, td code {
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: .07em .34em;
+}
+
+strong { font-weight: 600; }
+
+em.term {
+  font-style: normal;
+  font-family: var(--mono);
+  font-size: .87em;
+  color: var(--accent);
+}
+
+/* ---------- decision strip ---------- */
+
+.decisions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+
+.decisions div { background: var(--surface); padding: 16px 18px; }
+
+.decisions dt {
+  font-family: var(--mono);
+  font-size: .68rem;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--faint);
+  margin-bottom: 7px;
+}
+
+.decisions dd {
+  margin: 0;
+  font-family: var(--sans);
+  font-weight: 600;
+  font-size: .97rem;
+  line-height: 1.35;
+}
+
+/* ---------- consequence callout ---------- */
+
+.consequence {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  padding: 20px 22px;
+}
+
+.consequence + .consequence { margin-top: 14px; }
+
+.consequence h4 {
+  font-family: var(--sans);
+  font-size: 1.06rem;
+  font-weight: 700;
+  letter-spacing: -.012em;
+  margin: 0 0 8px;
+}
+
+.consequence p { font-size: .96rem; }
+
+.derived {
+  font-family: var(--mono);
+  font-size: .64rem;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 2px;
+  padding: 3px 7px;
+  vertical-align: 3px;
+  margin-left: 9px;
+  white-space: nowrap;
+}
+
+/* ---------- tables ---------- */
+
+.tbl {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  margin-bottom: 30px;
+}
+
+.tbl-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px 14px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-alt);
+}
+
+.role {
+  font-family: var(--mono);
+  font-size: .64rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  padding: 3px 7px;
+  line-height: 1;
+}
+
+.tbl-head .gloss {
+  font-family: var(--serif);
+  color: var(--muted);
+  font-size: .95rem;
+  flex-basis: 100%;
+  margin: 0;
+  max-width: 62ch;
+}
+
+.scroll { overflow-x: auto; }
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: .92rem;
+  font-variant-numeric: tabular-nums;
+}
+
+th {
+  font-family: var(--mono);
+  font-size: .66rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--faint);
+  text-align: left;
+  font-weight: 500;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+td {
+  padding: 11px 20px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+tr:last-child td { border-bottom: none; }
+
+td.col { font-family: var(--mono); font-weight: 500; white-space: nowrap; }
+td.typ { font-family: var(--mono); font-size: .82rem; color: var(--muted); white-space: nowrap; }
+td.why { color: var(--muted); min-width: 24ch; }
+td.why strong { color: var(--ink); font-weight: 600; }
+
+tr.key td.col { color: var(--accent); }
+
+/* ---------- policy matrix ---------- */
+
+.matrix table { font-size: .88rem; }
+.matrix td { text-align: center; padding: 10px 12px; }
+.matrix td:first-child { text-align: left; font-family: var(--mono); white-space: nowrap; }
+.matrix th { text-align: center; padding: 10px 12px; }
+.matrix th:first-child { text-align: left; }
+
+.p {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: .69rem;
+  letter-spacing: .04em;
+  border-radius: 2px;
+  padding: 4px 8px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.p-allow { color: var(--allow); background: var(--allow-soft); }
+.p-mod   { color: var(--mod);   background: var(--mod-soft); }
+.p-deny  { color: var(--deny);  background: var(--deny-soft); }
+
+/* ---------- licences ---------- */
+
+.lic {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(238px, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+
+.lic > div { background: var(--surface); padding: 16px 18px; }
+
+.lic .name {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: .95rem;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.lic .note { font-size: .9rem; color: var(--muted); }
+
+.default-tag {
+  font-family: var(--sans);
+  font-size: .6rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--surface);
+  background: var(--accent);
+  border-radius: 2px;
+  padding: 3px 6px;
+  line-height: 1;
+}
+
+.excluded {
+  margin-top: 14px;
+  padding: 16px 18px;
+  border: 1px dashed var(--line-strong);
+  color: var(--muted);
+  font-size: .95rem;
+}
+.excluded strong { color: var(--ink); }
+
+/* ---------- open questions ---------- */
+
+ol.asks { margin: 0; padding-left: 1.3em; }
+ol.asks li { margin-bottom: .85em; max-width: 68ch; }
+ol.asks li::marker { font-family: var(--mono); color: var(--accent); font-weight: 700; }
+
+footer {
+  margin-top: 56px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: .74rem;
+  color: var(--faint);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}
+
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <div>
+      <h1>Cloud Schema<span class="thin">Phase&nbsp;0 — fields before SQL</span></h1>
+      <p>Seven tables behind VeinScript accounts, the chat, and a corpus of published bundles. Read it
+      to argue with it; nothing is written yet.</p>
+    </div>
+    <div class="stamp">For review · no migrations written</div>
+  </header>
+
+  <div class="body-grid">
+
+    <nav class="rail" aria-label="Tables">
+      <div class="rail-label">Contents</div>
+      <ol>
+        <li><a href="#settled">Settled</a></li>
+        <li><a href="#consequences">Consequences</a></li>
+        <li><a href="#profiles">profiles</a></li>
+        <li><a href="#projects">projects</a></li>
+        <li><a href="#versions">project_versions</a></li>
+        <li><a href="#files">project_files</a></li>
+        <li><a href="#licences">licences</a></li>
+        <li><a href="#takedown">takedown_requests</a></li>
+        <li><a href="#chat">rooms · messages</a></li>
+        <li><a href="#rls">RLS matrix</a></li>
+        <li><a href="#asks">Still open</a></li>
+      </ol>
+    </nav>
+
+    <main>
+
+      <section id="settled">
+        <h2>What you settled</h2>
+        <dl class="decisions">
+          <div>
+            <dt>Licence</dt>
+            <dd>Open source always. Selling what you build with it, always allowed.</dd>
+          </div>
+          <div>
+            <dt>Removal</dt>
+            <dd>No delete. Modification only, and takedown by moderator review.</dd>
+          </div>
+          <div>
+            <dt>Identity</dt>
+            <dd>Email plus a unique pseudonym, set at signup on the website.</dd>
+          </div>
+          <div>
+            <dt>Publish unit</dt>
+            <dd>The whole folder, with <span class="m">entry_path</span> naming the way in.</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section id="consequences">
+        <h2>Two things that follow, and need your eye</h2>
+
+        <div class="consequence">
+          <h4>Deleting an account must not delete its bundles<span class="derived">derived</span></h4>
+          <p>Supabase cascades <code>auth.users</code> into <code>profiles</code>. If
+          <code>projects.owner</code> cascaded as well, one person closing their account would take out
+          every bundle a hundred other projects had come to depend on — the exact outcome the no-delete
+          rule exists to prevent.</p>
+          <p>So <code>owner</code> is <strong>ON DELETE SET NULL</strong>, and a separate
+          <code>owner_handle</code> column carries the name forward. An orphaned project is still
+          readable, still compiles, and is visibly unowned.</p>
+        </div>
+
+        <div class="consequence">
+          <h4>There is no <span class="m">private</span> visibility<span class="derived">derived</span></h4>
+          <p>A project switched to private after publication vanishes for everyone already using it.
+          That is deletion wearing a different word, and it walks straight around the moderator.</p>
+          <p>So visibility is <code>public</code> or <code>unlisted</code> only. Unlisted keeps a
+          project out of search and listings while a direct link still resolves — as far as taking it
+          back can go without breaking dependents.</p>
+        </div>
+      </section>
+
+      <section id="profiles">
+        <h2>Identity</h2>
+
+        <div class="tbl">
+          <div class="tbl-head">
+            <h3>profiles</h3>
+            <span class="role">identity</span>
+            <p class="gloss">The public half of an account. Supabase Auth owns the private half.</p>
+          </div>
+          <div class="scroll">
+            <table>
+              <thead><tr><th>Column</th><th>Type</th><th>Why</th></tr></thead>
+              <tbody>
+                <tr class="key"><td class="col">id</td><td class="typ">uuid PK → auth.users</td><td class="why">Supabase owns identity; this row is what everyone else may read.</td></tr>
+                <tr><td class="col">handle</td><td class="typ">citext unique NOT NULL</td><td class="why"><strong>The unique VeinScript pseudonym.</strong> <code>^[a-z0-9_-]{3,32}$</code>. Never null, so no listing has to render a nameless author.</td></tr>
+                <tr><td class="col">display_name</td><td class="typ">text</td><td class="why">Free-form, changeable. The handle is the one that must stay stable.</td></tr>
+                <tr><td class="col">bio</td><td class="typ">text</td><td class="why">Shown on the profile page in the website.</td></tr>
+                <tr><td class="col">avatar_url</td><td class="typ">text</td><td class="why">A URL, not a blob — Supabase Storage or a gravatar, decided by the site.</td></tr>
+                <tr><td class="col">role</td><td class="typ">text default 'user'</td><td class="why"><strong>user · moderator · admin.</strong> Takedowns need someone who can act. <strong>Not self-updatable</strong> — the update policy excludes this column and a trigger rejects a change to it, or anyone could promote themselves and delete your bundle.</td></tr>
+                <tr><td class="col">created_at</td><td class="typ">timestamptz</td><td class="why"></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <p>A row is created by a trigger on <code>auth.users</code> insert, reading the handle out of
+        the signup metadata — so a signup can never leave an account with no profile and no name. The
+        Workbench never sees this path: it signs in, and its <strong>Create an account</strong> button
+        opens the browser at the VeinScript site.</p>
+      </section>
+
+      <section id="projects">
+        <h2>The corpus</h2>
+
+        <div class="tbl">
+          <div class="tbl-head">
+            <h3>projects</h3>
+            <span class="role">corpus</span>
+            <p class="gloss">One row per publishable folder. The mutable part — summary, tags, visibility.</p>
+          </div>
+          <div class="scroll">
+            <table>
+              <thead><tr><th>Column</th><th>Type</th><th>Why</th></tr></thead>
+              <tbody>
+                <tr class="key"><td class="col">id</td><td class="typ">uuid PK</td><td class="why"></td></tr>
+                <tr><td class="col">owner</td><td class="typ">uuid → profiles<br>ON DELETE SET NULL</td><td class="why"><strong>Not cascade.</strong> See the consequence above.</td></tr>
+                <tr><td class="col">owner_handle</td><td class="typ">text NOT NULL</td><td class="why">The handle as it stood at publish time, so a project keeps an author even when the account is gone.</td></tr>
+                <tr><td class="col">slug</td><td class="typ">text</td><td class="why"><code>unique(owner_handle, slug)</code> — <span class="m">alice/combat</span> and <span class="m">bob/combat</span> coexist, which is exactly how <code>*Author.Bundle</code> already disambiguates in the language.</td></tr>
+                <tr><td class="col">name</td><td class="typ">text</td><td class="why">The bundle or app name as written in the source.</td></tr>
+                <tr><td class="col">author</td><td class="typ">text</td><td class="why"><strong>The <code>by X</code> from the code</strong>, which may differ from the uploader's handle. Both are kept; the publish dialog warns on a mismatch rather than rewriting anyone's source.</td></tr>
+                <tr><td class="col">kind</td><td class="typ">text</td><td class="why"><span class="m">scratch · bundle · solution</span> — the same three <code>ProjectKind</code> values the New Project dialog already produces.</td></tr>
+                <tr><td class="col">summary</td><td class="typ">text</td><td class="why">One line, shown in the browser list.</td></tr>
+                <tr><td class="col">tags</td><td class="typ">text[]</td><td class="why">Free-form for now; a curated vocabulary can come later without a migration.</td></tr>
+                <tr><td class="col">visibility</td><td class="typ">text default 'public'</td><td class="why"><span class="m">public · unlisted</span>. No <span class="m">private</span> — see above.</td></tr>
+                <tr><td class="col">latest_seq</td><td class="typ">int default 0</td><td class="why">Denormalised, so a listing of a thousand projects needs no join.</td></tr>
+                <tr><td class="col">latest_license</td><td class="typ">text</td><td class="why">Same reason — filter the browser by licence without touching the versions table.</td></tr>
+                <tr><td class="col">created_at / updated_at</td><td class="typ">timestamptz</td><td class="why"></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="versions">
+        <div class="tbl">
+          <div class="tbl-head">
+            <h3>project_versions</h3>
+            <span class="role">corpus · immutable</span>
+            <p class="gloss">One snapshot per publish. Never updated, so what someone depends on cannot change under them.</p>
+          </div>
+          <div class="scroll">
+            <table>
+              <thead><tr><th>Column</th><th>Type</th><th>Why</th></tr></thead>
+              <tbody>
+                <tr class="key"><td class="col">id</td><td class="typ">uuid PK</td><td class="why"></td></tr>
+                <tr><td class="col">project_id</td><td class="typ">uuid → projects</td><td class="why"></td></tr>
+                <tr><td class="col">seq</td><td class="typ">int</td><td class="why"><code>unique(project_id, seq)</code> — v1, v2, v3. Never reused, never renumbered.</td></tr>
+                <tr><td class="col">entry_path</td><td class="typ">text</td><td class="why">Relative: <span class="m">app.vein</span>, or <span class="m">demo/demo.vein</span>. The way into a folder that holds several files.</td></tr>
+                <tr><td class="col">license</td><td class="typ">text NOT NULL</td><td class="why"><strong>On the version, not the project.</strong> v1 went out under its terms and cannot be un-published under different ones.</td></tr>
+                <tr><td class="col">notes</td><td class="typ">text</td><td class="why">What changed. This is the whole changelog.</td></tr>
+                <tr><td class="col">compiler_version</td><td class="typ">text</td><td class="why">So a listing can say what it was built against, and a failure years later has a starting point.</td></tr>
+                <tr><td class="col">error_count</td><td class="typ">int, CHECK = 0</td><td class="why"><strong>The compile gate, enforced by the database.</strong> A client bug cannot put broken source in the corpus.</td></tr>
+                <tr><td class="col">warning_count</td><td class="typ">int</td><td class="why">Recorded and shown, never a refusal.</td></tr>
+                <tr><td class="col">file_count / total_bytes</td><td class="typ">int</td><td class="why">So the browser can show the size of a thing before fetching it.</td></tr>
+                <tr><td class="col">created_at</td><td class="typ">timestamptz</td><td class="why"></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="files">
+        <div class="tbl">
+          <div class="tbl-head">
+            <h3>project_files</h3>
+            <span class="role">corpus · immutable</span>
+            <p class="gloss">The source itself, as text columns — because a corpus in text is a corpus you can search.</p>
+          </div>
+          <div class="scroll">
+            <table>
+              <thead><tr><th>Column</th><th>Type</th><th>Why</th></tr></thead>
+              <tbody>
+                <tr class="key"><td class="col">version_id</td><td class="typ">uuid → project_versions</td><td class="why"></td></tr>
+                <tr><td class="col">path</td><td class="typ">text</td><td class="why"><code>unique(version_id, path)</code>. Relative, forward slashes, and <strong>checked</strong>: no <span class="m">..</span>, no leading slash, no drive letter. A path check is what stops a restore writing outside the folder you chose.</td></tr>
+                <tr><td class="col">content</td><td class="typ">text, ≤ 512 KB</td><td class="why">Not Supabase Storage. <span class="m">.vein</span> files are small, and text columns are what make full-text search across every published bundle possible.</td></tr>
+                <tr><td class="col">bytes</td><td class="typ">int</td><td class="why"></td></tr>
+                <tr><td class="col">sha256</td><td class="typ">text</td><td class="why">So a re-publish can show what actually changed, and a restore can prove it got the same bytes.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <p>Whole folder means whole folder: everything <code>ProjectPackage</code> finds under the root
+        — the main file, <code>publicators/</code> and <code>shards/</code> fragments,
+        <code>bundles/</code> dependencies, <code>.veinproj</code>, <code>vein.discovery</code> — minus
+        <code>bin/</code>, <code>obj/</code> and <code>out/</code>. Ordered
+        <code>StringComparer.Ordinal</code>, so publishing an unchanged project twice produces identical
+        hashes.</p>
+      </section>
+
+      <section id="licences">
+        <h2>The licence list</h2>
+
+        <p>Every published version is open source, and every option below lets whoever uses your bundle
+        <strong>sell the game, app or site they build with it</strong>.</p>
+
+        <div class="lic">
+          <div>
+            <div class="name">MIT <span class="default-tag">default</span></div>
+            <div class="note">Shortest, most permissive, what anyone expects. Keep the notice, do what you like.</div>
+          </div>
+          <div>
+            <div class="name">Apache-2.0</div>
+            <div class="note">MIT plus an explicit patent grant. Choose it if patents could ever come into it.</div>
+          </div>
+          <div>
+            <div class="name">BSD-3-Clause</div>
+            <div class="note">MIT-equivalent, with a clause against using your name to endorse their product.</div>
+          </div>
+          <div>
+            <div class="name">MPL-2.0</div>
+            <div class="note">Weak copyleft: changes <em class="term">to your files</em> stay open, the product built around them can be closed and sold.</div>
+          </div>
+          <div>
+            <div class="name">Unlicense</div>
+            <div class="note">Public domain dedication. No notice to keep, no conditions at all.</div>
+          </div>
+          <div>
+            <div class="name">CC0-1.0</div>
+            <div class="note">The same intent as Unlicense, with a licence fallback for countries where dedication is not a thing.</div>
+          </div>
+        </div>
+
+        <div class="excluded">
+          <strong>GPL-3.0 and AGPL-3.0 are deliberately off the list.</strong> They permit selling too —
+          but they require the whole derived work's source to be released. A bundle under one would
+          quietly force every game and web app built on it to open its own source, which is the opposite
+          of what you asked for, and not a trap to leave a stranger to discover after they have shipped.
+        </div>
+      </section>
+
+      <section id="takedown">
+        <h2>Removal</h2>
+
+        <div class="tbl">
+          <div class="tbl-head">
+            <h3>takedown_requests</h3>
+            <span class="role">moderation</span>
+            <p class="gloss">The only route to removal. Nothing in the corpus is deletable by its owner.</p>
+          </div>
+          <div class="scroll">
+            <table>
+              <thead><tr><th>Column</th><th>Type</th><th>Why</th></tr></thead>
+              <tbody>
+                <tr class="key"><td class="col">id</td><td class="typ">uuid PK</td><td class="why"></td></tr>
+                <tr><td class="col">project_id</td><td class="typ">uuid, nullable</td><td class="why">A whole project…</td></tr>
+                <tr><td class="col">version_id</td><td class="typ">uuid, nullable</td><td class="why">…or one bad version. Exactly one of the two is set.</td></tr>
+                <tr><td class="col">requester</td><td class="typ">uuid → profiles</td><td class="why">May be the owner asking for their own code back, may be someone reporting a problem.</td></tr>
+                <tr><td class="col">reason</td><td class="typ">text NOT NULL, 10–2000</td><td class="why">A request with no reason cannot be judged, so the database refuses one.</td></tr>
+                <tr><td class="col">status</td><td class="typ">text default 'pending'</td><td class="why"><span class="m">pending · approved · rejected</span>. Only a moderator can move it off pending.</td></tr>
+                <tr><td class="col">decided_by</td><td class="typ">uuid → profiles</td><td class="why">Which moderator. A takedown with no name attached is not reviewable.</td></tr>
+                <tr><td class="col">decided_at / decision_note</td><td class="typ">timestamptz / text</td><td class="why"></td></tr>
+                <tr><td class="col">created_at</td><td class="typ">timestamptz</td><td class="why"></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <p>The DELETE policies on <code>projects</code>, <code>project_versions</code> and
+        <code>project_files</code> exist for moderators and nobody else, checked through an
+        <code>is_moderator()</code> <span class="m">SECURITY DEFINER</span> function — so the policy
+        never has to read <code>profiles</code> under the caller's own RLS.</p>
+
+        <p>The reasoning is yours and worth writing down: <strong>if a hundred projects load your bundle,
+        your right to withdraw it stops where their working build begins.</strong> A moderator is the
+        only place that judgement can actually be made.</p>
+      </section>
+
+      <section id="chat">
+        <h2>Chat</h2>
+
+        <div class="tbl">
+          <div class="tbl-head">
+            <h3>rooms</h3>
+            <span class="role">chat</span>
+            <p class="gloss">One row to start: <span class="m">general</span>.</p>
+          </div>
+          <div class="scroll">
+            <table>
+              <thead><tr><th>Column</th><th>Type</th><th>Why</th></tr></thead>
+              <tbody>
+                <tr class="key"><td class="col">id</td><td class="typ">uuid PK</td><td class="why"></td></tr>
+                <tr><td class="col">slug</td><td class="typ">text unique</td><td class="why"><span class="m">general</span> is seeded by the migration.</td></tr>
+                <tr><td class="col">name</td><td class="typ">text</td><td class="why"></td></tr>
+                <tr><td class="col">kind</td><td class="typ">text</td><td class="why"><span class="m">global · project</span>. Costs nothing today, and is what lets per-project rooms arrive later without migrating live data.</td></tr>
+                <tr><td class="col">project_id</td><td class="typ">uuid, nullable</td><td class="why">Set only for a project room.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="tbl">
+          <div class="tbl-head">
+            <h3>messages</h3>
+            <span class="role">chat</span>
+            <p class="gloss">Polled, not streamed — and the primary key is what makes polling exact.</p>
+          </div>
+          <div class="scroll">
+            <table>
+              <thead><tr><th>Column</th><th>Type</th><th>Why</th></tr></thead>
+              <tbody>
+                <tr class="key"><td class="col">id</td><td class="typ">bigint identity PK</td><td class="why"><strong>Not a timestamp.</strong> The client asks <code>?id=gt.&lt;last&gt;&amp;order=id.asc</code> — no clock skew, no ties, no message fetched twice or missed. A <code>created_at</code> poll has all three failure modes.</td></tr>
+                <tr><td class="col">room_id</td><td class="typ">uuid → rooms</td><td class="why"></td></tr>
+                <tr><td class="col">author</td><td class="typ">uuid → profiles</td><td class="why"></td></tr>
+                <tr><td class="col">body</td><td class="typ">text, 1–2000</td><td class="why">Length checked in the database, so a client bug cannot post an empty or enormous message.</td></tr>
+                <tr><td class="col">created_at</td><td class="typ">timestamptz</td><td class="why">For display. Never for paging.</td></tr>
+                <tr><td class="col">deleted_at</td><td class="typ">timestamptz</td><td class="why">Soft delete, so removing your own message does not punch a hole in everyone else's poll cursor.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <p>Reading is authenticated as well as posting, per <em>authenticate before chatting</em> — a
+        signed-out Workbench makes no chat request at all.</p>
+      </section>
+
+      <section id="rls">
+        <h2>Row Level Security</h2>
+
+        <p>The anon key ships inside the Workbench, so <strong>RLS is not a layer of the security model,
+        it is all of it</strong>. Every table is created with its policies in the same migration file —
+        a separate <span class="m">rls.sql</span> is a file someone forgets to run, and the cost of
+        forgetting is a public database.</p>
+
+        <div class="tbl matrix">
+          <div class="scroll">
+            <table>
+              <thead><tr><th>Table</th><th>Select</th><th>Insert</th><th>Update</th><th>Delete</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>profiles</td>
+                  <td><span class="p p-allow">anyone</span></td>
+                  <td><span class="p p-allow">self</span></td>
+                  <td><span class="p p-allow">self, not role</span></td>
+                  <td><span class="p p-deny">none</span></td>
+                </tr>
+                <tr>
+                  <td>projects</td>
+                  <td><span class="p p-allow">anyone</span></td>
+                  <td><span class="p p-allow">owner</span></td>
+                  <td><span class="p p-allow">owner</span></td>
+                  <td><span class="p p-mod">moderator</span></td>
+                </tr>
+                <tr>
+                  <td>project_versions</td>
+                  <td><span class="p p-allow">anyone</span></td>
+                  <td><span class="p p-allow">owner</span></td>
+                  <td><span class="p p-deny">immutable</span></td>
+                  <td><span class="p p-mod">moderator</span></td>
+                </tr>
+                <tr>
+                  <td>project_files</td>
+                  <td><span class="p p-allow">anyone</span></td>
+                  <td><span class="p p-allow">owner</span></td>
+                  <td><span class="p p-deny">immutable</span></td>
+                  <td><span class="p p-mod">moderator</span></td>
+                </tr>
+                <tr>
+                  <td>takedown_requests</td>
+                  <td><span class="p p-allow">requester · mod</span></td>
+                  <td><span class="p p-allow">signed in</span></td>
+                  <td><span class="p p-mod">moderator</span></td>
+                  <td><span class="p p-deny">none</span></td>
+                </tr>
+                <tr>
+                  <td>rooms</td>
+                  <td><span class="p p-allow">signed in</span></td>
+                  <td><span class="p p-deny">none</span></td>
+                  <td><span class="p p-deny">none</span></td>
+                  <td><span class="p p-deny">none</span></td>
+                </tr>
+                <tr>
+                  <td>messages</td>
+                  <td><span class="p p-allow">signed in</span></td>
+                  <td><span class="p p-allow">self</span></td>
+                  <td><span class="p p-allow">own</span></td>
+                  <td><span class="p p-allow">own, soft</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <p>Listings filter <code>visibility = 'public'</code> in the query rather than the policy, so an
+        unlisted project still resolves by direct link. The last migration file is
+        <span class="m">0099_checks.sql</span>: negative tests you run against a fresh project with the
+        anon key alone, proving that posting as another user and updating someone else's version both
+        fail.</p>
+      </section>
+
+      <section id="asks">
+        <h2>Still open</h2>
+        <ol class="asks">
+          <li><strong>Is <span class="m">unlisted</span> enough</strong>, or should a published project
+          be permanently listed and only removable by a moderator? Right now an owner can quietly unlist
+          without review.</li>
+          <li><strong>Who is the first moderator?</strong> The migration can seed your account by handle,
+          or leave the table empty until you promote someone by hand in the SQL editor.</li>
+          <li><strong>Rate limits.</strong> Nothing currently stops one account posting a thousand
+          messages or publishing five hundred versions. A per-minute check is cheap to add now and
+          awkward to retrofit — worth doing, unless you would rather see how it behaves first.</li>
+          <li><strong>The site's URL</strong>, for the <em>Create an account</em> button and for
+          <code>CloudConfig</code>.</li>
+        </ol>
+      </section>
+
+      <footer>
+        <span>VeinScript Cloud · Phase 0</span>
+        <span>7 tables · 1 function · 0 migrations written</span>
+        <span>Next: supabase/migrations/</span>
+      </footer>
+
+    </main>
+  </div>
+</div>
