@@ -28,9 +28,22 @@ bundle Convert by you {
 
             emit *Vein.Console.Io.@Print { text: "string 7    = [" + string(7) + "]" }
             emit *Vein.Console.Io.@Print { text: "string bool = [" + string(true) + "]" }
+            emit *Vein.Console.Io.@Print { text: "string list = " + string(chars("ab")) }
+
+            // A number too large to hold saturates. It does NOT wrap round to a large negative one,
+            // which is what the underlying cast does and what a wrong answer here would look like.
+            emit *Vein.Console.Io.@Print { text: "int too big = " + int("999999999999999999999") }
 
             emit *Vein.Console.Io.@Print { text: "bool 0      = " + bool(0) }
             emit *Vein.Console.Io.@Print { text: "bool text   = " + bool("x") }
+
+            // `bool` of text READS THE ANSWER rather than asking whether there is text. This is the one
+            // conversion that is not truthiness: `if "false"` is true, because there is a string there,
+            // but `bool("false")` is false, because that is what the person typed.
+            emit *Vein.Console.Io.@Print { text: "bool 'false'= " + bool("false") }
+            emit *Vein.Console.Io.@Print { text: "bool 'no'   = " + bool("no") }
+            emit *Vein.Console.Io.@Print { text: "bool '0'    = " + bool("0") }
+            emit *Vein.Console.Io.@Print { text: "bool 'cat'  = " + bool("cat") }
 
             emit *Vein.Console.Io.@Print { text: "isNumber 42 = " + isNumber("42") }
             emit *Vein.Console.Io.@Print { text: "isNumber ab = " + isNumber("abc") }

@@ -1279,7 +1279,7 @@ public sealed class Interp
         "int" => ToLong(args.Count > 0 ? args[0] : null),
         "float" => ToDouble(args.Count > 0 ? args[0] : null),
         "string" => args.Count > 0 ? Str(args[0]) : "",
-        "bool" => args.Count > 0 && Truthy(args[0]),
+        "bool" => args.Count > 0 && ToBool(args[0]),
         "isNumber" => args.Count > 0 && LooksNumeric(args[0]),
 
         _ => null
@@ -1293,10 +1293,10 @@ public sealed class Interp
         bool b => b ? 1L : 0L,
         long l => l,
         int i => i,
-        double d => double.IsFinite(d) ? (long)d : 0L,
+        double d => FromDouble(d),
         string s => long.TryParse(s.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out long n) ? n
                   : double.TryParse(s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out double f)
-                    && double.IsFinite(f) ? (long)f
+                    ? FromDouble(f)
                   : 0L,
         _ => 0L
     };
@@ -1315,6 +1315,46 @@ public sealed class Interp
                     && double.IsFinite(f) ? f : 0d,
         _ => 0d
     };
+
+    /// A real number to a whole one, CLAMPED at the ends of the range.
+    ///
+    /// `(long)d` in C# is undefined for a value outside long's range and in practice answers
+    /// long.MinValue, so `int("999999999999999999999")` used to be -9223372036854775808: a large
+    /// positive number silently becoming a large negative one, which then compared and summed as if it
+    /// were real. Saturating is the lesser wrong answer — it is at least on the correct side of zero,
+    /// and `isNumber` was already the way to ask whether the text was a number at all.
+    private static long FromDouble(double d) =>
+        !double.IsFinite(d) ? 0L
+        : d >= long.MaxValue ? long.MaxValue
+        : d <= long.MinValue ? long.MinValue
+        : (long)d;
+
+    /// `bool(x)` — a PARSE for text, and truthiness for everything else.
+    ///
+    /// This is the one conversion that cannot simply call [Truthy]. Truthiness asks "is there anything
+    /// here", and every non-empty string answers yes, so `bool("false")` was TRUE and so was `bool("0")`.
+    /// That is the right rule for a condition and the wrong one for a conversion: a string being
+    /// converted is nearly always something a person typed or a file held, and there "false" means false.
+    ///
+    /// Words first, then numbers, and only then truthiness — which is what keeps `bool("cat")` true and
+    /// agrees with `if` for every string that is not a written answer.
+    private static bool ToBool(object? v)
+    {
+        if (v is not string s) return Truthy(v);
+
+        string t = s.Trim();
+        if (t.Length == 0) return false;
+        if (IsWord(t, "true", "yes", "on")) return true;
+        if (IsWord(t, "false", "no", "off")) return false;
+        return LooksNumeric(t) ? ToDouble(t) != 0 : true;
+    }
+
+    private static bool IsWord(string t, params string[] words)
+    {
+        foreach (string w in words)
+            if (string.Equals(t, w, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
 
     /// Would `int`/`float` find a number here, rather than falling back to zero?
     ///
@@ -1523,7 +1563,19 @@ public sealed class Interp
     private static bool IsNumeric(object? o) => o is double or long or int or bool;
 
     private static double AsDouble(object? o) => o switch { double d => d, long l => l, int i => i, bool b => b ? 1 : 0, _ => 0 };
-    private static string Str(object? o) => o switch { null => "", string s => s, double d => d.ToString(CultureInfo.InvariantCulture), bool b => b ? "true" : "false", _ => o.ToString() ?? "" };
+    /// Any runtime value as text. The list arm is not a nicety: without it `"lines = " + lines` printed
+    /// `System.Collections.Generic.List` plus a mangled type argument — a .NET implementation detail
+    /// leaking into the output of a program written in a language that has no .NET in it. `join(list,
+    /// sep)` is still how you render a list deliberately; this is what it looks like when you did not ask.
+    private static string Str(object? o) => o switch
+    {
+        null => "",
+        string s => s,
+        double d => d.ToString(CultureInfo.InvariantCulture),
+        bool b => b ? "true" : "false",
+        List<object?> xs => "[" + string.Join(", ", xs.ConvertAll(Str)) + "]",
+        _ => o.ToString() ?? ""
+    };
     private static object? Default(string typeName) => typeName switch { "string" or "Mark" => "", "int" => 0L, "float" => 0.0, "bool" => false, _ => null };
 
     // Typed zero used to satisfy required fields under `?` (fill-the-rest). A `Mark` (an identity

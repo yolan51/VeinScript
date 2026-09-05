@@ -93,6 +93,26 @@ public class ConversionTests
         Assert.Equal(Say("\"\" + false"), Say("string(false)"));
     }
 
+    [Fact]
+    public void Int_saturates_rather_than_wrapping_past_the_end_of_the_range()
+    {
+        // `(long)d` for a value outside long's range answers long.MinValue, so this used to print
+        // -9223372036854775808: a number too big to hold came back as a large NEGATIVE one, which then
+        // compared and summed as though it were real. Saturating is at least on the right side of zero.
+        Assert.Equal("9223372036854775807", Say("int(\"999999999999999999999\")"));
+        Assert.Equal("-9223372036854775808", Say("int(\"-999999999999999999999\")"));
+    }
+
+    [Fact]
+    public void String_renders_a_list_rather_than_its_dotnet_type_name()
+    {
+        // `"x = " + someList` used to print `System.Collections.Generic.List` and a mangled type
+        // argument — .NET showing through a language that has no .NET in it. `join` is still how you
+        // render a list on purpose; this is what it looks like when you did not ask.
+        Assert.Equal("[a, b]", Say("string(chars(\"ab\"))"));
+        Assert.Equal("[]", Say("string(chars(\"\"))"));
+    }
+
     // ---- bool and isNumber ------------------------------------------------------------------------
 
     [Theory]
@@ -101,11 +121,40 @@ public class ConversionTests
     [InlineData("bool(true)", "true")]
     [InlineData("bool(\"x\")", "true")]
     [InlineData("bool(\"\")", "false")]          // empty text is falsy, exactly as `if ""` already was
-    public void Bool_follows_the_same_truthiness_as_if(string expr, string expected)
+    public void Bool_follows_truthiness_for_everything_that_is_not_a_written_answer(string expr, string expected)
+        => Assert.Equal(expected, Say(expr));
+
+    [Theory]
+    [InlineData("bool(\"false\")", "false")]
+    [InlineData("bool(\"FALSE\")", "false")]
+    [InlineData("bool(\"no\")", "false")]
+    [InlineData("bool(\"off\")", "false")]
+    [InlineData("bool(\" false \")", "false")]   // as it arrives from a typed line
+    [InlineData("bool(\"true\")", "true")]
+    [InlineData("bool(\"yes\")", "true")]
+    [InlineData("bool(\"on\")", "true")]
+    [InlineData("bool(\"0\")", "false")]         // a number in text answers as that number would
+    [InlineData("bool(\"0.0\")", "false")]
+    [InlineData("bool(\"3\")", "true")]
+    public void Bool_reads_a_written_answer_rather_than_asking_whether_there_is_text(string expr, string expected)
     {
-        // It reuses the interpreter's own `Truthy`, so `bool(x)` and `if x` can never disagree — a
-        // second definition of "true enough" is a bug waiting for the one value they differ on.
+        // THIS IS THE ONE CONVERSION THAT IS NOT TRUTHINESS. `bool(x)` used to call `Truthy`, under which
+        // every non-empty string is true — so `bool("false")` was TRUE, and a program that read "false"
+        // from the console or a saved file got the opposite of what was written, silently.
+        //
+        // `if s` still means "is there text here"; that rule is right for a condition. It is wrong for a
+        // conversion, because the thing being converted is nearly always something a person wrote down.
         Assert.Equal(expected, Say(expr));
+    }
+
+    [Fact]
+    public void Bool_falls_back_to_truthiness_for_a_string_that_is_not_an_answer()
+    {
+        // The parse recognises words and numbers. Anything else keeps the old behaviour, so `bool` and
+        // `if` still agree on every string that was never a written yes or no.
+        Assert.Equal("true", Say("bool(\"cat\")"));
+        Assert.Equal("true", Say("bool(\"falsey\")"));
+        Assert.Equal("true", Say("bool(\"0 apples\")"));
     }
 
     [Theory]

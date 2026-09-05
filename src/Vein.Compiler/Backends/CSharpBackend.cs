@@ -170,6 +170,9 @@ public sealed class CSharpBackend : IVeinBackend
             sb.AppendLine("        bool b => b ? \"true\" : \"false\",");
             sb.AppendLine("        double d => d.ToString(System.Globalization.CultureInfo.InvariantCulture),");
             sb.AppendLine("        float f => ((double)f).ToString(System.Globalization.CultureInfo.InvariantCulture),");
+            // Without this arm a list rendered as its .NET type name, here as much as in the interpreter.
+            sb.AppendLine("        System.Collections.Generic.List<object?> xs => \"[\" + " +
+                          "string.Join(\", \", xs.ConvertAll(S)) + \"]\",");
             sb.AppendLine("        _ => v.ToString() ?? \"\",");
             sb.AppendLine("    };");
             sb.AppendLine();
@@ -287,13 +290,19 @@ public sealed class CSharpBackend : IVeinBackend
             sb.AppendLine("    public static long ToInt(object? v) => v switch");
             sb.AppendLine("    {");
             sb.AppendLine("        null => 0L, bool b => b ? 1L : 0L, long l => l, int i => i,");
-            sb.AppendLine("        double d => double.IsFinite(d) ? (long)d : 0L,");
+            sb.AppendLine("        double d => FromD(d),");
             sb.AppendLine("        string s => long.TryParse(s.Trim(), System.Globalization.NumberStyles.Integer, " +
                           "System.Globalization.CultureInfo.InvariantCulture, out var n) ? n");
             sb.AppendLine("                  : double.TryParse(s.Trim(), System.Globalization.NumberStyles.Float, " +
-                          "System.Globalization.CultureInfo.InvariantCulture, out var f) && double.IsFinite(f) ? (long)f : 0L,");
+                          "System.Globalization.CultureInfo.InvariantCulture, out var f) ? FromD(f) : 0L,");
             sb.AppendLine("        _ => 0L,");
             sb.AppendLine("    };");
+
+            // Saturating, not wrapping: `(long)d` out of range answers long.MinValue, so a huge positive
+            // number came back hugely negative. Mirrors Interp.FromDouble.
+            sb.AppendLine("    public static long FromD(double d) =>");
+            sb.AppendLine("        !double.IsFinite(d) ? 0L : d >= long.MaxValue ? long.MaxValue " +
+                          ": d <= long.MinValue ? long.MinValue : (long)d;");
             sb.AppendLine("    public static double ToFloat(object? v) => v switch");
             sb.AppendLine("    {");
             sb.AppendLine("        null => 0d, bool b => b ? 1d : 0d, long l => l, int i => i, double d => d,");
@@ -309,6 +318,24 @@ public sealed class CSharpBackend : IVeinBackend
                           "out var f) && double.IsFinite(f),");
             sb.AppendLine("        _ => false,");
             sb.AppendLine("    };");
+
+            // `bool(x)`, which is a PARSE for text and truthiness for everything else — B() above stays
+            // the truthiness test that `if` and `while` use. Mirrors Interp.ToBool.
+            sb.AppendLine("    public static bool ToBool(object? v)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        if (v is not string s) return B(v);");
+            sb.AppendLine("        var t = s.Trim();");
+            sb.AppendLine("        if (t.Length == 0) return false;");
+            sb.AppendLine("        if (Word(t, \"true\", \"yes\", \"on\")) return true;");
+            sb.AppendLine("        if (Word(t, \"false\", \"no\", \"off\")) return false;");
+            sb.AppendLine("        return IsNum(t) ? ToFloat(t) != 0 : true;");
+            sb.AppendLine("    }");
+            sb.AppendLine("    static bool Word(string t, params string[] words)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        foreach (var w in words) " +
+                          "if (string.Equals(t, w, System.StringComparison.OrdinalIgnoreCase)) return true;");
+            sb.AppendLine("        return false;");
+            sb.AppendLine("    }");
             sb.AppendLine("}");
         }
 
@@ -1047,7 +1074,7 @@ public sealed class CSharpBackend : IVeinBackend
             case "int": return $"__VeinText.ToInt({Expr(c.Args[0])})";
             case "float": return $"__VeinText.ToFloat({Expr(c.Args[0])})";
             case "string": return $"__VeinText.S({Expr(c.Args[0])})";
-            case "bool": return $"__VeinText.B({Expr(c.Args[0])})";
+            case "bool": return $"__VeinText.ToBool({Expr(c.Args[0])})";
             case "isNumber": return $"__VeinText.IsNum({Expr(c.Args[0])})";
 
             // `attach $C to e { … }` carries a struct init and emits directly. `attach $C to e` with no
