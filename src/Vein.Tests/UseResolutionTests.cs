@@ -85,11 +85,14 @@ public class UseResolutionTests
     {
         // The control for the first test. If this ever starts printing, `use` stopped being the thing
         // that opts a bundle in and became ambient stdlib scope — a different language.
-        var output = Run(
+        //
+        // It now says so rather than compiling to a call that answers null. This test used to assert
+        // the empty OUTPUT, which held for the right reason and the wrong one at once: `print` not
+        // resolving looked identical to `print` resolving and printing nothing.
+        Assert.Contains(Compile(
             "bundle T by me {\n" +
-            "  shard S { run once { print(\"hi\") } }\n}");
-
-        Assert.Equal("", output.Trim());
+            "  shard S { run once { print(\"hi\") } }\n}").Diagnostics,
+            d => d.Code == "VS0234");
     }
 
     [Fact]
@@ -175,12 +178,13 @@ public class UseResolutionTests
     [Fact]
     public void Using_a_bundle_that_exports_nothing_by_that_name_changes_nothing()
     {
-        // `use` widens what a bare name MAY mean; it does not make unrelated names resolve.
-        var output = Run(
+        // `use` widens what a bare name MAY mean; it does not make unrelated names resolve. Math
+        // exports no `print`, so this is as unknown as it was with no `use` at all — and now reads as
+        // VS0234 rather than as a program that runs and prints nothing.
+        Assert.Contains(Compile(
             "bundle T by me {\n" +
             "  use Math\n" +
-            "  shard S { run once { print(\"hi\") } }\n}");
-
-        Assert.Equal("", output.Trim());
+            "  shard S { run once { print(\"hi\") } }\n}").Diagnostics,
+            d => d.Code == "VS0234");
     }
 }

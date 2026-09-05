@@ -580,6 +580,93 @@ public sealed class Lower
             span);
     }
 
+    /// Every built-in's argument count, as (min, max). `substring` is the only one with an optional
+    /// argument — `substring(s, start)` runs to the end, `substring(s, start, length)` takes a length.
+    ///
+    /// This table exists because the built-ins are TOTAL: a wrong call answers an empty value rather
+    /// than crashing, which is the right choice at runtime and useless at the keyboard. `substring("h")`
+    /// is "", `int()` is 0, `chr()` is "" — every one of them indistinguishable from a real answer, and
+    /// none of them reported by anything until here. `fn` calls have had this check since VS0229; the
+    /// built-ins simply never got one.
+    private static readonly Dictionary<string, (int Min, int Max)> PrebuiltArity = new(StringComparer.Ordinal)
+    {
+        ["spawn"] = (0, 0), ["here"] = (0, 0), ["random"] = (0, 0),
+        ["pick"] = (1, 1), ["len"] = (1, 1), ["toJson"] = (1, 1), ["fromJson"] = (1, 1),
+        ["lines"] = (1, 1), ["words"] = (1, 1), ["trim"] = (1, 1), ["chars"] = (1, 1),
+        ["code"] = (1, 1), ["chr"] = (1, 1), ["upper"] = (1, 1), ["lower"] = (1, 1),
+        ["int"] = (1, 1), ["float"] = (1, 1), ["string"] = (1, 1), ["bool"] = (1, 1),
+        ["isNumber"] = (1, 1),
+        ["join"] = (2, 2), ["split"] = (2, 2), ["contains"] = (2, 2), ["startsWith"] = (2, 2),
+        ["endsWith"] = (2, 2), ["indexOf"] = (2, 2), ["substring"] = (2, 3), ["replace"] = (3, 3)
+    };
+
+    /// A bare `name(…)` that reached the end of lowering: every other case has already claimed the calls
+    /// it recognises, so what arrives here is a built-in or a name that does not exist.
+    ///
+    /// THE SECOND ONE USED TO COMPILE. `parse("3")` — no such function — lowered to a call the
+    /// interpreter answered with null, so it built an .exe, ran, and printed nothing. A misspelt
+    /// built-in did the same: `isNumbre(x)` was empty, and an empty value is falsy, so a guard written
+    /// with a typo in it let everything through. Nothing anywhere said the name was unknown.
+    private void CheckBareCall(NameExpr n, IReadOnlyList<Expr> args, SourceSpan span)
+    {
+        if (PrebuiltArity.TryGetValue(n.Name, out var arity))
+        {
+            if (args.Count >= arity.Min && args.Count <= arity.Max) return;
+
+            string wants = arity.Min == arity.Max ? arity.Min.ToString()
+                                                  : $"{arity.Min} or {arity.Max}";
+            _diag.Warning("VS0235",
+                $"'{n.Name}' takes {wants} argument(s) and got {args.Count}. " +
+                (args.Count > arity.Max
+                    ? "The extra ones are evaluated and discarded."
+                    : "A missing one reads as empty, so this answers the same thing for every input."),
+                span);
+            return;
+        }
+
+        if (_localFuncs.Contains(n.Name)) return;
+
+        string hint = Nearest(n.Name) is { } near ? $" Did you mean '{near}'?" : "";
+        _diag.Error("VS0234",
+            $"Unknown function '{n.Name}'.{hint} It is not built in and no `fn` or `SF` declares it, " +
+            "so the call answers nothing — which reads as empty text, zero, and false.", span);
+    }
+
+    /// The closest known name within two edits, so a typo names its own fix. Two rather than three
+    /// because at three edits the "suggestion" starts being a different function, and a confident wrong
+    /// hint costs more than no hint.
+    private string? Nearest(string name)
+    {
+        string? best = null;
+        int bestDist = 3;
+
+        foreach (string cand in PrebuiltArity.Keys.Concat(_localFuncs))
+        {
+            int d = Distance(name, cand);
+            if (d < bestDist) { bestDist = d; best = cand; }
+        }
+
+        return best;
+    }
+
+    private static int Distance(string a, string b)
+    {
+        var prev = new int[b.Length + 1];
+        var cur = new int[b.Length + 1];
+        for (int j = 0; j <= b.Length; j++) prev[j] = j;
+
+        for (int i = 1; i <= a.Length; i++)
+        {
+            cur[0] = i;
+            for (int j = 1; j <= b.Length; j++)
+                cur[j] = Math.Min(Math.Min(cur[j - 1] + 1, prev[j] + 1),
+                                  prev[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1));
+            (prev, cur) = (cur, prev);
+        }
+
+        return prev[b.Length];
+    }
+
     /// The `fn`/`SF` a qualified `*A.B.P.name` refers to. Same suffix match ImportExternalFunction uses,
     /// kept separate because that one has the side effect of importing the body.
     private FuncDecl? ResolveExternalFunc(IReadOnlyList<string> path, string name)
@@ -1434,7 +1521,11 @@ public sealed class Lower
                 CheckCallArity(ldecl, ln.Name, c.Args, c.Span);
                 return new IrCall(LowerExpr(c.Callee), c.Args.Select(LowerExpr).ToList());
 
-            case CallExpr c: return new IrCall(LowerExpr(c.Callee), c.Args.Select(LowerExpr).ToList());
+            // THE LAST CALL CASE, so everything the branches above recognise has already gone. What is
+            // left is a built-in, or a bare name that resolves to nothing at all.
+            case CallExpr c:
+                if (c.Callee is NameExpr bare) CheckBareCall(bare, c.Args, c.Span);
+                return new IrCall(LowerExpr(c.Callee), c.Args.Select(LowerExpr).ToList());
             case BinaryExpr b: return new IrBinary(MapBin(b.Op), LowerExpr(b.Left), LowerExpr(b.Right));
             case UnaryExpr u: return new IrUnary(u.Op == UnOp.Neg ? IrUnOp.Neg : IrUnOp.Not, LowerExpr(u.Operand));
             case StructLitExpr sl: return new IrStructInit(sl.TypeName, sl.Fields.Select(LowerFieldInit).ToList());

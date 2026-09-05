@@ -67,6 +67,12 @@ public static class DiagnosticGuide
 
         new("VS0233", "The whole value of an ascription is that its fields get checked, so a shape that does not exist checks nothing.",
             "docs/RULES.md §391"),
+
+        new("VS0234", "A name that is neither built in nor declared by any `fn`/`SF`. The call would answer nothing — empty text, zero, false — and a program full of them compiles, builds and runs in silence, which is how a typo'd `isNumbre` guard let every value past.",
+            "docs/RULES.md — built-ins"),
+
+        new("VS0235", "The built-ins are total: a wrong argument count answers an empty value rather than failing, so `substring(s)` is \"\" and `int()` is 0. Defined, but indistinguishable from a real answer — which is why the count is worth saying out loud.",
+            "docs/RULES.md — built-ins"),
     };
 
     private static readonly Dictionary<string, DiagnosticNote> ByCode =
