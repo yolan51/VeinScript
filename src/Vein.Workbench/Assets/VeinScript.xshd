@@ -6,6 +6,15 @@
   <Color name="String"  foreground="#CE9178" />
   <Color name="Number"  foreground="#B5CEA8" />
   <Color name="Keyword" foreground="#569CD6" fontWeight="bold" />
+
+  <!-- A COLOUR PER SIGIL. The four are different kinds of thing — data, tag, message, template — and
+       one shared colour made a file read as an undifferentiated wall. They are also the four names
+       that can legally collide: RULES 14e allows a shape and a mark to share one, so the colour is
+       often the only thing on the line that says which you are looking at. -->
+  <Color name="Shape"   foreground="#4EC9B0" />              <!-- $ teal   — data that attaches   -->
+  <Color name="Mark"    foreground="#C586C0" />              <!-- # mauve  — a tag                -->
+  <Color name="Event"   foreground="#DCDCAA" />              <!-- @ gold   — a message            -->
+  <Color name="Builder" foreground="#E09B5A" />              <!-- & amber  — an identity template -->
   <Color name="Sigil"   foreground="#4EC9B0" />
 
   <RuleSet ignoreCase="false">
@@ -20,8 +29,13 @@
       </RuleSet>
     </Span>
 
-    <!-- $Shape / @Event / #Mark references -->
-    <Rule color="Sigil">[$@#][A-Za-z_][A-Za-z0-9_]*</Rule>
+    <!-- One rule each, so the four read apart at a glance. `&Builder` had no rule at all before and
+         rendered as plain text. -->
+    <Rule color="Shape">\$[A-Za-z_][A-Za-z0-9_]*</Rule>
+    <Rule color="Mark">#[A-Za-z_][A-Za-z0-9_]*</Rule>
+    <Rule color="Event">@[A-Za-z_][A-Za-z0-9_]*</Rule>
+    <Rule color="Builder">&amp;[A-Za-z_][A-Za-z0-9_]*</Rule>
+
     <!-- `?` fill-the-rest placeholder in emit/bring -->
     <Rule color="Sigil">\?</Rule>
 

@@ -62,6 +62,8 @@ public partial class MainWindow : Window
     private TreeView _depsTree = null!;
     private ScrollViewer _execPanel = null!;
     private Grid _topCols = null!;
+    private Grid _mainRows = null!;
+    private Button? _bottomToggle;
     private TabControl _bottomPanel = null!;
     private TextBlock _statusBar = null!;
     private Border _bundleInspector = null!;
@@ -142,6 +144,8 @@ public partial class MainWindow : Window
         _depsTree = this.FindControl<TreeView>("DepsTree")!;
         _execPanel = this.FindControl<ScrollViewer>("ExecPanel")!;
         _topCols = this.FindControl<Grid>("TopCols")!;
+        _mainRows = this.FindControl<Grid>("MainRows")!;
+        _bottomToggle = this.FindControl<Button>("BottomToggle");
         _bottomPanel = this.FindControl<TabControl>("BottomPanel")!;
         _statusBar = this.FindControl<TextBlock>("StatusBar")!;
         _bundleInspector = this.FindControl<Border>("BundleInspector")!;
@@ -181,6 +185,10 @@ public partial class MainWindow : Window
         _terminal.RepoRoot = FindRepoRoot();
         _terminal.Resolve = ResolveVeinFile;
         Closed += (_, _) => { SaveSession(); _terminal.StopAll(); };   // no console outlives the IDE
+
+        // After the TabControls are resolved: the chat hosts dock into them. Appends only, so the
+        // Tab* constants above stay valid.
+        SetUpCloudPanels();
 
         _tabs.Activated += OnTabActivated;
         _tabs.ConfirmClose = ConfirmDiscardAsync;
@@ -438,6 +446,7 @@ public partial class MainWindow : Window
             case Key.W: OnCloseTab(sender, e); e.Handled = true; break;
             case Key.G: OnGoToLine(sender, e); e.Handled = true; break;
             case Key.T: OnGoToSymbol(sender, e); e.Handled = true; break;
+            case Key.J: OnToggleBottom(sender, e); e.Handled = true; break;
             case Key.OemPlus or Key.Add: SetFontSize(_editor.FontSize + 1); e.Handled = true; break;
             case Key.OemMinus or Key.Subtract: SetFontSize(_editor.FontSize - 1); e.Handled = true; break;
             case Key.D0: SetFontSize(14); e.Handled = true; break;
@@ -455,7 +464,7 @@ public partial class MainWindow : Window
     private async Task CloseTabAsync(EditorTabs.Doc doc) { await _tabs.CloseAsync(doc); SaveSession(); }
     private void OnNewProject(object? sender, RoutedEventArgs e) => _ = NewProjectAsync();
     private void OnBuild(object? sender, RoutedEventArgs e) => Build();
-    private void OnBuildInspect(object? sender, RoutedEventArgs e) { Build(); _bottomPanel.SelectedIndex = TabRawIr; _inspector.SelectedIndex = 2; }
+    private void OnBuildInspect(object? sender, RoutedEventArgs e) { Build(); ShowBottomTab(TabRawIr); _inspector.SelectedIndex = 2; }
     private void OnOpen(object? sender, RoutedEventArgs e) => _ = OpenAsync();
     private void OnOpenFolder(object? sender, RoutedEventArgs e) => _ = OpenFolderAsync();
     private void OnSave(object? sender, RoutedEventArgs e) => _ = SaveAsync();
@@ -575,7 +584,7 @@ public partial class MainWindow : Window
             _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath));
         if (!result.Success)
         {
-            _bottomPanel.SelectedIndex = TabDiagnostics;
+            ShowBottomTab(TabDiagnostics);
             SetStatus($"Run: fix {result.Diagnostics.Count} error(s) first.");
             return;
         }
@@ -602,7 +611,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _bottomPanel.SelectedIndex = TabTerminal;
+        ShowBottomTab(TabTerminal);
         _terminal.Run(spec, spec.ConsoleName ?? cfg.Label);
         SetStatus($"Running {_runArgs.Text}");
     }
@@ -622,15 +631,14 @@ public partial class MainWindow : Window
             _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath));
         if (!result.Success)
         {
-            _bottomPanel.SelectedIndex = TabDiagnostics;
+            ShowBottomTab(TabDiagnostics);
             SetStatus($"Run All: fix {result.Diagnostics.Count} error(s) first.");
             return;
         }
 
         if (_tabs.Active is { Path: not null } doc) { File.WriteAllText(doc.Path, doc.Document.Text); _tabs.MarkSaved(doc); }
 
-        _bottomPanel.IsVisible = true;
-        _bottomPanel.SelectedIndex = TabTerminal;
+        ShowBottomTab(TabTerminal);
 
         for (int i = 0; i < _configs.Count; i++)
         {
@@ -652,8 +660,7 @@ public partial class MainWindow : Window
         if (_currentPath is null) { SetStatus("Save the file first — serve serves a file, not a buffer."); return; }
         if (_tabs.Active is { } doc) { File.WriteAllText(_currentPath, doc.Document.Text); _tabs.MarkSaved(doc); }
 
-        _bottomPanel.IsVisible = true;
-        _bottomPanel.SelectedIndex = TabTerminal;
+        ShowBottomTab(TabTerminal);
         _terminal.Run(new LaunchSpec(LaunchKind.Cli, "serve",
             new[] { _currentPath, "--port", ServePort.ToString() }, new Dictionary<string, string>()), "serve");
 
@@ -669,8 +676,7 @@ public partial class MainWindow : Window
         if (_currentPath is null) { SetStatus("Save the file first — build publishes a file, not a buffer."); return; }
         if (_tabs.Active is { } doc) { File.WriteAllText(_currentPath, doc.Document.Text); _tabs.MarkSaved(doc); }
 
-        _bottomPanel.IsVisible = true;
-        _bottomPanel.SelectedIndex = TabTerminal;
+        ShowBottomTab(TabTerminal);
         _terminal.Run(new LaunchSpec(LaunchKind.Cli, "build", new[] { _currentPath }, new Dictionary<string, string>()), "build");
         SetStatus($"Building {Path.GetFileName(_currentPath)} — the terminal says where it lands.");
     }
@@ -723,14 +729,129 @@ public partial class MainWindow : Window
     {
         if (sender is not MenuItem { Tag: string command }) return;
 
-        _bottomPanel.IsVisible = true;
-        _bottomPanel.SelectedIndex = TabTerminal;
+        ShowBottomTab(TabTerminal);
         _terminal.Run(VeinShell.Parse(command, ResolveVeinFile), command.Split(' ')[0]);
         SetStatus($"Running {command}");
     }
 
     private void OnAbout(object? sender, RoutedEventArgs e) => new AboutWindow().ShowDialog(this);
     private void OnShortcuts(object? sender, RoutedEventArgs e) => new ShortcutsWindow().ShowDialog(this);
+
+    // ---- the cloud ------------------------------------------------------------------------------
+    //
+    // Read from disk once at startup, so a signed-in session survives a restart. Null is the ordinary
+    // state: everything about the cloud is additive, and the IDE compiles, runs and edits exactly the
+    // same with no account and no network.
+
+    private Vein.Cloud.CloudSession? _session = Vein.Cloud.CredentialStore.Load();
+
+    private LoungePanel? _lounge;
+    private AssistantPanel? _assistant;
+    private ChatHost? _loungeHost;
+    private ChatHost? _assistantHost;
+
+    /// Build both panels and put them where they were left. Called once, after the XAML controls are
+    /// resolved — the hosts need the two TabControls they may be docked into.
+    private void SetUpCloudPanels()
+    {
+        _lounge = new LoungePanel { SignInRequested = () => OnSignIn(this, new RoutedEventArgs()) };
+
+        _assistant = new AssistantPanel
+        {
+            SignInRequested = () => OnSignIn(this, new RoutedEventArgs()),
+            ProjectDir = () => ProjectDir,
+            InsertCode = InsertSuggestion
+        };
+
+        _loungeHost = new ChatHost(_lounge, "Lounge", this, _bottomPanel, _inspector)
+        {
+            Moved = dock => { _settings.LoungeDock = dock.ToString(); _settings.Save(); },
+            RevealBottom = () => SetBottomVisible(true),
+            LoadBounds = () => _settings.LoungeWindow,
+            SaveBounds = b => { _settings.LoungeWindow = b; _settings.Save(); }
+        };
+
+        _assistantHost = new ChatHost(_assistant, "Assistant", this, _bottomPanel, _inspector)
+        {
+            Moved = dock => { _settings.AssistantDock = dock.ToString(); _settings.Save(); },
+            RevealBottom = () => SetBottomVisible(true),
+            LoadBounds = () => _settings.AssistantWindow,
+            SaveBounds = b => { _settings.AssistantWindow = b; _settings.Save(); }
+        };
+
+        // Order matters only for which tab lands last; both append, so the existing Tab* constants
+        // stay correct either way. `reveal: false` — restoring a saved placement must not force open a
+        // bottom panel someone had collapsed.
+        _loungeHost.Place(ChatHost.Parse(_settings.LoungeDock), reveal: false);
+        _assistantHost.Place(ChatHost.Parse(_settings.AssistantDock), reveal: false);
+
+        PublishSession();
+    }
+
+    /// Hand the session to both panels. They go inert without one and make no request at all, so this
+    /// is also what stops the polling on sign-out.
+    private void PublishSession()
+    {
+        if (_lounge is not null) _lounge.Session = _session;
+        if (_assistant is not null) _assistant.Session = _session;
+    }
+
+    /// Drop an accepted suggestion in at the caret. Only ever reached for code the compiler has
+    /// already accepted — AssistantPanel does not offer the button otherwise.
+    private void InsertSuggestion(string source)
+    {
+        _editor.Document.Insert(_editor.CaretOffset, source.TrimEnd() + "\n");
+        _editor.Focus();
+        SetStatus("Inserted the assistant's suggestion");
+    }
+
+    private void OnShowLounge(object? sender, RoutedEventArgs e) => _loungeHost?.Reveal();
+    private void OnShowAssistant(object? sender, RoutedEventArgs e) => _assistantHost?.Reveal();
+
+    /// One handler for eight menu items; the Tag says which panel and where. Same `Tag`-parameterised
+    /// idiom the Build ▸ checks already use.
+    private void OnMoveChat(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string tag } || tag.Split(':') is not [var which, var where]) return;
+
+        var dock = ChatHost.Parse(where);
+        if (which == "Lounge") _loungeHost?.Place(dock); else _assistantHost?.Place(dock);
+    }
+
+    /// The menu says which of the two items is worth reading before it opens, rather than showing both
+    /// and letting one of them do nothing.
+    private void OnCloudOpening(object? sender, RoutedEventArgs e)
+    {
+        bool signedIn = _session is not null;
+
+        if (this.FindControl<MenuItem>("SignInItem") is { } signIn)
+        {
+            signIn.Header = signedIn ? $"Signed in as {_session!.Display}" : "_Sign In…";
+            signIn.IsEnabled = !signedIn;
+        }
+
+        if (this.FindControl<MenuItem>("SignOutItem") is { } signOut)
+            signOut.IsEnabled = signedIn;
+    }
+
+    private async void OnSignIn(object? sender, RoutedEventArgs e)
+    {
+        if (await LoginDialog.ShowAsync(this, _session) is not { } session) return;
+
+        _session = session;
+        Vein.Cloud.CredentialStore.Save(session);
+        PublishSession();
+        _loungeHost?.Reveal();
+        SetStatus($"Signed in as {session.Display} — publishing as {session.PublishHandle}");
+    }
+
+    private void OnSignOut(object? sender, RoutedEventArgs e)
+    {
+        _session = null;
+        Vein.Cloud.CredentialStore.Clear();
+        PublishSession();                 // which also stops the Lounge polling
+        SetStatus("Signed out");
+    }
 
     private void OnFontBigger(object? sender, RoutedEventArgs e) => SetFontSize(_editor.FontSize + 1);
     private void OnFontSmaller(object? sender, RoutedEventArgs e) => SetFontSize(_editor.FontSize - 1);
@@ -775,8 +896,7 @@ public partial class MainWindow : Window
 
     private void OnFocusTerminal(object? sender, RoutedEventArgs e)
     {
-        _bottomPanel.IsVisible = true;
-        _bottomPanel.SelectedIndex = TabTerminal;
+        ShowBottomTab(TabTerminal);
         _terminal.FocusPrompt();
     }
 
@@ -817,7 +937,7 @@ public partial class MainWindow : Window
         var result = _service.Compile(new CompileRequest(name, _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath));
         if (!result.Success)
         {
-            _bottomPanel.SelectedIndex = TabDiagnostics;
+            ShowBottomTab(TabDiagnostics);
             SetStatus($"Run: fix {result.Diagnostics.Count} error(s) first.");
             return;
         }
@@ -868,7 +988,7 @@ public partial class MainWindow : Window
         finally { ConsoleLauncher.Hook = prevHook; }
 
         _runOutput.Text = sb.ToString();
-        _bottomPanel.SelectedIndex = TabOutput;
+        ShowBottomTab(TabOutput);
         SetStatus($"Ran {name} in-process (save it to open real console windows).");
     }
 
@@ -888,7 +1008,45 @@ public partial class MainWindow : Window
 
     // View
     private void OnToggleExplorer(object? sender, RoutedEventArgs e) => SetColumn(0, 1, ref _explorerVisible, 230);
-    private void OnToggleBottom(object? sender, RoutedEventArgs e) => _bottomPanel.IsVisible = !_bottomPanel.IsVisible;
+
+    /// Hide or show the whole lower third.
+    ///
+    /// The ROW is collapsed, not just the TabControl. Hiding the control alone left its 240 pixels
+    /// behind as an empty band with a splitter floating above it — which is most of what someone
+    /// wanted back.
+    ///
+    /// The height it had is remembered, so a panel you dragged taller comes back the height you left
+    /// it rather than snapping to the default.
+    private void OnToggleBottom(object? sender, RoutedEventArgs e) => SetBottomVisible(!_bottomVisible);
+
+    private bool _bottomVisible = true;
+    private double _bottomHeight = 240;
+
+    private void SetBottomVisible(bool visible)
+    {
+        if (visible == _bottomVisible) return;
+
+        var rows = _mainRows.RowDefinitions;
+        if (!visible) _bottomHeight = Math.Max(rows[2].ActualHeight, 120);
+
+        _bottomVisible = visible;
+        rows[1].Height = new GridLength(visible ? 4 : 0);          // the splitter
+        rows[2].Height = new GridLength(visible ? _bottomHeight : 0);
+        _bottomPanel.IsVisible = visible;
+
+        // The glyph points where the click will take the panel: down to put it away, up to bring it
+        // back. A static icon on a toggle tells you nothing about what pressing it does.
+        if (_bottomToggle is not null) _bottomToggle.Content = visible ? "▾" : "▴";
+    }
+
+    /// Bring the bottom panel back if it is hidden, then select a tab. Everything that reveals a tab
+    /// goes through here — otherwise ▶ could "switch to Terminal" while the panel was collapsed and
+    /// appear to do nothing at all.
+    private void ShowBottomTab(int index)
+    {
+        SetBottomVisible(true);
+        _bottomPanel.SelectedIndex = index;
+    }
 
     private bool _explorerVisible = true;
     private void SetColumn(int panelCol, int splitterCol, ref bool visible, double width)
@@ -1768,8 +1926,7 @@ public partial class MainWindow : Window
             .Select(s => $"{s.Span.Line}:{s.Span.Col}  {(s.IsDefinition ? "declared" : "used")} in {s.Owner}")
             .ToList();
 
-        _bottomPanel.IsVisible = true;
-        _bottomPanel.SelectedIndex = TabDiagnostics;
+        ShowBottomTab(TabDiagnostics);
         SetStatus($"{site.Kind} {site.Name} — {all.Count} site(s). Double-click to jump; build to go back to diagnostics.");
     }
 
@@ -1990,13 +2147,70 @@ public partial class MainWindow : Window
         }
 
         // 3) The word itself is a declared symbol.
-        if (_hoverModel.Shapes.ContainsKey(word)) return $"shape ${word}";
-        if (_hoverModel.Events.ContainsKey(word)) return $"event @{word}";
-        if (FindBuilder(_hoverAst, word) is { } bd)
-            return $"builder {BuilderKind(bd)} {word}(" + string.Join(", ", BuilderParams(_hoverAst, bd).Select(p => $"{p.Name}: {p.Type}")) + ")";
+        //
+        // THE SIGIL DECIDES, when there is one. `WordAt` returns the identifier without it, and a shape
+        // and a mark MAY SHARE A NAME (RULES 14e) — so guessing by lookup order made `#MenuItem` report
+        // "shape $MenuItem", confidently and wrongly, for every program that used the pattern the
+        // scaffold itself generates.
+        char sigil = start > 0 ? text[start - 1] : '\0';
+
+        switch (sigil)
+        {
+            case '$': return _hoverModel.Shapes.ContainsKey(word) ? Shape(word) : $"shape ${word}";
+            case '@': return _hoverModel.Events.ContainsKey(word) ? Event(word) : $"event @{word}";
+            case '#': return Mark(word);
+            case '&':
+                return FindBuilder(_hoverAst, word) is { } sb ? Builder(sb, word) : $"builder &{word}";
+        }
+
+        // No sigil: a bare name in an expression. Order is a fallback, not a guess about kind — a
+        // builder and a function are named without one, and a shape or event mentioned bare is rare.
+        if (_hoverModel.Shapes.ContainsKey(word)) return Shape(word);
+        if (_hoverModel.Events.ContainsKey(word)) return Event(word);
+        if (FindBuilder(_hoverAst, word) is { } bd) return Builder(bd, word);
         if (FuncIndex.Find(_hoverAst, word, ProjectDir) is { Fn: not null } hit)
             return FuncIndex.Signature(hit.Fn, hit.Owner);
+        if (IsMark(word)) return Mark(word);
         return null;
+
+        string Shape(string n) =>
+            $"shape ${n} {{ " +
+            string.Join(", ", _hoverModel!.Shapes[n].Select(f => $"{f.Name}: {f.Type}")) + " }";
+
+        string Event(string n) =>
+            $"event @{n} {{ " +
+            string.Join(", ", _hoverModel!.Events[n].Select(f => $"{f.Name}: {f.Type}")) + " }";
+
+        string Builder(BuilderDecl b, string n) =>
+            $"builder {BuilderKind(b)} {n}(" +
+            string.Join(", ", BuilderParams(_hoverAst!, b).Select(p => $"{p.Name}: {p.Type}")) + ")";
+
+        // A mark carries no fields, so the useful extra fact is whether a shape shares its name —
+        // which is legal, common, and the source of the confusion this hover used to cause.
+        string Mark(string n) =>
+            IsMark(n)
+                ? _hoverModel!.Shapes.ContainsKey(n)
+                    ? $"mark #{n}   (a shape ${n} shares this name)"
+                    : $"mark #{n}"
+                : $"mark #{n}   (not declared in this file)";
+    }
+
+    /// Is `name` declared as a mark anywhere in the compiled unit? Marks have no members, so
+    /// `MemberIndex` does not carry them and the AST is the only place to ask.
+    private bool IsMark(string name) =>
+        _hoverAst is not null &&
+        _hoverAst.Bundles.SelectMany(b => Declared(b.Members)).Any(m => m.Name == name);
+
+    private static IEnumerable<MarkDecl> Declared(IEnumerable<Decl> members)
+    {
+        foreach (var member in members)
+        {
+            if (member is MarkDecl mark) yield return mark;
+            // Marks declared inside a `publicator { … }` are the shared ones, and the ones most likely
+            // to be hovered from another file.
+            else if (member is PublicatorDecl pub)
+                foreach (var nested in Declared(pub.Members)) yield return nested;
+        }
     }
 
 
@@ -2252,14 +2466,9 @@ public partial class MainWindow : Window
 
     // ---- highlighting ---------------------------------------------------
 
-    private void LoadHighlighting()
-    {
-        using var stream = typeof(MainWindow).Assembly
-            .GetManifestResourceStream("Vein.Workbench.Assets.VeinScript.xshd");
-        if (stream is null) return;
-        using var reader = XmlReader.Create(stream);
-        _editor.SyntaxHighlighting = HighlightingLoader.Load(reader, HighlightingManager.Instance);
-    }
+    // Shared with the assistant's code cards, so the same source cannot look like two languages
+    // depending on which pane you read it in.
+    private void LoadHighlighting() => _editor.SyntaxHighlighting = VeinHighlighting.Definition;
 
     private const string Sample =
         "bundle Demo {\n" +

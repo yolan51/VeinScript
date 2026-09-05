@@ -90,6 +90,26 @@
         <MenuItem Header="Zoom _Out" Click="OnFontSmaller" InputGesture="Ctrl+OemMinus" />
         <MenuItem Header="Reset _Zoom" Click="OnFontReset" InputGesture="Ctrl+D0" />
       </MenuItem>
+      <MenuItem Header="_Cloud" Name="CloudMenu" SubmenuOpened="OnCloudOpening">
+        <MenuItem Header="_Sign In…" Name="SignInItem" Click="OnSignIn" />
+        <MenuItem Header="Sign _Out" Name="SignOutItem" Click="OnSignOut" />
+        <Separator />
+        <MenuItem Header="Show _Lounge" Click="OnShowLounge" />
+        <MenuItem Header="Show _Assistant" Click="OnShowAssistant" />
+        <Separator />
+        <MenuItem Header="Lounge _Panel">
+          <MenuItem Header="Bottom"          Tag="Lounge:Bottom" Click="OnMoveChat" />
+          <MenuItem Header="Right"           Tag="Lounge:Right"  Click="OnMoveChat" />
+          <MenuItem Header="Floating window" Tag="Lounge:Window" Click="OnMoveChat" />
+          <MenuItem Header="Off"             Tag="Lounge:Off"    Click="OnMoveChat" />
+        </MenuItem>
+        <MenuItem Header="Assistant P_anel">
+          <MenuItem Header="Bottom"          Tag="Assistant:Bottom" Click="OnMoveChat" />
+          <MenuItem Header="Right"           Tag="Assistant:Right"  Click="OnMoveChat" />
+          <MenuItem Header="Floating window" Tag="Assistant:Window" Click="OnMoveChat" />
+          <MenuItem Header="Off"             Tag="Assistant:Off"    Click="OnMoveChat" />
+        </MenuItem>
+      </MenuItem>
       <MenuItem Header="_Help">
         <MenuItem Header="_Keyboard Shortcuts" Click="OnShortcuts" />
         <Separator />
@@ -111,6 +131,10 @@
                  FontFamily="Cascadia Code,Consolas,monospace"
                  ToolTip.Tip="The command ▶ will run. Edit it to change --ticks or --port without touching the header." />
         <TextBlock Name="RunHint" VerticalAlignment="Center" Foreground="Gray" FontSize="11" />
+        <!-- The bottom panel carries thirteen tabs; reclaiming the whole lower third has to be one
+             click, not a trip through a menu. -->
+        <Button Name="BottomToggle" Click="OnToggleBottom" Padding="10,2"
+                ToolTip.Tip="Hide or show the bottom panel (Ctrl+J)">▾</Button>
       </StackPanel>
     </Border>
 
@@ -125,7 +149,7 @@
                  FontFamily="Cascadia Code,Consolas,monospace" TextWrapping="NoWrap" />
     </Border>
 
-    <Grid RowDefinitions="*,4,240">
+    <Grid RowDefinitions="*,4,240" Name="MainRows">
       <Grid Grid.Row="0" Name="TopCols" ColumnDefinitions="230,4,*,4,390">
         <DockPanel Grid.Column="0" Name="ExplorerPanel">
           <TextBlock DockPanel.Dock="Top" Text="Project Explorer" Margin="8,6" FontWeight="Bold" />
@@ -163,6 +187,14 @@
       <GridSplitter Grid.Row="1" Height="4" Background="#333" />
 
       <TabControl Grid.Row="2" Name="BottomPanel">
+        <!-- Wrap rather than overflow. With thirteen tabs a single row runs off the edge on a narrow
+             window and the last ones become unreachable — a tab you cannot click is a panel that does
+             not exist. Wrapping costs a second strip row only when it is actually needed. -->
+        <TabControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <WrapPanel />
+          </ItemsPanelTemplate>
+        </TabControl.ItemsPanel>
         <TabItem Header="Diagnostics">
           <DockPanel>
             <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="8,5">

@@ -25,6 +25,20 @@ internal sealed class WorkbenchSettings
     public bool AutoBuild { get; set; } = true;
     public double FontSize { get; set; } = 14;
 
+    /// Where the Lounge and the Assistant sit: Bottom, Right, Window or Off.
+    ///
+    /// The default is a bottom tab rather than Off, because a feature nobody can find is not a
+    /// feature — and it costs nothing, since both panels are inert until you sign in and make no
+    /// request at all before then. `Off` removes the tab entirely, for anyone who wants it gone.
+    public string LoungeDock { get; set; } = "Bottom";
+    public string AssistantDock { get; set; } = "Bottom";
+
+    /// Where each floating panel was last left, as `x,y,w,h`. The point of floating one is usually to
+    /// park it on a second monitor, and a window that re-centres every launch has to be dragged back
+    /// every launch.
+    public string? LoungeWindow { get; set; }
+    public string? AssistantWindow { get; set; }
+
     public const int MaxRecent = 8;
 
     private static string Path0 => Path.Combine(
