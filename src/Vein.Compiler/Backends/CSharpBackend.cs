@@ -239,10 +239,19 @@ public sealed class CSharpBackend : IVeinBackend
             // Ordinal when BOTH sides are strings, numeric otherwise — the same rule as Interp, and the
             // same rule EntityStore.OrderKey sorts by, so an operator cannot disagree with a sort.
             sb.AppendLine("    /// Comparison: two strings compare ORDINALLY, anything else numerically.");
+            // Ordering, in the same three steps the interpreter takes. The middle one used to be
+            // `Num(a).CompareTo(Num(b))`, and Num answers 0 for anything that is not a number — so
+            // `"5" < 3` compared 0 to 3 and came out true.
             sb.AppendLine("    public static int Cmp(object? a, object? b) =>");
-            sb.AppendLine("        a is string x && b is string y");
-            sb.AppendLine("            ? string.CompareOrdinal(x, y)");
-            sb.AppendLine("            : Num(a).CompareTo(Num(b));");
+            sb.AppendLine("        a is string x && b is string y ? string.CompareOrdinal(x, y)");
+            sb.AppendLine("        : AsNum(a) is double p && AsNum(b) is double q ? p.CompareTo(q)");
+            sb.AppendLine("        : string.CompareOrdinal(S(a), S(b));");
+            sb.AppendLine();
+            sb.AppendLine("    private static double? AsNum(object? v) => v switch");
+            sb.AppendLine("    {");
+            sb.AppendLine("        long l => l, int i => i, double d => d, bool b => b ? 1 : 0,");
+            sb.AppendLine("        string s => IsNum(s) ? ToFloat(s) : null, _ => null,");
+            sb.AppendLine("    };");
             sb.AppendLine();
             sb.AppendLine("    private static double Num(object? v) => v switch");
             sb.AppendLine("    {");

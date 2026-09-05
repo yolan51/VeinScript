@@ -60,16 +60,39 @@ public class CharacterTests
     }
 
     [Fact]
-    public void A_string_against_a_number_still_compares_as_zero()
+    public void A_numeric_string_against_a_number_compares_as_the_number()
     {
-        // Pinning a WART, not endorsing it. Only BOTH-strings switched to ordinal; a mixed comparison
-        // still goes through AsDouble, which does not parse strings — `"5" > 3` is `0 > 3`, false.
+        // This used to pin the opposite, as a known wart: only BOTH-strings had switched to ordinal, so
+        // a mixed comparison still ran through AsDouble — which answers 0 for anything that is not a
+        // number. `"5" < 3` was `0 < 3`, TRUE, and `"5" > 3` was false. Every ordering that mixed text
+        // and a number silently agreed the text was zero.
         //
-        // Left alone deliberately. Making it parse would be a new loose coercion reaching every mixed
-        // comparison in every existing program, which is a bigger change than the bug being fixed and
-        // wants deciding on its own. Recorded here so it is a known limit rather than a surprise.
-        Assert.Contains("false", Once(Say("\"5\" > 3")));   // 0 > 3
-        Assert.Contains("true", Once(Say("\"5\" < 3")));    // 0 < 3 — the same wart, seen from the other side
+        // It was left that way because making it parse would have been a new loose coercion reaching
+        // every existing program, and it wanted deciding on its own. `int(x)` is what decided it: the
+        // language can now say what a numeric string means, so the comparison saying something else
+        // has no defence left.
+        Assert.Contains("true", Once(Say("\"5\" > 3")));
+        Assert.Contains("false", Once(Say("\"5\" < 3")));
+        Assert.Contains("true", Once(Say("\"4.5\" < 5")));
+    }
+
+    [Fact]
+    public void Text_that_is_not_a_number_falls_back_to_comparing_text()
+    {
+        // Not to zero. `"abc"` against `3` compares "abc" with "3" ordinally — deterministic, and the
+        // same place `==` lands when it cannot compare numerically.
+        Assert.Contains("true", Once(Say("\"abc\" > 3")));    // 'a' (97) after '3' (51)
+        Assert.Contains("false", Once(Say("\"abc\" < 3")));
+    }
+
+    [Fact]
+    public void Both_strings_still_order_ordinally()
+    {
+        // The half that must NOT change. Character comparison depends on it (RULES 28) and
+        // EntityStore.OrderKey sorts the same way, so an operator that disagreed would be a second
+        // answer to the same question.
+        Assert.Contains("true", Once(Say("\"10\" < \"9\"")));
+        Assert.Contains("true", Once(Say("\"a\" < \"b\"")));
     }
 
     [Fact]

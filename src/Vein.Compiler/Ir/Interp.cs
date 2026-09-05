@@ -1459,15 +1459,47 @@ public sealed class Interp
             // Ordinal, never culture-sensitive: `EntityStore.OrderKey` already sorts strings that way so
             // the C# backend produces the same sequence, and an operator that disagreed with the sort
             // would be a second answer to the same question.
-            case IrBinOp.Lt: return Both(l, r) is { } lt ? lt < 0 : AsDouble(l) < AsDouble(r);
-            case IrBinOp.Gt: return Both(l, r) is { } gt ? gt > 0 : AsDouble(l) > AsDouble(r);
-            case IrBinOp.Le: return Both(l, r) is { } le ? le <= 0 : AsDouble(l) <= AsDouble(r);
-            case IrBinOp.Ge: return Both(l, r) is { } ge ? ge >= 0 : AsDouble(l) >= AsDouble(r);
+            case IrBinOp.Lt: return Ordering(l, r) < 0;
+            case IrBinOp.Gt: return Ordering(l, r) > 0;
+            case IrBinOp.Le: return Ordering(l, r) <= 0;
+            case IrBinOp.Ge: return Ordering(l, r) >= 0;
             default: return null;
         }
     }
 
     // ---- helpers --------------------------------------------------------
+
+    /// Ordering across loosely-typed values, in the same three steps `==` already takes.
+    ///
+    /// THE MIXED CASE USED TO READ AS ZERO. `AsDouble` answers 0 for anything that is not a number, and
+    /// the old fallback ran it on both sides — so `"5" < 3` was `0 < 3`, TRUE, and `"5" > 3` was false.
+    /// Every ordering that mixed text and a number silently agreed that the text was zero. That is the
+    /// same shape of bug as the one this comparison was written to fix (`c >= "a"` true for every
+    /// string), one layer further in, and `int(x)` existing is what makes the honest answer available.
+    ///
+    ///   both text            → ordinal, and it must stay that way: character comparison depends on it
+    ///                          (RULES 28), and EntityStore.OrderKey sorts the same way, so an operator
+    ///                          that disagreed would be a second answer to the same question.
+    ///   both read as numbers → numeric, text that parses included.
+    ///   otherwise            → ordinal on their text, which is where `==` also lands.
+    private static int Ordering(object? l, object? r)
+    {
+        if (l is string a && r is string b) return string.CompareOrdinal(a, b);
+        if (AsNumber(l) is { } x && AsNumber(r) is { } y) return x.CompareTo(y);
+        return string.CompareOrdinal(Str(l), Str(r));
+    }
+
+    /// The value as a number, or null when it is not one — unlike `AsDouble`, which answers 0 and
+    /// cannot tell "zero" from "not a number".
+    private static double? AsNumber(object? v) => v switch
+    {
+        long l => l,
+        int i => i,
+        double d => d,
+        bool b => b ? 1 : 0,
+        string s => LooksNumeric(s) ? ToDouble(s) : null,
+        _ => null
+    };
 
     private static object Num(double v, object? l, object? r) => IsInt(l) && IsInt(r) ? (long)v : v;
     private static bool IsInt(object? o) => o is long or int;

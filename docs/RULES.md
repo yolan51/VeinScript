@@ -487,6 +487,28 @@ never disagree.
 All five compile. `samples/entities_convert.vein` is in `tools/check-backend.sh`, which is how a
 locale-dependent parse would be caught rather than shipped.
 
+**28e. Ordering decides in three steps, and text is never silently zero.** `<` `>` `<=` `>=` ask:
+
+| operands | compared as |
+|---|---|
+| both text | **ordinal** — `"10" < "9"` is true |
+| both read as numbers, parsed text included | numerically — `"5" > 3` is true |
+| anything else | ordinal on their text — `"abc" > 3` is true, `'a'` after `'3'` |
+
+The both-text rule is the load-bearing one: character comparison depends on it (28), and
+`EntityStore.OrderKey` sorts the same way, so an operator that disagreed would be a second answer to
+the same question.
+
+The middle rule is newer, and it replaced a real trap. `AsDouble` answers `0` for anything that is not
+a number, and mixed comparisons used to run through it — so **`"5" < 3` was `0 < 3`, true**, and
+`"5" > 3` was false. Every ordering that mixed text and a number silently agreed the text was zero.
+It survived because parsing text in a comparison would have been a new loose coercion reaching every
+existing program. `int(x)` is what settled it: once the language can say what a numeric string means,
+a comparison saying something else has nothing left to stand on.
+
+Note what the third rule is **not**: a fallback to zero. `"abc"` against `3` compares `"abc"` with
+`"3"` — deterministic, and the same place `==` lands when it cannot compare numerically.
+
 **28b. A file is an event, and a failure is a message.** `*Vein.Files.Io.@ReadFile { path }` answers
 with `@FileLoaded` or `@FileMissing`; `@WriteFile` answers with `@FileWritten` or `@FileMissing`. That
 is the same shape as `@Fetch`/`@Fetched`/`@Failed` and a console send's `@Undelivered` — there is no

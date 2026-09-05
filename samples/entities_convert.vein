@@ -34,6 +34,15 @@ bundle Convert by you {
 
             emit *Vein.Console.Io.@Print { text: "isNumber 42 = " + isNumber("42") }
             emit *Vein.Console.Io.@Print { text: "isNumber ab = " + isNumber("abc") }
+
+            // Ordering across text and a number. Numeric when both read as numbers, ordinal on their
+            // text when they do not, and ordinal between two strings — which character comparison
+            // depends on and must never change.
+            emit *Vein.Console.Io.@Print { text: "'5' > 3     = " + ("5" > 3) }
+            emit *Vein.Console.Io.@Print { text: "'4.5' < 5   = " + ("4.5" < 5) }
+            emit *Vein.Console.Io.@Print { text: "'abc' > 3   = " + ("abc" > 3) }
+            emit *Vein.Console.Io.@Print { text: "'10' < '9'  = " + ("10" < "9") }
+            emit *Vein.Console.Io.@Print { text: "'a' < 'b'   = " + ("a" < "b") }
         }
     }
 
