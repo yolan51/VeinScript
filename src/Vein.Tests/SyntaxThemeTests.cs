@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Xunit;
 
@@ -70,7 +71,31 @@ public class SyntaxThemeTests
 
         // The pattern must actually match a use of that sigil — XML unescaping included, which is what
         // `&amp;` in the file depends on.
-        Assert.Matches(rule!.Value, sigil + "Name");
+        //
+        // IgnorePatternWhitespace is what AvaloniaEdit compiles these with, and matching under the
+        // DEFAULT options is not the same question. A bare `#` passes with defaults and becomes a
+        // comment under the real ones.
+        Assert.Matches(new Regex(rule!.Value, RegexOptions.IgnorePatternWhitespace), sigil + "Name");
+    }
+
+    [Fact]
+    public void No_rule_can_collapse_into_a_regex_comment()
+    {
+        // The crash this exists for, and it took the whole IDE down rather than degrading: a `#` at the
+        // start of `#[A-Za-z_][A-Za-z0-9_]*` begins a COMMENT under IgnorePatternWhitespace, so the
+        // pattern became empty, matched zero characters, and AvaloniaEdit threw
+        // "a highlighting rule matched 0 characters, which would cause an endless loop" on the first
+        // line it painted. The Workbench would not open at all.
+        //
+        // `[#]` sidesteps it — which is why the original single `[$@#]` rule never hit this.
+        foreach (var rule in Theme().Descendants(Ns + "Rule"))
+        {
+            var pattern = new Regex(rule.Value, RegexOptions.IgnorePatternWhitespace);
+
+            Assert.False(pattern.IsMatch("") && pattern.Match("").Length == 0 && rule.Value.Length > 0,
+                $"rule '{rule.Value}' matches zero characters under IgnorePatternWhitespace — " +
+                "escape a leading '#' as [#], or AvaloniaEdit throws on the first highlighted line");
+        }
     }
 
     [Fact]

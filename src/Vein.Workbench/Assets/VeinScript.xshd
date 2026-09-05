@@ -32,7 +32,11 @@
     <!-- One rule each, so the four read apart at a glance. `&Builder` had no rule at all before and
          rendered as plain text. -->
     <Rule color="Shape">\$[A-Za-z_][A-Za-z0-9_]*</Rule>
-    <Rule color="Mark">#[A-Za-z_][A-Za-z0-9_]*</Rule>
+    <!-- `[#]` and NOT a bare `#`: these patterns are compiled with IgnorePatternWhitespace, under
+         which `#` starts a regex COMMENT — the rest of the line vanishes, the pattern matches zero
+         characters, and AvaloniaEdit throws on the first highlighted line. The Workbench would not
+         open at all. A character class sidesteps it, which is why the original single rule used one. -->
+    <Rule color="Mark">[#][A-Za-z_][A-Za-z0-9_]*</Rule>
     <Rule color="Event">@[A-Za-z_][A-Za-z0-9_]*</Rule>
     <Rule color="Builder">&amp;[A-Za-z_][A-Za-z0-9_]*</Rule>
 
