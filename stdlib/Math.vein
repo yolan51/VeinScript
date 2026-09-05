@@ -49,4 +49,89 @@ bundle Math by Vein {
             return (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1)
         }
     }
+
+    // ---- whole numbers ------------------------------------------------------------------------------
+    //
+    // `int(v)` is a built-in and it TRUNCATES toward zero, which is right for indexing and wrong for
+    // three of the four questions people actually ask. `int(-4.5)` is -4; the floor is -5. Every
+    // function here exists because that difference is invisible until the first negative number.
+    //
+    // Written IN VeinScript rather than added to the compiler, deliberately. They are arithmetic and
+    // `if`, so the language can already say them — and a built-in is a thing you cannot read, cannot
+    // step through, and cannot fix without a compiler release.
+
+    // THE INTERNAL CALLS BELOW ARE FULLY QUALIFIED, which looks redundant and is not. A `shared` fn
+    // invoked from another bundle runs where the CALLER can see, and a bare sibling name is not
+    // resolvable there — the call answers nothing and the result is empty, silently. `Rest.vein:82`
+    // already qualifies a call to a function in its own publicator for exactly this reason.
+    publicator Round {
+        shared("Toward zero: trunc(4.7) is 4, trunc(-4.7) is -4. What `int(v)` does, named.")
+        fn trunc(v: float) -> float { return int(v) }
+
+        shared("Down, always: floor(4.7) is 4, floor(-4.7) is -5.")
+        fn floor(v: float) -> float {
+            let t = int(v)
+            // Truncation already went down for a positive value; for a negative one it went UP, and
+            // only when there was a fraction to discard. `t > v` is exactly that case.
+            if t > v { return t - 1 }
+            return t
+        }
+
+        shared("Up, always: ceil(4.2) is 5, ceil(-4.2) is -4.")
+        fn ceil(v: float) -> float {
+            let t = int(v)
+            if t < v { return t + 1 }
+            return t
+        }
+
+        shared("Nearest, halves away from zero: round(2.5) is 3, round(-2.5) is -3.")
+        fn round(v: float) -> float {
+            // Away from zero rather than half-up, so rounding a value and rounding its negation give
+            // answers that are negations of each other. Half-up quietly breaks that symmetry, and a
+            // total of rounded numbers then drifts in one direction.
+            if v < 0.0 { return 0.0 - *Vein.Math.Round.floor(0.0 - v + 0.5) }
+            return *Vein.Math.Round.floor(v + 0.5)
+        }
+
+        shared("Nearest, keeping `places` decimals: roundTo(3.14159, 2) is 3.14.")
+        fn roundTo(v: float, places: int) -> float {
+            let scale = *Vein.Math.Round.pow10(places)
+            return *Vein.Math.Round.round(v * scale) / scale
+        }
+
+        shared("10 raised to n, for n >= 0.")
+        fn pow10(n: int) -> float {
+            var p = 1.0
+            repeat n { p = p * 10.0 }
+            return p
+        }
+
+        // NO `sign` HERE. `*Vein.Filter.Whole.sign` already answers -1/0/1 and works on a float
+        // perfectly well — values are loosely typed at runtime, and `v < 0` does not care what the
+        // parameter was declared as. A second one would force every caller of either to qualify, which
+        // `veinc symbols` reports as a collision and is the whole reason it does.
+    }
+
+    // ---- roots --------------------------------------------------------------------------------------
+
+    publicator Roots {
+        shared("Square root, by Newton's method. Negative input answers 0 rather than failing.")
+        fn sqrt(v: float) -> float {
+            // Zero rather than an error, matching how every other total operation in the language
+            // behaves — `substring` clamps, `indexOf` answers -1, `int("abc")` is 0. There is no
+            // `catch` to put a guard in.
+            if v <= 0.0 { return 0.0 }
+
+            var guess = v
+            // Twenty steps is far past convergence for a double at any magnitude a program will meet,
+            // and a fixed count keeps it a pure function with no loop condition to reason about.
+            repeat 20 { guess = (guess + v / guess) * 0.5 }
+            return guess
+        }
+
+        shared("Distance between two points. `distance2` is cheaper when you only need to compare.")
+        fn distance(x1: float, y1: float, x2: float, y2: float) -> float {
+            return *Vein.Math.Roots.sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1))
+        }
+    }
 }
