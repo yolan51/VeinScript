@@ -45,4 +45,16 @@
   <ItemGroup>
     <Content Include="..\..\stdlib\**\*.vein" LinkBase="stdlib" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <!-- THE SAMPLES SHIP TOO, so somebody who has just installed this has something to open and run
+       before they have written anything.
+
+       BY EXTENSION, NEVER BY FOLDER. `samples/` also holds three 65 MB executables left behind by
+       `veinc build` — they are gitignored, so they are invisible in a clone and very present on the
+       machine of anyone who has run that command. A `samples\**\*` include would have quietly put
+       195 MB into a 44 MB download. What is actually source here is 633 KB. -->
+  <ItemGroup>
+    <Content Include="..\..\samples\**\*.vein" LinkBase="samples" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\samples\**\vein.discovery" LinkBase="samples" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

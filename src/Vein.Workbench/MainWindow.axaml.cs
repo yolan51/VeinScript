@@ -375,9 +375,12 @@ public partial class MainWindow : Window
         _rootFolder = root;
         PopulateProjectTree(root);
 
-        var firstVein = EnumerateVein(root).OrderBy(p => p, StringComparer.OrdinalIgnoreCase).FirstOrDefault();
-        if (firstVein is null) return false;
-        _ = OpenPathAsync(firstVein);   // opens the file → sets editor + Build()
+        // The same choice "open this folder" makes, rather than whatever sorts first. On an installed
+        // copy the root is the installation directory and holds both samples/ and stdlib/ — landing
+        // alphabetically would open a standard-library file, which is neither runnable nor anyone's to
+        // edit.
+        if (LandingFile(root) is not { } landing) return false;
+        _ = OpenPathAsync(landing);   // opens the file → sets editor + Build()
         return true;
     }
 
@@ -1124,25 +1127,41 @@ public partial class MainWindow : Window
     /// The landing file matters more than it looks. An explorer full of folders and an empty editor
     /// reads as "nothing happened", and the point of opening the repository is to be looking at
     /// VeinScript within a second or two.
+    /// The file to open when a folder becomes the project and nobody named one.
+    ///
+    /// `console.vein` before `LANGUAGE-TOUR.vein`, and the reason is ▶: the tour is the better read,
+    /// but its `veinc run` lines sit deep in the prose rather than in the LEADING comment block, so
+    /// RunConfig finds none and the button answers "this file declares no run line". Landing on
+    /// something that cannot run is a poor first second — especially for someone who installed this to
+    /// try the language without writing anything.
+    ///
+    /// Then anything runnable, then anything at all, so an unfamiliar folder still opens on something.
+    /// Fragments are skipped: they carry no `bundle` header, so opening one shows a wall of VS0101.
+    private static string? LandingFile(string dir)
+    {
+        foreach (string preferred in new[] { "console.vein", "LANGUAGE-TOUR.vein" })
+        {
+            string path = Path.Combine(dir, "samples", preferred);
+            if (File.Exists(path)) return path;
+            path = Path.Combine(dir, preferred);
+            if (File.Exists(path)) return path;
+        }
+
+        var candidates = EnumerateVein(dir).Where(p => !BundleLoader.IsFragment(p))
+                                           .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+                                           .ToList();
+
+        return candidates.FirstOrDefault(p => RunConfig.From(File.ReadAllText(p), p).Count > 0)
+            ?? candidates.FirstOrDefault();
+    }
+
     private async Task OpenProjectFolderAsync(string dir)
     {
         _rootFolder = dir;
         _settings.Remember(dir);
         PopulateProjectTree(dir);
 
-        // console.vein before LANGUAGE-TOUR.vein, and the reason is ▶. The tour is the better read, but
-        // its `veinc run` lines are examples deep in the prose rather than a run line in the LEADING
-        // comment block — so RunConfig finds nothing and ▶ answers "this file declares no run line".
-        // Landing on something that cannot run is a poor first second.
-        string? landing = new[]
-            {
-                Path.Combine(dir, "samples", "console.vein"),
-                Path.Combine(dir, "samples", "LANGUAGE-TOUR.vein")
-            }
-            .FirstOrDefault(File.Exists)
-            ?? Directory.EnumerateFiles(dir, "*.vein", SearchOption.AllDirectories)
-                        .FirstOrDefault(p => !BundleLoader.IsFragment(p));
-
+        string? landing = LandingFile(dir);
         if (landing is null) { SetStatus($"Opened {dir}"); return; }
 
         await OpenPathAsync(landing);
@@ -1158,12 +1177,12 @@ public partial class MainWindow : Window
         var top = TopLevel.GetTopLevel(this);
         if (top is null) return;
 
-        // The repository — and `stdlib/` alone no longer identifies one, because an installed Workbench
-        // ships the standard library beside its own executable. Without `samples/` as well, this row
-        // would offer to open the installation directory as somebody's project.
+        // The repository, identified by the SOLUTION FILE. `stdlib/` used to be the test, then
+        // `stdlib/` and `samples/` — and an installed Workbench now ships both of those beside its own
+        // executable, so each test in turn started matching every installation. The .sln is the one
+        // thing that means "you are looking at the source tree" and will not be shipped.
         string root = FindRepoRoot();
-        string? repo = Directory.Exists(Path.Combine(root, "stdlib")) &&
-                       Directory.Exists(Path.Combine(root, "samples")) ? root : null;
+        string? repo = File.Exists(Path.Combine(root, "VeinScript.sln")) ? root : null;
 
         if (await NewProjectDialog.ShowAsync(this, repo) is not { } choice) return;
 

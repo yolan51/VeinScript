@@ -38,6 +38,33 @@ public class ShippedLayoutTests
     }
 
     [Fact]
+    public void The_samples_are_copied_beside_the_application()
+    {
+        // So somebody who has just installed this has something to open and run before writing
+        // anything.
+        Assert.Contains(Workbench().Descendants().Where(e => e.Name.LocalName == "Content"),
+            e => (string?)e.Attribute("Include") is { } i && i.Contains("samples") && i.EndsWith("*.vein"));
+    }
+
+    [Fact]
+    public void The_samples_are_shipped_by_extension_and_never_by_folder()
+    {
+        // `samples/` also holds executables left behind by `veinc build` — 65 MB each, gitignored, so
+        // invisible in a clone and very present on the machine of anyone who has run that command. A
+        // `samples\**\*` include would put 195 MB into a 44 MB download, and only on some machines.
+        var samples = Workbench().Descendants()
+            .Where(e => e.Name.LocalName == "Content")
+            .Select(e => (string?)e.Attribute("Include") ?? "")
+            .Where(i => i.Contains("samples"))
+            .ToList();
+
+        Assert.NotEmpty(samples);
+        Assert.All(samples, i => Assert.True(
+            i.EndsWith("*.vein") || i.EndsWith("vein.discovery"),
+            $"'{i}' ships samples by pattern rather than by extension — build output would go with it"));
+    }
+
+    [Fact]
     public void The_cli_ships_with_the_workbench()
     {
         // ▶ and the terminal shell out to `veinc`. Without it they fall back to building the CLI from
