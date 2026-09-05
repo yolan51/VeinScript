@@ -842,6 +842,59 @@ public partial class MainWindow : Window
 
         if (this.FindControl<MenuItem>("SignOutItem") is { } signOut)
             signOut.IsEnabled = signedIn;
+
+        // Publishing needs an account and a folder. Saying which is missing beats a greyed item with no
+        // explanation — it is the same menu either way, and the header is the only place to say it.
+        if (this.FindControl<MenuItem>("PublishItem") is { } publish)
+        {
+            publish.IsEnabled = signedIn && _rootFolder is not null;
+            publish.Header = !signedIn ? "_Publish This Project… (sign in first)"
+                           : _rootFolder is null ? "_Publish This Project… (open a folder first)"
+                           : "_Publish This Project…";
+        }
+    }
+
+    /// Package, compile, redact and name — then show all of it and send nothing until asked.
+    ///
+    /// `Publisher.Prepare` touches no network, which is what makes a review screen possible instead of
+    /// a progress bar whose cancel button arrives too late. It compiles the whole project, so it runs
+    /// off the UI thread.
+    private async void OnPublishProject(object? sender, RoutedEventArgs e)
+    {
+        if (_session is not { } session) { SetStatus("Sign in first — Cloud ▸ Sign In."); return; }
+        if (_rootFolder is not { } folder) { SetStatus("Open a project folder first."); return; }
+
+        // Publish what is on disk, not what is in the editor. A dirty buffer would otherwise publish
+        // the last saved version while the screen shows something else.
+        foreach (var doc in _tabs.DirtyDocs.ToList()) await SaveDocAsync(doc);
+
+        SetStatus($"Preparing {Path.GetFileName(folder)}…");
+
+        Vein.Cloud.PublishPlan plan;
+        try
+        {
+            plan = await Task.Run(() => Vein.Cloud.Publisher.Prepare(folder, session.PublishHandle));
+        }
+        catch (Exception ex)
+        {
+            SetStatus("Could not prepare the publish — " + ex.Message);
+            return;
+        }
+
+        if (!plan.Check.Ok)
+        {
+            // Shown anyway rather than refused here: the dialog lists the errors, and a refusal with no
+            // list is a dead end.
+            ShowBottomTab(TabDiagnostics);
+        }
+
+        if (await PublishDialog.ShowAsync(this, session, plan) is not { } outcome)
+        {
+            SetStatus("Publish cancelled — nothing was sent.");
+            return;
+        }
+
+        SetStatus(outcome.Summary);
     }
 
     private async void OnSignIn(object? sender, RoutedEventArgs e)

@@ -97,6 +97,8 @@
         <MenuItem Header="_Sign In…" Name="SignInItem" Click="OnSignIn" />
         <MenuItem Header="Sign _Out" Name="SignOutItem" Click="OnSignOut" />
         <Separator />
+        <MenuItem Header="_Publish This Project…" Name="PublishItem" Click="OnPublishProject" />
+        <Separator />
         <MenuItem Header="Show _Lounge" Click="OnShowLounge" />
         <MenuItem Header="Show _Assistant" Click="OnShowAssistant" />
         <Separator />

@@ -231,6 +231,57 @@ public class PublisherTests : IDisposable
     }
 
     [Fact]
+    public void A_plan_carries_everything_the_dialog_has_to_show()
+    {
+        // The review screen is the only thing standing between someone and an irreversible public
+        // publish, so every section it renders has to come from the plan rather than be recomputed —
+        // a second source for "which files" would eventually disagree with the one that sends them.
+        string root = Temp();
+        try
+        {
+            ProjectScaffold.New(ProjectKind.Bundle, root, "Demo", "alice");
+            string dir = Path.Combine(root, "Demo");
+            File.WriteAllText(Path.Combine(dir, "README.md"), "# Demo\n");
+            File.WriteAllText(Path.Combine(dir, "shards", "Keys.vein"),
+                "shard Keys { run once { let apiKey = \"9f3Ka81mZq47LpXv02Tb\" } }\n");
+
+            var plan = Vein.Cloud.Publisher.Prepare(dir, "alice", "A demo bundle.");
+
+            Assert.Equal("alice.Demo", plan.BundleName);        // the heading
+            Assert.Equal("alice", plan.Author);
+            Assert.Equal("A demo bundle.", plan.Description);   // prefilled in the description box
+            Assert.True(plan.Check.Ok);                         // the compile badge
+            Assert.NotEmpty(plan.Files);                        // the file list, with published names
+            Assert.All(plan.Files, f => Assert.StartsWith("alice.Demo", f.Name));
+            Assert.Single(plan.Redactions);                     // the redaction list
+            Assert.Contains(plan.Skipped, s => s.Path == "README.md");   // the skipped list
+            Assert.Empty(plan.ForeignAuthors);                  // the author warning, absent here
+            Assert.True(plan.CanPublish);                       // whether the button is enabled
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public void A_project_that_does_not_compile_is_shown_but_not_sendable()
+    {
+        // The dialog opens anyway and lists the errors. Refusing to open it would be a dead end: the
+        // person would be told no with no way to see why.
+        string root = Temp();
+        try
+        {
+            ProjectScaffold.New(ProjectKind.Bundle, root, "Demo", "alice");
+            string dir = Path.Combine(root, "Demo");
+            File.WriteAllText(Path.Combine(dir, "Demo.vein"), "bundle Demo by alice { broken");
+
+            var plan = Vein.Cloud.Publisher.Prepare(dir, "alice");
+
+            Assert.False(plan.CanPublish);
+            Assert.NotEmpty(plan.Check.Summary());
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public void A_file_that_is_not_vein_is_reported_rather_than_dropped()
     {
         // A README cannot travel, and `.veinproj` is what names the entry when a folder has several
