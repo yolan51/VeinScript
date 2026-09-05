@@ -28,5 +28,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Vein.Compiler\Vein.Compiler.csproj" />
+    <ProjectReference Include="..\Vein.Cloud\Vein.Cloud.csproj" />
   </ItemGroup>
 </Project>

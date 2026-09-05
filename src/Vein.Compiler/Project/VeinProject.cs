@@ -6,6 +6,19 @@ namespace Vein.Compiler.Project;
 /// A run configuration saved with the project, rather than read out of a file header each time.
 public sealed record SavedRun(string Label, string Command, List<string> Args, Dictionary<string, string> Env);
 
+/// Which published project this folder is, once it has been published once.
+///
+/// WHY IT HAS TO BE WRITTEN DOWN. Nothing else on disk says that this folder is already `alice/combat`.
+/// Clone the repo onto a second machine, publish, and without this you get a SECOND project — or a
+/// uniqueness failure with nothing to explain it. The slug can be recomputed from the source, but only
+/// for a bundle; a solution and a scratch folder take a free slug, and there is no second place to
+/// look it up.
+///
+/// `Id` is the backend's own identifier and `Slug` the readable address. Both, because the id survives
+/// a rename the schema does not allow today and might tomorrow, and the slug is what a person reads in
+/// a diff when they wonder where their publish went.
+public sealed record CloudLink(string Id, string Slug, string? OwnerHandle = null);
+
 // A `.veinproj` — the few things about a project that are NOT derivable from the code.
 //
 // Deliberately thin, and the reason matters. Every other project system in this repo's tooling reads
@@ -34,6 +47,13 @@ public sealed class VeinProject
     /// An override for where `stdlib/` lives. Null means "the one found by walking up", which is right
     /// for everyone working inside this repo.
     public string? StdlibPath { get; set; }
+
+    /// Where this folder was published, written on the first successful publish. Null until then, and
+    /// null forever for a project nobody publishes — which stays the normal case.
+    ///
+    /// It belongs here for exactly the reason in this file's header: it is one of the few things about
+    /// a project that is NOT derivable from the code.
+    public CloudLink? Cloud { get; set; }
 
     [JsonIgnore]
     public string? Folder { get; private set; }
