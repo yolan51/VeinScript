@@ -259,9 +259,46 @@ public sealed class CSharpBackend : IVeinBackend
             sb.AppendLine("        string s => long.TryParse(s, out var p) ? p : 0, _ => 0,");
             sb.AppendLine("    };");
             sb.AppendLine("    public static double D(object? v) => Num(v);");
+            // Truthiness, and it must match the interpreter's `Truthy` arm for arm. It did not: `int`
+            // and `string` were both missing, so a boxed `0` and an empty string fell through to
+            // `_ => true`. Nothing exercised it until `bool(x)` existed — check-backend found it on the
+            // first run of the sample that does.
             sb.AppendLine("    public static bool B(object? v) => v switch");
             sb.AppendLine("    {");
-            sb.AppendLine("        bool b => b, long l => l != 0, double d => d != 0, null => false, _ => true,");
+            sb.AppendLine("        bool b => b, long l => l != 0, int i => i != 0, double d => d != 0,");
+            sb.AppendLine("        string s => s.Length > 0, null => false, _ => true,");
+            sb.AppendLine("    };");
+
+            // The `int(x)` / `float(x)` conversions. Separate from I()/D() above, which coerce a value
+            // into a field's declared type and may assume it is already numeric: these take arbitrary
+            // text and must answer for "12abc" and "" as well.
+            //
+            // InvariantCulture throughout, matching the interpreter. Parsing "1.5" against the machine's
+            // locale would make a program read its own saved files differently in France.
+            sb.AppendLine("    public static long ToInt(object? v) => v switch");
+            sb.AppendLine("    {");
+            sb.AppendLine("        null => 0L, bool b => b ? 1L : 0L, long l => l, int i => i,");
+            sb.AppendLine("        double d => double.IsFinite(d) ? (long)d : 0L,");
+            sb.AppendLine("        string s => long.TryParse(s.Trim(), System.Globalization.NumberStyles.Integer, " +
+                          "System.Globalization.CultureInfo.InvariantCulture, out var n) ? n");
+            sb.AppendLine("                  : double.TryParse(s.Trim(), System.Globalization.NumberStyles.Float, " +
+                          "System.Globalization.CultureInfo.InvariantCulture, out var f) && double.IsFinite(f) ? (long)f : 0L,");
+            sb.AppendLine("        _ => 0L,");
+            sb.AppendLine("    };");
+            sb.AppendLine("    public static double ToFloat(object? v) => v switch");
+            sb.AppendLine("    {");
+            sb.AppendLine("        null => 0d, bool b => b ? 1d : 0d, long l => l, int i => i, double d => d,");
+            sb.AppendLine("        string s => double.TryParse(s.Trim(), System.Globalization.NumberStyles.Float, " +
+                          "System.Globalization.CultureInfo.InvariantCulture, out var f) && double.IsFinite(f) ? f : 0d,");
+            sb.AppendLine("        _ => 0d,");
+            sb.AppendLine("    };");
+            sb.AppendLine("    public static bool IsNum(object? v) => v switch");
+            sb.AppendLine("    {");
+            sb.AppendLine("        long or int or double => true,");
+            sb.AppendLine("        string s => s.Trim().Length > 0 && double.TryParse(s.Trim(), " +
+                          "System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, " +
+                          "out var f) && double.IsFinite(f),");
+            sb.AppendLine("        _ => false,");
             sb.AppendLine("    };");
             sb.AppendLine("}");
         }
@@ -967,7 +1004,8 @@ public sealed class CSharpBackend : IVeinBackend
     /// backend contract forbids.
     private static bool IsPrebuilt(string name) =>
         name is "spawn" or "random" or "len" or "code" or "chr" or "chars" or "upper" or "lower"
-             or "contains" or "startsWith" or "endsWith" or "indexOf" or "substring" or "replace";
+             or "contains" or "startsWith" or "endsWith" or "indexOf" or "substring" or "replace"
+             or "int" or "float" or "string" or "bool" or "isNumber";
 
     private string RuntimeCall(IrRuntimeCall c)
     {
@@ -993,6 +1031,15 @@ public sealed class CSharpBackend : IVeinBackend
                 return c.Args.Count > 2
                     ? $"__VeinText.Sub({Expr(c.Args[0])}, {Expr(c.Args[1])}, {Expr(c.Args[2])})"
                     : $"__VeinText.Sub({Expr(c.Args[0])}, {Expr(c.Args[1])})";
+
+            // Conversions. Through the helper like everything else, so check-backend diffs them against
+            // the interpreter — a `float("1,5")` that parsed under one culture and not the other would
+            // otherwise be a difference nothing tests.
+            case "int": return $"__VeinText.ToInt({Expr(c.Args[0])})";
+            case "float": return $"__VeinText.ToFloat({Expr(c.Args[0])})";
+            case "string": return $"__VeinText.S({Expr(c.Args[0])})";
+            case "bool": return $"__VeinText.B({Expr(c.Args[0])})";
+            case "isNumber": return $"__VeinText.IsNum({Expr(c.Args[0])})";
 
             // `attach $C to e { … }` carries a struct init and emits directly. `attach $C to e` with no
             // initialiser carries a bare TYPE NAME instead, which through Expr would emit as a string

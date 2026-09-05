@@ -1,0 +1,59 @@
+// entities_convert.vein — turning text into numbers and back, on both paths.
+//
+//   veinc run samples/entities_convert.vein --ticks 2
+//
+// In tools/check-backend.sh, so the interpreter and the compiled C# are diffed on every conversion.
+// That matters more here than for most built-ins: `float("1.5")` parsed against the machine's locale
+// would read as 15 where the decimal separator is a comma, and a difference between the two paths
+// would be a program that computed one answer interpreted and another compiled.
+
+bundle Convert by you {
+
+    shape $Score { who: string, points: int }
+    mark #Score
+    builder Score { $Score   mark #Score }
+
+    shard Read {
+        run once {
+            // Whole numbers, decimals, and the two ways text fails to be either.
+            emit *Vein.Console.Io.@Print { text: "int 42      = " + int("42") }
+            emit *Vein.Console.Io.@Print { text: "int -3      = " + int("-3") }
+            emit *Vein.Console.Io.@Print { text: "int 4.9     = " + int("4.9") }
+            emit *Vein.Console.Io.@Print { text: "int abc     = " + int("abc") }
+            emit *Vein.Console.Io.@Print { text: "int empty   = " + int("") }
+            emit *Vein.Console.Io.@Print { text: "int spaced  = " + int("  7  ") }
+
+            emit *Vein.Console.Io.@Print { text: "float 1.5   = " + float("1.5") }
+            emit *Vein.Console.Io.@Print { text: "float comma = " + float("1,5") }
+
+            emit *Vein.Console.Io.@Print { text: "string 7    = [" + string(7) + "]" }
+            emit *Vein.Console.Io.@Print { text: "string bool = [" + string(true) + "]" }
+
+            emit *Vein.Console.Io.@Print { text: "bool 0      = " + bool(0) }
+            emit *Vein.Console.Io.@Print { text: "bool text   = " + bool("x") }
+
+            emit *Vein.Console.Io.@Print { text: "isNumber 42 = " + isNumber("42") }
+            emit *Vein.Console.Io.@Print { text: "isNumber ab = " + isNumber("abc") }
+        }
+    }
+
+    // A parsed number reaching an identity's field, which is where the conversion is actually for:
+    // console input is text, and a `points: int` will not take it.
+    shard Tally {
+        run once {
+            bring Score("Hero", int("120"))
+            bring Score("Rival", int("95.7"))
+        }
+    }
+
+    // A SEPARATE SCHEDULE, and it has to be. A `bring` is a structural change and structural changes
+    // commit at the phase boundary (RULES 11/12b) — so a `target` in the same block queries the world
+    // as it was BEFORE the brings and finds nothing. This is the second tick.
+    shard Report {
+        each tick {
+            target $Score #Score as s {
+                emit *Vein.Console.Io.@Print { text: s.Score.who + " scored " + s.Score.points }
+            }
+        }
+    }
+}

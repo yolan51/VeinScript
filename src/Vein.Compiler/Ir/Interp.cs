@@ -1150,7 +1150,8 @@ public sealed class Interp
         new HashSet<string>(StringComparer.Ordinal)
         { "spawn", "here", "pick", "len", "random", "join", "toJson", "fromJson",
           "split", "lines", "words", "chars", "trim", "code", "chr", "upper", "lower",
-          "contains", "startsWith", "endsWith", "indexOf", "substring", "replace" };
+          "contains", "startsWith", "endsWith", "indexOf", "substring", "replace",
+          "int", "float", "string", "bool", "isNumber" };
 
     /// Prebuilt (built-in) functions that DO return a value — the only functions that return.
     ///
@@ -1262,7 +1263,72 @@ public sealed class Interp
 
         "replace" => args.Count > 2 ? Str(args[0]).Replace(Str(args[1]), Str(args[2]), StringComparison.Ordinal) : "",
 
+        // ---- conversions ------------------------------------------------------------------------
+        //
+        // NAMED AFTER THE TYPES, which reads as a cast and needed no new syntax at all: `int`, `float`,
+        // `string` and `bool` are not keywords — they are ordinary identifiers the parser only ever
+        // sees in type position — so `int(x)` already parsed as a call and simply resolved to nothing.
+        //
+        // TOTAL, NEVER THROWING, which matches `substring` clamping and `indexOf` answering -1. A
+        // conversion that could crash would have to be guarded at every use, and a language with no
+        // `catch` has nowhere to put the guard.
+        //
+        // AND THAT IS WHY `isNumber` IS HERE. `int("abc")` is 0, and so is `int("0")` — total functions
+        // buy their safety by making failure indistinguishable from a real answer. `isNumber` is how you
+        // tell them apart, and without it this pair would be the `fromJson`-returns-null trap again.
+        "int" => ToLong(args.Count > 0 ? args[0] : null),
+        "float" => ToDouble(args.Count > 0 ? args[0] : null),
+        "string" => args.Count > 0 ? Str(args[0]) : "",
+        "bool" => args.Count > 0 && Truthy(args[0]),
+        "isNumber" => args.Count > 0 && LooksNumeric(args[0]),
+
         _ => null
+    };
+
+    /// Anything to a whole number. A float truncates toward zero rather than rounding, because
+    /// `int(x)` is asked for most often to index or count, and 4.9 items is four.
+    private static long ToLong(object? v) => v switch
+    {
+        null => 0L,
+        bool b => b ? 1L : 0L,
+        long l => l,
+        int i => i,
+        double d => double.IsFinite(d) ? (long)d : 0L,
+        string s => long.TryParse(s.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out long n) ? n
+                  : double.TryParse(s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out double f)
+                    && double.IsFinite(f) ? (long)f
+                  : 0L,
+        _ => 0L
+    };
+
+    /// Anything to a real number. INVARIANT CULTURE on purpose: `"1.5"` must parse the same on a machine
+    /// where the decimal separator is a comma, or a program would read its own saved files differently
+    /// depending on where it ran.
+    private static double ToDouble(object? v) => v switch
+    {
+        null => 0d,
+        bool b => b ? 1d : 0d,
+        long l => l,
+        int i => i,
+        double d => d,
+        string s => double.TryParse(s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out double f)
+                    && double.IsFinite(f) ? f : 0d,
+        _ => 0d
+    };
+
+    /// Would `int`/`float` find a number here, rather than falling back to zero?
+    ///
+    /// Distinct from `IsNumeric` below, which asks whether a value is ALREADY of numeric type and is
+    /// what `==` uses to decide between a numeric and a textual comparison. This one parses text, and
+    /// is deliberately false for a bool: `bool` converts to 0 or 1, but the question being asked is "is
+    /// this text a number", and answering yes for `true` would let a menu accept it as a choice.
+    private static bool LooksNumeric(object? v) => v switch
+    {
+        long or int or double => true,
+        string s => s.Trim().Length > 0 &&
+                    double.TryParse(s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out double f) &&
+                    double.IsFinite(f),
+        _ => false
     };
 
     /// `substring(s, start)` to the end, or `substring(s, start, length)`. Both clamped to the string:

@@ -4,3 +4,7 @@ obj/
 page.html
 *.exe
 out/
+
+# A 67 MB self-contained Linux build of samples/chat/server.vein. A published binary is output,
+# not source, and it has no extension for *.exe to catch.
+chatserver

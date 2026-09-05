@@ -459,6 +459,34 @@ throwing, because a runtime is not a place to crash a console app over an index.
 `samples/characters.vein` is the whole of this rule as a running program: classification, an identifier
 validator, ROT13 with `code`/`chr`, and why case folding needs a function.
 
+**28d. A conversion is named after the type, and `isNumber` is why it can be.** `int(x)`, `float(x)`,
+`string(x)` and `bool(x)` convert between the scalar types. They needed **no new syntax**: `int` and
+friends are not keywords — the parser only ever meets them in type position — so `int(x)` already
+parsed as an ordinary call and merely resolved to nothing.
+
+They are **total**. `int("abc")` is `0`, `float("")` is `0`, and nothing throws — the same choice
+`substring` makes by clamping and `indexOf` makes by answering `-1`, and for the same reason: a
+language with no `catch` has nowhere to put a guard.
+
+Which is exactly why `isNumber(s)` exists beside them:
+
+```
+if isNumber(typed) { let n = int(typed) } else { … }
+```
+
+A total function buys its safety by making failure indistinguishable from a real answer — `int("abc")`
+and `int("0")` are both `0`. Without `isNumber` this pair would be `fromJson` returning `null` again,
+wearing different clothes.
+
+`int` truncates toward zero rather than rounding, because it is asked for most often to index or to
+count and 4.9 items is four. Parsing is **invariant-culture**, so `"1.5"` reads the same on a machine
+whose decimal separator is a comma — otherwise a program would read its own saved files differently
+depending on where it ran. And `bool(x)` reuses the interpreter's own truthiness, so it and `if x` can
+never disagree.
+
+All five compile. `samples/entities_convert.vein` is in `tools/check-backend.sh`, which is how a
+locale-dependent parse would be caught rather than shipped.
+
 **28b. A file is an event, and a failure is a message.** `*Vein.Files.Io.@ReadFile { path }` answers
 with `@FileLoaded` or `@FileMissing`; `@WriteFile` answers with `@FileWritten` or `@FileMissing`. That
 is the same shape as `@Fetch`/`@Fetched`/`@Failed` and a console send's `@Undelivered` — there is no

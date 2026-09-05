@@ -341,9 +341,10 @@ public sealed class Resolve
     private static IrTypeRef? Builtin(string name) => name switch
     {
         "spawn" => IrTypeRef.Of("Entity"),
-        "len" => IrTypeRef.Of("int"),
-        "random" => IrTypeRef.Of("float"),
-        "join" or "toJson" => IrTypeRef.Of("string"),
+        "len" or "int" or "code" => IrTypeRef.Of("int"),
+        "random" or "float" => IrTypeRef.Of("float"),
+        "bool" or "isNumber" => IrTypeRef.Of("bool"),
+        "join" or "toJson" or "string" => IrTypeRef.Of("string"),
         "here" => IrTypeRef.Of("Mark"),
         _ => null,
     };
