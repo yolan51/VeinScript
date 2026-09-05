@@ -89,7 +89,11 @@ best_ms() {
     for _ in $(seq "$REPEATS"); do
         local start end ms
         start=$(date +%s%N)
-        "$@" >/dev/null 2>&1
+        # STDIN CLOSED, and not merely tidy: `veinc run` pumps stdin until EOF, so a run that inherits
+        # a live terminal never exits. It then holds src/Vein.Cli/bin/Release/…/Vein.Compiler.dll open,
+        # and EVERY later Release build fails to copy over it — this script included, which then reports
+        # "BUILD FAILED" for a build that has nothing wrong with it.
+        "$@" >/dev/null 2>&1 </dev/null
         end=$(date +%s%N)
         ms=$(( (end - start) / 1000000 ))
         if [ -z "$best" ] || [ "$ms" -lt "$best" ]; then best=$ms; fi
