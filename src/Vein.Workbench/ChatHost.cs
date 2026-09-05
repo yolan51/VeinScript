@@ -105,7 +105,7 @@ internal sealed class ChatHost
                     Place(ChatDock.Off);
                 };
 
-                _window.Show(_owner);
+                ShowOwned(_window);
                 break;
 
             case ChatDock.Off:
@@ -155,6 +155,30 @@ internal sealed class ChatHost
             try { closing.Content = null; closing.Close(); }
             finally { _closingToMove = false; }
         }
+    }
+
+    /// Show a floating panel, waiting for the main window if it is not on screen yet.
+    ///
+    /// THE HOSTS ARE BUILT IN MainWindow's CONSTRUCTOR, so restoring a saved `Window` placement runs
+    /// before the owner is visible — and Avalonia throws "cannot show window with non-visible owner".
+    /// That crashed the IDE on startup for anyone who had parked a panel in a floating window, with no
+    /// way back in short of editing workbench.json: the setting that broke it was the setting being
+    /// restored.
+    private void ShowOwned(Window window)
+    {
+        if (_owner.IsVisible) { window.Show(_owner); return; }
+
+        void WhenOwnerOpens(object? sender, EventArgs e)
+        {
+            _owner.Opened -= WhenOwnerOpens;
+
+            // Only if this is still the window we mean. The dock may have been changed again between
+            // construction and the owner opening, and showing a detached one would leave a floating
+            // panel nothing can close.
+            if (ReferenceEquals(_window, window)) window.Show(_owner);
+        }
+
+        _owner.Opened += WhenOwnerOpens;
     }
 
     /// Put the window back where it was left, if it fits somewhere sane.

@@ -1112,13 +1112,58 @@ public partial class MainWindow : Window
     /// it in the explorer and open its main file. Reuses ProjectScaffold (shared with `veinc new`).
     /// One entry point for every new project. Structure and starting point are asked together because
     /// they are independent — a Solution that starts as a website is a normal choice, and separate menu
+    /// Open a folder as the project: the tree, the recent list, and a file to land on.
+    ///
+    /// The landing file matters more than it looks. An explorer full of folders and an empty editor
+    /// reads as "nothing happened", and the point of opening the repository is to be looking at
+    /// VeinScript within a second or two.
+    private async Task OpenProjectFolderAsync(string dir)
+    {
+        _rootFolder = dir;
+        _settings.Remember(dir);
+        PopulateProjectTree(dir);
+
+        // console.vein before LANGUAGE-TOUR.vein, and the reason is ▶. The tour is the better read, but
+        // its `veinc run` lines are examples deep in the prose rather than a run line in the LEADING
+        // comment block — so RunConfig finds nothing and ▶ answers "this file declares no run line".
+        // Landing on something that cannot run is a poor first second.
+        string? landing = new[]
+            {
+                Path.Combine(dir, "samples", "console.vein"),
+                Path.Combine(dir, "samples", "LANGUAGE-TOUR.vein")
+            }
+            .FirstOrDefault(File.Exists)
+            ?? Directory.EnumerateFiles(dir, "*.vein", SearchOption.AllDirectories)
+                        .FirstOrDefault(p => !BundleLoader.IsFragment(p));
+
+        if (landing is null) { SetStatus($"Opened {dir}"); return; }
+
+        await OpenPathAsync(landing);
+
+        // Only promise ▶ when the file actually declares a run line — the same question OnRun asks.
+        bool runnable = RunConfig.From(File.ReadAllText(landing), landing).Count > 0;
+        SetStatus($"Opened {dir} — {Path.GetFileName(landing)}" + (runnable ? ", press ▶." : "."));
+    }
+
     /// items for "New Bundle" and "New from Template" made that combination unreachable.
     private async Task NewProjectAsync()
     {
         var top = TopLevel.GetTopLevel(this);
         if (top is null) return;
 
-        if (await NewProjectDialog.ShowAsync(this) is not { } choice) return;
+        // The repository, when the Workbench is running from inside one — that is the same rule
+        // BundleIndex uses to find `stdlib/`, so if this finds a folder, the compiler will resolve
+        // against it too.
+        string? repo = Directory.Exists(Path.Combine(FindRepoRoot(), "stdlib")) ? FindRepoRoot() : null;
+
+        if (await NewProjectDialog.ShowAsync(this, repo) is not { } choice) return;
+
+        // Nothing to scaffold: open what is already there.
+        if (choice.OpenExisting is { } existing)
+        {
+            await OpenProjectFolderAsync(existing);
+            return;
+        }
 
         // Where to put it. The open folder when there is one, since a project made while a project is
         // open is almost always meant to sit beside it.
