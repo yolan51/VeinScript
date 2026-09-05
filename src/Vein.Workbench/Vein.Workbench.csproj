@@ -6,6 +6,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <RootNamespace>Vein.Workbench</RootNamespace>
+
+    <!-- The name a person sees in the folder and on the taskbar. RootNamespace stays `Vein.Workbench`,
+         so embedded-resource names are unaffected — but `avares://` URIs address the ASSEMBLY, so the
+         four that load the logo had to change with this. -->
+    <AssemblyName>VeinScript-Workbench</AssemblyName>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <ApplicationManifest>app.manifest</ApplicationManifest>

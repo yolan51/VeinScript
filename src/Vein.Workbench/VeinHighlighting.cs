@@ -29,8 +29,17 @@ internal static class VeinHighlighting
 
             try
             {
-                using var stream = typeof(VeinHighlighting).Assembly
-                    .GetManifestResourceStream("Vein.Workbench.Assets.VeinScript.xshd");
+                var assembly = typeof(VeinHighlighting).Assembly;
+
+                // The resource name is RootNamespace + path, which is `Vein.Workbench.…` and does NOT
+                // follow AssemblyName. Found by suffix rather than spelled out, so renaming either one
+                // cannot silently turn every .vein file into plain text — the failure mode of a
+                // hardcoded name here is invisible, because the load is caught and carried on from.
+                string? resource = assembly.GetManifestResourceNames()
+                    .FirstOrDefault(n => n.EndsWith("VeinScript.xshd", StringComparison.Ordinal));
+                if (resource is null) return null;
+
+                using var stream = assembly.GetManifestResourceStream(resource);
                 if (stream is null) return null;
 
                 using var reader = XmlReader.Create(stream);

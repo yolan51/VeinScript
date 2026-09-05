@@ -56,7 +56,7 @@ internal sealed class AboutWindow : Window
     /// system — the published Workbench has no VSLOGO.png sitting next to it.
     private static Bitmap? Logo()
     {
-        try { return new Bitmap(AssetLoader.Open(new Uri("avares://Vein.Workbench/Assets/VSLOGO.png"))); }
+        try { return new Bitmap(AssetLoader.Open(new Uri("avares://VeinScript-Workbench/Assets/VSLOGO.png"))); }
         catch { return null; }
     }
 }

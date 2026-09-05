@@ -5,7 +5,7 @@
         xmlns:local="using:Vein.Workbench"
         x:Class="Vein.Workbench.MainWindow"
         Width="1320" Height="860"
-        Icon="avares://Vein.Workbench/Assets/VSLOGO.png"
+        Icon="avares://VeinScript-Workbench/Assets/VSLOGO.png"
         Title="VeinScript Workbench">
   <DockPanel>
     <Menu DockPanel.Dock="Top">
@@ -13,7 +13,7 @@
            row of vertical space the editor would rather have. -->
       <MenuItem Padding="6,0" IsHitTestVisible="False">
         <MenuItem.Header>
-          <Image Source="avares://Vein.Workbench/Assets/VSLOGO.png" Height="20" Width="22"
+          <Image Source="avares://VeinScript-Workbench/Assets/VSLOGO.png" Height="20" Width="22"
                  Stretch="Uniform" VerticalAlignment="Center" />
         </MenuItem.Header>
       </MenuItem>
@@ -123,7 +123,7 @@
     <!-- Toolbar: the run configuration this file declares in its own header, and the controls for it. -->
     <Border DockPanel.Dock="Top" Background="#1E1E1E" BorderBrush="#333" BorderThickness="0,0,0,1" Padding="8,4">
       <StackPanel Orientation="Horizontal" Spacing="6">
-        <Image Source="avares://Vein.Workbench/Assets/VSLOGO.png" Height="24" Width="26"
+        <Image Source="avares://VeinScript-Workbench/Assets/VSLOGO.png" Height="24" Width="26"
                Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,6,0" />
         <Button Name="RunButton" Click="OnRun" Padding="10,2" ToolTip.Tip="Run the selected configuration (F5)">▶</Button>
         <Button Name="RunAllButton" Click="OnRunAll" Padding="10,2" ToolTip.Tip="Start every participant this file declares, in header order (Ctrl+F5)">&#x25B6;&#x25B6;</Button>
