@@ -2334,6 +2334,9 @@ public partial class MainWindow : Window
 
     private static bool IsIdent(char c) => char.IsLetterOrDigit(c) || c == '_';
 
+    /// What `bring` looks like before its arguments. Defined in EventCatalog so it is testable.
+    private const string BringHead = EventCatalog.BringHead;
+
     /// Typing `?` right after `emit @Event` or `bring Builder` expands it into the field list, each
     /// slot carrying a value you can edit. Leaves `?` as-is elsewhere.
     ///
@@ -2353,7 +2356,7 @@ public partial class MainWindow : Window
 
         var emit = Regex.Match(before, @"emit\s+@(\w+)\s*$");
         var start = Regex.Match(before, @"start\s+@(\w+)\s*$");   // a bundle's entry-point payload
-        var bring = Regex.Match(before, @"bring\s+(?:\d+\s+)?(\w+)\s*$");
+        var bring = Regex.Match(before, BringHead + @"\s*$");
         if (!emit.Success && !start.Success && !bring.Success) { ShowFieldPicks(before); return; }
 
         var ast = _service.Compile(new CompileRequest("untitled.vein", _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
@@ -2438,11 +2441,11 @@ public partial class MainWindow : Window
         string text = _editor.Text;
 
         // `bring Unit(` … caret. Everything from the `(` to the matching `)` is what we replace.
-        var open = Regex.Match(text[..q], @"bring\s+(?:\d+\s+)?(\w+)\s*\($", RegexOptions.RightToLeft);
+        var open = Regex.Match(text[..q], BringHead + @"\s*\($", RegexOptions.RightToLeft);
         if (!open.Success)
         {
             // Or the whole expanded block is already there and the caret sits inside it.
-            open = Regex.Match(text[..q], @"bring\s+(?:\d+\s+)?(\w+)\s*\(", RegexOptions.RightToLeft);
+            open = Regex.Match(text[..q], BringHead + @"\s*\(", RegexOptions.RightToLeft);
             if (!open.Success) return false;
         }
 

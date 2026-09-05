@@ -237,6 +237,22 @@ public static class EventCatalog
         }
     }
 
+    /// Everything `bring` accepts before its argument list, capturing the BARE builder name in group 1.
+    ///
+    ///   bring Unit                      bring 8 Unit
+    ///   bring &amp;Unit                     bring 8 &amp;Unit
+    ///   bring *alice.Combat.Api.&amp;Unit    bring *alice.Combat.Api.Unit
+    ///
+    /// The sigil and the qualifier are both optional because `bring` treats them so, and the BARE name
+    /// is the right capture because that is what `Builders` keys on — a `use`d bundle's builders are
+    /// stored under their bare names precisely because that is how `bring Button(…)` resolves.
+    ///
+    /// Here rather than in the Workbench so it can be tested: the editor's `?` expansion used `\w+`,
+    /// which matches neither `&amp;` nor a dotted path, so `bring &amp;Unit ?` silently expanded to nothing
+    /// while `bring Unit ?` worked. Writing the sigil is the more explicit form and was the one the
+    /// tooling ignored.
+    public const string BringHead = @"bring\s+(?:\d+\s+)?(?:\*[\w.]*\.)?&?(\w+)";
+
     /// A ready-to-fill `bring`, which is what the `?` sigil stands for at a call site.
     public static string Scaffold(BuilderEntry b)
     {
