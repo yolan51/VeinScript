@@ -196,6 +196,15 @@ public sealed class TerminalSession : IDisposable
     /// Workbench from source has just built.
     private static IReadOnlyList<string> CliLauncher(string repoRoot, string cliProject)
     {
+        // BESIDE THE APPLICATION FIRST. An installed Workbench ships `veinc` in its own folder and has
+        // no repository, no source and possibly no .NET SDK — every branch below this one assumes all
+        // three. Checked first rather than last so a developer running from source also gets whatever
+        // was published rather than a stale bin/ from a configuration they forgot they built.
+        string here = AppContext.BaseDirectory;
+        string beside = Path.Combine(here, OperatingSystem.IsWindows() ? "veinc.exe" : "veinc");
+        if (File.Exists(beside)) return new[] { beside };
+        if (File.Exists(Path.Combine(here, "veinc.dll"))) return new[] { "dotnet", Path.Combine(here, "veinc.dll") };
+
         foreach (string cfg in new[] { "Debug", "Release" })
         {
             string dir = Path.Combine(repoRoot, "src", "Vein.Cli", "bin", cfg, "net8.0");

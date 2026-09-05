@@ -29,5 +29,20 @@
   <ItemGroup>
     <ProjectReference Include="..\Vein.Compiler\Vein.Compiler.csproj" />
     <ProjectReference Include="..\Vein.Cloud\Vein.Cloud.csproj" />
+
+    <!-- The CLI ships INSIDE the Workbench. ▶ and the terminal shell out to `veinc`, and without it
+         they fall back to building it from source with the SDK, and a machine that just installed
+         this application has neither the SDK nor the source tree. -->
+    <ProjectReference Include="..\Vein.Cli\Vein.Cli.csproj" />
+  </ItemGroup>
+
+  <!-- THE STANDARD LIBRARY SHIPS WITH THE APPLICATION.
+       `BundleIndex.LocateNamed` looks for a folder named `stdlib` holding .vein files, starting at
+       AppContext.BaseDirectory and walking up. Inside the repo it finds the real one; on an installed
+       copy it found nothing at all, so every `*Vein.Console.Io.@Print` failed to resolve and no program
+       a person wrote would compile. Copying it beside the executable is what makes the same lookup
+       succeed with no special case anywhere in the code. -->
+  <ItemGroup>
+    <Content Include="..\..\stdlib\**\*.vein" LinkBase="stdlib" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

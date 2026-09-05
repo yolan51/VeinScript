@@ -63,7 +63,10 @@
         <MenuItem Header="_Publish Executable (veinc build)" Click="OnPublish" />
         <MenuItem Header="_Serve This Site (veinc serve)" Click="OnServe" />
         <Separator />
-        <MenuItem Header="Run _Checks">
+        <!-- Hidden unless the Workbench is running from the source tree: every one of these needs the
+             repository, and two of them need bash. On an installed copy they are four menu items that
+             can only fail. -->
+        <MenuItem Header="Run _Checks" Name="ChecksMenu">
           <MenuItem Header="dotnet test" Click="OnRunCheck" Tag="dotnet test src/Vein.Tests" />
           <MenuItem Header="check-ir.sh" Click="OnRunCheck" Tag="bash tools/check-ir.sh" />
           <MenuItem Header="check-backend.sh" Click="OnRunCheck" Tag="bash tools/check-backend.sh" />

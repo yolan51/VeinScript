@@ -184,6 +184,13 @@ public partial class MainWindow : Window
 
         _terminal.RepoRoot = FindRepoRoot();
         _terminal.Resolve = ResolveVeinFile;
+
+        // The checks need the repository — `dotnet test src/Vein.Tests` and two bash scripts under
+        // tools/. An installed copy has none of it, so the submenu is hidden rather than left there to
+        // fail four different ways.
+        if (this.FindControl<MenuItem>("ChecksMenu") is { } checks)
+            checks.IsVisible = Directory.Exists(Path.Combine(FindRepoRoot(), "tools")) &&
+                               Directory.Exists(Path.Combine(FindRepoRoot(), "src", "Vein.Tests"));
         Closed += (_, _) => { SaveSession(); _terminal.StopAll(); };   // no console outlives the IDE
 
         // After the TabControls are resolved: the chat hosts dock into them. Appends only, so the
@@ -1151,10 +1158,12 @@ public partial class MainWindow : Window
         var top = TopLevel.GetTopLevel(this);
         if (top is null) return;
 
-        // The repository, when the Workbench is running from inside one — that is the same rule
-        // BundleIndex uses to find `stdlib/`, so if this finds a folder, the compiler will resolve
-        // against it too.
-        string? repo = Directory.Exists(Path.Combine(FindRepoRoot(), "stdlib")) ? FindRepoRoot() : null;
+        // The repository — and `stdlib/` alone no longer identifies one, because an installed Workbench
+        // ships the standard library beside its own executable. Without `samples/` as well, this row
+        // would offer to open the installation directory as somebody's project.
+        string root = FindRepoRoot();
+        string? repo = Directory.Exists(Path.Combine(root, "stdlib")) &&
+                       Directory.Exists(Path.Combine(root, "samples")) ? root : null;
 
         if (await NewProjectDialog.ShowAsync(this, repo) is not { } choice) return;
 
