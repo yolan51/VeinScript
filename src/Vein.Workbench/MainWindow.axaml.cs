@@ -2325,13 +2325,22 @@ public partial class MainWindow : Window
 
     private static bool IsIdent(char c) => char.IsLetterOrDigit(c) || c == '_';
 
-    /// Typing `?` right after `emit @Event` or `bring Builder` expands it into the field list —
-    /// defaults shown, required fields left as `?` holes to fill. Leaves `?` as-is elsewhere.
+    /// Typing `?` right after `emit @Event` or `bring Builder` expands it into the field list, each
+    /// slot carrying a value you can edit. Leaves `?` as-is elsewhere.
+    ///
+    /// A SECOND `?` — typing `??` — gives the compact one-liner instead: `bring Unit(base, base)`, no
+    /// comments, for when you already know the signature and just want the slots. The expanded form is
+    /// for learning what a builder takes; this one is for filling it in.
     private void TryExpandOnQuestion()
     {
         int q = _editor.CaretOffset - 1;             // the just-typed '?'
         if (q < 0) return;
         string before = _editor.Text[..q];
+
+        // The first `?` already expanded, so a second one lands after the text it produced. Undo that
+        // expansion and redo it compactly, which is what makes `??` feel like one gesture rather than
+        // an edit on top of an edit.
+        if (TryCompactOnSecondQuestion(q)) return;
 
         var emit = Regex.Match(before, @"emit\s+@(\w+)\s*$");
         var start = Regex.Match(before, @"start\s+@(\w+)\s*$");   // a bundle's entry-point payload
@@ -2410,13 +2419,50 @@ public partial class MainWindow : Window
         return -1;
     }
 
+    /// `??` on a builder: replace the expansion the first `?` just made with the one-line form.
+    ///
+    /// Recognised by looking BACK from the caret for `bring X(` — the text the first `?` wrote — rather
+    /// than by remembering that an expansion happened. State would go stale the moment someone typed
+    /// anything between the two, and reading the document cannot.
+    private bool TryCompactOnSecondQuestion(int q)
+    {
+        string text = _editor.Text;
+
+        // `bring Unit(` … caret. Everything from the `(` to the matching `)` is what we replace.
+        var open = Regex.Match(text[..q], @"bring\s+(?:\d+\s+)?(\w+)\s*\($", RegexOptions.RightToLeft);
+        if (!open.Success)
+        {
+            // Or the whole expanded block is already there and the caret sits inside it.
+            open = Regex.Match(text[..q], @"bring\s+(?:\d+\s+)?(\w+)\s*\(", RegexOptions.RightToLeft);
+            if (!open.Success) return false;
+        }
+
+        int lparen = text.IndexOf('(', open.Index);
+        if (lparen < 0) return false;
+
+        int rparen = BracketMatcher.Match(text, lparen) is { } pair && pair.Close > lparen ? pair.Close : -1;
+        if (rparen < 0 || rparen < q - 1) return false;
+
+        var ast = _service.Compile(new CompileRequest("untitled.vein", text,
+            ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
+        if (ast is null) return false;
+
+        if (BringBody(ast, open.Groups[1].Value, compact: true) is not { } compact) return false;
+
+        // Drop the just-typed `?` along with the block it followed.
+        _editor.Document.Replace(lparen, rparen - lparen + 1, compact);
+        _editor.CaretOffset = lparen + compact.Length;
+        SetStatus($"bring {open.Groups[1].Value}{compact} — every slot is its declared default; replace the ones you mean.");
+        return true;
+    }
+
     private string? EmitBody(CompilationUnit ast, string eventName) =>
         EventCatalog.Catalog(ast, ProjectDir).FirstOrDefault(e => e.Name == eventName) is { } ev
             ? EventCatalog.Body(ev) : null;
 
-    private string? BringBody(CompilationUnit ast, string builderName) =>
+    private string? BringBody(CompilationUnit ast, string builderName, bool compact = false) =>
         EventCatalog.Builders(ast, ProjectDir).FirstOrDefault(x => x.Name == builderName) is { } b
-            ? EventCatalog.Args(b) : null;
+            ? EventCatalog.Args(b, compact) : null;
 
     private static BuilderDecl? FindBuilder(CompilationUnit ast, string name)
     {

@@ -454,25 +454,28 @@ public class BundleIndexTests : IDisposable
 
         string body = EventCatalog.Body(Assert.Single(EventCatalog.Catalog(unit), e => e.Name == "Moved"));
 
-        Assert.Contains("x: ?      // required — float   from $Pos", body);
-        Assert.Contains("who: ?      // required — string", body);
-        Assert.DoesNotContain("who: ?      // required — string   from", body);   // declared inline
-        Assert.Contains("fast: ?      // optional — bool = false", body);         // not C#'s "False"
+        // The placeholder is a VALUE, not a `?`: `who: ?` is VS0104, so the old scaffold could not
+        // compile. What these assert is the PROVENANCE comment, which is the part an include hides.
+        Assert.Contains("x: 0.0      // required — float   from $Pos", body);
+        Assert.Contains("who: \"\"      // required — string", body);
+        Assert.DoesNotContain("who: \"\"      // required — string   from", body);   // declared inline
+        Assert.Contains("fast: false      // optional — bool = false", body);        // not C#'s "False"
     }
 
     [Fact]
     public void Builder_args_name_the_shape_each_slot_fills()
     {
-        // `bring` binds positionally, so the slots are bare `?`s. Without the comment there is nothing
-        // on screen saying which is which.
+        // `bring` binds positionally, so the slots carry no names. Without the comment there is nothing
+        // on screen saying which is which. Each slot is `base`, because `?` is not per-slot: `(?, ?)`
+        // VS0100.
         string dir = TempDir();
         var unit = Parse("bundle Demo by me { shape $Box { label: string, width: int }\n" +
                          " builder Box { $Box   markup = label } }", dir);
 
         string args = EventCatalog.Args(Assert.Single(EventCatalog.Builders(unit), b => b.Name == "Box"));
 
-        Assert.Contains("?,     // label: string   from $Box", args);
-        Assert.Contains("?      // width: int   from $Box", args);   // last slot, no comma
+        Assert.Contains("base,     // label: string   from $Box", args);
+        Assert.Contains("base      // width: int   from $Box", args);   // last slot, no comma
     }
 
     [Fact]

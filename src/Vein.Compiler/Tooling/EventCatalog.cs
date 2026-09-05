@@ -155,11 +155,35 @@ public static class EventCatalog
         if (e.Fields.Count == 0) return "{ }";
         var sb = new StringBuilder("{\n");
         foreach (var f in e.Fields.Where(f => f.Required).Concat(e.Fields.Where(f => !f.Required)))
-            sb.Append("    ").Append(f.Name).Append(": ?      // ")
+            sb.Append("    ").Append(f.Name).Append(": ").Append(Placeholder(f)).Append("      // ")
               .Append(f.Required ? "required — " + f.Type : "optional — " + f.Type + " = " + f.Default)
               .Append(f.OriginShape is null ? "" : "   from $" + f.OriginShape)
               .Append('\n');
         return sb.Append('}').ToString();
+    }
+
+    /// A VALUE for a field, not a `?`.
+    ///
+    /// This used to emit `name: ?`, and that does not parse: `?` is the standalone fill-the-rest marker,
+    /// and in value position it is VS0104 "unexpected '?' in expression". Every scaffolded emit body
+    /// with a field in it was code that could not compile — which is a strange thing for a scaffold to
+    /// hand you, and stranger still that the tool that produced it is the one that would reject it.
+    ///
+    /// A typed zero compiles and is editable, which is what a placeholder is for. A declared default is
+    /// used when there is one, so the line already says what the field would have been.
+    private static string Placeholder(EventField f)
+    {
+        if (!f.Required && f.Default is { Length: > 0 } d) return d;
+
+        return f.Type switch
+        {
+            "string" or "Mark" => "\"\"",
+            "int" => "0",
+            "float" => "0.0",
+            "bool" => "false",
+            "Entity" => "0",
+            _ => "0"
+        };
     }
 
     /// Every builder the unit declares, with its `$Shape` includes FLATTENED into the parameter list —
@@ -230,18 +254,32 @@ public static class EventCatalog
     /// Positional, because that is how `bring` binds, so the slot itself carries no name. The comment
     /// supplies it along with the `$Shape` the field came from — which for a builder is the whole point:
     /// an include flattens someone else's shape into this parameter list, and the reader is looking at
-    /// four bare `?`s with nothing on screen to say which is which.
-    public static string Args(BuilderEntry b)
+    /// four bare slots with nothing on screen to say which is which.
+    ///
+    /// EVERY SLOT IS `base`, and that is what makes this paste-able. It used to be `?`, which does not
+    /// parse: `bring X(?, ?)` is VS0100, because `?` fills the WHOLE argument list and is not a
+    /// per-slot token. `base` is — it means "this parameter's declared default", it mixes freely with
+    /// real values, and replacing one is exactly the edit a scaffold exists to invite.
+    ///
+    /// A parameter with no default still takes `base` and raises VS0231, which reads "'X' parameter 'a'
+    /// has no default, so `base` fills it with a typed zero. Give the field a default in its shape, or
+    /// pass a value." That is a better outcome than a silent hole: the compiler names the slots you
+    /// still have to think about.
+    public static string Args(BuilderEntry b, bool compact = false)
     {
         if (b.Fields.Count == 0) return "()";
+
+        // The one-line form: you already know the signature and want the slots.
+        if (compact) return "(" + string.Join(", ", b.Fields.Select(_ => "base")) + ")";
+
         var sb = new StringBuilder("(\n");
         for (int i = 0; i < b.Fields.Count; i++)
         {
             var f = b.Fields[i];
-            sb.Append("    ?").Append(i < b.Fields.Count - 1 ? "," : " ").Append("     // ").Append(f.Name)
+            sb.Append("    base").Append(i < b.Fields.Count - 1 ? "," : " ").Append("     // ").Append(f.Name)
               .Append(": ").Append(f.Type)
               .Append(f.OriginShape is null ? "" : "   from $" + f.OriginShape)
-              .Append(f.Required ? "" : "   optional — default " + f.Default)
+              .Append(f.Required ? "   REQUIRED — give it a value" : "   optional — default " + f.Default)
               .Append('\n');
         }
         return sb.Append(')').ToString();
