@@ -560,7 +560,7 @@ public sealed class CSharpBackend : IVeinBackend
     private void EmitShard(StringBuilder sb, IrShard shard)
     {
         _currentShard = shard.Name;
-        sb.AppendLine($"public sealed class {Ident(shard.Name)} : VeinSystem");
+        sb.AppendLine($"public sealed class {ShardIdent(shard)} : VeinSystem");
         sb.AppendLine("{");
         foreach (var f in shard.State) sb.AppendLine($"    public {Cs(f.Type)} {Ident(f.Name)};");
         if (shard.State.Count > 0) sb.AppendLine();
@@ -1426,6 +1426,40 @@ public sealed class CSharpBackend : IVeinBackend
         return CsKeywords.Contains(s) ? "@" + s : s;
     }
 
+    /// Members every shard class may declare. A shard named after one of them cannot use its own name
+    /// as its C# class name.
+    private static readonly HashSet<string> ShardMembers =
+        new(StringComparer.Ordinal) { "Once", "Tick", "Settled", "Subscribe" };
+
+    /// A shard's C# class name.
+    ///
+    /// `Ident` alone is not enough. C# forbids a member with the same name as its enclosing type, and
+    /// this class's members are named after the SCHEDULES — so `shard Tick { each tick { … } }` emitted
+    /// `class Tick { public override void Tick() }` and the entire generated file stopped compiling
+    /// with CS0542. `Tick` is not an exotic name for a shard; for anything with a clock it is the
+    /// obvious one, which is why samples/motion.vein hit it immediately.
+    ///
+    /// A state field counts too — `shard Count { var Count = 0 }` collides the same way — so the
+    /// shard's own fields join the reserved set rather than only the fixed four.
+    private string ShardIdent(IrShard shard)
+    {
+        string s = Ident(shard.Name);
+
+        bool taken =
+            // Its own members, named after the schedules.
+            ShardMembers.Contains(s) ||
+            shard.State.Any(f => string.Equals(Ident(f.Name), s, StringComparison.Ordinal)) ||
+            // A COMPONENT CLASS OF THE SAME NAME. Shapes emit top-level classes into the same
+            // namespace, and `shard Clock` beside a `$Clock` is ordinary VeinScript — the language
+            // already lets a shape and a mark share a name (RULES 14e) — but it emitted two
+            // `class Clock` and the file stopped compiling with CS0101.
+            _componentTypes.ContainsKey(shard.Name);
+
+        // A trailing underscore rather than a prefix: the name stays sorted and readable next to its
+        // siblings in the generated file, and nothing else here ends in one.
+        return taken ? s + "_" : s;
+    }
+
     // ---- entry point -----------------------------------------------------
 
     private void EmitEntryPoint(StringBuilder sb, IrModule module)
@@ -1442,7 +1476,7 @@ public sealed class CSharpBackend : IVeinBackend
         sb.AppendLine();
         sb.AppendLine("        var world = new VeinWorld();");
         foreach (var s in module.Shards)
-            sb.AppendLine($"        world.Register(new {Ident(s.Name)}());");
+            sb.AppendLine($"        world.Register(new {ShardIdent(s)}());");
         sb.AppendLine("        world.Start();");
         sb.AppendLine("        world.Run(ticks);");
         sb.AppendLine("    }");

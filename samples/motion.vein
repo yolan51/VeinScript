@@ -1,0 +1,119 @@
+// motion.vein — Vein.Transform and Vein.Time, used by a program that moves things.
+//
+//   veinc run samples/motion.vein --ticks 4
+//
+// In tools/check-backend.sh. Two stdlib bundles had no sample at all, so nothing checked that their
+// shapes still resolve into something a program can use — and this is also the only sample that does
+// `each tick` arithmetic in FLOAT. Everything else ticks in int.
+//
+// WHY THE INTEGRATION IS HERE AND NOT IN THE STDLIB. stdlib/Transform.vein says it outright: stepping
+// $Position from $Velocity is the application's job, because the rules — fixed or variable step,
+// clamping, sub-stepping — belong to the application. No bundle in stdlib/ declares a single shard,
+// bridge or ShardView; the standard library is vocabulary, not a framework. `$Velocity folds sum` is
+// the part stdlib DOES provide, and it is what lets the two force shards below stay unaware of
+// each other.
+//
+// A STDLIB SHAPE REACHES AN ENTITY THROUGH A BUILDER INCLUDE. `*Vein.Transform.Spatial.$Position`
+// inside a builder is the supported route, and the one stdlib/Web.vein already uses for
+// `*Vein.UI.Widgets.$Button`. The include resolves the qualified path away, so the component is named
+// `Position` — which is why `target $Position` matches it and `m.Position.x` reads it.
+//
+// NO CROSS-BUNDLE EVENTS HERE, DELIBERATELY. `Vein.Time.@Ticked` and `Vein.Transform.@Moved` would be
+// the natural way to write this, and the interpreter runs them fine — but the C# backend does not emit
+// a `hear` for an event declared in another bundle (it says so: "there is no payload type here and its
+// transport lives on the interpreter"). A sample in check-backend.sh has to be a program BOTH runtimes
+// can run, or it is not a differential test. So the clock is read directly and the step happens in
+// `each tick`. Covering @Ticked and @Moved needs the backend to emit payload types for external
+// events first; docs/SAMPLES.md records that.
+//
+// TIME IS SUPPLIED BY THE PROGRAM, not read from a clock. stdlib/Time.vein's header says a runtime
+// emits time "when appropriate", so a program stepping its own clock is the documented contract rather
+// than a workaround. It is also what makes this runnable in check-backend.sh at all: a sample whose
+// output depends on wall-clock time fails at random, and a test that fails at random gets deleted.
+
+bundle Motion by you {
+
+    mark #Moving
+
+    // Two includes in one builder. Their fields collide by name — both $Position and $Velocity declare
+    // x, y and z — and that is fine, because arguments bind POSITIONALLY across the includes in
+    // declaration order: the first three are the position, the next three the velocity.
+    builder Mover {
+        *Vein.Transform.Spatial.$Position
+        *Vein.Transform.Spatial.$Velocity
+        mark #Moving
+    }
+
+    // $Clock is Vein.Time's shape, carried on the identity that owns the step. `delta` is fixed at half
+    // a second so four frames are readable by hand.
+    builder Ticker {
+        *Vein.Time.Clock.$Clock
+        mark #Clock
+    }
+    mark #Clock
+
+    shard Start {
+        run once {
+            bring Mover(0.0, 100.0, 0.0,  0.0, 0.0, 0.0)
+            bring Ticker(0.0, 0.5)
+        }
+    }
+
+    // ---- two independent forces, neither aware of the other ----------------------------------------
+    //
+    // THIS IS WHAT `folds sum` IS FOR. Both shards write the same field in the same frame. Neither reads
+    // the other, neither runs in a defined order relative to the other, and the runtime reconciles the
+    // two writes into one value at the frame boundary. Written any other way, one of them would win.
+    //
+    // Because contributions accumulate frame after frame, a constant force reads as an ACCELERATION —
+    // which is exactly what gravity is.
+
+    shard Gravity {
+        each tick { target $Velocity #Moving as m { m.Velocity.y -= 4.9 } }
+    }
+
+    shard Wind {
+        each tick { target $Velocity #Moving as m { m.Velocity.x += 1.0 } }
+    }
+
+    shard Clock {
+        each tick { target $Clock #Clock as c { c.Clock.now += c.Clock.delta } }
+    }
+
+    // ---- the application's own integration step ----------------------------------------------------
+    //
+    // THE FIRST FRAME DOES NOT MOVE, and that is the phase boundary showing through rather than a bug.
+    // The forces above contribute during frame 1; those contributions are reconciled at the boundary
+    // and are what frame 2 reads (RULES 11/12b). So position always steps by the velocity as it stood
+    // at the END of the previous frame — an explicit Euler step, which is the ordinary one.
+
+    shard Step {
+        each tick {
+            target $Position $Velocity #Moving as m {
+                m.Position.x += m.Velocity.x * 0.5
+                m.Position.y += m.Velocity.y * 0.5
+            }
+        }
+    }
+
+    // Reported from `settled`, after every contribution in the frame has been reconciled — reporting
+    // from `each tick` would race the shards above and print a half-built frame.
+    //
+    // Rounded on the way out because a float printed at full precision is an implementation detail with
+    // a decimal point in it: 0.1 + 0.2 is 0.30000000000000004 in any language with doubles.
+    shard Report {
+        settled {
+            target $Clock #Clock as c {
+                emit *Vein.Console.Io.@Print { text: "t = " + *Vein.Math.Round.roundTo(c.Clock.now, 2) }
+            }
+            target $Position $Velocity #Moving as m {
+                emit *Vein.Console.Io.@Print {
+                    text: "  at " + *Vein.Math.Round.roundTo(m.Position.x, 2) +
+                          ", " + *Vein.Math.Round.roundTo(m.Position.y, 2) +
+                          "   v " + *Vein.Math.Round.roundTo(m.Velocity.x, 2) +
+                          ", " + *Vein.Math.Round.roundTo(m.Velocity.y, 2)
+                }
+            }
+        }
+    }
+}

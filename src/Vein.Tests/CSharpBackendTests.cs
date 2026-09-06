@@ -311,4 +311,100 @@ public class CSharpBackendTests
         Assert.True(guard >= 0, "expected a `continue` guard for the second component");
         Assert.True(bump > guard, "the index must be incremented after the guard, not before it");
     }
+
+    // ---- names that are legal VeinScript and illegal C# --------------------------------------------
+    //
+    // The generated file is C#, and C# reserves things VeinScript does not. Every one of these compiled
+    // clean, ran correctly in the interpreter, and produced a .g.cs that would not build — which is the
+    // worst shape a backend bug can have, because nothing before the C# compiler says a word.
+
+    [Theory]
+    [InlineData("Tick")]
+    [InlineData("Once")]
+    [InlineData("Settled")]
+    [InlineData("Subscribe")]
+    public void A_shard_named_after_one_of_its_own_members_is_renamed(string name)
+    {
+        // C# forbids a member with the same name as its enclosing type, and a shard's members are named
+        // after the SCHEDULES. `shard Tick { each tick { … } }` emitted `class Tick { void Tick() }` —
+        // CS0542, whole file dead. For anything with a clock, `Tick` is the obvious name.
+        var (code, _) = Emit($"shard {name} {{ each tick {{ }} }}");
+
+        Assert.DoesNotContain($"class {name} : VeinSystem", code);
+        Assert.Contains($"class {name}_ : VeinSystem", code);
+        Assert.Contains($"new {name}_()", code);      // and the registration follows the rename
+    }
+
+    [Fact]
+    public void A_shard_sharing_a_name_with_a_shape_is_renamed()
+    {
+        // Shapes emit top-level classes into the same namespace. `shard Clock` beside a `$Clock` is
+        // ordinary VeinScript — the language already lets a shape and a mark share a name (RULES 14e)
+        // — but it emitted two `class Clock` and failed with CS0101.
+        var (code, _) = Emit("""
+            shape $Clock { now: float }
+            mark #C
+            shard Clock { each tick { target $Clock #C as c { c.Clock.now += 1.0 } } }
+            """);
+
+        Assert.Contains("class Clock_ : VeinSystem", code);
+        Assert.Contains("new Clock_()", code);
+    }
+
+    [Fact]
+    public void A_shard_sharing_a_name_with_its_own_state_field_is_renamed()
+    {
+        var (code, _) = Emit("shard Count { var Count = 0\n each tick { Count = Count + 1 } }");
+        Assert.Contains("class Count_ : VeinSystem", code);
+    }
+
+    [Fact]
+    public void An_ordinary_shard_name_is_left_alone()
+    {
+        // The rename is for collisions only. Suffixing everything would churn every generated file and
+        // make the output harder to read for no reason.
+        var (code, _) = Emit("shard Gravity { each tick { } }");
+
+        Assert.Contains("class Gravity : VeinSystem", code);
+        Assert.DoesNotContain("class Gravity_", code);
+    }
+
+    // ---- string literals ----------------------------------------------------------------------------
+
+    [Fact]
+    public void A_newline_in_a_string_survives_into_the_generated_file()
+    {
+        // The lexer turns `\n` in source into a real newline long before the backend sees it, so
+        // emitting it raw put a line break inside a C# literal — CS1010, and nothing in the file
+        // compiled. `lines("a\nb")` is the most ordinary thing to write in a program handling text.
+        var (code, _) = Emit("""
+            shard S { run once { let x = lines("a\nb") } }
+            """);
+
+        Assert.Contains(@"""a\nb""", code);
+        Assert.DoesNotContain("\"a\nb\"", code);
+    }
+
+    [Theory]
+    [InlineData(@"a\tb", @"a\tb")]
+    [InlineData(@"a\rb", @"a\rb")]
+    public void Other_characters_C_sharp_will_not_take_bare_are_escaped(string source, string expected)
+    {
+        var (code, _) = Emit($"shard S {{ run once {{ let x = \"{source}\" }} }}");
+        Assert.Contains(expected, code);
+    }
+
+    [Fact]
+    public void A_quote_inside_a_string_stays_escaped()
+    {
+        // The one case that already worked before the escaping fix, kept so a rewrite of Escape cannot
+        // drop it while adding the newline handling.
+        var (code, _) = Emit("""
+            shard S { run once { let x = "say \"hi\"" } }
+            """);
+
+        Assert.Contains("""
+            "say \"hi\""
+            """, code);
+    }
 }

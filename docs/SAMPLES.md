@@ -45,7 +45,7 @@ with the number of frames to run it for.
 - **events** — `events`, `payload`, `dom_rewire`
 - **text and values** — `entities_chars`, `entities_convert`, `text_search`, `text_split_join`
 - **control flow** — `loops`
-- **stdlib** — `math_round`
+- **stdlib** — `math_round`, `motion`
 
 ---
 
@@ -64,20 +64,24 @@ reserved.
 
 ### Still missing
 
-**Five stdlib bundles have no sample at all:** `Game`, `Input`, `Time`, `Transform`, `UI`.
+**Three stdlib bundles have no sample at all:** `Game`, `Input`, `UI`. (`Transform` and `Time` are
+covered by `motion.vein`.)
 
 Each declares shapes and events that nothing in `samples/` ever constructs, so nothing checks that they
-still parse into what a program can use. They are the highest-value remaining work, in this order:
+still parse into what a program can use. In order of value:
 
-1. **`Transform` + `Time`** — `$Position`, `$Velocity`, `$Clock`, `@Ticked`. The pair is one sample:
-   move an identity by its velocity each tick. It also exercises `each tick` with float arithmetic,
-   which nothing else does.
-2. **`Input`** — `@KeyDown`, `@TextInput`, `@MouseDown`. Hard to drive from a test, so the sample is
-   about the *wiring*: a shard that hears each one and reports. It would go in `check-backend.sh` with
-   the events emitted by the program rather than by a device.
-3. **`UI`** — `$Button`, `$Field`, `@Clicked`. Overlaps the existing web samples; the gap is that none
+1. **`Input`** — `@KeyDown`, `@TextInput`, `@MouseDown`. Hard to drive from a test, so the sample is
+   about the *wiring*: a shard that hears each one and reports.
+2. **`UI`** — `$Button`, `$Field`, `@Clicked`. Overlaps the existing web samples; the gap is that none
    of them use the `UI` bundle's own declarations.
-4. **`Game`** — `$Collider`, `@Collided`, `@Damaged`. The most involved, and the least urgent.
+3. **`Game`** — `$Collider`, `@Collided`, `@Damaged`. The most involved, and the least urgent.
+
+**All three are blocked from `check-backend.sh` by the same limitation**, which is worth fixing before
+writing them: the C# backend does not emit a `hear` for an event declared in **another bundle** — there
+is no payload type on that side, and it says so in a note rather than failing silently. Since all three
+bundles are event-shaped, a sample for any of them is interpreter-only until the backend emits payload
+types for external events. `motion.vein` works around it by using only stdlib *shapes*, which do cross
+bundles correctly, and doing its stepping in `each tick`. That is why it covers no `@Ticked`/`@Moved`.
 
 **Two smaller ones:**
 
@@ -126,6 +130,21 @@ Emitted as bare calls to C# methods that do not exist, by the deliberate `Unimpl
 fail loudly rather than compute something else. The rule is right; the gap it was reporting was that
 **any program doing text handling could not be compiled to C#**. All five are now implemented in
 `__VeinText`, and `check-backend.sh` diffs them against the interpreter.
+
+### Two shard names that are legal VeinScript and illegal C#
+
+Found by `motion.vein`, and both had the worst shape a backend bug can have: the program compiled
+clean, ran correctly in the interpreter, and produced a `.g.cs` that would not build, with nothing
+before the C# compiler saying a word.
+
+- **`shard Tick`** emitted `class Tick { public override void Tick() }` — C# forbids a member with the
+  same name as its enclosing type (CS0542). A shard's members are named after the schedules, so `Once`
+  and `Settled` were the same trap. For anything with a clock, `Tick` is the obvious name.
+- **`shard Clock` beside a `$Clock`** emitted two `class Clock` in one namespace (CS0101). The language
+  already lets a shape and a mark share a name (RULES 14e), so this is ordinary code.
+
+`ShardIdent` now suffixes a shard class name that collides with its own members, its own state fields,
+or a component class. Ordinary names are untouched.
 
 ### And one gap in `Resolve`
 
