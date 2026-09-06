@@ -348,6 +348,21 @@ public sealed class Lower
             Array.Empty<IrEnumCase>(), null, new[] { IrAttr.Of("component") });
     }
 
+    /// A shape named by an `attach` statement. Local ones need nothing; a non-local one has its type
+    /// imported so the component can be READ back after it is written.
+    ///
+    /// Silent when the name resolves to nothing at all. `attach` has never diagnosed an unknown shape —
+    /// it lowers to a runtime call on a bare name — and starting here would report it from the wrong
+    /// place, with a message about importing rather than about the name being wrong. VS0233 already
+    /// covers the ascription case; an `attach` diagnostic is its own change.
+    private void RegisterAttachedShape(string name, SourceSpan span)
+    {
+        if (_shapeFields.ContainsKey(name)) return;      // declared here — nothing to import
+
+        if (ResolveUsed(Index.Shapes, "$", name, span)?.Value.Members.OfType<FieldDecl>().ToList() is { } fields)
+            RegisterImportedShape(name, fields);
+    }
+
     private IEnumerable<IrType> LowerShape(ShapeDecl s)
     {
         var fields = new List<IrField>();
@@ -1062,6 +1077,15 @@ public sealed class Lower
                 if (at.Remove)
                     return new IrExprStmt(new IrRuntimeCall("RemoveComponent",
                         new IrExpr[] { LowerExpr(at.Target), new IrTypeNameExpr(at.Shape) }));
+
+                // THE SAME IMPORT A BUILDER INCLUDE DOES, and for the same reason. `use Transform` then
+                // `attach $Position to e { … }` resolved the name well enough to lower and to match a
+                // `target $Position`, but the module carried no component type for it — so every read
+                // of `m.Position.x` came back empty, silently, in a program that compiled without a
+                // word. The include path was fixed for this once; the attach STATEMENT is the other
+                // way in and was missed.
+                RegisterAttachedShape(at.Shape, at.Span);
+
                 IrExpr init = at.Init is null
                     ? new IrTypeNameExpr(at.Shape)
                     : new IrStructInit(at.Shape, at.Init.Select(LowerFieldInit).ToList());

@@ -187,4 +187,108 @@ public class UseResolutionTests
             "  shard S { run once { print(\"hi\") } }\n}").Diagnostics,
             d => d.Code == "VS0234");
     }
+
+    // ---- attaching a shape that `use` resolved ------------------------------------------------------
+    //
+    // THE ATTACH WORKED AND THE READ DID NOT, which is the worst shape a bug can take. The entity
+    // spawned, `target $Position #Moving` MATCHED it, and `m.Position.x` came back empty — because a
+    // field access resolves to a component only when the module carries a component type of that name
+    // (Interp.IsComponent), and nothing imported one.
+    //
+    // Lower already had `RegisterImportedShape` for exactly this, added when a builder INCLUDE hit the
+    // same wall. The `attach` statement is the other way in and was missed.
+
+    private const string UsedShape = """
+        bundle T by me {
+            use Transform
+            mark #Moving
+            shard Make {
+                run once {
+                    let e = spawn()
+                    attach $Position to e { x: 1.5, y: 2.5, z: 0.0 }
+                    mark e #Moving
+                }
+            }
+            shard Show {
+                each tick {
+                    target $Position #Moving as m {
+                        emit *Vein.Console.Io.@Print { text: "at " + m.Position.x + "," + m.Position.y }
+                    }
+                }
+            }
+        }
+        """;
+
+    [Fact]
+    public void A_shape_reached_through_use_can_be_read_back_after_it_is_attached()
+    {
+        Assert.Contains("at 1.5,2.5", Run(UsedShape, ticks: 1));
+    }
+
+    [Fact]
+    public void The_module_carries_the_imported_component_type()
+    {
+        // The mechanism behind the test above, asserted directly — and it is also what gives the C#
+        // backend a component to emit, so the two runtimes cannot disagree about a shape one of them
+        // has never heard of.
+        var module = Assert.Single(Compile(UsedShape).Modules);
+
+        Assert.Contains(module.Types, t =>
+            t.Name == "Position" && t.Kind == Vein.Compiler.Ir.IrTypeKind.Component);
+    }
+
+    [Fact]
+    public void The_backend_emits_the_imported_component_too()
+    {
+        // The other half, and the one that decides whether this fix created a DIVERGENCE instead of
+        // curing one. The C# backend builds its component types from `module.Types`, so importing the
+        // shape there is what stops the compiled program from knowing nothing about a shape the
+        // interpreter can read — which would have been a worse bug than the one being fixed.
+        var module = Assert.Single(Compile(UsedShape).Modules);
+        var emitted = new Vein.Compiler.Backends.CSharpBackend().Emit(module);
+
+        Assert.True(emitted.Success);
+        Assert.Contains("struct Position", emitted.Files[0].Contents);
+        Assert.Contains("public double x", emitted.Files[0].Contents);
+    }
+
+    [Fact]
+    public void A_locally_declared_shape_is_not_replaced_by_a_used_one()
+    {
+        // `use` only ever WIDENS what a bare name may mean. A bundle that declares its own `$Position`
+        // keeps it, fields and all, even while using a bundle that exports one too — otherwise adding a
+        // `use` line could silently change the shape of data a program already stores.
+        var result = Compile("""
+            bundle T by me {
+                use Transform
+                shape $Position { label: string }
+                mark #Here
+                shard Make {
+                    run once {
+                        let e = spawn()
+                        attach $Position to e { label: "home" }
+                        mark e #Here
+                    }
+                }
+                shard Show {
+                    each tick {
+                        target $Position #Here as p {
+                            emit *Vein.Console.Io.@Print { text: "label " + p.Position.label }
+                        }
+                    }
+                }
+            }
+            """);
+        Assert.True(result.Success, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var position = Assert.Single(result.Modules[0].Types,
+            t => t.Name == "Position" && t.Kind == Vein.Compiler.Ir.IrTypeKind.Component);
+
+        Assert.Contains(position.Fields, f => f.Name == "label");
+        Assert.DoesNotContain(position.Fields, f => f.Name == "x");
+
+        var output = new StringWriter();
+        new Interp { Ticks = 1 }.Run(result.Modules[0], new StringReader(""), output);
+        Assert.Contains("label home", output.ToString());
+    }
 }
