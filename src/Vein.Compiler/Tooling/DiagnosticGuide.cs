@@ -73,6 +73,9 @@ public static class DiagnosticGuide
 
         new("VS0235", "The built-ins are total: a wrong argument count answers an empty value rather than failing, so `substring(s)` is \"\" and `int()` is 0. Defined, but indistinguishable from a real answer — which is why the count is worth saying out loud.",
             "docs/RULES.md — built-ins"),
+
+        new("VS0236", "A query's binding reads fields, and the shapes it names are what give it fields to read — `target #Enemy as e` leaves `e` with nothing on it. It was also silently skipped by the C# backend, which has no query-by-mark, so the same program did one thing interpreted and another compiled.",
+            "docs/RULES.md — target"),
     };
 
     private static readonly Dictionary<string, DiagnosticNote> ByCode =

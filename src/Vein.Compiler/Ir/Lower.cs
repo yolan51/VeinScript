@@ -1073,6 +1073,29 @@ public sealed class Lower
                 // reference to `Marks.Ghost` and no `Marks` class to hold it, so the generated C# did not
                 // compile. Querying a mark nothing sets is legitimate — the query is simply always empty.
                 foreach (var tag in q.Tags) UseMark(tag, q.Span);
+
+                // A QUERY NAMES AT LEAST ONE SHAPE. `target #Enemy as e { … }` is marks only, and the
+                // binding it produces can read nothing — there is no component on it, so `e.Anything`
+                // resolves to nothing and the body can only count.
+                //
+                // It was also silently WRONG once compiled. Every `VeinWorld.Query` overload takes a
+                // component type, so the C# backend skipped the loop entirely and its body never ran,
+                // while the interpreter ran it — a program that behaved differently depending on how it
+                // was run, with nothing reported either way. The choice was to add a query-by-mark at
+                // the back or to require the shape at the front; requiring it is the smaller language
+                // and closes the divergence where it can be seen.
+                //
+                // Naming the shape is what you were going to write anyway: the body reads fields, and
+                // the query is what gives the binding a type to read them from.
+                if (q.Components.Count == 0)
+                {
+                    string marks = string.Join(" ", q.Tags.Select(t => "#" + t));
+                    _diag.Error("VS0236",
+                        $"`target {marks}` names no shape, so `{q.Bind}` has no fields to read. A query " +
+                        $"needs at least one — write `target $Shape {marks} as {q.Bind}` with the shape " +
+                        "whose data the body uses.", q.Span);
+                }
+
                 using var _ = BindTarget(q.Bind);
                 return new IrLoop(IrLoopKind.Target, null, q.Bind, null, new IrQuery(q.Components, q.Tags, q.Bind, q.OrderShape, q.OrderField), null, LowerBlock(q.Body));
             }

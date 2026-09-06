@@ -1,5 +1,20 @@
 # VeinScript for 2D/3D games, and the IDE that would make it one
 
+> **§1's recommendation is withdrawn, and §4–§5 with it.** This document argued for consolidating into
+> `VeinEngine/ShardECS` and keeping its Avalonia editor. That was reasoned from a file count; the
+> Avalonia editor had *already been tried* — 3D rendering was buggy, extensive prompting and
+> scaffolding produced little, and raw OpenGL gave better results. Experience of the failure beats an
+> inventory.
+>
+> **The decision taken instead:** a fresh solution with a **Dear ImGui editor over an OpenGL renderer**,
+> project-referencing this repo's compiler, alongside the existing Avalonia Workbench as the lightweight
+> code IDE. Two apps, each good at one thing. That solution is **read-only toward this repo** and
+> queues what it needs in its own `RequiredModificationPlan.md`, because the four checks here are what
+> caught nine compiler bugs this week and they do not travel.
+>
+> **§2 and §3 below still stand** — what gates games in the language, and the state of the engine repo.
+> One item has since been closed: the mark-only `target` is now the error `VS0236`.
+
 ## Context
 
 The ask: make VeinScript able to build 2D and 3D games; build an IDE with a renderer, asset tooling and
@@ -85,11 +100,15 @@ So the work is a **distinction that does not exist yet**: which stdlib events ar
 (emit them) and which have host transport (keep the note). That is a language decision — probably a
 marker on the declaration — before it is a backend change. See `docs/SAMPLES.md` §3.
 
-### 2b. A mark-only `target` is silently skipped by the backend
+### 2b. A mark-only `target` — closed
 
-`target #Enemy as e { … }` runs interpreted and never runs compiled — every `VeinWorld.Query` overload
-takes a component type and there is no query-by-mark. Games query by tag constantly. Fix is a
-`QueryByMark<M1…>` on `VeinWorld` with its own cache path, plus emission.
+`target #Enemy as e { … }` ran interpreted and never ran compiled: every `VeinWorld.Query` overload
+takes a component type and there is no query-by-mark, so the backend skipped the loop entirely.
+
+Closed as **`VS0236`**, an error — a query must name at least one shape. Requiring it is a smaller
+change than adding query-by-mark, and it closes the divergence at the front where a person can see it.
+The rule is also the honest one: a binding reads fields, and the shapes are what give it fields to
+read.
 
 ### 2c. Things games need that the language has never had
 

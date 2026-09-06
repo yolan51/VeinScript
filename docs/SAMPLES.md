@@ -70,7 +70,8 @@ reserved.
 ### Still missing
 
 **Every stdlib bundle now has a sample**, and every built-in has a call site. What is left is not a
-missing sample but two limitations that decide what a sample is *allowed* to do.
+missing sample but one limitation that decides what a sample is *allowed* to do — plus one that used to
+be a limitation and is now a compile error.
 
 ### 1. Cross-bundle events cannot be diffed
 
@@ -88,16 +89,25 @@ The events in `stdlib_events.vein` *are* pure data, so lifting it for those spec
 sound. Doing that needs a way to tell a data occurrence from one with host transport, which nothing
 records today. That is the open item, and it is a language/stdlib question before it is a backend one.
 
-### 2. A mark-only `target` is not emitted at all
+### 2. A mark-only `target` — closed, as VS0236
 
-`target #Alive as a { … }` — no shape, just a mark — runs in the interpreter and is **silently skipped
-by the backend**, whose note reads *"target with no query and no source not emitted"*. Every
-`VeinWorld.Query` overload takes a component type; there is no query-by-mark, so the loop body simply
-never runs in compiled code.
+`target #Alive as a { … }` — no shape, just a mark — used to run in the interpreter and be **silently
+skipped by the backend**, whose note read *"target with no query and no source not emitted"*. Every
+`VeinWorld.Query` overload takes a component type and there is no query-by-mark, so the loop body never
+ran in compiled code. The same program did one thing interpreted and another compiled, with nothing
+reported either way.
 
-Nothing in the repo depended on it, which is why it went unnoticed until `entities_destroy.vein` tried
-it. That sample names a shape alongside the mark as a workaround, and says so. The fix is a
-`QueryByMark<M1…>` on `VeinWorld` with its own cache path, plus emission for it.
+There were two ways to close it: add `QueryByMark<M1…>` to the runtime, or require the shape. **The
+shape is now required** — `VS0236`, an error. It is the smaller language, and it closes the divergence
+at the front where a person can see it rather than at the back where they cannot.
+
+It is also the honest rule. A query's binding reads fields, and the shapes it names are what give it
+fields to read; `target #Enemy as e` leaves `e` with nothing on it, so the body could only ever count.
+Naming the shape is what the body needed anyway.
+
+Nothing shipped depended on it — `entities_destroy.vein` was the only file that ever wrote one, and it
+names `$Health` alongside the mark. `TargetShapeRequiredTests` sweeps `samples/` and `stdlib/` to keep
+that true.
 
 ---
 

@@ -87,12 +87,14 @@ bundle Destroying by you {
     // Three counts rather than one, because each removal answers a different question: the #Alive count
     // tracks marks, $Shield tracks components, and $Health tracks identities that still exist at all.
     //
-    // The mark count names $Health as well, and that is a WORKAROUND rather than a preference. A
-    // mark-only `target #Alive as a` is what this wants to say, and the interpreter runs it — but the
-    // C# backend does not emit one at all (its note: "target with no query and no source not emitted"),
-    // because every VeinWorld.Query overload takes a component type and there is no query-by-mark. The
-    // loop body would simply never run in the compiled program, silently. Every entity here carries
-    // $Health, so naming it changes no count. docs/SAMPLES.md records the gap.
+    // The mark count names $Health as well, and that is now the RULE rather than a workaround. A
+    // mark-only `target #Alive as a` is VS0236: a query's binding reads fields, and the shapes it names
+    // are what give it fields to read.
+    //
+    // It used to compile and was silently skipped by the C# backend — every VeinWorld.Query overload
+    // takes a component type — so this file ran one way interpreted and another compiled. Requiring the
+    // shape closes that where it can be seen. Every entity here carries $Health, so naming it changes
+    // no count.
 
     shard During {
         each tick {
