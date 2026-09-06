@@ -115,6 +115,23 @@ internal sealed class EditorTabs : UserControl
         else Refresh();
     }
 
+    /// Close a tab WITHOUT asking about unsaved changes.
+    ///
+    /// For one case only: the file behind it has been deleted. `CloseAsync` would offer to save it
+    /// first, and taking that offer writes the deleted file straight back — so the prompt is not a
+    /// safety net here, it is a way to undo the delete by accident.
+    public void Discard(Doc doc)
+    {
+        int at = _docs.IndexOf(doc);
+        if (at < 0) return;
+
+        _docs.Remove(doc);
+
+        if (_docs.Count == 0) { Activate(null); return; }
+        if (ReferenceEquals(Active, doc)) Activate(_docs[Math.Clamp(at, 0, _docs.Count - 1)]);
+        else Refresh();
+    }
+
     /// Rebuild the strip. Small enough that recreating beats tracking per-button state.
     private void Refresh()
     {

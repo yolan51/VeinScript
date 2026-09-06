@@ -142,6 +142,7 @@ public partial class MainWindow : Window
         _irTree = this.FindControl<TreeView>("IrTree")!;
         _diagBox = this.FindControl<ListBox>("Diagnostics")!;
         _projectTree = this.FindControl<TreeView>("ProjectTree")!;
+        BuildExplorerMenu();
         _depsTree = this.FindControl<TreeView>("DepsTree")!;
         _execPanel = this.FindControl<ScrollViewer>("ExecPanel")!;
         _topCols = this.FindControl<Grid>("TopCols")!;
@@ -1559,9 +1560,14 @@ public partial class MainWindow : Window
         catch { return null; }
     }
 
+    /// A folder in the tree. `Tag` is a FolderRef rather than a bare string so the context menu can tell
+    /// a folder from a file without asking the disk — and so `OnProjectItemActivated`, which matches on
+    /// `Tag: string`, keeps ignoring folders exactly as it did.
+    private sealed record FolderRef(string Path);
+
     private static TreeViewItem FolderNode(DirectoryInfo dir)
     {
-        var item = new TreeViewItem { Header = dir.Name };
+        var item = new TreeViewItem { Header = dir.Name, Tag = new FolderRef(dir.FullName) };
         // Show ALL project folders (including empty skeleton folders like shapes/ events/), except the
         // build/VCS blocklist — so a freshly scaffolded bundle/app shows its full structure.
         foreach (var sub in dir.GetDirectories().OrderBy(d => d.Name))
@@ -1588,6 +1594,269 @@ public partial class MainWindow : Window
                 await OpenPathAsync(path);
                 break;
         }
+    }
+
+    // ---- the Project Explorer's context menu -----------------------------------------------------
+    //
+    // New file, new folder, rename, delete. Every rule about what is allowed lives in
+    // ProjectEdits (Vein.Compiler/Project) rather than here, so it can be tested without a window —
+    // and so "can I delete this" has one answer rather than one per call site.
+    //
+    // WHAT IS SELECTED DECIDES WHERE, and a file means its folder. Right-clicking `shards/Boot.vein`
+    // and choosing New File means "another one next to this", which is what the tree looks like it
+    // means; taking it to mean the project root would put the file somewhere nobody was pointing.
+
+    /// The path the menu acts on, and whether it is a folder. Null when the selection is not something
+    /// this menu can touch — the stdlib branch, or a bundle node in the semantic view.
+    private (string Path, bool IsFolder)? Selected() => _projectTree.SelectedItem switch
+    {
+        TreeViewItem { Tag: FolderRef f } => (f.Path, true),
+        TreeViewItem { Tag: string p } when File.Exists(p) => (p, false),
+        _ => null
+    };
+
+    /// Where a new entry goes: the selected folder, the selected file's folder, or the project root.
+    private string? TargetFolder() => Selected() switch
+    {
+        (var path, true) => path,
+        (var path, false) => Path.GetDirectoryName(path),
+        _ => _rootFolder
+    };
+
+    private void BuildExplorerMenu()
+    {
+        var newFile = Item("New VeinScript File…", () => _ = NewEntryAsync(EntryKind.File));
+        var newFolder = Item("New Folder…", () => _ = NewEntryAsync(EntryKind.Folder));
+        var rename = Item("Rename…", () => _ = RenameEntryAsync());
+        var delete = Item("Delete…", () => _ = DeleteEntryAsync());
+        var reveal = Item("Reveal in File Explorer", RevealSelected);
+
+        var menu = new ContextMenu
+        {
+            ItemsSource = new object[]
+            {
+                newFile, newFolder, new Separator(), rename, delete, new Separator(), reveal
+            }
+        };
+
+        // Opened on the current selection, so the items reflect what is actually under the pointer
+        // rather than what was selected last time.
+        menu.Opening += (_, _) =>
+        {
+            var sel = Selected();
+            bool has = sel is not null;
+            bool editable = has && ProjectEdits.DeleteProblem(_rootFolder, sel!.Value.Path) is null;
+
+            newFile.IsEnabled = TargetFolder() is not null;
+            newFolder.IsEnabled = newFile.IsEnabled;
+            rename.IsEnabled = editable;
+            delete.IsEnabled = editable;
+            reveal.IsEnabled = has;
+
+            // Naming the thing beats a generic verb: "Delete…" over a folder full of work should say
+            // so before it is clicked, not only in the prompt afterwards.
+            string what = has ? Path.GetFileName(sel!.Value.Path.TrimEnd(Path.DirectorySeparatorChar)) : "";
+            rename.Header = has ? $"Rename '{what}'…" : "Rename…";
+            delete.Header = has ? $"Delete '{what}'…" : "Delete…";
+        };
+
+        _projectTree.ContextMenu = menu;
+    }
+
+    private static MenuItem Item(string header, Action run)
+    {
+        var item = new MenuItem { Header = header };
+        item.Click += (_, _) => run();
+        return item;
+    }
+
+    private async Task NewEntryAsync(EntryKind kind)
+    {
+        if (TargetFolder() is not { } parent) { SetStatus("Open a project folder first."); return; }
+
+        bool file = kind == EntryKind.File;
+        string? typed = await PromptDialog.ShowAsync(this,
+            file ? "New VeinScript File" : "New Folder",
+            $"Name (in {Path.GetFileName(parent.TrimEnd(Path.DirectorySeparatorChar))})",
+            file ? ".vein" : "");
+
+        if (typed is null) return;
+
+        if (ProjectEdits.CreateProblem(_rootFolder, parent, typed, kind) is { } why)
+        {
+            SetStatus($"Cannot create that — {why}");
+            return;
+        }
+
+        string name = file ? ProjectEdits.FileName(typed) : typed.Trim();
+        string target = Path.Combine(parent, name);
+
+        try
+        {
+            if (file)
+            {
+                // A new bundle file that is EMPTY is a VS0101 the moment it opens, which greets a new
+                // file with an error about nothing the person did. A header named after the file is
+                // what they were going to type anyway.
+                await File.WriteAllTextAsync(target, Scaffold(name));
+                PopulateProjectTree(_rootFolder!);
+                await OpenPathAsync(target);
+            }
+            else
+            {
+                Directory.CreateDirectory(target);
+                PopulateProjectTree(_rootFolder!);
+            }
+
+            SetStatus($"Created {Path.GetRelativePath(_rootFolder!, target).Replace('\\', '/')}");
+        }
+        catch (Exception ex) { SetStatus($"Could not create it — {ex.Message}"); }
+    }
+
+    /// The starting contents of a new .vein file: a bundle named after it, and nothing else.
+    ///
+    /// Only for a file at the project's top level. Inside `shards/` or `publicators/` a file is a
+    /// FRAGMENT — BundleLoader merges it into the bundle around it and a `bundle` header there is
+    /// VS0321 — so those start empty, which is correct rather than lazy.
+    private string Scaffold(string fileName)
+    {
+        string stem = Path.GetFileNameWithoutExtension(fileName);
+        string? parent = TargetFolder();
+        string folder = parent is null ? "" : Path.GetFileName(parent.TrimEnd(Path.DirectorySeparatorChar));
+
+        if (BundleLoader.FragmentFolders.Contains(folder, StringComparer.OrdinalIgnoreCase)) return "";
+
+        string author = _session?.PublishHandle ?? "you";
+        return $"bundle {stem} by {author} {{\n\n}}\n";
+    }
+
+    private async Task RenameEntryAsync()
+    {
+        if (Selected() is not { } sel) return;
+
+        string current = Path.GetFileName(sel.Path.TrimEnd(Path.DirectorySeparatorChar));
+        string? typed = await PromptDialog.ShowAsync(this, "Rename", "New name", current);
+        if (typed is null || typed.Trim() == current) return;
+
+        if (ProjectEdits.RenameProblem(_rootFolder, sel.Path, typed) is { } why)
+        {
+            SetStatus($"Cannot rename — {why}");
+            return;
+        }
+
+        string target = Path.Combine(Path.GetDirectoryName(sel.Path)!, typed.Trim());
+
+        try
+        {
+            // The OPEN TABS have to move with it. A tab still pointing at the old path saves the file
+            // back into existence under its old name on the next Ctrl+S — so the rename appears to
+            // have half worked, which is worse than it failing.
+            if (sel.IsFolder) Directory.Move(sel.Path, target);
+            else File.Move(sel.Path, target);
+
+            Retarget(sel.Path, target, sel.IsFolder);
+            PopulateProjectTree(_rootFolder!);
+            SaveSession();
+            SetStatus($"Renamed to {typed.Trim()}");
+        }
+        catch (Exception ex) { SetStatus($"Could not rename it — {ex.Message}"); }
+    }
+
+    private async Task DeleteEntryAsync()
+    {
+        if (Selected() is not { } sel) return;
+
+        if (ProjectEdits.DeleteProblem(_rootFolder, sel.Path) is { } why)
+        {
+            SetStatus($"Cannot delete — {why}");
+            return;
+        }
+
+        string rel = Path.GetRelativePath(_rootFolder!, sel.Path).Replace('\\', '/');
+        int count = ProjectEdits.FileCount(sel.Path);
+
+        // THE COUNT IS THE POINT OF THE PROMPT. "Delete this folder?" is clicked past; "Delete
+        // shards/ and the 12 files in it?" is read. And it says plainly that this is not undoable,
+        // because it is not — there is no recycle bin behind File.Delete.
+        string message = sel.IsFolder
+            ? $"Delete the folder '{rel}' and the {count} file(s) inside it?\n\n" +
+              "This cannot be undone — the Workbench has no way to bring it back."
+            : $"Delete '{rel}'?\n\nThis cannot be undone — the Workbench has no way to bring it back.";
+
+        if (!await ConfirmDialog.DangerAsync(this, "Delete", message, sel.IsFolder ? "Delete folder" : "Delete file"))
+            return;
+
+        try
+        {
+            // Tabs go first. Closing a tab whose file has already gone would prompt to save it, and
+            // the save would recreate exactly what was just deleted.
+            CloseTabsUnder(sel.Path, sel.IsFolder);
+
+            if (sel.IsFolder) Directory.Delete(sel.Path, recursive: true);
+            else File.Delete(sel.Path);
+
+            PopulateProjectTree(_rootFolder!);
+            SaveSession();
+            Build();
+            SetStatus($"Deleted {rel}");
+        }
+        catch (Exception ex) { SetStatus($"Could not delete it — {ex.Message}"); }
+    }
+
+    /// Point any open tab at where its file just moved to.
+    private void Retarget(string from, string to, bool folder)
+    {
+        foreach (var doc in _tabs.Docs)
+        {
+            if (doc.Path is not { } p) continue;
+
+            if (folder)
+            {
+                string prefix = from.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                if (p.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    _tabs.MarkSaved(doc, Path.Combine(to, p[prefix.Length..]));
+            }
+            else if (string.Equals(p, from, StringComparison.OrdinalIgnoreCase))
+            {
+                _tabs.MarkSaved(doc, to);
+            }
+        }
+
+        Title = _tabs.Active?.Path is { } active ? $"VeinScript Workbench — {active}" : "VeinScript Workbench";
+    }
+
+    /// Close every tab whose file is about to be deleted, WITHOUT the unsaved-changes prompt — the file
+    /// is going, so "save it first" offers to write back the thing being removed.
+    private void CloseTabsUnder(string path, bool folder)
+    {
+        string prefix = path.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+        foreach (var doc in _tabs.Docs.ToList())
+        {
+            if (doc.Path is not { } p) continue;
+
+            bool hit = folder
+                ? p.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                : string.Equals(p, path, StringComparison.OrdinalIgnoreCase);
+
+            if (hit) _tabs.Discard(doc);
+        }
+    }
+
+    private void RevealSelected()
+    {
+        if (Selected() is not { } sel) return;
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = sel.IsFolder ? $"\"{sel.Path}\"" : $"/select,\"{sel.Path}\"",
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex) { SetStatus($"Could not open the file explorer — {ex.Message}"); }
     }
 
     // Bundle Explorer: the bundle's IOP manifest — every primitive, with Search + Type/Visibility filters,
