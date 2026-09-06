@@ -33,6 +33,12 @@ internal sealed class WorkbenchSettings
     public string LoungeDock { get; set; } = "Bottom";
     public string AssistantDock { get; set; } = "Bottom";
 
+    /// Whether the assistant sends a digest of the open project with each question. On by default —
+    /// it is what makes answers refer to your own shapes — but remembered when turned off, because
+    /// somebody who does not want their project described to the service means it every time and not
+    /// just for one question.
+    public bool AssistantContext { get; set; } = true;
+
     /// Where each floating panel was last left, as `x,y,w,h`. The point of floating one is usually to
     /// park it on a second monitor, and a window that re-centres every launch has to be dragged back
     /// every launch.

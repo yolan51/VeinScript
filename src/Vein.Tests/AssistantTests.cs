@@ -204,4 +204,96 @@ public class AssistantTests : IDisposable
         Assert.Equal("t10", kept[0].Content);
         Assert.Equal("t29", kept[^1].Content);
     }
+
+    // ---- file= on a fence ---------------------------------------------------------------------------
+
+    [Fact]
+    public void A_fence_can_name_the_file_it_belongs_to()
+    {
+        // What turns a snippet into a file the Workbench can offer to write.
+        var blocks = AssistantApi.ExtractBlocks("""
+            Here you go:
+
+            ```vein file=shards/Boot.vein
+            shard Boot { run once { } }
+            ```
+            """);
+
+        var block = Assert.Single(blocks);
+        Assert.Equal("shards/Boot.vein", block.TargetPath);
+        Assert.Contains("shard Boot", block.Source);
+    }
+
+    [Theory]
+    [InlineData("vein file=\"shards/Boot.vein\"")]
+    [InlineData("vein file='shards/Boot.vein'")]
+    [InlineData("veinscript file=shards/Boot.vein")]
+    [InlineData("vein   file=shards/Boot.vein")]
+    public void The_attribute_is_read_the_ways_a_reply_might_write_it(string info)
+    {
+        // A reply that quotes the path means the same thing, and refusing it would be pedantry the
+        // reader pays for.
+        var block = Assert.Single(AssistantApi.ExtractBlocks($"```{info}\nshard B {{ }}\n```"));
+        Assert.Equal("shards/Boot.vein", block.TargetPath);
+    }
+
+    [Fact]
+    public void A_plain_fence_still_behaves_exactly_as_before()
+    {
+        var block = Assert.Single(AssistantApi.ExtractBlocks("```vein\nshard B { }\n```"));
+
+        Assert.Null(block.TargetPath);
+        Assert.Equal("shard B { }", block.Source);
+    }
+
+    [Theory]
+    [InlineData("vein file=")]
+    [InlineData("vein file")]
+    [InlineData("vein notfile=x.vein")]
+    public void A_malformed_attribute_degrades_to_a_snippet_rather_than_throwing(string info)
+    {
+        // A bad attribute in a reply is not a reason to lose the code that came with it.
+        var block = Assert.Single(AssistantApi.ExtractBlocks($"```{info}\nshard B {{ }}\n```"));
+
+        Assert.Null(block.TargetPath);
+        Assert.Equal("shard B { }", block.Source);
+    }
+
+    [Fact]
+    public void A_fence_in_another_language_is_still_ignored_even_with_a_file_attribute()
+    {
+        // The tag decides, not the attribute. Running a shell block through the VeinScript compiler
+        // would produce confident nonsense about code never meant to compile.
+        Assert.Empty(AssistantApi.ExtractBlocks("```bash file=run.vein\nrm -rf /\n```"));
+    }
+
+    [Fact]
+    public void Each_block_keeps_its_own_target()
+    {
+        var blocks = AssistantApi.ExtractBlocks("""
+            ```vein file=a.vein
+            shard A { }
+            ```
+            and then
+            ```vein
+            shard B { }
+            ```
+            ```vein file=c.vein
+            shard C { }
+            ```
+            """);
+
+        Assert.Equal(3, blocks.Count);
+        Assert.Equal("a.vein", blocks[0].TargetPath);
+        Assert.Null(blocks[1].TargetPath);
+        Assert.Equal("c.vein", blocks[2].TargetPath);
+    }
+
+    [Fact]
+    public void The_source_only_overload_still_works()
+    {
+        // Kept so existing callers do not have to care about targets they never use.
+        var sources = AssistantApi.ExtractVeinBlocks("```vein file=a.vein\nshard A { }\n```");
+        Assert.Equal("shard A { }", Assert.Single(sources));
+    }
 }

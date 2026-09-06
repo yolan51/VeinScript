@@ -22,6 +22,7 @@ using Vein.Compiler.Parsing;
 using Vein.Compiler.Project;
 using Vein.Compiler.Service;
 using Vein.Compiler.Tooling;
+using Vein.Cloud;
 
 namespace Vein.Workbench;
 
@@ -797,8 +798,18 @@ public partial class MainWindow : Window
         {
             SignInRequested = () => OnSignIn(this, new RoutedEventArgs()),
             ProjectDir = () => ProjectDir,
-            InsertCode = InsertSuggestion
+            ProjectRoot = () => _rootFolder,
+            InsertCode = InsertSuggestion,
+            ApplyFile = ApplySuggestedFileAsync,
+            SendContext = _settings.AssistantContext,
+
+            // The EDITOR's text, not the file's: unsaved edits are the version being asked about.
+            ActiveDocument = () => _tabs?.Active is { } doc
+                ? (doc.Path, doc.Document.Text, _editor.SelectionLength > 0 ? _editor.SelectedText : null)
+                : (null, null, null)
         };
+
+        _assistant.SendContextChanged += on => { _settings.AssistantContext = on; _settings.Save(); };
 
         _loungeHost = new ChatHost(_lounge, "Lounge", this, _bottomPanel, _inspector)
         {
@@ -840,6 +851,43 @@ public partial class MainWindow : Window
         _editor.Document.Insert(_editor.CaretOffset, source.TrimEnd() + "\n");
         _editor.Focus();
         SetStatus("Inserted the assistant's suggestion");
+    }
+
+    /// A suggestion that names a file, accepted. Shows the diff, then writes it and opens it.
+    ///
+    /// THE WRITE HAPPENS HERE AND NOT IN THE PANEL, for the same reason `InsertSuggestion` does not
+    /// touch the editor from inside the panel: the window owns the documents, the tabs and the tree,
+    /// and a panel that wrote files behind them would leave all three describing a project that no
+    /// longer matches the disk.
+    private async Task ApplySuggestedFileAsync(SuggestedCode block)
+    {
+        var plan = FileApply.Resolve(_rootFolder, block.TargetPath, block.Source);
+
+        if (!plan.CanApply)
+        {
+            SetStatus(plan.Kind == ApplyKind.Unchanged
+                ? $"{plan.RelativePath} already matches the suggestion"
+                : $"Cannot write {block.TargetPath} — {plan.Reason}");
+            return;
+        }
+
+        if (await ApplyFileDialog.ShowAsync(this, plan, block) is not { } agreed) return;
+
+        bool creating = agreed.Kind == ApplyKind.Create;
+        FileApply.Commit(agreed);
+
+        // Open it AFTER the write so the tab reads the file that is now there. `Open` focuses an
+        // existing tab rather than making a second one, so replacing a file that is already open
+        // lands in the tab already showing it.
+        string text = File.ReadAllText(agreed.FullPath);
+        var doc = _tabs.Open(agreed.FullPath, text);
+        _tabs.MarkSaved(doc, agreed.FullPath);
+
+        // A created file changes the tree; a replaced one does not.
+        if (creating && _rootFolder is not null) PopulateProjectTree(_rootFolder);
+
+        Build();
+        SetStatus($"{(creating ? "Created" : "Replaced")} {agreed.RelativePath}");
     }
 
     private void OnShowLounge(object? sender, RoutedEventArgs e) => _loungeHost?.Reveal();

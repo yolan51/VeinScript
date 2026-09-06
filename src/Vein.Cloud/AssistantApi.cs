@@ -23,7 +23,8 @@ public sealed record SuggestedCode(
     string Source,
     bool Compiles,
     IReadOnlyList<Diagnostic> Diagnostics,
-    bool Wrapped)
+    bool Wrapped,
+    string? TargetPath = null)
 {
     public string Summary(int take = 3) =>
         string.Join("\n", Diagnostics.Where(d => d.Severity == Severity.Error).Take(take).Select(d => d.ToString()));
@@ -51,24 +52,39 @@ public static class AssistantApi
     /// world where every qualified reference is unresolvable.
     public static async Task<AssistantAnswer> AskAsync(
         CloudSession session, string message, IReadOnlyList<ChatTurn>? history = null,
-        string? projectDir = null, CancellationToken ct = default)
+        string? projectDir = null, ProjectContext? context = null, CancellationToken ct = default)
     {
         message = message.Trim();
         if (message.Length == 0) throw new CloudException(0, "there is nothing to ask");
         if (message.Length > MaxMessage)
             throw new CloudException(0, $"a question is at most {MaxMessage} characters; this one is {message.Length}");
 
+        // The question is measured on its own ABOVE, before any context is added. Context that would
+        // push the request over the cap is dropped by `Compose` rather than trimming what was typed —
+        // an answer to half a question is worse than a less informed answer to all of it.
+        string sent = context is null or { IsEmpty: true }
+            ? message
+            : ProjectDigest.Compose(context, Convention + message);
+
         var tail = (history ?? Array.Empty<ChatTurn>())
             .TakeLast(HistoryTurns)
             .Select(t => new { role = t.Role, content = t.Content });
 
         var root = await VeinCloudClient.PostAsync("workbenchChat",
-            new { message, history = tail }, session.Token, ct).ConfigureAwait(false);
+            new { message = sent, history = tail }, session.Token, ct).ConfigureAwait(false);
 
         string reply = AuthApi.Str(root, "reply");
 
-        return new AssistantAnswer(reply, Check(ExtractVeinBlocks(reply), projectDir));
+        return new AssistantAnswer(reply, Check(ExtractBlocks(reply), projectDir));
     }
+
+    /// Told to the assistant only when project context is attached, because it is only actionable
+    /// then: without a project open there is nowhere for a named file to go, and asking for a
+    /// convention the Workbench would refuse to honour would produce replies it has to reject.
+    private const string Convention =
+        "When you propose the full contents of a file, open its code fence as " +
+        "```vein file=<path relative to the project root> so the Workbench can offer to write it. " +
+        "Use a plain ```vein fence for a fragment meant to be pasted.\n\n";
 
     /// Trim a transcript to what is worth keeping between turns. Twice the window the service reads,
     /// so a scrollback still shows more than it sends.
@@ -77,18 +93,28 @@ public static class AssistantApi
 
     // ---- fenced blocks ----------------------------------------------------------------------------
 
+    /// A fenced block, with the file it says it belongs to.
+    public sealed record VeinBlock(string Source, string? TargetPath);
+
     /// Pull ```vein blocks out of a markdown reply.
     ///
     /// Only tagged blocks. An untagged fence in an answer about VeinScript is as likely to be a shell
     /// command, a JSON payload or an error message, and running those through the compiler would
     /// produce confident nonsense about code that was never meant to compile.
-    public static IReadOnlyList<string> ExtractVeinBlocks(string markdown)
+    ///
+    /// A fence may name its file — ```vein file=shards/Boot.vein — which is what lets a reply propose
+    /// a whole file rather than a fragment to paste. The attribute is OPTIONAL in both directions: a
+    /// plain ```vein block behaves exactly as it always has, and a malformed `file=` degrades to a
+    /// plain block rather than throwing, because a bad attribute in a reply is not a reason to lose
+    /// the code that came with it.
+    public static IReadOnlyList<VeinBlock> ExtractBlocks(string markdown)
     {
-        var blocks = new List<string>();
+        var blocks = new List<VeinBlock>();
         if (string.IsNullOrEmpty(markdown)) return blocks;
 
         string[] lines = markdown.Replace("\r\n", "\n").Split('\n');
         StringBuilder? current = null;
+        string? target = null;
 
         foreach (string line in lines)
         {
@@ -102,42 +128,82 @@ public static class AssistantApi
 
             if (current is not null)
             {
-                blocks.Add(current.ToString().TrimEnd('\n', '\r'));
+                blocks.Add(new VeinBlock(current.ToString().TrimEnd('\n', '\r'), target));
                 current = null;
+                target = null;
                 continue;
             }
 
-            string tag = trimmed[3..].Trim();
-            if (tag.Equals("vein", StringComparison.OrdinalIgnoreCase) ||
-                tag.Equals("veinscript", StringComparison.OrdinalIgnoreCase))
-                current = new StringBuilder();
+            string info = trimmed[3..].Trim();
+            if (!IsVeinTag(info, out target)) continue;
+
+            current = new StringBuilder();
         }
 
         // An unterminated fence is still a suggestion; the reply was probably truncated.
-        if (current is { Length: > 0 }) blocks.Add(current.ToString().TrimEnd('\n', '\r'));
+        if (current is { Length: > 0 })
+            blocks.Add(new VeinBlock(current.ToString().TrimEnd('\n', '\r'), target));
 
         return blocks;
     }
 
-    private static IReadOnlyList<SuggestedCode> Check(IReadOnlyList<string> blocks, string? projectDir)
+    /// Kept so existing callers and tests that only want the source keep working.
+    public static IReadOnlyList<string> ExtractVeinBlocks(string markdown) =>
+        ExtractBlocks(markdown).Select(b => b.Source).ToList();
+
+    /// Is this fence info string one of ours, and does it name a file?
+    ///
+    /// Accepts `vein`, `veinscript`, and either followed by `file=<path>`. The path may be quoted,
+    /// because a reply that writes `file="shards/Boot.vein"` means the same thing and refusing it
+    /// would be pedantry the reader pays for.
+    private static bool IsVeinTag(string info, out string? target)
+    {
+        target = null;
+        if (info.Length == 0) return false;
+
+        string[] parts = info.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        string lang = parts[0];
+
+        if (!lang.Equals("vein", StringComparison.OrdinalIgnoreCase) &&
+            !lang.Equals("veinscript", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        foreach (string part in parts.Skip(1))
+        {
+            if (!part.StartsWith("file=", StringComparison.OrdinalIgnoreCase)) continue;
+
+            string value = part[5..].Trim().Trim('"', '\'');
+            if (value.Length > 0) target = value;
+            break;
+        }
+
+        return true;
+    }
+
+    private static IReadOnlyList<SuggestedCode> Check(IReadOnlyList<VeinBlock> blocks, string? projectDir)
     {
         var checkedBlocks = new List<SuggestedCode>();
         if (blocks.Count == 0) return checkedBlocks;
 
         using var _ = BundleSearch.Scope(projectDir);
 
-        foreach (string block in blocks)
+        foreach (var block in blocks)
         {
             // A snippet is usually a fragment — `shard Flee { … }` with no bundle around it, which is
             // a guaranteed VS0101 on its own. Wrapping it is what makes the check answer the question
             // the person actually has: "would this work in my bundle?"
-            bool wrapped = !HasHeader(block);
-            string source = wrapped ? $"bundle Suggestion by you {{\n{block}\n}}\n" : block;
+            //
+            // A block that names a FRAGMENT path is the same case: `publicators/Shapes.vein` carries no
+            // bundle header by design, and BundleLoader merges it into one. So it is wrapped to be
+            // checked, and written unwrapped — the wrapper is a lens, never part of the file.
+            bool wrapped = !HasHeader(block.Source);
+            string source = wrapped ? $"bundle Suggestion by you {{\n{block.Source}\n}}\n" : block.Source;
 
             var result = new VeinCompilerService().Compile(
                 new CompileRequest("suggestion.vein", source, ProjectDir: projectDir));
 
-            checkedBlocks.Add(new SuggestedCode(block, result.Success, result.Diagnostics, wrapped));
+            checkedBlocks.Add(new SuggestedCode(
+                block.Source, result.Success, result.Diagnostics, wrapped, block.TargetPath));
         }
 
         return checkedBlocks;

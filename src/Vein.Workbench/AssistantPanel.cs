@@ -34,6 +34,25 @@ internal sealed class AssistantPanel : UserControl
     private readonly Button _signIn = new() { Content = "Sign in to use the assistant" };
     private readonly DockPanel _composer;
 
+    /// WHAT LEAVES THE MACHINE, SAID BEFORE IT LEAVES IT. The assistant is more useful when it can see
+    /// the project, and that means the project's shape is uploaded with every question — which is not
+    /// something anybody should find out afterwards. The line names the file count and the exact size,
+    /// the checkbox turns it off, and off is remembered.
+    private readonly CheckBox _useContext = new()
+    {
+        Content = "Send project context",
+        IsChecked = true,
+        FontSize = 11,
+        VerticalAlignment = VerticalAlignment.Center
+    };
+
+    private readonly TextBlock _contextNote = new()
+    {
+        FontSize = 11,
+        VerticalAlignment = VerticalAlignment.Center,
+        Foreground = new SolidColorBrush(Color.Parse("#8A8A8A"))
+    };
+
     private readonly List<ChatTurn> _transcript = new();
     private CancellationTokenSource? _life;
     private bool _busy;
@@ -43,9 +62,32 @@ internal sealed class AssistantPanel : UserControl
     /// Where a suggestion goes when someone accepts it. The window owns the editor.
     public Action<string>? InsertCode { get; set; }
 
-    /// The project to resolve bundle references against, so a suggestion that uses the user's own
-    /// bundles is judged against the code they actually have.
+    /// The folder to resolve bundle references against when compile-checking a suggestion. This is the
+    /// CURRENT FILE's folder, which is what `bring` and `load` resolve relative to.
     public Func<string?>? ProjectDir { get; set; }
+
+    /// The opened project folder — a different thing from `ProjectDir` above, and the difference
+    /// matters here. A suggested `shards/Boot.vein` is relative to the PROJECT, not to whichever file
+    /// happens to be open; resolving it against the current file's folder would write the bundle's
+    /// shard into a sibling folder the moment somebody was reading a file one level down.
+    public Func<string?>? ProjectRoot { get; set; }
+
+    /// The file being edited right now: its path, its text including unsaved edits, and the selection
+    /// if there is one. The editor's copy, not the disk's — the unsaved version is the one being asked
+    /// about, and a digest built from disk would answer about code the person has already changed.
+    public Func<(string? Path, string? Text, string? Selection)>? ActiveDocument { get; set; }
+
+    /// Somebody accepted a whole file. The window owns writing and opening it.
+    public Func<SuggestedCode, Task>? ApplyFile { get; set; }
+
+    /// Remembered across sessions by WorkbenchSettings, through the window.
+    public bool SendContext
+    {
+        get => _useContext.IsChecked == true;
+        set => _useContext.IsChecked = value;
+    }
+
+    public event Action<bool>? SendContextChanged;
 
     private CloudSession? _session;
 
@@ -70,12 +112,34 @@ internal sealed class AssistantPanel : UserControl
             _ = AskAsync();
         };
 
+        _useContext.IsCheckedChanged += (_, _) =>
+        {
+            SendContextChanged?.Invoke(SendContext);
+            RefreshContextNote();
+        };
+
         DockPanel.SetDock(_send, Dock.Right);
+        var row = new DockPanel
+        {
+            LastChildFill = true,
+            Children = { _send, _ask }
+        };
+
         _composer = new DockPanel
         {
             Margin = new Avalonia.Thickness(10, 0, 10, 10),
             LastChildFill = true,
-            Children = { _send, _ask }
+            Children =
+            {
+                Top(new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 10,
+                    Margin = new Avalonia.Thickness(0, 0, 0, 4),
+                    Children = { _useContext, _contextNote }
+                }),
+                row
+            }
         };
 
         Content = new DockPanel
@@ -96,6 +160,23 @@ internal sealed class AssistantPanel : UserControl
     }
 
     private static Control Bottom(Control c) { DockPanel.SetDock(c, Dock.Bottom); return c; }
+    private static Control Top(Control c) { DockPanel.SetDock(c, Dock.Top); return c; }
+
+    /// Build the context that WOULD be sent, so the note can describe it and `AskAsync` can send it.
+    ///
+    /// Built fresh each time rather than cached: the open file changes under it constantly, and a note
+    /// describing the previous file is worse than no note.
+    private ProjectContext CurrentContext()
+    {
+        if (!SendContext) return ProjectContext.None;
+
+        var (path, text, selection) = ActiveDocument?.Invoke() ?? (null, null, null);
+
+        try { return ProjectDigest.Build(ProjectRoot?.Invoke(), path, text, selection); }
+        catch (Exception) { return ProjectContext.None; }   // a digest is never worth failing a question over
+    }
+
+    private void RefreshContextNote() => _contextNote.Text = CurrentContext().Summary;
 
     private void Reflect()
     {
@@ -114,6 +195,11 @@ internal sealed class AssistantPanel : UserControl
         string question = (_ask.Text ?? "").Trim();
         if (question.Length == 0) return;
 
+        // Gathered on the UI thread, before the await: it reads the editor's document, and the digest
+        // walks the project folder. Both belong here rather than on whatever thread the continuation
+        // lands on.
+        var context = CurrentContext();
+
         _ask.Text = "";
         Busy(true);
         Say("you", question, "#9CDCFE");
@@ -123,7 +209,7 @@ internal sealed class AssistantPanel : UserControl
         try
         {
             var answer = await AssistantApi.AskAsync(
-                session, question, _transcript, ProjectDir?.Invoke(),
+                session, question, _transcript, ProjectDir?.Invoke(), context,
                 _life?.Token ?? CancellationToken.None).ConfigureAwait(false);
 
             _transcript.Add(new ChatTurn("assistant", answer.Reply));
@@ -192,10 +278,17 @@ internal sealed class AssistantPanel : UserControl
 
         var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { badge } };
 
-        // The Insert button only appears for code that builds. Offering to paste something the
-        // compiler has already rejected would be the Workbench arguing with itself.
-        if (ok)
+        // A block that names a file gets a file button INSTEAD of Insert at caret. The two are
+        // different acts — one puts text where the cursor is, the other decides the contents of a
+        // file — and offering both on one card invites the wrong one.
+        if (block.TargetPath is { Length: > 0 })
         {
+            header.Children.Add(FileButton(block, ok));
+        }
+        else if (ok)
+        {
+            // Insert only appears for code that builds. Offering to paste something the compiler has
+            // already rejected would be the Workbench arguing with itself.
             var insert = new Button { Content = "Insert at caret", FontSize = 11 };
             insert.Click += (_, _) => InsertCode?.Invoke(block.Source);
             header.Children.Add(insert);
@@ -244,6 +337,52 @@ internal sealed class AssistantPanel : UserControl
             Child = body
         };
     }
+
+    /// The control for a block that names a file: a button when it can be written, an explanation when
+    /// it cannot.
+    ///
+    /// The label says which file and which act — "Create shards/Boot.vein", not "Apply" — because the
+    /// two differ in the only way that matters. Creating costs nothing; replacing can lose work, and
+    /// the button that does it should not read like the button that does not.
+    private Control FileButton(SuggestedCode block, bool compiles)
+    {
+        var plan = FileApply.Resolve(ProjectRoot?.Invoke(), block.TargetPath, block.Source);
+
+        switch (plan.Kind)
+        {
+            case ApplyKind.Unchanged:
+                return Note($"{plan.RelativePath} already matches", "#8A8A8A");
+
+            case ApplyKind.Refused:
+                return Note($"cannot write {block.TargetPath} — {plan.Reason}", "#D7BA7D");
+        }
+
+        // A file that does not compile is still writable, deliberately. Work in progress is normal, the
+        // diff shows exactly what lands, and refusing would mean the assistant can only ever produce
+        // finished files. The dialog states the compile result next to the Apply button.
+        string verb = plan.Kind == ApplyKind.Create ? "Create" : "Review changes to";
+        var button = new Button { Content = $"{verb} {plan.RelativePath}", FontSize = 11 };
+
+        if (!compiles) ToolTip.SetTip(button, "This does not compile. The diff shows exactly what would be written.");
+
+        button.Click += async (_, _) =>
+        {
+            if (ApplyFile is null) return;
+            try { await ApplyFile(block); }
+            catch (Exception ex) { Say("assistant", "Could not write the file — " + ex.Message, "#F48771"); }
+        };
+
+        return button;
+    }
+
+    private static TextBlock Note(string text, string colour) => new()
+    {
+        Text = text,
+        FontSize = 11,
+        TextWrapping = TextWrapping.Wrap,
+        VerticalAlignment = VerticalAlignment.Center,
+        Foreground = new SolidColorBrush(Color.Parse(colour))
+    };
 
     /// A suggestion rendered with the editor's own syntax theme.
     ///
