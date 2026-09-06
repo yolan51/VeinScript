@@ -1,0 +1,79 @@
+// text_search.vein — looking inside a string, and slicing it.
+//
+//   veinc run samples/text_search.vein --ticks 1
+//
+// In tools/check-backend.sh. Before this file, `indexOf`, `substring` and `endsWith` had ZERO call
+// sites in any sample — they appeared only inside comments — so the interpreter and the C# backend
+// were never diffed on one of them.
+//
+// EVERY ONE OF THESE IS ORDINAL, never culture-sensitive, so they agree with `<` and with how the
+// store sorts. A case-insensitive test is `lower(a) == lower(b)` rather than a second comparison
+// operator that quietly means something else.
+//
+// They are all TOTAL. Nothing here throws: `indexOf` answers -1 for absent, `substring` clamps to the
+// string, and an out-of-range read is "" rather than a crash. A language with no `catch` has nowhere
+// to put a guard, so the operations do not need one.
+
+bundle TextSearch by you {
+
+    shard Look {
+        run once {
+            let line = "  ERROR: disk full on /dev/sda1  "
+            let trimmed = trim(line)
+
+            emit *Vein.Console.Io.@Print { text: "trimmed  = [" + trimmed + "]" }
+
+            // ---- is it in there ----------------------------------------------------------------
+
+            emit *Vein.Console.Io.@Print { text: "contains = " + contains(trimmed, "disk full") }
+            emit *Vein.Console.Io.@Print { text: "starts   = " + startsWith(trimmed, "ERROR") }
+            emit *Vein.Console.Io.@Print { text: "ends     = " + endsWith(trimmed, "sda1") }
+
+            // The empty needle is TRUE — every string contains the empty string. Worth stating,
+            // because the opposite reading silently drops every line when a filter box is blank.
+            emit *Vein.Console.Io.@Print { text: "empty in = " + contains(trimmed, "") }
+
+            // ---- where is it -------------------------------------------------------------------
+            //
+            // -1 for absent is the one value a real position can never be, so `indexOf(s, x) >= 0`
+            // reads as "is in there" without a second call.
+
+            emit *Vein.Console.Io.@Print { text: "at       = " + indexOf(trimmed, "disk") }
+            emit *Vein.Console.Io.@Print { text: "missing  = " + indexOf(trimmed, "network") }
+
+            // ---- cut it up ---------------------------------------------------------------------
+            //
+            // Two forms: to the end, or a given length. Both CLAMP rather than failing.
+
+            let colon = indexOf(trimmed, ":")
+            emit *Vein.Console.Io.@Print { text: "level    = " + substring(trimmed, 0, colon) }
+            emit *Vein.Console.Io.@Print { text: "rest     = " + substring(trimmed, colon + 2) }
+
+            emit *Vein.Console.Io.@Print { text: "past end = [" + substring(trimmed, 900) + "]" }
+            emit *Vein.Console.Io.@Print { text: "too long = [" + substring("abc", 1, 99) + "]" }
+
+            // ---- change it ---------------------------------------------------------------------
+
+            emit *Vein.Console.Io.@Print { text: "replaced = " + replace(trimmed, "ERROR", "WARN") }
+            emit *Vein.Console.Io.@Print { text: "absent   = " + replace("abc", "zz", "!") }
+
+            emit *Vein.Console.Io.@Print { text: "upper    = " + upper("MiXeD") }
+            emit *Vein.Console.Io.@Print { text: "lower    = " + lower("MiXeD") }
+
+            // Case-insensitive comparison, the only way there is one.
+            emit *Vein.Console.Io.@Print { text: "same?    = " + (lower("HELLO") == lower("hello")) }
+        }
+    }
+
+    // A REAL USE, and the reason the family exists at all: deciding something about a line of text
+    // that a program read rather than wrote. `if the line mentions ERROR` was unwritable before these.
+    shard Filter {
+        run once {
+            target lines("ok: started\nERROR: no disk\nok: ready\nERROR: no net") as line {
+                if startsWith(line, "ERROR") {
+                    emit *Vein.Console.Io.@Print { text: "! " + substring(line, indexOf(line, " ") + 1) }
+                }
+            }
+        }
+    }
+}

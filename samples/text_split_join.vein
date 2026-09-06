@@ -1,0 +1,75 @@
+// text_split_join.vein — text into pieces, and pieces back into text.
+//
+//   veinc run samples/text_split_join.vein --ticks 1
+//
+// In tools/check-backend.sh. `split` and `join` are the two most ordinary text operations there are,
+// and before this file NEITHER had a single call site in any sample.
+//
+// FOUR WAYS APART, ONE WAY BACK. `split`, `lines`, `words` and `chars` all hand back a list, and
+// `join` is the only way back — which is why `target <list> as x` walks all four with one statement.
+//
+// The four are not interchangeable, and choosing wrongly is quiet:
+//
+//   split(s, sep)   exact separator, exact pieces. Nothing is discarded.
+//   lines(s)        by line, with the ENDING removed whichever it was.
+//   words(s)        runs of whitespace, no empties.
+//   chars(s)        one-character strings.
+
+bundle TextSplitJoin by you {
+
+    shard Apart {
+        run once {
+            // SPLIT keeps everything. "a,,b" is three pieces and the middle one is empty — a caller
+            // counting columns in a CSV needs the empty column to still be there.
+            let cells = split("north,,south,east", ",")
+            emit *Vein.Console.Io.@Print { text: "cells    = " + len(cells) + " -> " + join(cells, "|") }
+
+            // LINES, not split(text, "\n"). They look equivalent and are not: a file written on
+            // Windows leaves a `\r` on every line, and `line == "end"` then fails against "end\r"
+            // with both sides looking identical in any output. That trap is what this closes.
+            let rows = lines("first\r\nsecond\nthird")
+            emit *Vein.Console.Io.@Print { text: "lines    = " + len(rows) + " -> " + join(rows, "/") }
+
+            // WORDS collapses runs of whitespace and drops empties. `split(line, " ")` on "a  b"
+            // gives three pieces with an empty middle, and a program that cannot inspect characters
+            // has no good way to tell an empty word from a real one after the fact.
+            let ws = words("  the   quick  brown   ")
+            emit *Vein.Console.Io.@Print { text: "words    = " + len(ws) + " -> " + join(ws, ".") }
+
+            // CHARS completes the family. A character is a one-character string — there is no `char`
+            // type and no 'a' literal, because `==` already compares one and ordering already works.
+            let cs = chars("abc")
+            emit *Vein.Console.Io.@Print { text: "chars    = " + len(cs) + " -> " + join(cs, "-") }
+        }
+    }
+
+    shard Together {
+        run once {
+            let parts = split("2026-09-06", "-")
+
+            // JOIN with any separator, including none.
+            emit *Vein.Console.Io.@Print { text: "dashes   = " + join(parts, "-") }
+            emit *Vein.Console.Io.@Print { text: "slashes  = " + join(parts, "/") }
+            emit *Vein.Console.Io.@Print { text: "nothing  = " + join(parts, "") }
+
+            // A ROUND TRIP. Apart and back together is the original, which is the property that makes
+            // `split` safe to reach for — nothing is silently dropped on the way through.
+            let original = "a,b,,c"
+            emit *Vein.Console.Io.@Print { text: "round    = " + (join(split(original, ","), ",") == original) }
+
+            // Rendering a list without asking. `join` is how you do it deliberately; this is what a
+            // list looks like when it simply lands in a string.
+            emit *Vein.Console.Io.@Print { text: "as text  = " + string(parts) }
+        }
+    }
+
+    // A REAL USE: a table of records, split apart, walked, and rebuilt in a different shape.
+    shard Table {
+        run once {
+            target lines("ada,36\ngrace,45\nalan,41") as row {
+                let f = split(row, ",")
+                emit *Vein.Console.Io.@Print { text: upper(substring(f[0], 0, 1)) + substring(f[0], 1) + " is " + f[1] }
+            }
+        }
+    }
+}

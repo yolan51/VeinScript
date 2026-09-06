@@ -262,6 +262,21 @@ public sealed class CSharpBackend : IVeinBackend
             sb.AppendLine("    };");
             sb.AppendLine();
 
+            // Equality, mirroring Interp.LooseEq arm for arm. Two numbers compare numerically so
+            // `1 == 1.0` holds across a long field and a double literal; anything else compares as
+            // TEXT, which is what keeps `"5" == 5` true without letting an unparseable string collapse
+            // into a number the way an all-numeric rule would.
+            sb.AppendLine("    /// Equality across loosely-typed values. NEVER C#'s `==`, which is");
+            sb.AppendLine("    /// reference equality once either side is boxed into object.");
+            sb.AppendLine("    public static bool Eq(object? a, object? b) =>");
+            sb.AppendLine("        Numeric(a) && Numeric(b) ? Num(a) == Num(b)");
+            sb.AppendLine("        : string.Equals(S(a), S(b), System.StringComparison.Ordinal);");
+            sb.AppendLine();
+            // Deliberately NOT the `IsNum` below: that one is the `isNumber(x)` built-in and parses
+            // text, so it would make "5" numeric here and change what `==` means for strings.
+            sb.AppendLine("    private static bool Numeric(object? v) => v is double or long or int or bool;");
+            sb.AppendLine();
+
             // Coercion to a field's declared type. A VeinScript value is untyped at runtime and some
             // expressions arrive as `object?` — a `chars()` element, `s[i]` — so assigning one to a typed
             // field needs converting where the interpreter simply stores it.
@@ -310,6 +325,47 @@ public sealed class CSharpBackend : IVeinBackend
                           "System.Globalization.CultureInfo.InvariantCulture, out var f) && double.IsFinite(f) ? f : 0d,");
             sb.AppendLine("        _ => 0d,");
             sb.AppendLine("    };");
+            // TEXT INTO PIECES. All four hand back the same List<object?> the interpreter builds, so a
+            // `target split(s, ",") as p` walks the identical thing on both paths — and `len` of one
+            // counts the same, since it already handles ICollection.
+            sb.AppendLine("    /// Exact separator, exact pieces: split(\"a,,b\", \",\") is three, the middle empty.");
+            sb.AppendLine("    public static System.Collections.Generic.List<object?> Split(object? v, object? sep)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        var outp = new System.Collections.Generic.List<object?>();");
+            sb.AppendLine("        foreach (var part in S(v).Split(S(sep))) outp.Add(part);");
+            sb.AppendLine("        return outp;");
+            sb.AppendLine("    }");
+
+            sb.AppendLine("    /// By line, with the ENDING removed whichever it was — CRLF, CR or LF.");
+            sb.AppendLine("    public static System.Collections.Generic.List<object?> Lines(object? v)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        var outp = new System.Collections.Generic.List<object?>();");
+            sb.AppendLine("        foreach (var part in S(v).Replace(\"\\r\\n\", \"\\n\").Replace('\\r', '\\n').Split('\\n')) outp.Add(part);");
+            sb.AppendLine("        return outp;");
+            sb.AppendLine("    }");
+
+            sb.AppendLine("    /// Runs of whitespace, with no empties.");
+            sb.AppendLine("    public static System.Collections.Generic.List<object?> Words(object? v)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        var outp = new System.Collections.Generic.List<object?>();");
+            sb.AppendLine("        foreach (var part in S(v).Split((char[]?)null, " +
+                          "System.StringSplitOptions.RemoveEmptyEntries)) outp.Add(part);");
+            sb.AppendLine("        return outp;");
+            sb.AppendLine("    }");
+
+            sb.AppendLine("    public static string Trim(object? v) => S(v).Trim();");
+
+            sb.AppendLine("    /// The only way back. Each element renders through S, so a list of numbers");
+            sb.AppendLine("    /// joins in the invariant culture exactly as the interpreter does.");
+            sb.AppendLine("    public static string Join(object? v, object? sep)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        if (v is not System.Collections.IEnumerable e || v is string) return \"\";");
+            sb.AppendLine("        var parts = new System.Collections.Generic.List<string>();");
+            sb.AppendLine("        foreach (var item in e) parts.Add(S(item));");
+            sb.AppendLine("        return string.Join(S(sep), parts);");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+
             sb.AppendLine("    public static bool IsNum(object? v) => v switch");
             sb.AppendLine("    {");
             sb.AppendLine("        long or int or double => true,");
@@ -966,6 +1022,18 @@ public sealed class CSharpBackend : IVeinBackend
         IrBinary b when b.Op is IrBinOp.Lt or IrBinOp.Gt or IrBinOp.Le or IrBinOp.Ge
             => $"(__VeinText.Cmp({Expr(b.Left)}, {Expr(b.Right)}) {Op(b.Op)} 0)",
 
+        // AND SO DOES EQUALITY, for the very reason the comment above gives and which was applied only
+        // to ordering. C# `==` on two `object`s is REFERENCE equality, and plenty of VeinScript values
+        // arrive as object — an element of `target split(s, ",") as p`, a `chars()` element, an `s[i]`.
+        // So `p == "skip"` compared two references, found them different because Split had built a
+        // fresh string, and quietly answered false: the interpreter skipped the row and the compiled
+        // program did not. Found by samples/loops.vein, which is the first sample to compare a
+        // collection binding against a literal.
+        IrBinary b when b.Op is IrBinOp.Eq or IrBinOp.Ne
+            => b.Op == IrBinOp.Eq
+                ? $"__VeinText.Eq({Expr(b.Left)}, {Expr(b.Right)})"
+                : $"(!__VeinText.Eq({Expr(b.Left)}, {Expr(b.Right)}))",
+
         IrBinary b => $"({Expr(b.Left)} {Op(b.Op)} {Expr(b.Right)})",
 
         // `s[i]` — a character out of a string, or an entry out of a list. Was unemitted, which made
@@ -1041,6 +1109,7 @@ public sealed class CSharpBackend : IVeinBackend
     private static bool IsPrebuilt(string name) =>
         name is "spawn" or "random" or "len" or "code" or "chr" or "chars" or "upper" or "lower"
              or "contains" or "startsWith" or "endsWith" or "indexOf" or "substring" or "replace"
+             or "split" or "lines" or "words" or "trim" or "join"
              or "int" or "float" or "string" or "bool" or "isNumber";
 
     private string RuntimeCall(IrRuntimeCall c)
@@ -1057,6 +1126,16 @@ public sealed class CSharpBackend : IVeinBackend
             case "chars": return $"__VeinText.Chars({Expr(c.Args[0])})";
             case "upper": return $"__VeinText.Upper({Expr(c.Args[0])})";
             case "lower": return $"__VeinText.Lower({Expr(c.Args[0])})";
+
+            // Text into pieces, and back. These were UNIMPLEMENTED until samples/text_split_join.vein
+            // asked for them: `split` and `join` are the two most ordinary text operations there are,
+            // and any program that used one could not be compiled to C# at all — it emitted a call to a
+            // `split` that does not exist and failed on a name error.
+            case "split": return $"__VeinText.Split({Expr(c.Args[0])}, {Expr(c.Args[1])})";
+            case "lines": return $"__VeinText.Lines({Expr(c.Args[0])})";
+            case "words": return $"__VeinText.Words({Expr(c.Args[0])})";
+            case "trim": return $"__VeinText.Trim({Expr(c.Args[0])})";
+            case "join": return $"__VeinText.Join({Expr(c.Args[0])}, {Expr(c.Args[1])})";
 
             case "contains": return $"__VeinText.Has({Expr(c.Args[0])}, {Expr(c.Args[1])})";
             case "startsWith": return $"__VeinText.Starts({Expr(c.Args[0])}, {Expr(c.Args[1])})";
@@ -1249,9 +1328,40 @@ public sealed class CSharpBackend : IVeinBackend
         };
     }
 
+    /// A VeinScript string as a C# string literal.
+    ///
+    /// It used to escape only `\` and `"`, which is right until a string contains a NEWLINE. The lexer
+    /// has already turned `\n` in the source into a real newline character by the time it reaches here,
+    /// so emitting it raw put a line break inside a C# literal — `error CS1010: Newline in constant`,
+    /// and the whole generated file stopped compiling. `lines("a\nb")` is the most ordinary thing to
+    /// write in a program that handles text, and it could not be compiled at all.
+    ///
+    /// Control characters go out as `\uXXXX` rather than being passed through, because the set of
+    /// characters C# will not accept bare in a literal is longer than the three with short escapes.
+    private static string Escape(string s)
+    {
+        var sb = new StringBuilder(s.Length + 8);
+
+        foreach (char c in s)
+            switch (c)
+            {
+                case '\\': sb.Append("\\\\"); break;
+                case '"': sb.Append("\\\""); break;
+                case '\n': sb.Append("\\n"); break;
+                case '\r': sb.Append("\\r"); break;
+                case '\t': sb.Append("\\t"); break;
+                default:
+                    if (char.IsControl(c)) sb.Append("\\u").Append(((int)c).ToString("x4"));
+                    else sb.Append(c);
+                    break;
+            }
+
+        return sb.ToString();
+    }
+
     private static string Literal(IrLiteral l) => l.Kind switch
     {
-        IrLiteralKind.String => "\"" + (l.Value?.ToString() ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"",
+        IrLiteralKind.String => "\"" + Escape(l.Value?.ToString() ?? "") + "\"",
         IrLiteralKind.Bool => (l.Value is true) ? "true" : "false",
         IrLiteralKind.Int => l.Value?.ToString() ?? "0",
         IrLiteralKind.Float or IrLiteralKind.Percent =>

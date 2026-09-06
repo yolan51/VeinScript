@@ -338,13 +338,24 @@ public sealed class Resolve
     /// genuinely has no static type. `fromJson` returns whatever the JSON held and `pick` returns an
     /// element of a list that may be mixed; both stay null, which is the honest answer rather than a
     /// guess a consumer would then trust.
+    /// The return type of a built-in.
+    ///
+    /// Worth keeping COMPLETE, because every name missing from here is an expression the rest of the
+    /// compiler has to guess about — and the C# backend's guesses are what produced "True" for a bool
+    /// and a comma for a decimal point. The text built-ins were absent for a long time simply because
+    /// no sample used them; samples/text_search.vein and text_split_join.vein are what surfaced it.
+    ///
+    /// The list-returning four — `split`, `lines`, `words`, `chars` — are deliberately still null.
+    /// There is no list type to name: `ParseTypeRef` has nothing for one, and inventing a name here
+    /// that no type reference can spell would be worse than an honest "unknown".
     private static IrTypeRef? Builtin(string name) => name switch
     {
         "spawn" => IrTypeRef.Of("Entity"),
-        "len" or "int" or "code" => IrTypeRef.Of("int"),
+        "len" or "int" or "code" or "indexOf" => IrTypeRef.Of("int"),
         "random" or "float" => IrTypeRef.Of("float"),
-        "bool" or "isNumber" => IrTypeRef.Of("bool"),
-        "join" or "toJson" or "string" => IrTypeRef.Of("string"),
+        "bool" or "isNumber" or "contains" or "startsWith" or "endsWith" => IrTypeRef.Of("bool"),
+        "join" or "toJson" or "string" or "trim" or "upper" or "lower"
+            or "substring" or "replace" or "chr" => IrTypeRef.Of("string"),
         "here" => IrTypeRef.Of("Mark"),
         _ => null,
     };

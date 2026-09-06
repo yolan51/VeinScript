@@ -1,0 +1,62 @@
+// math_round.vein — rounding and roots, from stdlib/Math.vein.
+//
+//   veinc run samples/math_round.vein --ticks 1
+//
+// In tools/check-backend.sh. `Vein.Math`'s Round and Roots publicators had no sample at all, which
+// meant nothing diffed them between the interpreter and the compiled program.
+//
+// THESE ARE WRITTEN IN VEINSCRIPT, not built in — stdlib/Math.vein is ordinary source you can read.
+// `sqrt` is twenty Newton steps; `floor` is arithmetic on a truncation. That is worth knowing, because
+// it is also why they are `shared fn` in a publicator and reached by their qualified path.
+//
+// WHY THEY EXIST AT ALL: `int(x)` truncates toward zero, which is the right answer for indexing and
+// the wrong one for almost everything else. `int(-2.5)` is -2; `floor(-2.5)` is -3. The difference
+// only shows up on negative numbers, which is exactly when nobody is looking.
+
+bundle MathRound by you {
+
+    shard Rounding {
+        run once {
+            // TRUNCATE versus FLOOR. Identical for positives, different for every negative — the
+            // reason there are two of them.
+            emit *Vein.Console.Io.@Print { text: "trunc  2.7 = " + *Vein.Math.Round.trunc(2.7) }
+            emit *Vein.Console.Io.@Print { text: "trunc -2.7 = " + *Vein.Math.Round.trunc(-2.7) }
+            emit *Vein.Console.Io.@Print { text: "floor  2.7 = " + *Vein.Math.Round.floor(2.7) }
+            emit *Vein.Console.Io.@Print { text: "floor -2.7 = " + *Vein.Math.Round.floor(-2.7) }
+            emit *Vein.Console.Io.@Print { text: "ceil   2.1 = " + *Vein.Math.Round.ceil(2.1) }
+            emit *Vein.Console.Io.@Print { text: "ceil  -2.1 = " + *Vein.Math.Round.ceil(-2.1) }
+
+            // Halves go AWAY FROM ZERO, not up: round(2.5) is 3 and round(-2.5) is -3. That keeps
+            // `round(-v)` equal to `-round(v)`, which half-up quietly breaks — and a column of
+            // half-up numbers then drifts upward as you total it.
+            emit *Vein.Console.Io.@Print { text: "round  2.5 = " + *Vein.Math.Round.round(2.5) }
+            emit *Vein.Console.Io.@Print { text: "round  2.4 = " + *Vein.Math.Round.round(2.4) }
+            emit *Vein.Console.Io.@Print { text: "round -2.5 = " + *Vein.Math.Round.round(-2.5) }
+        }
+    }
+
+    shard Places {
+        run once {
+            // roundTo is what binary floating point makes necessary. 0.1 + 0.2 is
+            // 0.30000000000000004 in any language with doubles, and printing that to somebody is not
+            // an answer — it is an implementation detail with a decimal point in it.
+            emit *Vein.Console.Io.@Print { text: "raw        = " + (0.1 + 0.2) }
+            emit *Vein.Console.Io.@Print { text: "to 2 dp    = " + *Vein.Math.Round.roundTo(0.1 + 0.2, 2) }
+            emit *Vein.Console.Io.@Print { text: "pi to 2    = " + *Vein.Math.Round.roundTo(3.14159, 2) }
+            emit *Vein.Console.Io.@Print { text: "pi to 4    = " + *Vein.Math.Round.roundTo(3.14159, 4) }
+            emit *Vein.Console.Io.@Print { text: "pow10 3    = " + *Vein.Math.Round.pow10(3) }
+        }
+    }
+
+    shard Roots {
+        run once {
+            emit *Vein.Console.Io.@Print { text: "sqrt 16    = " + *Vein.Math.Roots.sqrt(16.0) }
+            emit *Vein.Console.Io.@Print { text: "sqrt 2     = " + *Vein.Math.Round.roundTo(*Vein.Math.Roots.sqrt(2.0), 4) }
+
+            // The 3-4-5 triangle, which is the one to check a distance function against because the
+            // answer is a whole number and any error in the root shows immediately.
+            emit *Vein.Console.Io.@Print { text: "dist 3,4   = " + *Vein.Math.Roots.distance(0.0, 0.0, 3.0, 4.0) }
+            emit *Vein.Console.Io.@Print { text: "dist same  = " + *Vein.Math.Roots.distance(2.0, 2.0, 2.0, 2.0) }
+        }
+    }
+}

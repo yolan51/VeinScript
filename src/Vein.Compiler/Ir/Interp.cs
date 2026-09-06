@@ -45,6 +45,27 @@ public sealed class Interp
         public ReturnSignal(object? value) => Value = value;
     }
 
+    /// `break` and `continue`, unwound to the nearest loop the same way `return` unwinds to its call.
+    ///
+    /// THESE DID NOTHING AT ALL until they were added here. They lex, they parse, they lower to IrBreak
+    /// and IrContinue, and the C# backend emits real `break;`/`continue;` — but this switch had no case
+    /// for either, so the interpreter ran straight past them and finished the loop. The two runtimes
+    /// disagreed on any program that used them, and nothing caught it because no sample did.
+    ///
+    /// An exception for control flow is the same trade `return` already makes: threading a status
+    /// through every Exec, ExecStmt and ExecLoop would touch every statement in the interpreter to
+    /// serve two keywords. They carry no payload and no stack trace is ever read, so one instance of
+    /// each is reused rather than allocated per hop.
+    private sealed class BreakSignal : Exception
+    {
+        public static readonly BreakSignal It = new();
+    }
+
+    private sealed class ContinueSignal : Exception
+    {
+        public static readonly ContinueSignal It = new();
+    }
+
     private int _callDepth;
     private readonly Queue<(string Name, Dictionary<string, object?> Payload)> _queue = new();
     private readonly List<string> _log = new();
@@ -673,6 +694,11 @@ public sealed class Interp
 
         try { Exec(body, owner, locals); }
         catch (ReturnSignal) { /* a `return` that escaped its fn — the block simply ends */ }
+        // A `break`/`continue` written outside any loop. It means nothing, and ending the block is the
+        // same answer `return` gets here — reporting a runtime error for it would turn a harmless
+        // mistake into a failed frame.
+        catch (BreakSignal) { }
+        catch (ContinueSignal) { }
         catch (Exception ex)
         {
             string where = $"{owner.Name} ({what})";
@@ -924,6 +950,8 @@ public sealed class Interp
             // Unwinds to the enclosing CallUser. The parser only admits `return` inside an `fn`, so a
             // stray signal cannot escape into the event loop.
             case IrReturn r: throw new ReturnSignal(r.Value is null ? null : Eval(r.Value, self, locals));
+            case IrBreak: throw BreakSignal.It;
+            case IrContinue: throw ContinueSignal.It;
             case IrMatch m: ExecMatch(m, self, locals); break;
             // break/continue not exercised by the render path yet
             default: break;
@@ -941,12 +969,27 @@ public sealed class Interp
         if (m.Else is not null) Exec(m.Else, self, locals);
     }
 
+    /// One pass of a loop body. False means the loop must stop.
+    ///
+    /// Every loop kind goes through here so `break` and `continue` mean the same thing in all four —
+    /// `while`, `repeat`, an identity `target` and a collection `target`. A `continue` inside a
+    /// `target` still ends that entity's activation cleanly, because the caller's `finally` runs
+    /// between this returning and the next iteration starting.
+    private bool Iterate(IrBlock body, Instance self, Dictionary<string, object?> locals)
+    {
+        try { Exec(body, self, locals); }
+        catch (ContinueSignal) { }
+        catch (BreakSignal) { return false; }
+        return true;
+    }
+
     private void ExecLoop(IrLoop lp, Instance self, Dictionary<string, object?> locals)
     {
         switch (lp.Kind)
         {
             case IrLoopKind.While:
-                { int g = 0; while (Truthy(Eval(lp.Cond!, self, locals)) && g++ < 100_000) Exec(lp.Body, self, locals); }
+                { int g = 0; while (Truthy(Eval(lp.Cond!, self, locals)) && g++ < 100_000)
+                      if (!Iterate(lp.Body, self, locals)) break; }
                 break;
             case IrLoopKind.Repeat:
                 { long n = AsLong(Eval(lp.Count!, self, locals));
@@ -955,7 +998,7 @@ public sealed class Interp
                   {
                       _currentIndex = i;                       // `Index` works here too; `as i` names the same number
                       if (lp.Var is not null) locals[lp.Var] = i;
-                      Exec(lp.Body, self, locals);
+                      if (!Iterate(lp.Body, self, locals)) break;
                   }
                   _currentIndex = prevIdx; }
                 break;
@@ -976,13 +1019,18 @@ public sealed class Interp
                         if (lp.Var is not null) locals[lp.Var] = entity;
 
                         _store.BeginActivation();
-                        try { Exec(lp.Body, self, locals); }
+                        bool more;
+                        try { more = Iterate(lp.Body, self, locals); }
                         finally
                         {
+                            // The activation and the bind stack unwind FIRST, whatever the body did.
+                            // A `break` out of a `target` that skipped EndActivation would leave the
+                            // store mid-activation for every later shard in the frame.
                             _store.EndActivation();
                             _targetBinds.RemoveAt(_targetBinds.Count - 1);
                             _currentEntity = previous;
                         }
+                        if (!more) break;
                     }
                     _currentIndex = prevIdx;
                 }
@@ -995,8 +1043,10 @@ public sealed class Interp
                         _currentIndex = ++idx;
                         _targetBinds.Add(item);
                         if (lp.Var is not null) locals[lp.Var] = item;
-                        try { Exec(lp.Body, self, locals); }
+                        bool more;
+                        try { more = Iterate(lp.Body, self, locals); }
                         finally { _targetBinds.RemoveAt(_targetBinds.Count - 1); }
+                        if (!more) break;
                     }
                     _currentIndex = prevIdx;
                 }

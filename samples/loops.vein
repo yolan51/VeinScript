@@ -1,0 +1,83 @@
+// loops.vein — the four loops, and the two words that cut them short.
+//
+//   veinc run samples/loops.vein --ticks 2
+//
+// IN tools/check-backend.sh, and that is the point of it existing.
+//
+// `break` and `continue` lexed, parsed, lowered to IrBreak/IrContinue and were emitted correctly by the
+// C# backend — but the interpreter had no case for either and ran straight past them. The two runtimes
+// disagreed about every program that used them, and nothing noticed, because NO SAMPLE USED THEM. The
+// backend check diffs the interpreter against the compiled program on each file listed in it, so this
+// sample is what makes that class of divergence impossible to reintroduce quietly.
+//
+// VeinScript has four loops and they are not interchangeable:
+//
+//   while <cond>          run until the condition goes false
+//   repeat N as i         run a counted number of times
+//   target $S #M as e     every identity carrying that shape and mark — the identity loop
+//   target <list> as x    every element of a list
+//
+// `break` and `continue` mean the same thing in all four.
+
+bundle Loops by you {
+
+    shape $Score { who: string, points: int }
+    mark #Player
+    builder Player { $Score   mark #Player }
+
+    shard Counting {
+        run once {
+            // WHILE, with both words. `continue` skips the rest of this pass; `break` leaves the loop.
+            // Printed: 1, 3, 4 — 2 is skipped and 5 stops it before it prints.
+            var i = 0
+            while i < 10 {
+                i = i + 1
+                if i == 2 { continue }
+                if i == 5 { break }
+                emit *Vein.Console.Io.@Print { text: "while i=" + i }
+            }
+
+            // REPEAT, counted. `as r` names the same number `Index` would give.
+            repeat 3 as r {
+                emit *Vein.Console.Io.@Print { text: "repeat r=" + r + " Index=" + Index }
+            }
+
+            // `break` in a counted loop still ends it early — the count is a limit, not a promise.
+            repeat 10 as r {
+                if r == 2 { break }
+                emit *Vein.Console.Io.@Print { text: "capped r=" + r }
+            }
+
+            // A loop over a LIST. Same statement, same two words.
+            var seen = 0
+            target words("alpha beta skip gamma") as w {
+                if w == "skip" { continue }
+                seen = seen + 1
+                emit *Vein.Console.Io.@Print { text: "word " + seen + " = " + w }
+            }
+        }
+    }
+
+    shard Make {
+        run once {
+            bring Player("Ada", 30)
+            bring Player("Grace", 20)
+            bring Player("Alan", 10)
+        }
+    }
+
+    // A SEPARATE SCHEDULE. A `bring` is a structural change and structural changes commit at the phase
+    // boundary (RULES 11/12b), so a `target` in the same block would query the world as it was before
+    // the brings and find nothing. This is the second tick.
+    shard Report {
+        each tick {
+            // `continue` inside an IDENTITY loop. Each entity gets its own activation, and skipping one
+            // has to end that activation cleanly — a `continue` that left the store mid-activation
+            // would corrupt every shard that ran after it in the frame.
+            target $Score #Player as p {
+                if p.Score.points < 15 { continue }
+                emit *Vein.Console.Io.@Print { text: p.Score.who + " scored " + p.Score.points }
+            }
+        }
+    }
+}
