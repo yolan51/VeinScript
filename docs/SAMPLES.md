@@ -45,7 +45,12 @@ with the number of frames to run it for.
 - **events** — `events`, `payload`, `dom_rewire`
 - **text and values** — `entities_chars`, `entities_convert`, `text_search`, `text_split_join`
 - **control flow** — `loops`
-- **stdlib** — `math_round`, `motion`
+- **removal** — `entities_destroy`
+- **chance** — `random_draw`
+- **stdlib** — `math_round`, `motion`, `ui_widgets`, `game_collision`
+
+One sample is deliberately **outside** the list: `stdlib_events.vein`, because only the interpreter can
+run it. Section 3 says why.
 
 ---
 
@@ -54,8 +59,8 @@ with the number of frames to run it for.
 Measured by pulling every `Call` node out of `veinc ir` for all 70 samples — the compiler's own idea of
 a call, not a grep, which counts words in comments.
 
-**Built-ins: 28 of 29 have at least one call site.** The one that does not is `random()`, and it is
-reached indirectly — `chance 30% { … }` lowers to it, and `entities_chance` is in the backend check.
+**Built-ins: 29 of 29 have at least one call site.** `random()` was the last, and writing its sample
+turned out to be the way to discover that it *could not be called at all* — see section 4.
 
 **Language features: everything implemented is exercised**, following the `loops` sample. Note that
 `enum`, `mute`, `unmute` and `transform` are *lexed but have no implementation* — `enum Colour { Red }`
@@ -64,31 +69,35 @@ reserved.
 
 ### Still missing
 
-**Three stdlib bundles have no sample at all:** `Game`, `Input`, `UI`. (`Transform` and `Time` are
-covered by `motion.vein`.)
+**Every stdlib bundle now has a sample**, and every built-in has a call site. What is left is not a
+missing sample but two limitations that decide what a sample is *allowed* to do.
 
-Each declares shapes and events that nothing in `samples/` ever constructs, so nothing checks that they
-still parse into what a program can use. In order of value:
+### 1. Cross-bundle events cannot be diffed
 
-1. **`Input`** — `@KeyDown`, `@TextInput`, `@MouseDown`. Hard to drive from a test, so the sample is
-   about the *wiring*: a shard that hears each one and reports.
-2. **`UI`** — `$Button`, `$Field`, `@Clicked`. Overlaps the existing web samples; the gap is that none
-   of them use the `UI` bundle's own declarations.
-3. **`Game`** — `$Collider`, `@Collided`, `@Damaged`. The most involved, and the least urgent.
+The C# backend emits neither a cross-bundle `emit` nor a `hear` for an event declared in another
+bundle. `samples/stdlib_events.vein` covers all seven of them — Input's three, UI's two, Game's two —
+and is therefore **interpreter-only and outside `check-backend.sh`**.
 
-**All three are blocked from `check-backend.sh` by the same limitation**, which is worth fixing before
-writing them: the C# backend does not emit a `hear` for an event declared in **another bundle** — there
-is no payload type on that side, and it says so in a note rather than failing silently. Since all three
-bundles are event-shaped, a sample for any of them is interpreter-only until the backend emits payload
-types for external events. `motion.vein` works around it by using only stdlib *shapes*, which do cross
-bundles correctly, and doing its stepping in `each tick`. That is why it covers no `@Ticked`/`@Moved`.
+**The exclusion is correct as it stands**, and lifting it naively would be worse than the gap. A stdlib
+event is not always just data on a bus: `*Vein.Net.Http.@Fetch` performs an HTTP request and
+`*Vein.Files.Io.@ReadFile` reads a file, and the interpreter is what implements them. Emitting a
+payload class and a queue for every imported event would turn `emit @Fetch` into a queued no-op — a
+program that compiles, runs, and silently never fetches.
 
-**Two smaller ones:**
+The events in `stdlib_events.vein` *are* pure data, so lifting it for those specifically would be
+sound. Doing that needs a way to tell a data occurrence from one with host transport, which nothing
+records today. That is the open item, and it is a language/stdlib question before it is a backend one.
 
-- A direct `random()` sample with a fixed seed, so the generator itself is diffed rather than only
-  `chance`'s use of it.
-- `destroy` and `unattach` have call sites but no *dedicated* sample the way `entities_detach` covers
-  detaching — and `entities_detach` is the only place either is checked behaviourally.
+### 2. A mark-only `target` is not emitted at all
+
+`target #Alive as a { … }` — no shape, just a mark — runs in the interpreter and is **silently skipped
+by the backend**, whose note reads *"target with no query and no source not emitted"*. Every
+`VeinWorld.Query` overload takes a component type; there is no query-by-mark, so the loop body simply
+never runs in compiled code.
+
+Nothing in the repo depended on it, which is why it went unnoticed until `entities_destroy.vein` tried
+it. That sample names a shape alongside the mark as a workaround, and says so. The fix is a
+`QueryByMark<M1…>` on `VeinWorld` with its own cache path, plus emission for it.
 
 ---
 
@@ -130,6 +139,26 @@ Emitted as bare calls to C# methods that do not exist, by the deliberate `Unimpl
 fail loudly rather than compute something else. The rule is right; the gap it was reporting was that
 **any program doing text handling could not be compiled to C#**. All five are now implemented in
 `__VeinText`, and `check-backend.sh` diffs them against the interpreter.
+
+### `random()` could not be called
+
+`random` was in the **lexer's keyword table** and used by no parser rule, so `random()` was `VS0104:
+Unexpected 'random' in expression`. Every other stage implemented it — `Interp.PrebuiltNames`, the
+`_rng.NextDouble()` behind it, `Resolve` typing it `float`, and the backend's `World.Random()` — and
+`chance N%` lowering to it internally was the only way to reach it at all.
+
+That is why it showed zero call sites: not an oversight in the samples, a word the lexer had taken.
+Removed from the keyword table, exactly as `spawn` has never been one.
+
+### An imported event's own shapes resolved against the wrong bundle
+
+`event @KeyDown { $Key }` includes a shape declared beside it in `stdlib/Input.vein`. Importing that
+event into another bundle expanded the include against the bundle doing the *hearing*, found no local
+`$Key`, and raised **VS0210 against the library's source** — a warning about stdlib, printed while
+compiling a program that had done nothing wrong, with the payload coming out empty either way.
+
+Two call sites were missing the owner key; a third, for builders, already had one and carried a comment
+calling it "load-bearing". `ResolveEventOwned` now keeps the key for all of them.
 
 ### Two shard names that are legal VeinScript and illegal C#
 

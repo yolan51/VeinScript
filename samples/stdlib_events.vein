@@ -1,0 +1,125 @@
+// stdlib_events.vein — the standard library's OCCURRENCES: Input, UI interaction, Game combat.
+//
+//   veinc run samples/stdlib_events.vein --ticks 3
+//
+// NOT IN tools/check-backend.sh, and that is the point of the file rather than an oversight.
+//
+// The C# backend emits neither a cross-bundle `emit` nor a `hear` for an event declared in another
+// bundle, and it says so rather than failing quietly:
+//
+//   note: emit @KeyDown not emitted — it is declared in another bundle, and its transport lives on
+//         the interpreter.
+//   note: Keys: hear @KeyDown not emitted — the event is declared in another bundle, so there is no
+//         payload type here and its transport lives on the interpreter.
+//
+// THAT EXCLUSION IS CORRECT, and worth understanding before anyone tries to lift it. A stdlib event is
+// not always just data on a bus: `*Vein.Net.Http.@Fetch` performs an HTTP request and
+// `*Vein.Files.Io.@ReadFile` reads a file, and the interpreter is what implements them. If the backend
+// emitted a payload class and a queue for every imported event, `emit @Fetch` would become a queued
+// no-op — a program that compiles, runs, and silently never fetches. The note is the honest answer.
+//
+// The events below ARE pure data, so lifting the exclusion for them specifically would be sound. Doing
+// it needs a way to tell a data occurrence from one with host transport, which nothing records today.
+// docs/SAMPLES.md carries that as the open item; this file is what would go into check-backend.sh the
+// day it lands.
+//
+// So the coverage this file gives is real but narrower than the others: SamplesTests compiles it and
+// asserts it produces no warnings, RunConfigSweepTests checks the line above, and running it proves
+// the interpreter delivers every one of these. What it cannot prove is that both runtimes agree,
+// because only one of them runs it.
+//
+// THE PROGRAM EMITS ITS OWN INPUT. There is no device here, and `Vein.Input`'s events are ordinary
+// occurrences — a runtime emits them when a key is pressed, and a program can emit them to describe a
+// key having been pressed. That is what makes this runnable at all, and it is the same contract
+// samples/motion.vein relies on for time.
+
+bundle StdlibEvents by you {
+
+    use UI
+
+    shape $Log { line: string }
+    mark #Logged
+
+    mark #Button
+
+    // `spawn()` is IMMEDIATE while `attach` and `mark` are deferred to the phase boundary, so the id is
+    // usable in the same block that created it — which is what lets the interaction events name their
+    // target here rather than needing a `target` in a later frame to go looking for it.
+    shard Setup {
+        run once {
+            let ok = spawn()
+            attach $Button to ok { label: "OK", id: "ok" }
+            mark ok #Button
+
+            emit *Vein.UI.Interaction.@Clicked { target: ok }
+            emit *Vein.UI.Interaction.@Focused { target: ok }
+        }
+    }
+
+    // ---- Vein.Input ---------------------------------------------------------------------------------
+
+    shard Device {
+        run once {
+            emit *Vein.Input.Keyboard.@KeyDown { key: "a" }
+            emit *Vein.Input.Keyboard.@TextInput { text: "hello" }
+            emit *Vein.Input.Mouse.@MouseDown { x: 12.0, y: 40.0, button: 0 }
+        }
+    }
+
+    shard Keys {
+        hear *Vein.Input.Keyboard.@KeyDown as k {
+            emit *Vein.Console.Io.@Print { text: "key down: " + k.key }
+        }
+    }
+
+    shard Typing {
+        hear *Vein.Input.Keyboard.@TextInput as t {
+            emit *Vein.Console.Io.@Print { text: "typed: " + t.text }
+        }
+    }
+
+    shard Pointer {
+        hear *Vein.Input.Mouse.@MouseDown as m {
+            emit *Vein.Console.Io.@Print { text: "mouse " + m.button + " at " + m.x + "," + m.y }
+        }
+    }
+
+    // ---- Vein.UI interaction ------------------------------------------------------------------------
+    //
+    // The interaction events carry the target Entity, which is what lets any bundle react to a specific
+    // widget rather than to "a button somewhere".
+
+    shard Reacting {
+        hear *Vein.UI.Interaction.@Clicked as c {
+            emit *Vein.Console.Io.@Print { text: "clicked entity " + c.target }
+        }
+    }
+
+    shard Focusing {
+        hear *Vein.UI.Interaction.@Focused as f {
+            emit *Vein.Console.Io.@Print { text: "focused entity " + f.target }
+        }
+    }
+
+    // ---- Vein.Game combat ---------------------------------------------------------------------------
+
+    shard Fight {
+        run once {
+            let hero = spawn()
+            emit *Vein.Game.Collision.@Collided { a: hero, b: hero }
+            emit *Vein.Game.Combat.@Damaged { target: hero, amount: 7 }
+        }
+    }
+
+    shard Wounds {
+        hear *Vein.Game.Combat.@Damaged as d {
+            emit *Vein.Console.Io.@Print { text: "damaged " + d.target + " for " + d.amount }
+        }
+    }
+
+    shard Contacts {
+        hear *Vein.Game.Collision.@Collided as c {
+            emit *Vein.Console.Io.@Print { text: "collision between " + c.a + " and " + c.b }
+        }
+    }
+}

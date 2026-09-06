@@ -1,0 +1,98 @@
+// ui_widgets.vein — Vein.UI's widget shapes, as identities.
+//
+//   veinc run samples/ui_widgets.vein --ticks 2
+//
+// In tools/check-backend.sh. stdlib/UI.vein had no sample at all, so nothing checked that its shapes
+// still resolve into something a program can attach and read back.
+//
+// WIDGETS ARE IDENTITIES, NOT MARKUP. That is the whole design of Vein.UI and the reason it is separate
+// from Vein.Web: a `$Button` is state — a label, an id, a class, a handler name — and a RENDERER turns
+// it into pixels or into DOM. stdlib/Web.vein's `Button` builder is one such renderer, and it includes
+// `*Vein.UI.Widgets.$Button` rather than declaring a second one, so a button attached for a native
+// backend and a button rendered to HTML are one identity and not two.
+//
+// `use UI` AND A BARE `attach`, which is the readable form and, until recently, the broken one: the
+// component attached and every read of it came back empty, because a shape reaching a bundle through
+// `use` was never imported into the module. The other route — a builder including
+// `*Vein.UI.Widgets.$Button` — is what samples/motion.vein uses. Both work; this file exercises the
+// one that reads like ordinary code.
+//
+// NO @Clicked HERE. Vein.UI's interaction events are the natural other half, and the C# backend does
+// not emit a `hear` for an event declared in another bundle — so a sample using them cannot be diffed,
+// and a sample in check-backend.sh that only one runtime can run is not a differential test.
+// samples/stdlib_events.vein covers them, interpreter-only and marked as such.
+
+bundle UiWidgets by you {
+
+    use UI
+
+    mark #Widget
+    mark #Focused
+
+    shard Build {
+        run once {
+            // A button with only its label. The other three fields carry declared defaults — an id, a
+            // class and a handler are all optional in any renderer, exactly as `<button>Go</button>` is
+            // a complete button — so this is a one-field attach and the rest arrive as "".
+            let save = spawn()
+            attach $Button to save { label: "Save" }
+            mark save #Widget
+
+            // And one with everything a renderer resolves.
+            let cancel = spawn()
+            attach $Button to cancel { label: "Cancel", id: "btn-cancel", class: "muted", onclick: "dismiss" }
+            mark cancel #Widget
+
+            let name = spawn()
+            attach $Field to name { value: "", placeholder: "your name" }
+            mark name #Widget
+            mark name #Focused
+
+            let title = spawn()
+            attach $Text to title { content: "Preferences" }
+            mark title #Widget
+        }
+    }
+
+    // Typing into the focused field. A widget's state is ordinary component data, so changing what a
+    // field holds is an assignment and not a message to a toolkit.
+    shard Type {
+        each tick {
+            target $Field #Focused as f {
+                if f.Field.value == "" { f.Field.value = "Ada" }
+            }
+        }
+    }
+
+    // ---- what a renderer would walk ----------------------------------------------------------------
+    //
+    // Three separate queries rather than one over #Widget, because a renderer needs to know WHICH shape
+    // it is drawing — and a query names the shape it reads. That is the same reason `target` takes a
+    // shape rather than only a mark: the binding has a type because the query said so.
+
+    shard Render {
+        settled {
+            target $Text #Widget as t {
+                emit *Vein.Console.Io.@Print { text: "text    " + t.Text.content }
+            }
+
+            target $Button #Widget as b {
+                // An empty id is the default doing its job, and worth showing rather than hiding.
+                if b.Button.id == "" {
+                    emit *Vein.Console.Io.@Print { text: "button  " + b.Button.label + "  (no id)" }
+                } else {
+                    emit *Vein.Console.Io.@Print {
+                        text: "button  " + b.Button.label + "  id=" + b.Button.id +
+                              " class=" + b.Button.class + " onclick=" + b.Button.onclick
+                    }
+                }
+            }
+
+            target $Field #Widget as f {
+                emit *Vein.Console.Io.@Print {
+                    text: "field   [" + f.Field.value + "]  placeholder=" + f.Field.placeholder
+                }
+            }
+        }
+    }
+}

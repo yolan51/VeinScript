@@ -740,10 +740,14 @@ public sealed class Lower
     {
         if (em.Fields.Count == 0) return;
 
-        var decl = ResolveEvent(em.EventPath, em.Event);
+        // WITH ITS OWNER, or expanding the payload looks for the event's `$Shape` includes in the
+        // bundle doing the EMITTING. `emit *Vein.Input.Keyboard.@KeyDown` then failed to find `$Key`
+        // and warned VS0210 against stdlib/Input.vein — a warning about the library, raised while
+        // compiling a program that had done nothing wrong.
+        var (owner, decl) = ResolveEventOwned(em.EventPath, em.Event);
         if (decl is null) return;    // an event this bundle cannot see: not this check's business
 
-        var known = ExpandMembers(decl.Members);
+        var known = ExpandMembers(decl.Members, owner);
         if (known.Count == 0) return;
 
         foreach (var f in em.Fields)
@@ -776,6 +780,32 @@ public sealed class Lower
         // Then a `use`d bundle. `use Web` makes `@Request` mean *Vein.Web.Http.@Request, and the payload
         // is that declaration's — the same widening rule bare calls and marks already follow.
         return ResolveUsed(Index.Events, "@", name, default)?.Value;
+    }
+
+    /// The same lookup as `ResolveEvent`, keeping the index KEY — the bundle that declared the event.
+    ///
+    /// The key is load-bearing for exactly the reason the builder branch of RegisterImportedEvent gives
+    /// for its own: an event's `$Shape` includes belong to the bundle that DECLARED it. Expanding
+    /// `event @KeyDown { $Key }` against the bundle doing the HEARING looked for a local `$Key`, did not
+    /// find one, and warned VS0210 against stdlib/Input.vein's own source — pointing at the library for
+    /// a mistake in the importer, with the payload coming out empty either way.
+    ///
+    /// Null key for a local event, which needs no owner: `ExpandMembers` then resolves against this
+    /// bundle, which is where the shape is.
+    private (string? Key, EventDecl? Decl) ResolveEventOwned(IReadOnlyList<string> path, string name)
+    {
+        if (path.Count > 0)
+        {
+            string refKey = string.Join(".", path) + "." + name;
+            var hit = Index.Events.FirstOrDefault(kv =>
+                kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal));
+            return (hit.Key, hit.Value);
+        }
+
+        if (_events.TryGetValue(name, out var local)) return (null, local);
+
+        var used = ResolveUsed(Index.Events, "@", name, default);
+        return (used?.Key, used?.Value);
     }
 
     private static string RefText(ShapeInclude si) =>
@@ -951,9 +981,10 @@ public sealed class Lower
         // `r.path` untyped in the web samples.
         if (_events.ContainsKey(name) || _importedEvents.ContainsKey(name)) return;
 
-        if (ResolveEvent(path, name) is { } decl)
+        // The OWNER goes with the members, for the same reason the builder branch below passes one.
+        if (ResolveEventOwned(path, name) is { Decl: { } decl } owned)
         {
-            _importedEvents[name] = ImportedEvent(name, ExpandMembers(decl.Members), decl.Doc);
+            _importedEvents[name] = ImportedEvent(name, ExpandMembers(decl.Members, owned.Key), decl.Doc);
             return;
         }
 

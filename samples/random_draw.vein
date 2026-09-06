@@ -1,0 +1,72 @@
+// random_draw.vein — `random()` called directly, and why it is reproducible.
+//
+//   veinc run samples/random_draw.vein --ticks 3
+//
+// In tools/check-backend.sh. `entities_chance.vein` covers `chance N%`, which LOWERS to `random()` —
+// so the generator was diffed only through that one construct. Called directly it had no coverage at
+// all, and a direct call is what a program reaches for the moment it wants a number rather than a
+// branch.
+//
+// ONE GENERATOR, SEEDED AT 0, ON BOTH SIDES. `Interp._rng` is `new Random(0)` and the backend emits
+// `World.Random()` against the same seed. That is what makes a probabilistic program diffable at all:
+// the same source and the same frame count print the same numbers every run, on both runtimes.
+//
+// It also means the draws below are NOT a statistical sample of anything. They are a fixed sequence
+// that happens to look random, which is exactly what a test wants and exactly what a lottery does not.
+// A program that needs unpredictability needs a seed from somewhere this language does not provide.
+//
+// AND THE ORDER OF DRAWS IS PART OF THE ANSWER. One generator serves every call in the program, so two
+// shards drawing in the same frame consume consecutive values. Reordering the shards would reorder the
+// numbers — which is why this file draws from ONE shard and leaves the interleaving to no one.
+
+bundle RandomDraw by you {
+
+    shape $Roll { value: int, kept: bool }
+    mark #Rolled
+    builder Roll { $Roll   mark #Rolled }
+
+    shard Draw {
+        each tick {
+            // A raw draw is a float in [0, 1). Rounded for printing, because the full 17 digits are the
+            // double's business and not the reader's.
+            emit *Vein.Console.Io.@Print {
+                text: "raw   " + *Vein.Math.Round.roundTo(random(), 4)
+            }
+
+            // THE IDIOM FOR A WHOLE NUMBER IN A RANGE: scale, then truncate. `int()` truncates toward
+            // zero, so `int(random() * 6) + 1` is 1..6 with every face equally likely — and no face can
+            // come out 7, because random() never returns 1.0.
+            emit *Vein.Console.Io.@Print {
+                text: "d6    " + (int(random() * 6.0) + 1)
+            }
+
+            // A COIN, which is `chance 50%` written as an expression instead of a statement. Worth
+            // showing beside `chance` so the relationship is visible: one is sugar for the other.
+            emit *Vein.Console.Io.@Print {
+                text: "coin  " + (random() < 0.5)
+            }
+        }
+    }
+
+    // A draw deciding DATA rather than control flow — the thing `chance` cannot do, because `chance`
+    // opens a block and this has to produce a value that gets stored.
+    shard Loot {
+        run once {
+            repeat 4 {
+                bring Roll(int(random() * 100.0), random() < 0.5)
+            }
+        }
+    }
+
+    shard Show {
+        each tick {
+            target $Roll #Rolled as r {
+                if r.Roll.kept {
+                    emit *Vein.Console.Io.@Print { text: "  roll " + r.Roll.value + " (kept)" }
+                } else {
+                    emit *Vein.Console.Io.@Print { text: "  roll " + r.Roll.value }
+                }
+            }
+        }
+    }
+}

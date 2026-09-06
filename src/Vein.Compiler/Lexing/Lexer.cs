@@ -22,7 +22,17 @@ public sealed class Lexer
         ["mark"] = TokenKind.KwMark,           ["mute"] = TokenKind.KwMute,
         ["not"] = TokenKind.KwNot,             ["on"] = TokenKind.KwOn,
         ["or"] = TokenKind.KwOr,               ["publicator"] = TokenKind.KwPublicator,
-        ["random"] = TokenKind.KwRandom,       ["return"] = TokenKind.KwReturn,
+        // NO `random` HERE, deliberately. It is a BUILT-IN FUNCTION, not a keyword, and reserving the
+        // word made it unreachable: `random()` was VS0104 because ParsePrimary only accepts an Ident as
+        // a call target. Every other stage already implemented it — Interp.PrebuiltNames, Prebuilt's
+        // `_rng.NextDouble()`, Resolve typing it float, and the backend's `World.Random()` — so the
+        // lexer was the single thing standing between a working built-in and any program that wanted
+        // it. `chance N%` lowered to it internally and was the only way to reach it at all.
+        //
+        // Same shape as `spawn`, which is a built-in for the same reason and was never a keyword.
+        // KwRandom stays in TokenKind: nothing produces it now, and removing an enum member buys
+        // nothing but renumbering.
+        ["return"] = TokenKind.KwReturn,
         ["settled"] = TokenKind.KwSettled,     ["SF"] = TokenKind.KwSf,
         ["shape"] = TokenKind.KwShape,         ["shard"] = TokenKind.KwShard,
         ["shared"] = TokenKind.KwShared,       ["start"] = TokenKind.KwStart,

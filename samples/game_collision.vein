@@ -1,0 +1,113 @@
+// game_collision.vein — Vein.Game's collision and body shapes, with the game supplying the behaviour.
+//
+//   veinc run samples/game_collision.vein --ticks 2
+//
+// In tools/check-backend.sh. stdlib/Game.vein had no sample, so nothing checked that $Collider and
+// $Body still resolve into something a program can attach and read.
+//
+// THE LIBRARY SUPPLIES THE VOCABULARY; THE GAME SUPPLIES THE BEHAVIOUR. Game.vein says so in its own
+// closing comment and gives the shape of this file almost verbatim: a game writes
+// `each tick { target $Collider #Collidable as self { … } }` and decides for itself what overlapping
+// means. It cannot live in the library because a shard cannot be `shared` — one declared there would
+// not be part of the API, just an invisible system installed in every consumer's frame loop because
+// they wanted a rectangle.
+//
+// PAIRS ARE THE PART WORTH A SAMPLE. A collision is between TWO identities and `target` walks one at a
+// time, so the inner loop is a second `target` over the same query — and an outer binding read inside
+// an inner loop has to still mean the OUTER entity (RULES 12c). This file is the only sample that
+// nests two identity queries and reads across them.
+//
+// NO @Collided HERE. Emitting Vein.Game's event is the natural next line, and the C# backend emits
+// neither a cross-bundle event nor a `hear` for one — so a sample using it could not be diffed against
+// the interpreter. samples/stdlib_events.vein covers it, interpreter-only and marked as such.
+
+bundle GameCollision by you {
+
+    use Game
+    use Transform
+
+    mark #Collidable
+
+    // No `abs` in the standard library, and the pair test needs one on both axes. Small enough to
+    // declare, and it doubles as this file's use of a plain `fn` over floats.
+    fn abs(v: float) -> float {
+        if v < 0.0 { return 0.0 - v }
+        return v
+    }
+
+    shard Arena {
+        run once {
+            // Four boxes on a line, chosen so the answer is checkable by hand. `width` and `height` are
+            // HALF-EXTENTS (Game.vein says so), so two boxes overlap on an axis when the gap between
+            // their centres is less than the sum of their half-widths.
+            //
+            //   a at 0 and b at 3, half-width 2 each  → gap 3 < 4   overlap
+            //   b at 3 and c at 7, half-width 2 each  → gap 4 < 4   false, exactly touching
+            //   d at 30                               → clear of everything
+            let a = spawn()
+            attach $Position to a { x: 0.0, y: 0.0, z: 0.0 }
+            attach $Collider to a { width: 2.0, height: 2.0 }
+            attach $Body to a { mass: 1.0, restitution: 0.5 }
+            mark a #Collidable
+
+            let b = spawn()
+            attach $Position to b { x: 3.0, y: 0.0, z: 0.0 }
+            attach $Collider to b { width: 2.0, height: 2.0 }
+            attach $Body to b { mass: 2.0, restitution: 0.1 }
+            mark b #Collidable
+
+            let c = spawn()
+            attach $Position to c { x: 7.0, y: 0.0, z: 0.0 }
+            attach $Collider to c { width: 2.0, height: 2.0 }
+            attach $Body to c { mass: 4.0, restitution: 0.9 }
+            mark c #Collidable
+
+            let d = spawn()
+            attach $Position to d { x: 30.0, y: 0.0, z: 0.0 }
+            attach $Collider to d { width: 1.0, height: 1.0 }
+            attach $Body to d { mass: 1.0, restitution: 0.0 }
+            mark d #Collidable
+        }
+    }
+
+    // ---- the game's own broad phase ----------------------------------------------------------------
+
+    shard Overlaps {
+        settled {
+            target $Position $Collider #Collidable as a {
+                target $Position $Collider #Collidable as b {
+                    // EACH PAIR ONCE, and never with itself. Ordering on x is what does it: for any two
+                    // distinct boxes exactly one arrangement satisfies this, and no box is left of
+                    // itself. An index comparison would be the usual trick and `Index` names only the
+                    // NEAREST loop, so the outer one has no number to compare against.
+                    if a.Position.x < b.Position.x {
+                        let dx = abs(b.Position.x - a.Position.x)
+                        let dy = abs(b.Position.y - a.Position.y)
+
+                        if dx < a.Collider.width + b.Collider.width {
+                            if dy < a.Collider.height + b.Collider.height {
+                                emit *Vein.Console.Io.@Print {
+                                    text: "overlap: box at " + a.Position.x + " and box at " + b.Position.x +
+                                          "  (gap " + dx + ")"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // $Body is the other half of Vein.Game's vocabulary — what a resolver would need once an overlap is
+    // known. Nothing here resolves anything; the sample's job is that the data is reachable.
+    shard Bodies {
+        settled {
+            target $Position $Body #Collidable as e {
+                emit *Vein.Console.Io.@Print {
+                    text: "  body at " + e.Position.x + "  mass " + e.Body.mass +
+                          "  bounce " + e.Body.restitution
+                }
+            }
+        }
+    }
+}

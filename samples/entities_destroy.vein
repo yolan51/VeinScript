@@ -1,0 +1,128 @@
+// entities_destroy.vein — taking things away: `unmark`, `unattach`, `destroy`.
+//
+//   veinc run samples/entities_destroy.vein --ticks 3
+//
+// In tools/check-backend.sh. `entities_detach.vein` covers `unattach`; `destroy` had call sites in two
+// samples and neither was diffed against the compiled backend, so removing an identity was the one
+// structural change with no differential coverage at all.
+//
+// ALL THREE ARE STRUCTURAL, and structural changes commit at the PHASE BOUNDARY (RULES 11/12b). That is
+// the single thing worth understanding here, because it makes the obvious reading wrong:
+//
+//   `unmark m #Alive` does not stop the current frame's later shards from seeing #Alive;
+//   `destroy e` does not make `e` vanish mid-frame.
+//
+// Everything queued during a frame lands together at the end of it, which is what stops two shards from
+// disagreeing about the world depending on which ran first. So a shard that removes and a shard that
+// counts, in the same frame, both see the world as it was when the frame began — and the frame after
+// sees the result.
+
+bundle Destroying by you {
+
+    shape $Health { hp: int }
+    shape $Shield { sp: int }
+    mark #Alive
+    mark #Guarded
+
+    builder Mob { $Health, $Shield   mark #Alive   mark #Guarded }
+
+    shard Spawn {
+        run once {
+            bring Mob(10, 5)
+            bring Mob(20, 5)
+            bring Mob(30, 5)
+        }
+    }
+
+    // ---- take the mark off the weakest -------------------------------------------------------------
+    //
+    // `unmark` removes an identity from a query without touching its data. The entity still exists and
+    // still carries $Health; it simply stops being #Alive, so every `target … #Alive` skips it from the
+    // next frame on.
+
+    shard Cull {
+        each tick {
+            target $Health #Alive as m {
+                if m.Health.hp < 15 { unmark m #Alive }
+            }
+        }
+    }
+
+    // ---- take a component off, keeping the identity ------------------------------------------------
+    //
+    // `unattach` is the other half: the identity stays, and one shape leaves it. After this the entity
+    // no longer matches `target $Shield`, but still matches `target $Health`.
+
+    shard Disarm {
+        each tick {
+            target $Shield #Guarded as m {
+                if m.Shield.sp > 0 { unattach $Shield from m }
+            }
+        }
+    }
+
+    // ---- take the whole identity away --------------------------------------------------------------
+    //
+    // `destroy` removes it entirely — every component, every mark. Deferred like the other two, so an
+    // entity destroyed in this frame is still counted by anything else running in this frame.
+
+    shard Reap {
+        each tick {
+            target $Health #Alive as m {
+                if m.Health.hp > 25 { destroy m }
+            }
+        }
+    }
+
+    // ---- what is there, counted twice per frame ----------------------------------------------------
+    //
+    // THE TWO COUNTS ARE THE POINT OF THIS FILE. `during` runs in the same phase as the three shards
+    // above and sees the world as the frame BEGAN — every removal they queued is still pending. `after`
+    // runs once those have committed.
+    //
+    // The order of the `each tick` shards relative to each other does not matter, and that is the
+    // guarantee rather than a caveat: because removals are deferred, `during` reports the same numbers
+    // whether it happens to run before or after Cull, Disarm and Reap.
+    //
+    // Three counts rather than one, because each removal answers a different question: the #Alive count
+    // tracks marks, $Shield tracks components, and $Health tracks identities that still exist at all.
+    //
+    // The mark count names $Health as well, and that is a WORKAROUND rather than a preference. A
+    // mark-only `target #Alive as a` is what this wants to say, and the interpreter runs it — but the
+    // C# backend does not emit one at all (its note: "target with no query and no source not emitted"),
+    // because every VeinWorld.Query overload takes a component type and there is no query-by-mark. The
+    // loop body would simply never run in the compiled program, silently. Every entity here carries
+    // $Health, so naming it changes no count. docs/SAMPLES.md records the gap.
+
+    shard During {
+        each tick {
+            var alive = 0
+            var shielded = 0
+            var living = 0
+
+            target $Health #Alive as a { alive = alive + 1 }
+            target $Shield as s { shielded = shielded + 1 }
+            target $Health as h { living = living + 1 }
+
+            emit *Vein.Console.Io.@Print {
+                text: "during   alive " + alive + "   shielded " + shielded + "   entities " + living
+            }
+        }
+    }
+
+    shard After {
+        settled {
+            var alive = 0
+            var shielded = 0
+            var living = 0
+
+            target $Health #Alive as a { alive = alive + 1 }
+            target $Shield as s { shielded = shielded + 1 }
+            target $Health as h { living = living + 1 }
+
+            emit *Vein.Console.Io.@Print {
+                text: "after    alive " + alive + "   shielded " + shielded + "   entities " + living
+            }
+        }
+    }
+}
