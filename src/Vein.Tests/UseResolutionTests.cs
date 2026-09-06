@@ -188,6 +188,103 @@ public class UseResolutionTests
             d => d.Code == "VS0234");
     }
 
+    // ---- `use X as Y` — importing qualified ---------------------------------------------------------
+    //
+    // The syntax parsed from the day `use` was added — `UseDecl(Name, Alias, Span)` — and NOTHING
+    // consumed the alias. Only the AST printer echoed it. So `use Combat as C` silently behaved as a
+    // plain `use Combat`: it widened bare names, `*C.…` resolved nowhere, and the one thing an alias
+    // exists to do was the one thing it did not.
+    //
+    // AN ALIAS IMPORTS QUALIFIED, NOT BARE, and that is the whole point. `use Combat` beside `use UI`
+    // when both export `Damage` is VS0216 — ambiguous — and the only escape was writing the full
+    // `*author.Combat.Fx.Damage` at every use site. If an alias ALSO widened, aliasing both would leave
+    // bare `Damage` just as ambiguous and would have solved nothing. So it does not widen: it names the
+    // bundle segment of a `*` path instead, and two aliased bundles cannot collide because neither
+    // contributes a bare name at all. `import numpy as np`, not `from numpy import *`.
+
+    [Fact]
+    public void An_alias_names_the_bundle_segment_of_a_qualified_path()
+    {
+        var output = Run("""
+            bundle T by me {
+                use Math as M
+                shard S {
+                    run once {
+                        emit *Vein.Console.Io.@Print { text: "sqrt " + *M.Roots.sqrt(16.0) }
+                    }
+                }
+            }
+            """);
+
+        Assert.Contains("sqrt 4", output);
+    }
+
+    [Fact]
+    public void An_alias_does_NOT_widen_bare_names()
+    {
+        // The load-bearing half. Without this an alias is a plain `use` with extra syntax.
+        Assert.Contains(Compile("""
+            bundle T by me {
+                use Math as M
+                shard S { run once { let x = sqrt(16.0) } }
+            }
+            """).Diagnostics, d => d.Code == "VS0234");
+    }
+
+    [Fact]
+    public void A_plain_use_still_widens()
+    {
+        // The regression guard for the line above: the alias branch must not have taken the bare path
+        // away from an ordinary `use`.
+        Assert.DoesNotContain(Compile("""
+            bundle T by me {
+                use Math
+                shard S { run once { let x = sqrt(16.0) } }
+            }
+            """).Diagnostics, d => d.Code == "VS0234");
+    }
+
+    [Fact]
+    public void Two_aliased_bundles_cannot_be_ambiguous_with_each_other()
+    {
+        // The reason the feature exists. Neither contributes a bare name, so there is nothing to be
+        // ambiguous about — VS0216 cannot fire, and both vocabularies stay reachable.
+        var diags = Compile("""
+            bundle T by me {
+                use Math as M
+                use Console as C
+                shard S {
+                    run once {
+                        emit *Vein.Console.Io.@Print { text: "" + *M.Round.floor(-2.5) }
+                    }
+                }
+            }
+            """).Diagnostics;
+
+        Assert.DoesNotContain(diags, d => d.Code == "VS0216");
+        Assert.DoesNotContain(diags, d => d.Severity == Vein.Compiler.Diagnostics.Severity.Error);
+    }
+
+    [Fact]
+    public void Only_the_first_segment_is_substituted()
+    {
+        // An alias names a BUNDLE. A publicator or member that happens to share its spelling is not one,
+        // so substitution stops after the head — otherwise `use X as Round` would rewrite the publicator
+        // segment of `*Vein.Math.Round.floor` and resolve somewhere absurd.
+        var output = Run("""
+            bundle T by me {
+                use Math as Round
+                shard S {
+                    run once {
+                        emit *Vein.Console.Io.@Print { text: "" + *Round.Round.floor(-2.5) }
+                    }
+                }
+            }
+            """);
+
+        Assert.Contains("-3", output);
+    }
+
     // ---- attaching a shape that `use` resolved ------------------------------------------------------
     //
     // THE ATTACH WORKED AND THE READ DID NOT, which is the worst shape a bug can take. The entity

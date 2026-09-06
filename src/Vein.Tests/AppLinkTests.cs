@@ -160,6 +160,47 @@ public class AppLinkTests : IDisposable
     }
 
     [Fact]
+    public void Two_bundles_declaring_one_event_differently_STOPS_the_link()
+    {
+        // AN ERROR, NOT A WARNING, and this is the assertion that matters at scale.
+        //
+        // It used to warn and link `seen.Owner`'s version — so one bundle silently won, decided by
+        // module order, and the other bundle's handlers were bound to a payload whose fields they do
+        // not have. Survivable to notice in a program with a hundred primitives; invisible in one with
+        // ten thousand, where warnings scroll past. Nothing about it is recoverable at runtime, so the
+        // app does not link.
+        Write("A.vein",
+            "bundle A by me {\n  publicator S { shared(\"d\") event @Ping { text: string } }\n" +
+            "  shard X { run once { emit @Ping { text: \"hi\" } } }\n}");
+        Write("B.vein",
+            "bundle B by me {\n  publicator S { shared(\"d\") event @Ping { count: int } }\n}");
+        var app = Write("T.app.vein", "app T {\n load \"A.vein\"\n load \"B.vein\"\n}");
+
+        var (_, diag) = Run(app);
+
+        var clash = Assert.Single(diag.Items, d => d.Code == "VS0332");
+        Assert.Equal(Severity.Error, clash.Severity);
+        Assert.True(diag.HasErrors, "a divergent unification must fail the build, not merely report");
+    }
+
+    [Fact]
+    public void A_shape_two_bundles_declare_differently_also_stops_the_link()
+    {
+        // Shapes take the same path as events through AppLinker — both are `module.Types` — and the
+        // consequence is worse: a shard reads `h.Health.max` off a component that has `bar` on it.
+        Write("A.vein",
+            "bundle A by me {\n  publicator S { shared(\"d\") shape $Health { current: int, max: int } }\n" +
+            "  shard X { run once { } }\n}");
+        Write("B.vein",
+            "bundle B by me {\n  publicator S { shared(\"d\") shape $Health { bar: string } }\n}");
+        var app = Write("T.app.vein", "app T {\n load \"A.vein\"\n load \"B.vein\"\n}");
+
+        var (_, diag) = Run(app);
+
+        Assert.Contains(diag.Items, d => d.Code == "VS0332" && d.Severity == Severity.Error);
+    }
+
+    [Fact]
     public void An_identical_event_declared_in_two_bundles_is_not_reported()
     {
         // The shared-vocabulary case must stay quiet, or the warning becomes noise people learn to skip.

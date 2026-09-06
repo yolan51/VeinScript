@@ -121,10 +121,16 @@ public static class AppLinker
                     // events. Unifying two DIFFERENT declarations is not; that is a name clash wearing
                     // the costume of a shared vocabulary, and it would bind handlers to a payload whose
                     // fields they do not have.
+                    // AN ERROR. It used to warn and link `seen.Owner`'s version, which means one bundle
+                    // silently won and the other's shards read fields that are not on the component they
+                    // were handed. Nothing about that is recoverable at runtime, and "the app links the
+                    // first one" is a coin toss decided by module order — so the app does not link.
                     if (!SameShape(seen.Type, t))
-                        diag.Warning("VS0332",
-                            $"'{t.Name}' is declared differently in bundles '{seen.Owner}' and '{name}'; " +
-                            $"the app links '{seen.Owner}'s version. Rename one, or give them matching fields.",
+                        diag.Error("VS0332",
+                            $"'{t.Name}' is declared differently in bundles '{seen.Owner}' and '{name}'. " +
+                            "Unifying by name is deliberate — it is how a capability bundle sees the " +
+                            "principal's data — but these two disagree, so one bundle's shards would read " +
+                            "fields the component does not have. Rename one, or give them matching fields.",
                             span);
                     continue;
                 }

@@ -56,7 +56,26 @@ public sealed class Lower
 
     /// Bundles this one says `use` on, in declaration order. A bare name that resolves nowhere locally
     /// is looked for in these, which is the whole of what `use` does.
+    ///
+    /// An ALIASED use is deliberately absent from this list — see `_aliases`.
     private readonly List<string> _used = new();
+
+    /// `use Combat as C` — the alias, to the bundle it names.
+    ///
+    /// AN ALIAS IMPORTS QUALIFIED, NOT BARE, and that is the whole point of it. `use Combat` widens
+    /// bare names, so `use Combat` beside `use UI` when both export `Damage` is VS0216 — ambiguous, and
+    /// the only escape was writing `*alice.Combat.Fx.Damage` at every use site. If an alias ALSO
+    /// widened, `use Combat as C` beside `use UI as U` would still be ambiguous on bare `Damage` and
+    /// the alias would have solved nothing.
+    ///
+    /// So it does not widen. It names the bundle segment of a `*` path instead: `*C.Fx.Damage` resolves
+    /// as `*Combat.Fx.Damage`, and two aliased bundles cannot collide because neither contributes a
+    /// bare name. Same idea as `import numpy as np` — the alias is how you keep two vocabularies apart,
+    /// not how you merge them.
+    ///
+    /// The syntax has parsed since `use` was added (`UseDecl.Alias`) and nothing consumed it, so an
+    /// alias silently behaved as a plain `use`. That was the bug.
+    private readonly Dictionary<string, string> _aliases = new(StringComparer.Ordinal);
 
     /// Locally declared `fn`/`SF` names. Needed only to tell "this bare call is local" from "this bare
     /// call resolves nowhere" — nothing tracked that before, because nothing needed to.
@@ -111,6 +130,9 @@ public sealed class Lower
                     case EventDecl ed: _events[ed.Name] = ed; break;
                     case FuncDecl fd: _localFuncs.Add(fd.Name); _funcDecls[fd.Name] = fd; break;
                     case MarkDecl md: _declaredMarks.Add(md.Name); break;
+                    // `use X` widens bare names; `use X as Y` does not — it binds the alias for `*Y.…`
+                    // paths instead. One or the other, never both.
+                    case UseDecl { Alias: { } alias } ua: _aliases[alias] = ua.Name; break;
                     case UseDecl ud: if (!_used.Contains(ud.Name, StringComparer.Ordinal)) _used.Add(ud.Name); break;
                     case PublicatorDecl pub: Collect(pub.Members); break;
                 }
@@ -273,10 +295,22 @@ public sealed class Lower
                 string others = string.Join(" and ", clashes.Select(
                     kv => $"*{kv.Key} {Fields(kv.Value.Members.OfType<FieldDecl>().ToList())}"));
 
+                // A WARNING HERE, AN ERROR AT THE LINK (VS0332), and the difference is whether the
+                // collision is real yet.
+                //
+                // This fires when ANY bundle in the index declares the name differently — the whole
+                // standard library and every installed bundle, whether or not this program will ever
+                // link them. Making it an error was tried and it reserves the stdlib's vocabulary:
+                // `shape $Tag { n: int }` becomes illegal because some other bundle has a different
+                // `$Tag`, in a program that uses neither. Two tests caught exactly that.
+                //
+                // So this stays the early heads-up, and VS0332 stops the build at the point the two
+                // declarations are actually being folded into one app — which is the point where one of
+                // them would silently win.
                 _diag.Warning("VS0220",
                     $"'${s.Name}' is {Fields(mine)}, but is also declared as {others}. Components unify " +
                     $"by name, so linking both into one app makes them one component with two meanings " +
-                    $"(VS0332). Match the fields, or rename.",
+                    $"(VS0332). Match the fields, or rename one.",
                     s.Span);
             }
         }
@@ -430,6 +464,26 @@ public sealed class Lower
         return list;
     }
 
+    /// The index key a `*Path.member` reference is looking for, with any alias expanded.
+    ///
+    /// `*C.Fx.Damage` under `use Combat as C` becomes `Combat.Fx.Damage`, which the suffix matchers then
+    /// line up against `alice.Combat.Fx.Damage` exactly as a hand-written path would. Only the FIRST
+    /// segment is substituted: an alias names a bundle, and a publicator or a member that happens to
+    /// share the alias's spelling is not one.
+    ///
+    /// Every `*` lookup goes through here so an alias works the same in every position — a call, a
+    /// shape include, an event, a builder. Six call sites built this string by hand before, and an alias
+    /// honoured in five of them would be worse than one honoured in none.
+    private string RefKey(IReadOnlyList<string> path, string name)
+    {
+        if (path.Count == 0) return name;
+
+        string head = _aliases.TryGetValue(path[0], out var bundle) ? bundle : path[0];
+        return path.Count == 1
+            ? head + "." + name
+            : head + "." + string.Join(".", path.Skip(1)) + "." + name;
+    }
+
     /// Resolve a BARE name against the bundles this one `use`s — the whole of what `use` does.
     ///
     /// Called only after every local lookup has missed, so a local declaration always wins and no
@@ -469,7 +523,7 @@ public sealed class Lower
     /// only as far as you need to be unique — the same rule as `bring *Author.Bundle.&Builder(…)`.
     private List<FieldDecl>? ResolveExternalShape(IReadOnlyList<string> path, string name)
     {
-        string refKey = string.Join(".", path) + "." + name;
+        string refKey = RefKey(path, name);
         foreach (var kv in Index.Shapes)
             if (kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal))
                 return kv.Value.Members.OfType<FieldDecl>().ToList();
@@ -481,7 +535,7 @@ public sealed class Lower
     /// qualified reference. Recursive: an imported function may itself call another.
     private string? ImportExternalFunction(IReadOnlyList<string> path, string name, SourceSpan span)
     {
-        string refKey = string.Join(".", path) + "." + name;
+        string refKey = RefKey(path, name);
         var hit = Index.Functions
             .FirstOrDefault(kv => kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal));
         if (hit.Value is null)
@@ -686,7 +740,7 @@ public sealed class Lower
     /// kept separate because that one has the side effect of importing the body.
     private FuncDecl? ResolveExternalFunc(IReadOnlyList<string> path, string name)
     {
-        string refKey = string.Join(".", path) + "." + name;
+        string refKey = RefKey(path, name);
         return Index.Functions.FirstOrDefault(kv =>
             kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal)).Value;
     }
@@ -771,7 +825,7 @@ public sealed class Lower
     {
         if (path.Count > 0)
         {
-            string refKey = string.Join(".", path) + "." + name;
+            string refKey = RefKey(path, name);
             return Index.Events.FirstOrDefault(kv =>
                 kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal)).Value;
         }
@@ -796,7 +850,7 @@ public sealed class Lower
     {
         if (path.Count > 0)
         {
-            string refKey = string.Join(".", path) + "." + name;
+            string refKey = RefKey(path, name);
             var hit = Index.Events.FirstOrDefault(kv =>
                 kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal));
             return (hit.Key, hit.Value);
@@ -1191,7 +1245,7 @@ public sealed class Lower
     // against the bundle that DECLARED it, not the one bringing it — see ResolveOwnedShape.
     private (string Key, BuilderDecl Value)? ResolveExternalBuilder(IReadOnlyList<string> path, string name)
     {
-        string refKey = string.Join(".", path) + "." + name;
+        string refKey = RefKey(path, name);
         foreach (var kv in Index.Builders)
             if (kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal)) return (kv.Key, kv.Value);
         return null;

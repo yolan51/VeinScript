@@ -284,6 +284,17 @@ fallback. A built-in wins and the shadowed member is reported as **VS0217** (`us
 capture `spawn`, so `let e = spawn()` built no entity). Two used bundles exporting one name is
 **VS0216** — reach for the `*Author.Bundle.Publicator.member` path, where rule 17b allows one.
 
+**18b. `use X as Y` imports QUALIFIED, and widens nothing.** The alias names the bundle segment of a
+`*` path — `use Math as M` makes `*M.Roots.sqrt(16.0)` resolve — and deliberately does *not* make bare
+`sqrt` mean anything. That is what makes it the answer to VS0216: two bundles exporting one name are
+ambiguous only because both contribute bare names, so aliasing both removes the ambiguity instead of
+restating it, and each vocabulary stays reachable under its own head. Only the FIRST segment
+substitutes; an alias names a bundle, and a publicator that happens to share its spelling is not one.
+This is `import numpy as np`, not `from numpy import *`.
+
+The syntax parsed from the day `use` was added and nothing consumed the alias, so `use X as Y` behaved
+as a plain `use X` — widening bare names, with `*Y.…` resolving nowhere.
+
 **19. A bundle can span files, and FRAGMENTS MERGE BEFORE THE MAIN FILE.** `publicators/*.vein` is API,
 `shards/*.vein` is behaviour, and a fragment carrying an API declaration is **VS0321**. Member order is
 the order shards run in, so a shard declared last in the main file still runs last — and a fragment

@@ -26,7 +26,7 @@ public static class DiagnosticGuide
         new("VS0212", "A console address is an identity, but the runtime never checks one — ConsoleBus concatenates it into an OS pipe name and a miss is silently swallowed. This is the only thing that catches a typo'd address.",
             "src/Vein.Compiler/Tooling/ConsoleGraph.cs"),
 
-        new("VS0216", "Reach it by its `*Author.Bundle.Publicator.member` path instead; rule 17b allows one there.",
+        new("VS0216", "Reach it by its `*Author.Bundle.Publicator.member` path instead; rule 17b allows one there. Or alias the bundles — `use Combat as C` imports qualified and widens no bare name, so two aliased bundles cannot be ambiguous with each other (rule 18b).",
             "docs/RULES.md §285"),
 
         new("VS0217", "`use` cannot rebind a built-in — the built-in wins, and the shadowed member becomes unreachable by its short name. `use Console` silently shadowing spawn() is the bug this was added for.",
@@ -35,7 +35,10 @@ public static class DiagnosticGuide
         new("VS0218", "A bundle that declares ANY mark has all of its mark names checked. Declaring one turns the check on for the file.",
             "docs/RULES.md §255"),
 
-        new("VS0220", "A shape and a mark may share a name, but two of the same kind may not — get them wrong and an app linking both cannot tell them apart (VS0332).",
+        new("VS0220", "A warning, because it fires for any bundle in the index whether or not this program links it. The error is VS0332, at the point an app actually folds two disagreeing declarations into one component.",
+            "docs/RULES.md §252"),
+
+        new("VS0332", "Unifying by bare name is deliberate — it is how a capability bundle sees the principal's data (rule 15b). Unifying two declarations that DISAGREE is a name clash wearing that feature's costume: one bundle would silently win by module order, and the other's shards would read fields the component does not have. So the app does not link.",
             "docs/RULES.md §252"),
 
         new("VS0221", "Only an identity template can be bound with `as`; a fragment builder has no identity to bind.",
