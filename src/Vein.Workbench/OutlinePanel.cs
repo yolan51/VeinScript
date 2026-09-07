@@ -63,6 +63,36 @@ internal sealed class OutlinePanel : UserControl
 
     private Control Entry(SymbolSite d)
     {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+
+        // THE ICON JOINS THE SIGIL, it does not replace it. `$Health` reads the way the source reads,
+        // and that was the point of `Sigil` — an outline that showed a picture where the language
+        // writes a character would be further from the file, not closer to it. What the icon adds is
+        // the thing a sigil cannot: `shard`, `bridge`, `publicator` and `fn` have no sigil at all, so
+        // four of the kinds in this list used to be distinguishable only by which group they sat under.
+        //
+        // A kind with no art (a `var` — a local, not a primitive) leaves the space empty rather than
+        // taking a placeholder, so the column stays honest about what is a primitive.
+        if (PrimitiveIcons.For(d.Kind) is { } icon)
+            row.Children.Add(new Image
+            {
+                Source = icon,
+                Width = 14,
+                Height = 14,
+                VerticalAlignment = VerticalAlignment.Center
+            });
+
+        row.Children.Add(new TextBlock
+        {
+            Text = Sigil(d.Kind) + d.Name,
+            FontFamily = new FontFamily("Cascadia Code,Consolas,monospace")
+        });
+        row.Children.Add(new TextBlock
+        {
+            Text = d.Span.Line.ToString(), Foreground = Brushes.DimGray, FontSize = 11,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
         var button = new Button
         {
             Background = Brushes.Transparent,
@@ -70,20 +100,7 @@ internal sealed class OutlinePanel : UserControl
             Padding = new Avalonia.Thickness(6, 2),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Left,
-            Content = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 8,
-                Children =
-                {
-                    new TextBlock
-                    {
-                        Text = Sigil(d.Kind) + d.Name,
-                        FontFamily = new FontFamily("Cascadia Code,Consolas,monospace")
-                    },
-                    new TextBlock { Text = d.Span.Line.ToString(), Foreground = Brushes.DimGray, FontSize = 11, VerticalAlignment = VerticalAlignment.Center }
-                }
-            }
+            Content = row
         };
         button.Click += (_, _) => Navigate?.Invoke(d.Span.Line, d.Span.Col);
         return button;

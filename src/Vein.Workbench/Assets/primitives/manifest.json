@@ -1,0 +1,26 @@
+{
+  "sourceAtlas": "../veinscript-primitives-icons.png",
+  "canvas": {
+    "width": 314,
+    "height": 314,
+    "background": "transparent"
+  },
+  "icons": [
+    { "file": "shape.png", "concept": "$Shape" },
+    { "file": "mark.png", "concept": "mark" },
+    { "file": "event.png", "concept": "event" },
+    { "file": "builder.png", "concept": "builder" },
+    { "file": "shard.png", "concept": "shard" },
+    { "file": "publicator.png", "concept": "publicator" },
+    { "file": "bridge.png", "concept": "bridge" },
+    { "file": "identity.png", "concept": "identity" },
+    { "file": "bundle.png", "concept": "bundle" },
+    { "file": "import.png", "concept": "import/use" },
+    { "file": "target.png", "concept": "target" },
+    { "file": "fold.png", "concept": "fold" },
+    { "file": "tick.png", "concept": "tick/frame" },
+    { "file": "function.png", "concept": "function/route" },
+    { "file": "diagnostic.png", "concept": "diagnostic" },
+    { "file": "dependency.png", "concept": "dependency" }
+  ]
+}

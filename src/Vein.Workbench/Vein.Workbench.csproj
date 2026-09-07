@@ -29,6 +29,15 @@
     <!-- The logo is an AvaloniaResource, not an EmbeddedResource: that is what `avares://` resolves,
          and it is referenced from XAML (window icon, menu strip, toolbar, About). -->
     <AvaloniaResource Include="Assets/VSLOGO.png" />
+
+    <!-- One icon per VeinScript primitive, keyed by filename (`shape.png`, `mark.png`, …) and mapped
+         to SymbolKind in PrimitiveIcons.cs. AvaloniaResource for the same reason the logo is: that is
+         what `avares://` resolves.
+
+         They are 314x314 sources drawn at 14px. That is deliberate rather than careless — decoding
+         happens once through Bitmap.DecodeToWidth, so what is held is the small copy, and the large
+         original is what makes them still look right if a panel ever wants them bigger. -->
+    <AvaloniaResource Include="Assets/primitives/*.png" />
   </ItemGroup>
 
   <ItemGroup>
