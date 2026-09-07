@@ -85,6 +85,9 @@ public static class DiagnosticGuide
 
         new("VS0007", "Builders and events can include a `$Shape`; a shape body takes fields only, because components unify by bare name and an include would be a second definition of the same component. Put the include one level out, in the builder or event that carries this shape.",
             "docs/RULES.md — 15b"),
+
+        new("VS0008", "`not` takes a unary operand, so `not x == y` is `(not x) == y`. For a number the two readings agree by accident; for a string `not name == \"\"` is false for every input. The parentheses are the whole difference.",
+            "docs/SYNTAX-DECISIONS.md — D12"),
     };
 
     private static readonly Dictionary<string, DiagnosticNote> ByCode =

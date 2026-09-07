@@ -1017,7 +1017,24 @@ public sealed class Parser
                 TokenKind.Le => BinOp.Le, TokenKind.Ge => BinOp.Ge, _ => null
             };
             if (op is null) return e;
-            var s = Here; Advance(); e = new BinaryExpr(op.Value, e, ParseAdd(), s);
+            var s = Here;
+
+            // `not x == y` PARSES AS `(not x) == y`, because `not` takes a unary operand (D12 makes it
+            // the language's only negation), and that is almost never what was written. For a number
+            // the two readings happen to agree — `(not a) == 0` collapses to "is a truthy", which is
+            // also what `not (a == 0)` means — so the mistake is invisible exactly until the operand is
+            // a string: `not name == ""` negates the string, compares the bool to empty text, and is
+            // FALSE for every input, with nothing said. A warning rather than an error, because the
+            // parse is legal and a program that meant it stays a program; the message is the fix.
+            if (e is UnaryExpr { Op: UnOp.Not })
+            {
+                string opText = op.Value == BinOp.Eq ? "==" : Cur.Text;
+                _diag.Warning("VS0008",
+                    $"`not x {opText} y` compares `not x` to `y` — `not` binds tighter than `{opText}`. " +
+                    $"Write `not (x {opText} y)` to negate the comparison.", s);
+            }
+
+            Advance(); e = new BinaryExpr(op.Value, e, ParseAdd(), s);
         }
     }
     private Expr ParseAdd()

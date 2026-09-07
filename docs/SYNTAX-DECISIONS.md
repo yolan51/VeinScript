@@ -213,6 +213,12 @@ namespace; reinforces that meaning attaches to identities.
 > the leftover `=`, "Expected '{'" — two errors pointing at a brace, neither saying the language has
 > no `!=`. The lexer now names the spelling and hands the parser the token that was meant, so it is
 > one error and no cascade. The decision itself is unchanged: the file is rejected.
+>
+> **The parentheses are load-bearing, and `VS0008` says so.** `not` takes a *unary* operand, so
+> `not x == y` is `(not x) == y`. For a number the two readings agree by accident — `(not a) == 0`
+> collapses to "is `a` truthy", which is what `not (a == 0)` means too — so the mistake is invisible
+> until the operand is a string: `not name == ""` is false for every input. The warning names the fix.
+> Four inequalities in one `if` read best as one negation: `if not (a == 0 or b == 0 or c == 0)`.
 
 **DECIDED.** VeinScript has no `!=`, no `!x`, and no `!` token at all. Negation and inequality are
 spelled with the word operator the language already has:

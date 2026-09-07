@@ -195,4 +195,55 @@ public class HandoverTests
     {
         Assert.True(Compile("bundle T by you { shape $H { hp: int, max: int }\n shard S { run once { } } }").Success);
     }
+
+    // ---- `not x == y` — the trap D12 creates, and the warning that closes it ----------------------
+    //
+    // `not` takes a UNARY operand, so `not x == y` is `(not x) == y`. For a number the two readings
+    // agree by accident — `(not a) == 0` collapses to "is a truthy", which is what `not (a == 0)` means
+    // too — so the mistake is invisible exactly until the operand is a string: `not name == ""`
+    // negates the string, compares the bool to empty text, and is FALSE for every input.
+
+    [Fact]
+    public void Not_before_a_comparison_warns_and_names_the_fix()
+    {
+        var r = Compile("bundle T by you { shard S { run once { let name = \"Ada\"\n if not name == \"\" { } } } }");
+
+        var w = Assert.Single(r.Diagnostics, d => d.Code == "VS0008");
+        Assert.Equal(Severity.Warning, w.Severity);
+        Assert.Contains("not (x == y)", w.Message);
+        Assert.True(r.Success, "a warning, not an error — the parse is legal and a program that meant it stays a program");
+    }
+
+    [Fact]
+    public void The_parenthesised_form_does_not_warn()
+    {
+        var r = Compile("bundle T by you { shard S { run once { let name = \"Ada\"\n if not (name == \"\") { } } } }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "VS0008");
+    }
+
+    [Fact]
+    public void Every_comparison_operator_is_covered()
+    {
+        // The trap is not specific to `==`: `(not a) < 3` is just as meaningless.
+        var r = Compile("bundle T by you { shard S { run once { let a = 5\n if not a < 3 { } } } }");
+        var w = Assert.Single(r.Diagnostics, d => d.Code == "VS0008");
+        Assert.Contains("not (x < y)", w.Message);
+    }
+
+    [Fact]
+    public void The_warning_describes_a_real_wrong_answer()
+    {
+        // The runtime proof that this is worth a diagnostic: the two spellings disagree on a string.
+        var output = new StringWriter();
+        new Interp().Run(Module("""
+            bundle T by you {
+                shard S { run once { let name = "Ada"
+                    if not (name == "") { emit *Vein.Console.Io.@Print { text: "A yes" } }
+                    if not name == ""   { emit *Vein.Console.Io.@Print { text: "B yes" } } } }
+            }
+            """), new StringReader(""), output);
+
+        Assert.Contains("A yes", output.ToString());
+        Assert.DoesNotContain("B yes", output.ToString());
+    }
 }
