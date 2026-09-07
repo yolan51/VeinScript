@@ -102,11 +102,20 @@ public sealed class CSharpBackend : IVeinBackend
         foreach (var f in module.Functions) _functions.Add(f.Name);
         foreach (var t in module.Types)
             if (t.Kind == IrTypeKind.Component) { _components.Add(t.Name); _componentTypes[t.Name] = t; }
-            // IMPORTED events are excluded: they exist in the module so their payload fields have
-            // types, not because this module owns them. Emitting a class and a dispatch for a stdlib
-            // transport would turn `emit @Fetch` into a queued no-op instead of the note that says the
-            // transport lives on the interpreter.
-            else if (t.Kind == IrTypeKind.Message && !t.Attrs.Any(a => a.Name == "imported")) _events.Add(t.Name);
+            // AN IMPORTED EVENT IS EMITTED UNLESS ITS MEANING IS TRANSPORT.
+            //
+            // Every imported event used to be excluded, and the reason given was right about half the
+            // set: emitting a class and a dispatch for `@Fetch` would turn it into a queued no-op — a
+            // program that compiles, runs, and silently never fetches. `Interp.HostEvents` is that
+            // half, and it is the interpreter's own list because `Drain` is what decides it.
+            //
+            // The other half is pure data — `@KeyDown`, `@Clicked`, `@Collided`, `@Damaged`, `@Ticked`,
+            // `@Moved` — an occurrence that queues and dispatches to `hear` handlers and does nothing
+            // outside the program. Refusing those cost a compiled game its input, its collisions and
+            // its clock, for a reason that was never about them.
+            else if (t.Kind == IrTypeKind.Message
+                     && (!t.Attrs.Any(a => a.Name == "imported") || !Interp.HostEvents.Contains(t.Name)))
+                _events.Add(t.Name);
             else if (t.Kind == IrTypeKind.Struct) _structs.Add(t.Name);
 
         var sb = new StringBuilder();

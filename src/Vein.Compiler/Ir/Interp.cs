@@ -1310,6 +1310,27 @@ public sealed class Interp
         finally { _callDepth--; }
     }
 
+    /// The events this interpreter IMPLEMENTS rather than merely delivers — the ones whose meaning is
+    /// an effect on the world outside the program.
+    ///
+    /// `Drain` consumes each of these and `continue`s: `@Fetch` performs an HTTP request, `@ReadFile`
+    /// reads a file, `@Print` writes to a console, `@Console` launches a process. They are transport,
+    /// and the transport is here.
+    ///
+    /// EVERY OTHER EVENT IS PURE DATA — it queues, it dispatches to `hear` handlers, and nothing
+    /// outside the program happens. `@KeyDown`, `@Clicked`, `@Collided`, `@Damaged`, `@Ticked`,
+    /// `@Moved`: an occurrence and nothing more.
+    ///
+    /// That distinction is what the C# backend needed and could not make. It refused to emit ANY
+    /// cross-bundle event, correctly for this set — emitting a payload class and a queue for `@Fetch`
+    /// would turn it into a program that compiles, runs, and silently never fetches — and needlessly
+    /// for all the rest, which is why a compiled game had no input. The list lives here because this is
+    /// the file that decides it: an event added to `Drain` and not to this set would be quietly
+    /// compiled into a no-op.
+    public static readonly IReadOnlySet<string> HostEvents =
+        new HashSet<string>(StringComparer.Ordinal)
+        { "Response", "Print", "Console", "Send", "Listen", "Link", "Fetch", "ReadFile", "WriteFile" };
+
     /// The names `Prebuilt` below answers to. Declared as a set because `Lower` needs the same list: a
     /// built-in already resolves, so a `use`d bundle exporting the same name must not capture it (VS0217).
     /// Keep the two in step — a name added below and not here is silently rebindable by `use`.

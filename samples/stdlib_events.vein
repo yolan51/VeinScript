@@ -2,31 +2,23 @@
 //
 //   veinc run samples/stdlib_events.vein --ticks 3
 //
-// NOT IN tools/check-backend.sh, and that is the point of the file rather than an oversight.
+// IN tools/check-backend.sh — and it was not, until the language learned to tell a data occurrence
+// from one carrying host transport.
 //
-// The C# backend emits neither a cross-bundle `emit` nor a `hear` for an event declared in another
-// bundle, and it says so rather than failing quietly:
+// The C# backend used to emit neither a cross-bundle `emit` nor a `hear` for ANY event declared in
+// another bundle. Half of that was right: `*Vein.Net.Http.@Fetch` performs an HTTP request and
+// `*Vein.Files.Io.@ReadFile` reads a file, and the INTERPRETER is what implements them. Emitting a
+// payload class and a queue for those would make `emit @Fetch` a program that compiles, runs, and
+// silently never fetches.
 //
-//   note: emit @KeyDown not emitted — it is declared in another bundle, and its transport lives on
-//         the interpreter.
-//   note: Keys: hear @KeyDown not emitted — the event is declared in another bundle, so there is no
-//         payload type here and its transport lives on the interpreter.
+// The other half was never about them. Every event below is pure data — it queues, it dispatches to a
+// `hear`, and nothing outside the program happens. Refusing them cost a compiled game its input, its
+// collisions and its clock.
 //
-// THAT EXCLUSION IS CORRECT, and worth understanding before anyone tries to lift it. A stdlib event is
-// not always just data on a bus: `*Vein.Net.Http.@Fetch` performs an HTTP request and
-// `*Vein.Files.Io.@ReadFile` reads a file, and the interpreter is what implements them. If the backend
-// emitted a payload class and a queue for every imported event, `emit @Fetch` would become a queued
-// no-op — a program that compiles, runs, and silently never fetches. The note is the honest answer.
-//
-// The events below ARE pure data, so lifting the exclusion for them specifically would be sound. Doing
-// it needs a way to tell a data occurrence from one with host transport, which nothing records today.
-// docs/SAMPLES.md carries that as the open item; this file is what would go into check-backend.sh the
-// day it lands.
-//
-// So the coverage this file gives is real but narrower than the others: SamplesTests compiles it and
-// asserts it produces no warnings, RunConfigSweepTests checks the line above, and running it proves
-// the interpreter delivers every one of these. What it cannot prove is that both runtimes agree,
-// because only one of them runs it.
+// `Interp.HostEvents` is the distinction, and it lives in the interpreter because `Drain` is what
+// decides it: the nine names it consumes and `continue`s are transport, everything else is an
+// occurrence. So this file is now diffed frame for frame like every other sample, and `@Fetch` is
+// still refused with the note it always had.
 //
 // THE PROGRAM EMITS ITS OWN INPUT. There is no device here, and `Vein.Input`'s events are ordinary
 // occurrences — a runtime emits them when a key is pressed, and a program can emit them to describe a

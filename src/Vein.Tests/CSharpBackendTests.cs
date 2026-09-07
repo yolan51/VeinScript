@@ -369,6 +369,48 @@ public class CSharpBackendTests
         Assert.DoesNotContain("class Gravity_", code);
     }
 
+    // ---- cross-bundle events: data is emitted, transport is not ------------------------------------
+    //
+    // The backend used to refuse EVERY event declared in another bundle. Half of that was right —
+    // `@Fetch` performs a real HTTP request and the interpreter is what implements it, so emitting a
+    // payload class and a queue for it would produce a program that compiles, runs and silently never
+    // fetches. The other half was never about them: `@KeyDown` and `@Collided` are occurrences that
+    // queue and dispatch, and refusing those cost a compiled game its input and its collisions.
+
+    [Fact]
+    public void A_transport_event_is_still_refused_with_its_note()
+    {
+        var (code, notes) = Emit("""
+            shard S { run once { emit *Vein.Net.Http.@Fetch { url: "https://example.com" } } }
+            """);
+
+        Assert.Contains(notes, n => n.Contains("@Fetch") && n.Contains("transport lives on the interpreter"));
+        Assert.DoesNotContain("class Fetch", code);
+    }
+
+    [Fact]
+    public void Every_name_the_interpreter_implements_is_treated_as_transport()
+    {
+        // The set is the interpreter's, because `Drain` is what decides it. A name added there and not
+        // to `HostEvents` would be quietly compiled into a no-op — which is the failure this whole
+        // distinction exists to prevent, arriving by the back door.
+        Assert.Contains("Fetch", Interp.HostEvents);
+        Assert.Contains("ReadFile", Interp.HostEvents);
+        Assert.Contains("WriteFile", Interp.HostEvents);
+        Assert.Contains("Print", Interp.HostEvents);
+        Assert.Contains("Send", Interp.HostEvents);
+        Assert.Contains("Listen", Interp.HostEvents);
+        Assert.Contains("Link", Interp.HostEvents);
+        Assert.Contains("Console", Interp.HostEvents);
+        Assert.Contains("Response", Interp.HostEvents);
+
+        // And the data occurrences a game is built on are NOT in it.
+        Assert.DoesNotContain("KeyDown", Interp.HostEvents);
+        Assert.DoesNotContain("Clicked", Interp.HostEvents);
+        Assert.DoesNotContain("Collided", Interp.HostEvents);
+        Assert.DoesNotContain("Ticked", Interp.HostEvents);
+    }
+
     // ---- string literals ----------------------------------------------------------------------------
 
     [Fact]

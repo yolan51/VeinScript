@@ -73,21 +73,28 @@ reserved.
 missing sample but one limitation that decides what a sample is *allowed* to do — plus one that used to
 be a limitation and is now a compile error.
 
-### 1. Cross-bundle events cannot be diffed
+### 1. Cross-bundle events — closed, by learning to tell data from transport
 
-The C# backend emits neither a cross-bundle `emit` nor a `hear` for an event declared in another
-bundle. `samples/stdlib_events.vein` covers all seven of them — Input's three, UI's two, Game's two —
-and is therefore **interpreter-only and outside `check-backend.sh`**.
+The C# backend used to emit neither a cross-bundle `emit` nor a `hear` for **any** event declared in
+another bundle, so `samples/stdlib_events.vein` was interpreter-only and a compiled game had no input,
+no collisions and no clock.
 
-**The exclusion is correct as it stands**, and lifting it naively would be worse than the gap. A stdlib
-event is not always just data on a bus: `*Vein.Net.Http.@Fetch` performs an HTTP request and
-`*Vein.Files.Io.@ReadFile` reads a file, and the interpreter is what implements them. Emitting a
-payload class and a queue for every imported event would turn `emit @Fetch` into a queued no-op — a
-program that compiles, runs, and silently never fetches.
+**Half of that exclusion was right.** `*Vein.Net.Http.@Fetch` performs an HTTP request and
+`*Vein.Files.Io.@ReadFile` reads a file, and the *interpreter* is what implements them. Emitting a
+payload class and a queue for those would make `emit @Fetch` a program that compiles, runs, and
+silently never fetches.
 
-The events in `stdlib_events.vein` *are* pure data, so lifting it for those specifically would be
-sound. Doing that needs a way to tell a data occurrence from one with host transport, which nothing
-records today. That is the open item, and it is a language/stdlib question before it is a backend one.
+**The other half was never about them.** `@KeyDown`, `@Clicked`, `@Collided`, `@Damaged`, `@Ticked`,
+`@Moved` are pure data: they queue, they dispatch to a `hear`, and nothing outside the program happens.
+
+`Interp.HostEvents` is the distinction, and it lives in the interpreter because `Drain` is what decides
+it — the nine names it consumes and `continue`s are transport, and everything else is an occurrence.
+The backend emits an imported event unless it is in that set. `stdlib_events.vein` is now in
+`check-backend.sh` and diffs clean; `@Fetch` still gets the note it always had.
+
+The one hazard left is bookkeeping: an event added to `Drain` and not to `HostEvents` would be quietly
+compiled into a no-op, which is the failure the whole distinction exists to prevent arriving by the
+back door. `CSharpBackendTests` pins the set for that reason.
 
 ### 2. A mark-only `target` — closed, as VS0236
 
