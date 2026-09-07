@@ -184,6 +184,55 @@ public class AppLinkTests : IDisposable
     }
 
     [Fact]
+    public void A_shape_and_a_mark_of_one_name_are_different_things()
+    {
+        // RULES 14e: a shape and a mark may share a name. `$Switch` is a Component and `#Switch` is a
+        // Tag — different keyword, different sigil — and `Interp.Setup` and `EntityStore.Declare` both
+        // already say so.
+        //
+        // The linker's type table was keyed by NAME ALONE, so a module's own Component and Tag matched
+        // each other and one bundle was compared against itself:
+        //
+        //     'Switch' is declared differently in bundles 'Solo' and 'Solo'
+        //
+        // Latent as a warning — the app linked one of them and ran. Making VS0332 an error is what
+        // turned it into a rejected build, so this test exists as much for that escalation as for the
+        // original mistake.
+        Write("Solo.vein", """
+            bundle Solo by you {
+                shape $Switch { on: int }
+                mark #Switch
+                builder Sw { $Switch   mark #Switch }
+                shard Boot { run once { bring Sw(1) } }
+                shard Look {
+                    settled { target $Switch #Switch as s {
+            """ + P("\"switch on=\" + s.Switch.on") + """
+                    } }
+                }
+            }
+            """);
+        var app = Write("Solo.app.vein", "app Solo {\n load \"Solo.vein\"\n}");
+
+        var diag = new DiagnosticBag();
+        var linked = AppLinker.Link(app, File.ReadAllText(app), diag);
+
+        Assert.DoesNotContain(diag.Items, d => d.Code == "VS0332");
+        Assert.False(diag.HasErrors, string.Join("\n", diag.Items.Select(d => d.ToString())));
+        Assert.NotNull(linked);
+
+        // The linked module keeps BOTH declarations — a Component and a Tag under one name — rather
+        // than one having swallowed the other on the way in.
+        Assert.Contains(linked!.Module.Types, t => t.Name == "Switch" && t.Kind == IrTypeKind.Component);
+        Assert.Contains(linked.Module.Types, t => t.Name == "Switch" && t.Kind == IrTypeKind.Tag);
+
+        // And a frame proves the query still matches on both: `bring` commits at the phase boundary,
+        // so the `settled` block needs a tick that the shared Run helper (Ticks = 0) does not drive.
+        var sw = new StringWriter();
+        new Interp { Ticks = 1 }.Run(linked.Module, new StringReader(""), sw);
+        Assert.Contains("switch on=1", sw.ToString());
+    }
+
+    [Fact]
     public void A_shape_two_bundles_declare_differently_also_stops_the_link()
     {
         // Shapes take the same path as events through AppLinker — both are `module.Types` — and the

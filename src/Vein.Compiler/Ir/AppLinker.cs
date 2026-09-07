@@ -96,10 +96,19 @@ public static class AppLinker
         IReadOnlyList<(string Name, IrModule Module, AppLoad? Load)> modules,
         string principal, DiagnosticBag diag, SourceSpan span)
     {
-        var types = new Dictionary<string, (IrType Type, string Owner)>(StringComparer.Ordinal);
+        // KEYED BY NAME **AND KIND**. `$Switch` and `#Switch` are different things — different keyword,
+        // different sigil — and RULES 14e says a shape and a mark may share a name. Keyed by name
+        // alone, a module's own Component and Tag collided with each other, so linking a bundle
+        // produced `'Switch' is declared differently in bundles 'Solo' and 'Solo'`: one bundle,
+        // compared against itself, over two declarations that were never meant to unify.
+        //
+        // `Interp.Setup` and `EntityStore.Declare` both already draw this line, and `Lower` learned it
+        // once too — its tag loop skips a name that a Component holds, under a comment about a shape
+        // swallowing a mark. The linker was the last place still deduping on the name.
+        var types = new Dictionary<(string Name, IrTypeKind Kind), (IrType Type, string Owner)>();
         var funcs = new Dictionary<string, (IrFunction Fn, string Owner)>(StringComparer.Ordinal);
         var shards = new List<IrShard>();
-        var typeOrder = new List<string>();
+        var typeOrder = new List<(string Name, IrTypeKind Kind)>();
         var funcOrder = new List<string>();
 
         // A shard name repeated across bundles is ordinary — `Boot` is an obvious name for anyone to
@@ -115,7 +124,7 @@ public static class AppLinker
         {
             foreach (var t in module.Types)
             {
-                if (types.TryGetValue(t.Name, out var seen))
+                if (types.TryGetValue((t.Name, t.Kind), out var seen))
                 {
                     // Unifying is deliberate — it is how a capability bundle hears the principal's
                     // events. Unifying two DIFFERENT declarations is not; that is a name clash wearing
@@ -134,8 +143,8 @@ public static class AppLinker
                             span);
                     continue;
                 }
-                types[t.Name] = (t, name);
-                typeOrder.Add(t.Name);
+                types[(t.Name, t.Kind)] = (t, name);
+                typeOrder.Add((t.Name, t.Kind));
             }
 
             foreach (var f in module.Functions)
