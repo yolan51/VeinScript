@@ -125,7 +125,11 @@ public sealed class Interp
     public int Ticks { get; set; }
 
     private string _bundle = "";
-    private Dictionary<string, IrType> _types = new(StringComparer.Ordinal);
+    /// Shapes by name. `IsComponent` is the only thing that asks, and it asks about a component.
+    private Dictionary<string, IrType> _components = new(StringComparer.Ordinal);
+
+    /// Event payloads by name — the boot directive and every `emit` fill omitted fields from these.
+    private Dictionary<string, IrType> _events = new(StringComparer.Ordinal);
     private int _eventSeq;
     private Dictionary<string, object?>? _current;   // the event currently being handled (for cause/trail)
     private string? _responseBody;
@@ -273,13 +277,21 @@ public sealed class Interp
     private void Setup(IrModule module)
     {
         _bundle = module.Name;
-        // Tags are excluded, and that is not an optimisation. `$Enemy` and `#Enemy` are different things
-        // in VeinScript — different keyword, different sigil — so a module may legitimately hold a
-        // Component and a Tag under one name, and a flat name→type map cannot. Nothing reads a tag from
-        // here anyway: the three lookups below want an event or a component, marks live in the store's
-        // own sets. `EntityStore.Declare` has always filtered to components for the same reason.
-        _types = module.Types.Where(t => t.Kind != IrTypeKind.Tag)
-                             .ToDictionary(t => t.Name, StringComparer.Ordinal);
+        // ONE TABLE PER SIGIL, because a name means a different thing under each of them: `$Switch` is a
+        // shape, `#Switch` a mark, `@Switch` an event, `&Switch` a builder, and a program may declare
+        // all four. Tags were already excluded here for exactly that reason — but Components and
+        // Messages still shared one map, so `shape $Switch` beside `event @Switch` threw
+        // `An item with the same key has already been added` out of ToDictionary and took the
+        // interpreter down before the program ran a line. A raw ArgumentException, on legal source.
+        //
+        // Splitting is what the call sites wanted anyway: `IsComponent` asks about a component, and the
+        // boot and emit payload lookups ask about an event. Neither was ever served by "whichever type
+        // holds this name". Marks need no table — they live in the store's own sets — and builders are
+        // gone by this point, desugared into spawn/attach/mark by Lower.
+        _components = module.Types.Where(t => t.Kind == IrTypeKind.Component)
+                                  .ToDictionary(t => t.Name, StringComparer.Ordinal);
+        _events = module.Types.Where(t => t.Kind == IrTypeKind.Message)
+                              .ToDictionary(t => t.Name, StringComparer.Ordinal);
         _store.Declare(module.Types);   // field defaults + each field's fold reducer
 
         // Module-level `fn`/`SF` declarations, callable by name from any body. Shard-local ones are
@@ -333,7 +345,7 @@ public sealed class Interp
             bootEvent = st.Event;
             foreach (var (field, val) in st.Fields) boot[field] = Eval(val, bootInst, noLocals);
             // Fill remaining declared fields from their defaults (or a zero placeholder under `?`).
-            if (_types.TryGetValue(bootEvent, out var et))
+            if (_events.TryGetValue(bootEvent, out var et))
                 foreach (var fld in et.Fields)
                 {
                     if (fld.Name is "origin" or "source" || boot.ContainsKey(fld.Name)) continue;
@@ -1265,7 +1277,7 @@ public sealed class Interp
     private static long? AsEntity(object? v) => v switch { long l => l, int i => i, _ => null };
 
     private bool IsComponent(string name) =>
-        _types.TryGetValue(name, out var t) && t.Kind == IrTypeKind.Component;
+        _components.ContainsKey(name);
 
     /// An entity + component pair, produced by `self.Health` so `self.Health.hp` can resolve.
     private readonly record struct ComponentRef(long Entity, string Shape);
@@ -1662,7 +1674,7 @@ public sealed class Interp
                     foreach (var (field, val) in si.Fields) payload[field] = Eval(val, self, locals);
                     // Fill omitted payload fields: a field's default, else the current context (the
                     // event being handled, then locals) by matching name. Explicit fields win.
-                    if (_types.TryGetValue(si.TypeName, out var et))
+                    if (_events.TryGetValue(si.TypeName, out var et))
                         foreach (var fld in et.Fields)
                         {
                             if (fld.Name is "origin" or "source" || payload.ContainsKey(fld.Name)) continue;

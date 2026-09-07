@@ -1,0 +1,77 @@
+// sigil_names.vein — one name, four sigils, four different things.
+//
+//   veinc run samples/sigil_names.vein --ticks 2
+//
+// In tools/check-backend.sh, because the two runtimes answer this question with completely different
+// machinery and both have got it wrong: the interpreter keeps name→type tables and the C# backend
+// emits real types into one namespace. Only a diff proves they agree.
+//
+// THE RULE. A sigil is part of what a name MEANS, not decoration on it (RULES 14e, SYNTAX-DECISIONS
+// D8). So a program may declare all four of these and they are four separate declarations:
+//
+//     $Switch     a shape   — the data an identity carries
+//     #Switch     a mark    — a tag it wears
+//     @Switch     an event  — a message about it
+//      Switch     a builder — the template that makes one (`&` at the use site)
+//
+// This is not a curiosity. It is what lets a domain word stay one word: a switch has state, a switch
+// can be tagged, flipping a switch is an occurrence, and something builds switches. Forcing four
+// spellings — `$SwitchState`, `#SwitchTag`, `@SwitchFlipped`, `SwitchBuilder` — is the language making
+// the author work around it.
+//
+// WHAT WENT WRONG, TWICE, AND WHY THEY LOOKED LIKE DIFFERENT BUGS:
+//
+//   * `AppLinker` keyed its type table by NAME ALONE, so a module's own Component and Tag matched each
+//     other and one bundle was compared against itself: "'Switch' is declared differently in bundles
+//     'Solo' and 'Solo'". Latent as a warning; a rejected build once VS0332 became an error.
+//   * `Interp.Setup` filtered Tags out of its map for exactly this reason — and then let Components and
+//     Messages share it. `shape $Switch` beside `event @Switch` threw a raw ArgumentException out of
+//     ToDictionary and killed the interpreter before the program ran a line.
+//
+// Both were the same mistake in two places: a flat name→thing table for a language where the sigil is
+// half the name. Marks need no table at all — they live in the store's own sets — and builders are
+// gone by then, desugared into spawn/attach/mark.
+
+bundle SigilNames by you {
+
+    shape $Switch { on: int }
+    mark  #Switch
+    event @Switch { n: int }
+
+    // The builder. Declared bare and reached as `&Switch` from another bundle; here `bring Switch(…)`
+    // names it directly. It carries the shape AND the mark, so `Switch` in this one line refers to
+    // three of the four declarations above and means something different each time.
+    builder Switch { $Switch   mark #Switch }
+
+    shard Boot {
+        run once {
+            bring Switch(1)
+            bring Switch(0)
+        }
+    }
+
+    // A `bring` commits at the phase boundary (RULES 11/12b), so the query is a frame later.
+    shard Flip {
+        settled {
+            target $Switch #Switch as s {
+                emit @Switch { n: s.Switch.on }
+            }
+        }
+    }
+
+    shard Listen {
+        hear @Switch as e {
+            emit *Vein.Console.Io.@Print { text: "@Switch says n=" + e.n }
+        }
+    }
+
+    // Reading the shape and the mark back together, to show the query still tells them apart after
+    // everything above has shared their name.
+    shard Report {
+        settled {
+            var switches = 0
+            target $Switch #Switch as s { switches = switches + 1 }
+            emit *Vein.Console.Io.@Print { text: "$Switch #Switch matched " + switches }
+        }
+    }
+}

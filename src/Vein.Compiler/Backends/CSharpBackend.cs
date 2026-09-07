@@ -1181,6 +1181,12 @@ public sealed class CSharpBackend : IVeinBackend
                     }
                     return $"World.Attach({Expr(c.Args[0])}, default({Ident(at.Name)}))";
                 }
+                // A COMPONENT, said outright. `attach` names a shape, so when a name is both a shape
+                // and an event this must take the shape — going through `Expr` let the event win and
+                // handed `World.Attach` a payload object.
+                if (c.Args.Count > 1 && c.Args[1] is IrStructInit csi)
+                    return $"World.Attach({Expr(c.Args[0])}, {StructInit(csi, preferEvent: false)})";
+
                 return $"World.Attach({Expr(c.Args[0])}, {Expr(c.Args[1])})";
 
             // `unattach $C from e`. The shape arrives as a TYPE NAME, not a value, so it becomes the
@@ -1286,7 +1292,15 @@ public sealed class CSharpBackend : IVeinBackend
         return $"__VeinText.S({Expr(e)})";
     }
 
-    private string StructInit(IrStructInit si)
+    /// A field-initialised literal — a component, an event payload or a plain struct.
+    ///
+    /// `preferEvent` decides which, and it has to be asked rather than guessed: `$Switch` and `@Switch`
+    /// are different declarations that may both exist (RULES 14e), and the name alone cannot separate
+    /// `new Switch { … }` from `new Events.Switch { … }`. Guessing "event, if there is one" made
+    /// `bring Switch(1)` emit `new Events.Switch { on = 1 }` — an event payload handed to `World.Attach`
+    /// as though it were a component — which failed to build with "'Events.Switch' does not contain a
+    /// definition for 'on'". The two call sites that matter both know the answer, so they say it.
+    private string StructInit(IrStructInit si, bool preferEvent = true)
     {
         // Components and event payloads are both plain field-initialised objects here, so one path
         // builds either. Anything else is a type this backend never declared.
@@ -1296,7 +1310,11 @@ public sealed class CSharpBackend : IVeinBackend
             return "null";
         }
         var sets = si.Fields.Select(f => $"{Ident(f.Field)} = {Coerce(si.TypeName, f.Field, f.Value)}");
-        string type = _events.Contains(si.TypeName) ? EventType(si.TypeName) : Ident(si.TypeName);
+
+        bool asEvent = preferEvent ? _events.Contains(si.TypeName)
+                                   : _events.Contains(si.TypeName) && !_components.Contains(si.TypeName);
+
+        string type = asEvent ? EventType(si.TypeName) : Ident(si.TypeName);
         return $"new {type} {{ {string.Join(", ", sets)} }}";
     }
 
