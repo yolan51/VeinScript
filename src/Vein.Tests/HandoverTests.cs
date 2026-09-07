@@ -196,6 +196,94 @@ public class HandoverTests
         Assert.True(Compile("bundle T by you { shape $H { hp: int, max: int }\n shard S { run once { } } }").Success);
     }
 
+    // ---- F. A built game never advanced a frame -----------------------------------------------------
+    //
+    // The generated host ran `new Interp()` with `Ticks` at 0, so `RunFrames` did nothing and the inbox
+    // loop never called `Frame` again: `each tick`, `frame` and `settled` ran ZERO times, forever. A
+    // built game booted, printed what `run once` printed, and sat inert — while its `every N` blocks
+    // kept firing, because those have their own timer thread and never needed the frame loop. Visibly
+    // alive, doing nothing.
+    //
+    // Nothing caught it because the two runtimes that work drive frames themselves: `veinc run` from
+    // `--ticks`, an editor from `Boot`/`Frame`. The one that ships did not.
+
+    private const string Counting = """
+        bundle T by you {
+            shape $C { n: int }
+            mark #C
+            builder Counter { $C   mark #C }
+            shard Boot { run once { bring Counter(0) } }
+            shard Ticking {
+                each tick { target $C #C as c { c.C.n += 1
+                    emit *Vein.Console.Io.@Print { text: "tick " + c.C.n } } }
+            }
+        }
+        """;
+
+    /// A stdin that stays open until the test says otherwise.
+    ///
+    /// `new StringReader("")` is EOF immediately, and EOF ends the run — so a test using one is a race
+    /// between the run finishing and the frame timer firing once. It happened to pass, which is worse
+    /// than failing. Holding the reader open makes "did a frame happen" a question about the frame
+    /// loop rather than about which thread won.
+    private sealed class HeldReader : TextReader
+    {
+        private readonly ManualResetEventSlim _release = new(false);
+        public void Release() => _release.Set();
+        public override string? ReadLine() { _release.Wait(TimeSpan.FromSeconds(10)); return null; }
+    }
+
+    /// Run until `output` contains `wanted`, then close stdin and let the run end.
+    private static async Task<string> RunUntil(Interp interp, string src, string wanted)
+    {
+        var output = new StringWriter();
+        var stdin = new HeldReader();
+        var run = Task.Run(() => interp.Run(Module(src), stdin, output, messaging: true));
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            lock (output) { if (output.ToString().Contains(wanted, StringComparison.Ordinal)) break; }
+            await Task.Delay(20);
+        }
+
+        stdin.Release();
+        await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(5)));
+        lock (output) return output.ToString();
+    }
+
+    [Fact]
+    public async Task A_frame_rate_advances_frames_on_the_wall_clock()
+    {
+        // `messaging: true` is the mode a built program runs in — the one where this was broken.
+        string text = await RunUntil(new Interp { FrameRate = 200 }, Counting, "tick 1");
+        Assert.Contains("tick 1", text);
+    }
+
+    [Fact]
+    public async Task No_frame_rate_means_no_loop_so_veinc_run_is_unchanged()
+    {
+        // The guard on the fix. `veinc run` and every test rely on `Ticks` running an exact count and
+        // stopping — a default loop would make runs unreproducible and break check-backend's diff.
+        // Waits the full window on purpose: the assertion is that nothing arrives in it.
+        string text = await RunUntil(new Interp(), Counting, " never");
+        Assert.DoesNotContain("tick", text);
+    }
+
+    [Fact]
+    public async Task A_program_with_no_frame_work_starts_no_timer()
+    {
+        // A batch tool or a server that ships this way has no `each tick`, and pays nothing for the
+        // loop existing. Declaring `each tick` is how a program asks for frames.
+        string text = await RunUntil(new Interp { FrameRate = 200 }, """
+            bundle T by you {
+                shard S { run once { emit *Vein.Console.Io.@Print { text: "once only" } } }
+            }
+            """, " never");
+
+        Assert.Equal(1, text.Split("once only").Length - 1);
+    }
+
     // ---- `not x == y` — the trap D12 creates, and the warning that closes it ----------------------
     //
     // `not` takes a UNARY operand, so `not x == y` is `(not x) == y`. For a number the two readings

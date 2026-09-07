@@ -225,6 +225,7 @@ public sealed class Interp
         { try { inbox.Add(() => Receive(from, text)); } catch { /* inbox closed */ } });
 
         StartEveryTimers(inbox);
+        StartFrameTimer(inbox);
 
         // A spawned console stays alive for messages rather than ending on stdin EOF — but only for as
         // long as there is someone to receive them from. When the program that spawned it exits, this
@@ -645,6 +646,54 @@ public sealed class Interp
     }
 
     private void RunFrames() { for (int i = 0; i < Ticks; i++) Frame(); }
+
+    /// Frames per second to advance on the wall clock, for a run that owns a real one. 0 — the default
+    /// — means no loop, which is what `veinc run` and every test want: `Ticks` runs a fixed count and
+    /// stops, so a run stays reproducible and `check-backend.sh` can diff it frame for frame.
+    ///
+    /// A BUILT PROGRAM SETS THIS AND NOTHING ELSE DID, which is the whole of the bug. The generated
+    /// host ran `new Interp()` with `Ticks` at 0, so `RunFrames` did nothing and the inbox loop never
+    /// called `Frame` again: `each tick`, `frame` and `settled` ran zero times, forever. A game built
+    /// with `veinc build` booted, printed whatever `run once` printed, and then sat inert while its
+    /// `every N` blocks kept firing — because those run on their own timer thread and never needed the
+    /// frame loop. Visibly alive, doing nothing.
+    ///
+    /// Nothing caught it because the two runtimes that work drive frames themselves: `veinc run` from
+    /// `--ticks`, and an editor from `Boot`/`Frame` sixty times a second. The one that ships did not.
+    public double FrameRate { get; set; }
+
+    /// The frame loop, in the shape `StartEveryTimers` already uses: a thread that sleeps and POSTS
+    /// onto the inbox, so the event loop stays single-threaded and a frame is just another turn.
+    ///
+    /// It starts only when the program HAS frame work. A batch tool or a server that ships this way has
+    /// no `each tick` and gets no timer and no cost — the loop is not a behaviour change for programs
+    /// that never asked for a frame, and asking is what declaring `each tick` is.
+    ///
+    /// `FireTicked` goes with it, so `hear @Ticked` works in a built game exactly as it does in an
+    /// editor that drives the clock by hand — one clock, one meaning, wherever the program runs.
+    private void StartFrameTimer(System.Collections.Concurrent.BlockingCollection<Action> inbox)
+    {
+        if (FrameRate <= 0) return;
+        if (!_schedules.Any(s => s.Kind is "tick" or "frame" or "settled")) return;
+
+        var period = TimeSpan.FromSeconds(1.0 / FrameRate);
+        double delta = 1.0 / FrameRate;
+
+        var timer = new Thread(() =>
+        {
+            int frame = 0;
+            while (true)
+            {
+                Thread.Sleep(period);
+                int n = ++frame;
+                // Adding to a completed inbox throws — that is the run ending, so the thread ends too.
+                try { inbox.Add(() => { FireTicked(n, delta); Frame(); }); } catch { return; }
+            }
+        })
+        { IsBackground = true, Name = "vein-frames" };
+
+        timer.Start();
+    }
 
     /// The WALL clock. `every N` is the one schedule defined in real seconds, so it runs only where a
     /// real clock exists: a live console session (`veinc run`, a built .exe). Each block gets its own

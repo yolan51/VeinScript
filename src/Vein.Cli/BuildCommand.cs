@@ -154,7 +154,23 @@ internal static class BuildCommand
         // the error sitting in `diag` unread.
         if (diag.HasErrors) { foreach (var d in diag.Items) Console.Error.WriteLine(d); return 1; }
 
-        foreach (var m in modules) new Interp().Run(m, Console.In, Console.Out, messaging: true);
+        // `--ticks N` runs a fixed count and stops, matching `veinc run`; with no flag the program gets
+        // a real frame loop if it declares frame work, and none if it does not. A batch tool or a
+        // server pays nothing; a game runs.
+        int ticks = 0;
+        double fps = 60;
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (args[i] == "--ticks") int.TryParse(args[i + 1], out ticks);
+            if (args[i] == "--fps") double.TryParse(args[i + 1], System.Globalization.NumberStyles.Float,
+                                                    System.Globalization.CultureInfo.InvariantCulture, out fps);
+        }
+
+        foreach (var m in modules)
+        {
+            var interp = ticks > 0 ? new Interp { Ticks = ticks } : new Interp { FrameRate = fps };
+            interp.Run(m, Console.In, Console.Out, messaging: true);
+        }
         return 0;
         """;
 }
