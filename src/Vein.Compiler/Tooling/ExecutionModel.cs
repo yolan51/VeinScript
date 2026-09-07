@@ -143,7 +143,7 @@ public sealed class ExecutionModel
 
     public static ExecutionModel Analyze(BundleDecl bundle)
     {
-        var shapes = Sig.Shapes(new CompilationUnit(new[] { bundle }, bundle.Span));
+        var shapes = Sig.ShapesInScope(new CompilationUnit(new[] { bundle }, bundle.Span));
 
         // ---- pass 1: owners, SFs, units ------------------------------------------------
         var owners = new List<(string Name, OwnerKind Kind, IReadOnlyList<Node> Members)>();

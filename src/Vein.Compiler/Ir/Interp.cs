@@ -108,10 +108,16 @@ public sealed class Interp
     /// The world, for tests that want to assert on state rather than on stdout.
     public EntityStore World => _store;
 
-    /// The writer `@Print` actually goes to. Exposed because "which writer did we keep" is precisely the
-    /// thing that broke once: switching the console encoding REPLACES Console.Out, so a writer captured
-    /// beforehand keeps encoding in the old code page while the property reports the new one.
-    public TextWriter? Output => _out;
+    /// The writer `@Print` actually goes to. Readable because "which writer did we keep" is precisely
+    /// the thing that broke once: switching the console encoding REPLACES Console.Out, so a writer
+    /// captured beforehand keeps encoding in the old code page while the property reports the new one.
+    ///
+    /// SETTABLE FOR A HOST THAT DRIVES `Boot`/`Frame` ITSELF. `Run` assigns this and always did, so a
+    /// console program is unchanged — but the stepping path never touched it, and `@Print` writes
+    /// through `_out?.WriteLine`, so on that path every print went to a null and vanished. Not dropped
+    /// loudly: dropped by a `?.`, with no diagnostic and nothing to grep for. An editor that boots a
+    /// program and steps it got a working world and a silent console.
+    public TextWriter? Output { get => _out; set => _out = value; }
 
     /// Frames of the ECS clock to advance after boot. 0 — the default — is a purely reactive program:
     /// nothing drives `each tick`, so a bundle with no schedule blocks behaves exactly as it always has.

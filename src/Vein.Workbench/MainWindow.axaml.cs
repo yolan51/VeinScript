@@ -235,6 +235,44 @@ public partial class MainWindow : Window
             _tabs.Open(null, Sample);
             Build();
         }
+
+        // AND THEN, ON TOP OF ALL THAT, whatever the command line asked for. Last rather than instead:
+        // a launcher that says "open this file at line 40" wants the session it would otherwise have
+        // had, plus that file focused — not a Workbench with one tab and no context.
+        if (Program.Launch.AsksForAnything)
+            _ = OpenRequestedAsync(Program.Launch.Path!, Program.Launch.Line);
+    }
+
+    /// `VeinScript-Workbench <path> [--line N]` — open it, focus it, put the caret there.
+    ///
+    /// The seam the game editor hands a diagnostic across. It fails quietly: a path that no longer
+    /// exists leaves the restored session alone and says so in the status bar, because a launcher
+    /// passing a stale path should not cost somebody the tabs they had open.
+    private async Task OpenRequestedAsync(string path, int? line)
+    {
+        try
+        {
+            if (!File.Exists(path)) { SetStatus($"Cannot open {path} — no such file."); return; }
+
+            await OpenPathAsync(Path.GetFullPath(path));
+            if (line is { } n) GoToLine(n);
+        }
+        catch (Exception ex) { SetStatus($"Cannot open {path} — {ex.Message}"); }
+    }
+
+    /// Put the caret on a 1-based line and scroll it into view, clamped to the document.
+    ///
+    /// Clamped rather than refused: a diagnostic from a file that has since been edited shorter should
+    /// land at the end, not be ignored.
+    private void GoToLine(int line)
+    {
+        int n = Math.Clamp(line, 1, Math.Max(1, _editor.Document.LineCount));
+        var l = _editor.Document.GetLineByNumber(n);
+
+        _editor.CaretOffset = l.Offset;
+        _editor.ScrollToLine(n);
+        _editor.Focus();
+        SetStatus($"Line {n}");
     }
 
     // ---- session ---------------------------------------------------------

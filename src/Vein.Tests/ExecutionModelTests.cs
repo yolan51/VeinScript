@@ -369,4 +369,71 @@ public class ExecutionModelTests
         Assert.Equal(0, m.Totals.WaveCount);
         Assert.Contains("nothing in this bundle runs", ExecutionReport.Render(m));
     }
+
+    // ---- shapes that arrive through an include ------------------------------------------------------
+    //
+    // THE ANSWER WAS INVERTED, WHICH IS WHY THIS MATTERS MORE THAN ITS SIZE. The analysis gated state
+    // tracking on the shapes a bundle DECLARES, so a program built the documented way — over the
+    // standard library, through a builder include — reported zero reads, zero writes and zero
+    // conflicts. "Zero conflicts" reads as *this program is safe*; it meant *this program was not
+    // examined*. Every program that uses the stdlib goes through an include, so the wrong answer was
+    // the ordinary case, not the corner.
+
+    [Fact]
+    public void Two_shards_writing_an_INCLUDED_shape_conflict()
+    {
+        // `$Position` is never declared here — it reaches the bundle through the builder, and the
+        // component lands under the bare name because components unify by bare name (RULES 15b).
+        var m = Analyze("""
+            bundle T by me {
+                mark #Thing
+                builder Thing { *Vein.Transform.Spatial.$Position   mark #Thing }
+                shard Make { run once { bring Thing(0.0, 0.0, 0.0) } }
+                shard PushLeft  { each tick { target $Position #Thing as t { t.Position.x -= 1.0 } } }
+                shard PushRight { each tick { target $Position #Thing as t { t.Position.x += 2.0 } } }
+            }
+            """);
+
+        var clash = Assert.Single(m.Conflicts);
+        Assert.Contains("PushLeft", clash.A + clash.B);
+        Assert.Contains("PushRight", clash.A + clash.B);
+        Assert.False(clash.Resolvable);
+        Assert.Equal(2, m.Totals.ConflictingUnits);
+    }
+
+    [Fact]
+    public void The_reads_and_writes_of_an_included_shape_are_attributed()
+    {
+        // The counts are what the conflict is derived from, so they are worth asserting directly: a
+        // model that found the conflict while reporting r=0 w=0 would be right by accident.
+        var m = Analyze("""
+            bundle T by me {
+                mark #Thing
+                builder Thing { *Vein.Transform.Spatial.$Position   mark #Thing }
+                shard Move { each tick { target $Position #Thing as t { t.Position.x -= 1.0 } } }
+            }
+            """);
+
+        var move = Assert.Single(m.Units, u => u.Owner == "Move");
+        Assert.NotEmpty(move.Writes);
+        Assert.Contains(move.Writes, w => w.Name == "Position" && w.Field == "x");
+    }
+
+    [Fact]
+    public void A_locally_declared_shape_still_wins_over_an_included_one()
+    {
+        // `use`/include widening must never replace what the bundle declares itself — otherwise adding
+        // an include could silently change which fields an analysis thinks a component has.
+        var m = Analyze("""
+            bundle T by me {
+                shape $Position { label: string }
+                mark #Thing
+                builder Thing { $Position   mark #Thing }
+                shard Move { each tick { target $Position #Thing as t { t.Position.label = "x" } } }
+            }
+            """);
+
+        var move = Assert.Single(m.Units, u => u.Owner == "Move");
+        Assert.Contains(move.Writes, w => w.Name == "Position" && w.Field == "label");
+    }
 }

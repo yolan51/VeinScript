@@ -27,6 +27,56 @@ public static class Sig
         return map;
     }
 
+    /// Every shape a bundle's identities can actually CARRY: the ones it declares, plus the ones that
+    /// reach it through a qualified include on a builder or an event.
+    ///
+    /// `Shapes` above answers "what does this file declare", which is right for expanding a signature
+    /// and wrong for analysing state. A builder including `*Vein.Transform.Spatial.$Position` gives its
+    /// identities a `Position` component — under the BARE name, because components unify by bare name
+    /// (RULES 15b) — and a `target $Position as t` then binds it and reads `t.Position.x`.
+    ///
+    /// An analysis working from declarations alone sees no such shape, and the failure is silent and
+    /// INVERTS THE ANSWER: ExecutionModel gated its state tracking on this map, so a program built the
+    /// documented way — over stdlib shapes — reported zero reads, zero writes and zero conflicts. Zero
+    /// conflicts reads as "this program is safe" when it meant "this program was not examined", and
+    /// every program that uses the standard library goes through an include, so the wrong answer was
+    /// the ordinary case rather than the corner.
+    public static Dictionary<string, List<FieldDecl>> ShapesInScope(CompilationUnit unit)
+    {
+        var map = Shapes(unit);
+
+        void Walk(IEnumerable<Node> ms)
+        {
+            foreach (var m in ms)
+                switch (m)
+                {
+                    // A local declaration always wins: `Shapes` already put it in, and a bundle that
+                    // declares its own `$Position` means that one.
+                    case ShapeInclude si when si.Path.Count > 0 && !map.ContainsKey(si.Shape):
+                        if (External(si) is { } fields) map[si.Shape] = fields;
+                        break;
+                    case BundleDecl b: Walk(b.Members); break;
+                    case PublicatorDecl p: Walk(p.Members); break;
+                    case BuilderDecl bd: Walk(bd.Members); break;
+                    case EventDecl ed: Walk(ed.Members); break;
+                }
+        }
+
+        Walk(unit.Bundles);
+        return map;
+    }
+
+    /// The fields of a `*Author.Bundle.Publicator.$Shape`, matched on a path suffix like every other
+    /// qualified reference.
+    private static List<FieldDecl>? External(ShapeInclude si)
+    {
+        string refKey = string.Join(".", si.Path) + "." + si.Shape;
+        foreach (var kv in Project.StdlibIndex.Shapes())
+            if (kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal))
+                return kv.Value.Members.OfType<FieldDecl>().ToList();
+        return null;
+    }
+
     public static List<Field> Expand(IReadOnlyList<Node> members, Dictionary<string, List<FieldDecl>> shapes)
     {
         var list = new List<Field>();
