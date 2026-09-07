@@ -244,7 +244,7 @@ case.
 **15. `$Enemy` and `#Enemy` are different things.** Different keyword, different sigil; a program may use
 both. In emitted C# the mark becomes `Marks.Enemy` and the shape `Enemy`.
 
-**15b. COMPONENTS UNIFY BY BARE NAME, and a `shape` cannot include a `shape`.** `attach $Position`
+**15b. COMPONENTS UNIFY BY BARE NAME, and a `shape` cannot include a `shape` (VS0007 says so).** `attach $Position`
 lowers to the name alone, and linking folds every bundle's types into one table keyed by it — deliberately,
 since that is how a capability bundle sees the principal's data. So two bundles saying `$Position` share
 one component whether or not they agree on its fields. Only builders and events can include a `$Shape`;

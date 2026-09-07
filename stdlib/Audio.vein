@@ -1,0 +1,22 @@
+// stdlib/Audio.vein — VeinScript Standard Library : Vein.Audio
+// Sound as an EVENT, the way console output is. A program emits *Vein.Audio.Sound.@PlaySound and the
+// HOST plays it — an editor, a player, whatever owns a speaker. `veinc run` in a terminal has none and
+// drops the sound; `veinc build` refuses it with a note rather than shipping a game that is mute.
+//
+// This is TRANSPORT, not data: its meaning is an effect on the world outside the program, like
+// @Print and @Fetch. It is listed in Interp.HostEvents for that reason, and that listing is what stops
+// the C# backend from compiling it into a queued no-op. An event added here and not there is a game
+// that compiles, runs, and is silent.
+//
+// The vocabulary is deliberately the smallest that is useful. Looping, channels, positional audio and
+// mixing are all real needs and all decisions a host should get to make once there is one that plays
+// anything at all.
+// Discover:  veinc symbols stdlib/Audio.vein
+
+bundle Audio by Vein {
+
+    publicator Sound {
+        shared("Play a sound file once. `source` is a path or asset name the host resolves; `volume` is 0..1.")
+        event @PlaySound { source: string, volume: float = 1.0 }
+    }
+}

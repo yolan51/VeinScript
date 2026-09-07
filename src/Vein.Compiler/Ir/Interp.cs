@@ -414,6 +414,17 @@ public sealed class Interp
     /// `@MouseMove { x, y }`.
     public void FireMouseMove(double x, double y) => FireDevice("MouseMove", ("x", x), ("y", y));
 
+    /// `*Vein.Time.Clock.@Ticked { frame, delta }` — the clock, from a host that owns one.
+    ///
+    /// stdlib/Time.vein settles whose job this is: "a runtime emits @Ticked when appropriate (a game
+    /// every frame, an app on a timer)". `@Ticked` is pure data — `HostEvents` above names it as "an
+    /// occurrence and nothing more" — so a program hearing it compiled and ran and heard nothing, with
+    /// no error anywhere, because the six entry points above were keyboard and mouse only and the
+    /// helper they share is private. The host was doing the `$Clock` half through `World.Write` and had
+    /// no way to do this half at all.
+    public void FireTicked(int frame, double delta) =>
+        FireDevice("Ticked", ("frame", (long)frame), ("delta", delta));
+
     /// One device occurrence, with the provenance envelope every event carries.
     ///
     /// The sender is a registered runtime identity named `device`, the way stdin is registered as
@@ -855,6 +866,18 @@ public sealed class Interp
             _current = payload;   // emits inside handlers inherit this event's id into their trail
             if (name == "Response") { _responseBody = Str(payload.GetValueOrDefault("body")); _responseStatus = AsLong(payload.GetValueOrDefault("status")); continue; }
             if (name == "Print") { _out?.WriteLine(Str(payload.GetValueOrDefault("text"))); continue; }
+
+            // `@PlaySound` is TRANSPORT, like `@Print` — its meaning is an effect only a host can have,
+            // and it is in `HostEvents` for that reason: the C# backend refuses it with a note rather
+            // than compiling a game that is silent. What the host is, this interpreter does not know;
+            // `AudioOut.Hook` is where an editor or a player says. With no hook set — `veinc run` in a
+            // terminal — the sound is dropped, which is honest for a console.
+            if (name == "PlaySound")
+            {
+                AudioOut.Play(Str(payload.GetValueOrDefault("source")),
+                              AsDouble(payload.GetValueOrDefault("volume") ?? 1.0));
+                continue;
+            }
             if (name == "Console") { ConsoleLauncher.Spawn(Str(payload.GetValueOrDefault("name")), Str(payload.GetValueOrDefault("firsttext"))); continue; }
             if (name == "Send")
             {
@@ -1329,7 +1352,7 @@ public sealed class Interp
     /// compiled into a no-op.
     public static readonly IReadOnlySet<string> HostEvents =
         new HashSet<string>(StringComparer.Ordinal)
-        { "Response", "Print", "Console", "Send", "Listen", "Link", "Fetch", "ReadFile", "WriteFile" };
+        { "Response", "Print", "Console", "Send", "Listen", "Link", "Fetch", "ReadFile", "WriteFile", "PlaySound" };
 
     /// The names `Prebuilt` below answers to. Declared as a set because `Lower` needs the same list: a
     /// built-in already resolves, so a `use`d bundle exporting the same name must not capture it (VS0217).

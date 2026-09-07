@@ -242,6 +242,22 @@ public sealed class Parser
         while (!Check(TokenKind.RBrace) && !AtEnd)
         {
             if (Check(TokenKind.KwEnum)) members.Add(ParseEnum());
+            // A SHAPE CANNOT INCLUDE A SHAPE (RULES 15b), and the parse error for trying said nothing of
+            // the kind. Builders and events can — `event @KeyDown { $Key }` is in stdlib/Input.vein —
+            // so `shape $Ticking { *Vein.Time.Clock.$Clock }` looks like it should work, fails on the
+            // `*` or the `$` with "Expected field name", and leaves the rule to be discovered by
+            // trying the other spelling too. The include belongs one level out, in the builder.
+            else if (Check(TokenKind.ShapeRef) || Check(TokenKind.Star))
+            {
+                _diag.Error("VS0007",
+                    "A shape cannot include a shape — a shape body takes fields (RULES 15b). Put the " +
+                    "include in the builder or event that carries this shape instead: " +
+                    "`builder Thing { $Position  *Vein.Time.Clock.$Clock  mark #Thing }`.",
+                    Here);
+                // Skip the include so the shape's remaining fields still parse.
+                while (!Check(TokenKind.Term) && !Check(TokenKind.Comma) && !Check(TokenKind.RBrace) && !AtEnd) Advance();
+                Match(TokenKind.Comma);
+            }
             else { members.Add(ParseField()); Match(TokenKind.Comma); }   // comma- or newline-separated
             SkipTerms();
         }

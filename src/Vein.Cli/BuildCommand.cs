@@ -30,6 +30,33 @@ internal static class BuildCommand
         try
         {
             File.WriteAllText(Path.Combine(temp, "program.vein"), source);
+
+            // THE STANDARD LIBRARY GOES INTO THE EXE, or the program inside it cannot see it.
+            //
+            // The built host used to construct `new Lower(diag)` with no bundle index and nothing to
+            // index — the published exe had `program.vein` and nothing else. So `use Console` resolved
+            // nothing, `bring Console(#Screen2, "…")` was VS0203 "Unknown builder" and lowered to a
+            // NO-OP, and that error landed in `diag` after the host's only HasErrors check, which
+            // discarded it. Both surrounding `@Print`s still fired, because Print is matched by name in
+            // Drain regardless. So the same program spawned a second window under `veinc run` and
+            // shipped as one window, with nothing said. An afternoon went into narrowing that from
+            // outside; the fix is that the exe carries what it needs and says so when it does not.
+            //
+            // The files are copied into the build folder and embedded as resources with their relative
+            // paths, so the host can put them back on disk at startup and point the index at them —
+            // a single-file exe has no folder to ship beside.
+            if (Vein.Compiler.Project.BundleIndex.LocateNamed(null, "stdlib") is { } stdlibDir)
+            {
+                string into = Path.Combine(temp, "stdlib");
+                foreach (string file in Directory.EnumerateFiles(stdlibDir, "*.vein", SearchOption.AllDirectories))
+                {
+                    string rel = Path.GetRelativePath(stdlibDir, file);
+                    string target = Path.Combine(into, rel);
+                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                    File.Copy(file, target, overwrite: true);
+                }
+            }
+            else Console.Error.WriteLine("build warning: no stdlib folder found — the built program will not resolve *Vein.* references.");
             File.WriteAllText(Path.Combine(temp, "app.csproj"), Csproj(name, compilerDll));
             File.WriteAllText(Path.Combine(temp, "Program.cs"), HostProgram);
 
@@ -82,6 +109,7 @@ internal static class BuildCommand
           <ItemGroup>
             <Reference Include="Vein.Compiler"><HintPath>{compilerDll}</HintPath></Reference>
             <EmbeddedResource Include="program.vein" LogicalName="program.vein" />
+            <EmbeddedResource Include="stdlib\**\*.vein" LogicalName="stdlib/%(RecursiveDir)%(Filename)%(Extension)" />
           </ItemGroup>
         </Project>
         """;
@@ -101,8 +129,32 @@ internal static class BuildCommand
         var unit = new Parser(new Lexer(src, "program.vein", diag).Tokenize(), diag).ParseUnit();
         if (diag.HasErrors) { foreach (var d in diag.Items) Console.Error.WriteLine(d); return 1; }
 
-        var lower = new Lower(diag);
-        foreach (var b in unit.Bundles) new Interp().Run(lower.LowerBundle(b), Console.In, Console.Out, messaging: true);
+        // Put the embedded standard library back on disk so the bundle index can see it. A single-file
+        // exe has no folder beside it; a per-program temp folder, rewritten each start, is the honest
+        // stand-in. BundleIndex walks UP from this directory looking for one named `stdlib`, so the
+        // folder that CONTAINS stdlib/ is what gets handed to Lower.
+        string root = Path.Combine(Path.GetTempPath(), "vein-" + asm.GetName().Name);
+        foreach (string res in asm.GetManifestResourceNames())
+        {
+            if (!res.StartsWith("stdlib/", StringComparison.Ordinal)) continue;
+            string target = Path.Combine(root, res.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            using var rs = asm.GetManifestResourceStream(res)!;
+            using var fs = File.Create(target);
+            rs.CopyTo(fs);
+        }
+
+        var lower = new Lower(diag, root);
+        var modules = new List<IrModule>();
+        foreach (var b in unit.Bundles) modules.Add(lower.LowerBundle(b));
+
+        // CHECKED AFTER LOWERING, which is where a missing builder, an unknown shape or a bad `use`
+        // are found. The check above only covers the parse; a program that lowered `bring Console(…)`
+        // to a no-op used to run past this point printing everything else and spawning nothing, with
+        // the error sitting in `diag` unread.
+        if (diag.HasErrors) { foreach (var d in diag.Items) Console.Error.WriteLine(d); return 1; }
+
+        foreach (var m in modules) new Interp().Run(m, Console.In, Console.Out, messaging: true);
         return 0;
         """;
 }

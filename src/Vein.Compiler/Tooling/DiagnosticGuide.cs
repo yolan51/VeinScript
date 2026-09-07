@@ -79,6 +79,12 @@ public static class DiagnosticGuide
 
         new("VS0236", "A query's binding reads fields, and the shapes it names are what give it fields to read — `target #Enemy as e` leaves `e` with nothing on it. It was also silently skipped by the C# backend, which has no query-by-mark, so the same program did one thing interpreted and another compiled.",
             "docs/RULES.md — target"),
+
+        new("VS0006", "Deliberate, not missing: logic is spelled in words, so inequality is `not (a == b)` and negation is `not x`. `!` is kept unlexed for a future sigil. The lexer still hands the parser the token you meant, so this is one error rather than a cascade about braces.",
+            "docs/SYNTAX-DECISIONS.md — D12"),
+
+        new("VS0007", "Builders and events can include a `$Shape`; a shape body takes fields only, because components unify by bare name and an include would be a second definition of the same component. Put the include one level out, in the builder or event that carries this shape.",
+            "docs/RULES.md — 15b"),
     };
 
     private static readonly Dictionary<string, DiagnosticNote> ByCode =

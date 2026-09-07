@@ -9,7 +9,7 @@ using Vein.Compiler.Tooling;
 
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("usage: veinc <new|tokens|ast|ir|render|serve|run|build|emit|graph|events|scaffold|symbols|exec> <file.vein> [arg]");
+    Console.Error.WriteLine("usage: veinc <new|check|tokens|ast|ir|render|serve|run|build|emit|graph|events|scaffold|symbols|exec> <file.vein> [arg]");
     return 2;
 }
 
@@ -70,6 +70,31 @@ switch (command)
         var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
         Console.WriteLine(AstPrinter.Print(unit));
         break;
+    }
+
+    // `veinc check` — type-check a file and print every diagnostic, nothing else.
+    //
+    // It is the name every other toolchain uses and the first thing anyone tries, and it was missing:
+    // `ir` was how you checked a file from the CLI. It also does something `ir` does NOT — `ir`'s
+    // default renderer walks the AST and never calls Lower, which is where nearly every VS02xx is
+    // raised, so `veinc ir` on a program with an unknown builder printed a tree and no complaint.
+    // This runs Lower over every bundle so the same diagnostics an editor shows are what you get here.
+    case "check":
+    {
+        var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
+        if (!diagnostics.HasErrors)
+        {
+            var checker = new Lower(diagnostics, projectDir);
+            foreach (var bundle in unit.Bundles) checker.LowerBundle(bundle);
+        }
+
+        foreach (var d in diagnostics.Items) Console.Error.WriteLine(d);
+        int errors = diagnostics.Items.Count(d => d.Severity == Severity.Error);
+        int warnings = diagnostics.Items.Count(d => d.Severity == Severity.Warning);
+        Console.Error.WriteLine(errors == 0 && warnings == 0
+            ? "ok"
+            : $"{errors} error(s), {warnings} warning(s)");
+        return errors == 0 ? 0 : 1;
     }
 
     case "ir":

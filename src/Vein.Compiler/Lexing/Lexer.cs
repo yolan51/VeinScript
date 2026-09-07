@@ -308,7 +308,30 @@ public sealed class Lexer
                 break;
 
             // `!` is intentionally NOT a token — inequality is written `not (a == b)` (the `not` keyword),
-            // which frees `!` for a future sigil.
+            // which frees `!` for a future sigil (SYNTAX-DECISIONS D12).
+            //
+            // But it gets its OWN case, because the generic "Unexpected character" was the wrong shape
+            // of error for the most common thing anyone types here. `x != 0` produced VS0005 on the
+            // `!`, then the parser met a stray `=` and reported "Expected '{'" — two errors pointing at
+            // a brace, and neither said the language has no `!=`. Someone who knows C spent half an
+            // hour on that. The `=` is consumed so the cascade stops, and the message is the fix.
+            case '!':
+            {
+                bool neq = Match('=');
+                _diagnostics.Error("VS0006",
+                    neq ? "VeinScript has no `!=` — write `not (a == b)`. Logic is spelled in words here."
+                        : "VeinScript has no `!` — write `not x`. Logic is spelled in words here.",
+                    SpanFrom(startPos, startLine, startCol));
+
+                // RECOVER WITH THE TOKEN THE AUTHOR MEANT, so the parser sees a well-formed expression
+                // and reports nothing further. Returning nothing here left `if x 0.0 {` behind, which
+                // is a second error about a brace and a third about the closing `}` — the cascade this
+                // case exists to stop. The program is already rejected by the error above, so `Ne`
+                // being otherwise unreachable (D12) is preserved: it can only ever appear in a file
+                // that will not compile.
+                kind = neq ? TokenKind.Ne : TokenKind.KwNot;
+                break;
+            }
 
             default:
                 _diagnostics.Error("VS0005", $"Unexpected character '{c}'.",

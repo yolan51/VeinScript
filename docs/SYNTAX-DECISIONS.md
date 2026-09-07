@@ -209,6 +209,11 @@ namespace; reinforces that meaning attaches to identities.
 
 ## D12 — Logic is words: `not (a == b)`, and `!` stays unlexed {#not}
 
+> **Reported as `VS0006`.** Writing `x != 0` used to produce "Unexpected character '!'" and then, from
+> the leftover `=`, "Expected '{'" — two errors pointing at a brace, neither saying the language has
+> no `!=`. The lexer now names the spelling and hands the parser the token that was meant, so it is
+> one error and no cascade. The decision itself is unchanged: the file is rejected.
+
 **DECIDED.** VeinScript has no `!=`, no `!x`, and no `!` token at all. Negation and inequality are
 spelled with the word operator the language already has:
 
