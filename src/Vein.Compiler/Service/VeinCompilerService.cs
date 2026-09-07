@@ -28,7 +28,41 @@ public sealed record CompilationResult(
     IReadOnlyList<IrNode> IrTree,   // the VeinIR display tree (what `veinc ir` shows)
     string IrText,                  // the rendered VeinIR tree
     IReadOnlyList<IrModule> Modules,// the lowered HIR, one per bundle
-    long ElapsedMs);
+    long ElapsedMs)
+{
+    /// The module a host should RUN — the program, as opposed to a library declared beside it.
+    ///
+    /// `Modules` is one per bundle in declaration order and says nothing about which is which, so a
+    /// host had to take `Modules[0]`. That is right for every sample and wrong the moment somebody puts
+    /// a helper bundle first in the file — and wrong silently, by running the wrong program.
+    ///
+    /// Three steps, most explicit first:
+    ///
+    ///   a `start @E { … }` declaration, which is already the language's word for an entry point
+    ///     (VS0219: "a bundle has at most one entry point"). Two bundles declaring one is ambiguous, so
+    ///     it falls through rather than picking;
+    ///   otherwise the first bundle that actually DOES anything — a shard with a schedule or a `hear`.
+    ///     A bundle of shapes and publicators is a vocabulary, and running it does nothing;
+    ///   otherwise the first module, which is the old behaviour and the honest answer when nothing
+    ///     distinguishes them.
+    public IrModule? Entry
+    {
+        get
+        {
+            if (Modules.Count == 0) return null;
+
+            var started = Modules.Where(m => m.Start is not null).ToList();
+            if (started.Count == 1) return started[0];
+
+            return Modules.FirstOrDefault(Runnable) ?? Modules[0];
+        }
+    }
+
+    /// Does this module have behaviour, or is it only a vocabulary? A shard with no schedule and no
+    /// `hear` never runs — the attributes are what Lower stamps a trigger block with.
+    private static bool Runnable(IrModule m) =>
+        m.Shards.Any(s => s.Methods.Any(x => x.Attrs.Any(a => a.Name is "schedule" or "hear")));
+}
 
 public sealed class VeinCompilerService
 {

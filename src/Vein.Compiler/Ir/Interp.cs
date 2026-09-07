@@ -374,6 +374,65 @@ public sealed class Interp
     /// this; so can a host (or a test) that owns its own transport.
     public void Receive(string from, string text) { FireMessage(from, text); Drain(); }
 
+    // ---- device input, from a host that owns a window -------------------
+    //
+    // `Vein.Input`'s occurrences are pure DATA — a key went down, a pointer moved — and the interpreter
+    // already delivers them: `samples/stdlib_events.vein` emits them from VeinScript and its `hear`
+    // blocks fire. What was missing is a way for a HOST to produce one. An editor with a native window
+    // can see a key press and had no method to turn it into `@KeyDown` short of reflecting into the
+    // private queue and inventing the provenance envelope itself — which would be a second event
+    // transport, free to drift from the one `veinc run` uses.
+    //
+    // SPECIFIC ENTRY POINTS, NOT A GENERIC `Emit`. A host that could emit anything could emit `@Fetch`
+    // or `@ReadFile` — events whose meaning is a real HTTP request and a real file read, implemented by
+    // this interpreter. A host-fabricated one would look identical to a program and do nothing, which
+    // is the failure `docs/SAMPLES.md` §3 explains at length. Six named methods cannot make that
+    // mistake; one `Emit(string, payload)` invites it.
+    //
+    // Each drains, so a handler runs before the call returns and the world a host renders afterwards is
+    // settled. That matches `Receive` above rather than inventing a second delivery rule.
+
+    /// `@KeyDown { key }` — a key went down.
+    public void FireKeyDown(string key) => FireDevice("KeyDown", ("key", key));
+
+    /// `@KeyUp { key }` — a key came up.
+    public void FireKeyUp(string key) => FireDevice("KeyUp", ("key", key));
+
+    /// `@TextInput { text }` — composed text, not raw key codes. Stdlib says so, and it is the
+    /// difference between typing into a field and reading a keyboard.
+    public void FireTextInput(string text) => FireDevice("TextInput", ("text", text));
+
+    /// `@MouseDown { x, y, button }` — the position fields come from `*Vein.Math.Values.$Vec2`, which
+    /// the event includes, so they are flat `x`/`y` here exactly as a `hear` block reads them.
+    public void FireMouseDown(double x, double y, int button) =>
+        FireDevice("MouseDown", ("x", x), ("y", y), ("button", (long)button));
+
+    /// `@MouseUp { x, y, button }`.
+    public void FireMouseUp(double x, double y, int button) =>
+        FireDevice("MouseUp", ("x", x), ("y", y), ("button", (long)button));
+
+    /// `@MouseMove { x, y }`.
+    public void FireMouseMove(double x, double y) => FireDevice("MouseMove", ("x", x), ("y", y));
+
+    /// One device occurrence, with the provenance envelope every event carries.
+    ///
+    /// The sender is a registered runtime identity named `device`, the way stdin is registered as
+    /// `stdin` — so `d.from.name` tells a program the key came from the host rather than from another
+    /// bundle emitting it, and the audience barrier has something real to test.
+    private void FireDevice(string name, params (string Field, object? Value)[] fields)
+    {
+        var device = _registry.Register("device", VeinKind.Runtime);
+
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["from"] = FromOf(device), ["origin"] = null, ["bundle"] = _bundle
+        };
+        foreach (var (field, value) in fields) payload[field] = value;
+
+        Emit(name, payload);
+        Drain();
+    }
+
     /// A message that arrived from another console (via the bus) becomes an @Message event: `from` is the
     /// sending console's name, `text` the body.
     private void FireMessage(string from, string text)
@@ -639,6 +698,27 @@ public sealed class Interp
     /// Set to record execution. Null in an ordinary run, and the cost is then one null check per block.
     public Action<TraceEvent>? Trace;
 
+    /// A unit of user code that FAULTED: which tick, whose block, what kind, the identity bound at the
+    /// time, and what went wrong.
+    ///
+    /// `Entity` is the piece a host cannot reconstruct. A fault inside `target $Health #Hurt as h { … }`
+    /// happens with one specific identity bound, and the interpreter knows which — but the failure
+    /// leaves as a `@DiagnosticRaised` whose message is "{owner} ({what}): {message}" and whose
+    /// `origin` is null, so an editor could name the shard and never the entity. Picking one out of the
+    /// last world snapshot would be a guess dressed as an answer.
+    ///
+    /// Null when the fault was not inside a `target` — a `run once` body faulting belongs to no
+    /// identity, and saying 0 there would be worse than saying nothing.
+    public sealed record InterpFault(int Tick, string Owner, string Kind, long? Entity, Exception Exception);
+
+    /// Set to observe faults. THE FAULT STILL BECOMES `@DiagnosticRaised` exactly as before — this is a
+    /// second pair of eyes, not a redirect, because `hear @DiagnosticRaised` is the language's `catch`
+    /// and a host must not be able to take it away from the program.
+    ///
+    /// Same shape as `Trace` above and for the same reason: a callback costs one null check when unset,
+    /// and needs no new construct in a language that has no exceptions.
+    public Action<InterpFault>? Fault;
+
     /// Which tick is running. `Frame` advances it, so a trace line can say when it happened.
     private int _tick;
     public int Tick => _tick;
@@ -657,12 +737,32 @@ public sealed class Interp
     public void Frame()
     {
         _tick++;
-        RunPhase("tick");
-        RunPhase("frame");
-        CommitPhase();
-        RunPhase("settled");
-        CommitPhase();
-        Drain();               // events emitted by either phase are handled against a settled world
+
+        // USER CODE CANNOT FAULT HERE — `RunGuarded` catches it and raises `@DiagnosticRaised`, and the
+        // operations are total besides: `int("abc")` is 0, `substring` clamps, an out-of-range index is
+        // null. So anything that reaches this catch came from the machinery BETWEEN the blocks —
+        // reconciling folds, applying structural commands, dispatching the queue — or from a host
+        // callback like `Trace` that threw.
+        //
+        // Reported, then RETHROWN. The exception is not this method's to swallow: a host that was
+        // driving the loop needs to stop, and pretending the frame completed would leave a world nobody
+        // can reason about. What the seam adds is which tick and which phase, which the bare exception
+        // does not carry.
+        try
+        {
+            RunPhase("tick");
+            RunPhase("frame");
+            CommitPhase();
+            RunPhase("settled");
+            CommitPhase();
+            Drain();           // events emitted by either phase are handled against a settled world
+        }
+        catch (Exception ex)
+        {
+            Fault?.Invoke(new InterpFault(_tick, _bundle, "frame",
+                                          _currentEntity == 0 ? null : _currentEntity, ex));
+            throw;
+        }
     }
 
     private void RunPhase(string kind)
@@ -708,6 +808,17 @@ public sealed class Interp
         catch (Exception ex)
         {
             string where = $"{owner.Name} ({what})";
+
+            // The HOST hears about it first, and unconditionally — including the `!canRaise` case
+            // below, where the program cannot be told at all because a @DiagnosticRaised handler is
+            // what faulted. An editor watching a run should not go blind exactly when the program's own
+            // error reporting is what broke.
+            //
+            // `_currentEntity` is 0 outside any `target`, so a `run once` fault reports no identity
+            // rather than entity zero.
+            Fault?.Invoke(new InterpFault(_tick, owner.Name, what,
+                                          _currentEntity == 0 ? null : _currentEntity, ex));
+
             if (!canRaise) { _out?.WriteLine($"(error in {where} while reporting: {ex.Message})"); return; }
 
             Emit("DiagnosticRaised", new Dictionary<string, object?>(StringComparer.Ordinal)
