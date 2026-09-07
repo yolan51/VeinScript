@@ -181,6 +181,102 @@ public class HostSeamTests
         Assert.Contains("from device", output.ToString());
     }
 
+    // ---- a host writing a field -------------------------------------------------------------------
+    //
+    // Asked for as "there is no public write". There is: `EntityStore.Write` is public and reachable
+    // through `Interp.World`. What made it look absent is that a write does not become VISIBLE until a
+    // commit, which is the whole point of the phase boundary — nothing another unit does is observable
+    // mid-phase, and that is what removes the read/write race the execution analysis warns about.
+    //
+    // The fold question the editor raised has an answer already in the store, and it is the right one.
+    // `Write` outside an activation is "its own one-write unit" by design, so a host write is a
+    // contribution like any other; and `Flush` contributes the DELTA for a `folds sum` field and the
+    // absolute value for everything else. So setting hp to 50 while a shard takes 5 damage in the same
+    // phase lands at 45, which is what folds mean rather than a bug in them.
+
+    [Fact]
+    public void A_host_can_write_a_field_between_frames()
+    {
+        var module = Module("""
+            bundle T by you {
+                shape $H { hp: int }
+                mark #M
+                builder Unit { $H   mark #M }
+                shard Make { run once { bring Unit(10) } }
+                shard Show {
+                    settled { target $H #M as u { emit *Vein.Console.Io.@Print { text: "hp " + u.H.hp } } }
+                }
+            }
+            """);
+
+        var output = new StringWriter();
+        var interp = new Interp { Output = output };
+        interp.Boot(module);
+        interp.Frame();
+
+        long entity = interp.World.Snapshot()[0].Entity;
+        interp.World.Write(entity, "H", "hp", 99L);
+        interp.World.Commit();          // the host's own phase boundary, while nothing else is running
+
+        Assert.Equal(99L, interp.World.Read(entity, "H", "hp"));
+
+        interp.Frame();
+        Assert.Contains("hp 99", output.ToString());
+    }
+
+    [Fact]
+    public void A_host_write_is_not_visible_until_it_commits()
+    {
+        // Not a defect — the phase boundary. A write that took effect immediately would be visible to
+        // half a frame's shards and not the other half, which is the race the model exists to remove.
+        var module = Module("""
+            bundle T by you {
+                shape $H { hp: int }
+                mark #M
+                builder Unit { $H   mark #M }
+                shard Make { run once { bring Unit(10) } }
+            }
+            """);
+
+        var interp = new Interp { Output = TextWriter.Null };
+        interp.Boot(module);
+
+        long entity = interp.World.Snapshot()[0].Entity;
+        interp.World.Write(entity, "H", "hp", 99L);
+
+        Assert.Equal(10L, interp.World.Read(entity, "H", "hp"));   // still the committed value
+        interp.World.Commit();
+        Assert.Equal(99L, interp.World.Read(entity, "H", "hp"));
+    }
+
+    [Fact]
+    public void A_host_write_to_a_folded_field_CONTRIBUTES_rather_than_replaces()
+    {
+        // The case the editor was right to be careful about. `hp` folds sum, so the write contributes
+        // its delta from the snapshot — and a shard draining in the same phase contributes too. Setting
+        // 100 while a shard takes 1 lands at 99, which is what the fold means.
+        var module = Module("""
+            bundle T by you {
+                shape $H { hp: int folds sum }
+                mark #M
+                builder Unit { $H   mark #M }
+                shard Make { run once { bring Unit(10) } }
+                shard Drain { each tick { target $H #M as u { u.H.hp -= 1 } } }
+            }
+            """);
+
+        var interp = new Interp { Output = TextWriter.Null };
+        interp.Boot(module);
+
+        long entity = interp.World.Snapshot()[0].Entity;
+        interp.World.Write(entity, "H", "hp", 100L);   // contributes +90 from a snapshot of 10
+        interp.Frame();                                // Drain contributes -1, then the phase commits
+
+        // Converted rather than compared boxed: summing goes through the numeric tower, so a folded
+        // `int` reconciles to a double. That is the reducer's business, not this test's.
+        Assert.Equal(99L, Convert.ToInt64(interp.World.Read(entity, "H", "hp")));
+    }
+
     // ---- faults -------------------------------------------------------------------------------------
 
     // WHAT A FAULT ACTUALLY IS HERE, because the answer is narrower than it looks and it is worth

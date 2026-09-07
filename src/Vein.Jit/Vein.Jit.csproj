@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <!-- ROSLYN LIVES HERE AND NOWHERE ELSE. It could have gone in Vein.Runtime.SECS, which is already
+       net9 and already referenced by everything generated — and that is exactly why it must not: a
+       compiled VeinScript program links the runtime, and it has no business carrying a C# compiler
+       with it. This project references the runtime; the runtime does not reference this. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Vein.Compiler\Vein.Compiler.csproj" />
+    <ProjectReference Include="..\Vein.Runtime.SECS\Vein.Runtime.SECS.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -33,6 +33,8 @@ ask the user first.** Losing a useful file is far worse than leaving a temp fold
   not vice-versa.
 - **Build:** `dotnet build VeinScript.sln`
 - **Tests:** `dotnet test src/Vein.Tests`   ·   **Golden IR:** `bash tools/check-ir.sh`   ·   **Backend equivalence:** `bash tools/check-backend.sh`   ·   **Backend speed:** `bash tools/check-perf.sh`
+- **JIT tests:** `dotnet test src/Vein.Jit.Tests` — a second suite because it is **net9** and
+  `Vein.Tests` is net8, which cannot reference it. Only `Vein.Jit` needs running there.
 - **CLI (`veinc`):** `src/Vein.Cli` — run via `dotnet run --project src/Vein.Cli -- <cmd>` or the wrapper
   `.\veinc.cmd <cmd>`. Commands: `new tokens ast ir render serve run build emit graph events scaffold symbols exec`.
 - **Commits:** work on `master` (the session's established flow); end commit messages with the

@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- NET9, AND THAT IS WHY IT IS A SEPARATE PROJECT. Vein.Tests is net8 — it holds the compiler's
+       1100+ tests and the compiler is net8 — and net8 cannot reference net9. Vein.Jit must be net9
+       because the runtime it compiles against is. So the JIT gets its own suite rather than the main
+       one being retargeted around it.
+
+       Run with: dotnet test src/Vein.Jit.Tests -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
+    <PackageReference Include="xunit" Version="2.*" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Vein.Jit\Vein.Jit.csproj" />
+  </ItemGroup>
+
+  <!-- The standard library, for the same reason the Workbench ships it: BundleIndex.LocateNamed walks
+       up from AppContext.BaseDirectory looking for a folder named `stdlib`, and without one every
+       `*Vein.Console.Io.@Print` fails to resolve. -->
+  <ItemGroup>
+    <Content Include="..\..\stdlib\**\*.vein" LinkBase="stdlib" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
