@@ -100,3 +100,13 @@ The docs are the contract. If you change a keyword in
 [Lexer.cs](src/Vein.Compiler/Lexing/Lexer.cs), update [docs/KEYWORDS.md](docs/KEYWORDS.md) in the same
 change (every lexer keyword must appear there with a status). Open syntax questions live in
 [docs/SYNTAX-DECISIONS.md](docs/SYNTAX-DECISIONS.md).
+
+## Licence
+
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+**What you build with VeinScript is yours.** The licence covers this compiler and its standard
+library, not the game, app or site you write with them, and it places no condition on selling what you
+make. Apache rather than MIT for one reason: contributors grant a patent licence over their
+contributions, so shipping something commercial built on VeinScript does not leave you exposed to a
+claim from someone who once contributed to it.

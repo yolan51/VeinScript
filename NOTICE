@@ -1,0 +1,27 @@
+VeinScript
+Copyright 2026 Yohann
+
+This product includes software developed by Yohann.
+
+Licensed under the Apache License, Version 2.0. See LICENSE for the full terms.
+
+---
+
+What the licence means for you, in plain terms — the LICENSE file governs, this is orientation:
+
+  * You may use VeinScript to build anything, including software you SELL. A game, an app or a site
+    written in VeinScript is yours; the licence covers this compiler and its standard library, not what
+    you write with them.
+  * You may fork, modify and redistribute the compiler itself, provided you keep the licence, state
+    what you changed, and carry this NOTICE.
+  * Contributors grant a patent licence covering their contributions, so shipping something commercial
+    built on VeinScript does not leave you exposed to a patent claim from someone who contributed to
+    it. That grant is the main reason this is Apache-2.0 rather than MIT.
+  * There is no warranty.
+
+---
+
+THIRD-PARTY COMPONENTS
+
+  src/ShardECS.SECS and src/ShardECS.Contracts are a vendored copy of the ShardECS entity-component
+  runtime, included so `Vein.Runtime.SECS` can be built and tested from this repository alone.

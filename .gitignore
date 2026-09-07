@@ -8,3 +8,7 @@ out/
 # A 67 MB self-contained Linux build of samples/chat/server.vein. A published binary is output,
 # not source, and it has no extension for *.exe to catch.
 chatserver
+
+# Local tool settings — per-machine permissions, not part of the project. Untracked but not ignored
+# meant a `git add .` would have swept it into a public repository.
+.claude/
