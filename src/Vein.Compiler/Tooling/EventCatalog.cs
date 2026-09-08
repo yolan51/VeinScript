@@ -36,7 +36,7 @@ public static class EventCatalog
         ("trail", "id[] — the full causation chain that led here"),
     };
 
-    /// The bundles this unit `use`s. `use` names a bundle, so a shared member of one is reachable by its
+    /// The bundles this unit `need`s, as `Author.Bundle`. A shared member of one is reachable by its
     /// bare name — and the tooling has to see exactly what the compiler sees, or `bring Button ?` expands
     /// to nothing for the very builders a project consumes most.
     private static List<string> Uses(CompilationUnit unit)
@@ -47,7 +47,7 @@ public static class EventCatalog
             foreach (var d in ds)
                 switch (d)
                 {
-                    case NeedDecl n when !names.Contains(n.Bundle, StringComparer.Ordinal): names.Add(n.Bundle); break;
+                    case NeedDecl n when !names.Contains(n.Key, StringComparer.Ordinal): names.Add(n.Key); break;
                     case BundleDecl b: Walk(b.Members); break;
                     case PublicatorDecl p: Walk(p.Members); break;
                 }
@@ -56,8 +56,9 @@ public static class EventCatalog
         return names;
     }
 
-    /// Index entries whose bundle segment is one this unit `use`s. Keys are `Author.Bundle[.Pub].Name`,
-    /// the same suffix rule Lower.ResolveUsed applies.
+    /// Index entries belonging to a bundle this unit needs. Keys are `Author.Bundle[.Pub].Name`, matched
+    /// on AUTHOR AND BUNDLE — the same rule Lower.ResolveUsed applies, so the tooling offers exactly what
+    /// the compiler will resolve rather than another author's bundle of the same name.
     private static IEnumerable<KeyValuePair<string, T>> FromUsed<T>(
         IReadOnlyDictionary<string, T> index, IReadOnlyList<string> uses)
     {
@@ -65,12 +66,12 @@ public static class EventCatalog
         foreach (var kv in index)
         {
             var parts = kv.Key.Split('.');
-            if (parts.Length >= 3 && uses.Contains(parts[1], StringComparer.Ordinal)) yield return kv;
+            if (parts.Length >= 3 && uses.Contains(parts[0] + "." + parts[1], StringComparer.Ordinal)) yield return kv;
         }
     }
 
-    /// Local shapes, plus the shared shapes of `use`d bundles under their bare names. A local
-    /// declaration wins, which is `use` precedence — it only ever WIDENS what a bare name may mean.
+    /// Local shapes, plus the shared shapes of needed bundles under their bare names. A local
+    /// declaration wins, which is `need` precedence — it only ever WIDENS what a bare name may mean.
     private static Dictionary<string, List<FieldDecl>> ShapesInScope(
         CompilationUnit unit, BundleIndex? index, IReadOnlyList<string> uses)
     {
@@ -108,7 +109,7 @@ public static class EventCatalog
         }
         Walk(unit.Bundles);
 
-        // Then the shared events of `use`d bundles, under their bare names. Local wins, so a name this
+        // Then the shared events of needed bundles, under their bare names. Local wins, so a name this
         // unit declares is never displaced by an imported one.
         if (index is not null)
             foreach (var kv in FromUsed(index.Events, uses))

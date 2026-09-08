@@ -116,4 +116,42 @@ public class SyntaxThemeTests
         Assert.True(firstComment < firstSigil,
             "comment spans must be declared before the sigil rules, or a #Mark in a comment is coloured as a mark");
     }
+
+    [Fact]
+    public void Every_lexer_keyword_is_painted_as_one()
+    {
+        // THE DRIFT THIS EXISTS FOR. The theme is a hand-maintained word list in an embedded XML
+        // resource, and the lexer is the language. Adding a keyword to the lexer and not to the theme
+        // fails nothing: the word simply renders as plain text, which reads as "this is not a keyword".
+        // `need` was added and this test did not exist, so nothing would have said so.
+        //
+        // Sigils are excluded — `$Shape` and friends are painted by the sigil RULES above, not as words.
+        var painted = Theme().Descendants(Ns + "Word").Select(w => w.Value).ToHashSet(StringComparer.Ordinal);
+
+        var missing = Vein.Compiler.Lexing.Lexer.KeywordNames
+                          .Where(k => !painted.Contains(k))
+                          .OrderBy(k => k, StringComparer.Ordinal)
+                          .ToList();
+
+        Assert.True(missing.Count == 0,
+            "these lexer keywords are not in the syntax theme and render as plain text: " +
+            string.Join(", ", missing));
+    }
+
+    [Fact]
+    public void The_theme_paints_no_word_the_lexer_does_not_know()
+    {
+        // The other direction, and a weaker claim: a stale word costs only a mis-coloured identifier,
+        // where a missing one costs a keyword. Still worth catching, because it usually means a keyword
+        // was renamed and only one side was updated.
+        var known = Vein.Compiler.Lexing.Lexer.KeywordNames.ToHashSet(StringComparer.Ordinal);
+
+        var stale = Theme().Descendants(Ns + "Word").Select(w => w.Value)
+                         .Where(w => !known.Contains(w))
+                         .OrderBy(w => w, StringComparer.Ordinal)
+                         .ToList();
+
+        Assert.True(stale.Count == 0,
+            "the syntax theme paints words the lexer does not treat as keywords: " + string.Join(", ", stale));
+    }
 }

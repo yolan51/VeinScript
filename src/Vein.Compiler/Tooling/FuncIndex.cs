@@ -40,7 +40,7 @@ public static class FuncIndex
             foreach (var d in ds)
                 switch (d)
                 {
-                    case NeedDecl n when !uses.Contains(n.Bundle, StringComparer.Ordinal): uses.Add(n.Bundle); break;
+                    case NeedDecl n when !uses.Contains(n.Key, StringComparer.Ordinal): uses.Add(n.Key); break;
                     case BundleDecl b: Uses(b.Members); break;
                     case PublicatorDecl p: Uses(p.Members); break;
                 }
@@ -53,14 +53,14 @@ public static class FuncIndex
         foreach (var kv in BundleIndex.For(projectDir).Functions.OrderBy(k => k.Key, StringComparer.Ordinal))
         {
             var parts = kv.Key.Split('.');
-            if (parts.Length >= 3 && parts[^1] == name && uses.Contains(parts[1], StringComparer.Ordinal))
+            if (parts.Length >= 3 && parts[^1] == name && uses.Contains(parts[0] + "." + parts[1], StringComparer.Ordinal))
                 return (kv.Value, kv.Key);
         }
         return (null, null);
     }
 
     /// `fn addNumber(id: string, delta: int) -> string`, with the owning path when it came from a
-    /// `use`d bundle. `SF` and `fn` are shown as written, because the difference is the point: an SF
+    /// needed bundle. `SF` and `fn` are shown as written, because the difference is the point: an SF
     /// is behaviour, a fn is computation.
     public static string Signature(FuncDecl f, string? owner) =>
         (f.IsPure ? "SF " : "fn ") + f.Name +

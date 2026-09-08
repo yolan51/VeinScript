@@ -2829,9 +2829,9 @@ public partial class MainWindow : Window
     }
 
     // Both go through EventCatalog with the project dir, so `?` sees what the COMPILER sees — including
-    // the shared events and builders of `use`d bundles. The Workbench used to reach a builder through a
+    // the shared events and builders of NEEDED bundles. The Workbench used to reach a builder through a
     // private FindBuilder/BuilderParams pair that walked the local AST only, so `bring Button ?` against
-    // anything from `use Web` silently expanded to nothing: the one case a `?` is most wanted in.
+    // anything from `need "Vein.Web"` silently expanded to nothing: the one case a `?` is most wanted in.
     /// `?` typed INSIDE `emit @E { … }` or `bring X( … )`: offer the fields, each showing its type and
     /// the `$Shape` it came from. A popup, not an expansion — inside a payload `?` is the documented
     /// fill-the-rest token (`emit @Damaged { amount: 5, ? }`), so dismissing the list has to leave the

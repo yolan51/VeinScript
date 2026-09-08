@@ -26,10 +26,10 @@ public static class DiagnosticGuide
         new("VS0212", "A console address is an identity, but the runtime never checks one — ConsoleBus concatenates it into an OS pipe name and a miss is silently swallowed. This is the only thing that catches a typo'd address.",
             "src/Vein.Compiler/Tooling/ConsoleGraph.cs"),
 
-        new("VS0216", "Reach it by its `*Author.Bundle.Publicator.member` path instead; rule 17b allows one there. Or alias the bundles — `use Combat as C` imports qualified and widens no bare name, so two aliased bundles cannot be ambiguous with each other (rule 18b).",
+        new("VS0216", "Reach it by its `*Author.Bundle.Publicator.member` path instead; rule 17b allows one there. Or alias the bundles — `need \"alice.Combat\" as C` imports qualified and widens no bare name, so two aliased bundles cannot be ambiguous with each other (rule 18b).",
             "docs/RULES.md §285"),
 
-        new("VS0217", "`use` cannot rebind a built-in — the built-in wins, and the shadowed member becomes unreachable by its short name. `use Console` silently shadowing spawn() is the bug this was added for.",
+        new("VS0217", "`need` cannot rebind a built-in — the built-in wins, and the shadowed member becomes unreachable by its short name. `need \"Vein.Console\"` silently shadowing spawn() is the bug this was added for.",
             "docs/RULES.md §283"),
 
         new("VS0218", "A bundle that declares ANY mark has all of its mark names checked. Declaring one turns the check on for the file.",
@@ -40,6 +40,24 @@ public static class DiagnosticGuide
 
         new("VS0332", "Unifying by bare name is deliberate — it is how a capability bundle sees the principal's data (rule 15b). Unifying two declarations that DISAGREE is a name clash wearing that feature's costume: one bundle would silently win by module order, and the other's shards would read fields the component does not have. So the app does not link.",
             "docs/RULES.md §252"),
+
+        new("VS0237", "A builder with no `mark` and no output channel EMITS `@<Name>` carrying its params (rule 5) — a deliberate form, and `*Vein.Rest.Db.&Connect` is one. What is wrong here is that shape with nowhere for the event to go: not shared, so no other bundle can hear it by path, and nothing in this compilation hears it either. So `bring` runs, the world stays empty, and the language being total, nothing is an error.",
+            "docs/RULES.md — rule 5, a builder's output field"),
+
+        new("VS0336", "Loaded twice, a bundle is parsed, lowered and merged twice — both copies' shards take the same qualified name, and the runtime registers both. Every reaction and schedule in it would run twice, compounding, with nothing to say so.",
+            "docs/RUNTIME.md §5 — app link"),
+
+        new("VS0337", "The linker merges bundles BY NAME, so two files claiming one name cannot be told apart — the same argument VS0310 makes for one bundle found in two search roots. There is no spelling that picks one, so one of them has to go.",
+            "docs/RUNTIME.md §5 — app link"),
+
+        new("VS0338", "`use` named a bundle without its author, so it matched every author's bundle of that name at once, and it validated nothing — a misspelled `use` was silent until each call site failed separately. `need \"Author.Bundle\"` says both halves and is checked where it is written.",
+            "docs/RULES.md — rule 18"),
+
+        new("VS0339", "The author is what tells two authors' bundles of one name apart, which is why it is not optional. It is the `by` line in the bundle's own declaration.",
+            "docs/RULES.md — rule 18"),
+
+        new("VS0340", "Reported at the DECLARATION, which is the whole point of naming a dependency. Under `use` this was silent: the name went into a list used only as a filter over the folder index, so a name matching nothing simply never matched, and the failure surfaced later as VS0234 at each call that needed it — a misspelled bundle read as a broken call.",
+            "docs/RULES.md — rule 18"),
 
         new("VS0221", "Only an identity template can be bound with `as`; a fragment builder has no identity to bind.",
             "docs/RULES.md §82"),

@@ -43,8 +43,14 @@
     <!-- `?` fill-the-rest placeholder in emit/bring -->
     <Rule color="Sigil">\?</Rule>
 
+    <!-- EVERY lexer keyword, and nothing else. SyntaxThemeTests checks this list against
+         `Lexer.KeywordNames` in both directions, because drift here fails nothing: a keyword the theme
+         omits simply renders as plain text, which reads as "not a keyword". `app`, `by`, `transform`,
+         `mute`/`unmute`, `on`, `base` and `Index` were all missing; `random` and `in` were painted and
+         are not keywords at all — `random()` is a built-in FUNCTION (removing it from the lexer is what
+         made `random()` callable), and `in` has never been one. -->
     <Keywords color="Keyword">
-      <Word>bundle</Word>   <Word>use</Word>       <Word>publicator</Word> <Word>shared</Word>
+      <Word>bundle</Word>   <Word>need</Word>      <Word>use</Word>        <Word>publicator</Word> <Word>shared</Word>
       <Word>shape</Word>    <Word>event</Word>     <Word>shard</Word>      <Word>ShardView</Word>
       <Word>bridge</Word>   <Word>target</Word>    <Word>each</Word>       <Word>tick</Word>
       <Word>settled</Word>  <Word>start</Word>     <Word>hear</Word>       <Word>emit</Word>
@@ -57,7 +63,9 @@
       <Word>match</Word>    <Word>break</Word>     <Word>continue</Word>   <Word>type</Word>
       <Word>enum</Word>     <Word>fn</Word>        <Word>and</Word>        <Word>or</Word>
       <Word>not</Word>      <Word>true</Word>      <Word>false</Word>      <Word>map</Word>
-      <Word>random</Word>   <Word>in</Word>        <Word>Entity</Word>
+      <Word>Entity</Word>   <Word>app</Word>       <Word>by</Word>         <Word>transform</Word>
+      <Word>mute</Word>     <Word>unmute</Word>    <Word>on</Word>         <Word>base</Word>
+      <Word>Index</Word>
     </Keywords>
 
     <Rule color="Number">\b\d+(\.\d+)?%?\b</Rule>

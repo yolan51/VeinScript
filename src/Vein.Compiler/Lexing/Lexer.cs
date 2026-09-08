@@ -63,6 +63,11 @@ public sealed class Lexer
     private int _line = 1;
     private int _col = 1;
 
+    /// Every keyword, for tooling that must stay in step with the language — the Workbench's syntax
+    /// theme is checked against this. A keyword the theme does not list renders as plain text, and a
+    /// theme is an embedded XML resource, so nothing fails: it just quietly looks wrong.
+    public static IReadOnlyCollection<string> KeywordNames => Keywords.Keys;
+
     public Lexer(string source, string file, DiagnosticBag diagnostics)
     {
         _src = source;
