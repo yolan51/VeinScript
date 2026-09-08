@@ -1,0 +1,107 @@
+// shape_marks.vein — a shape that BRINGS its marks, so the two are never a frame apart.
+//
+//   veinc run samples/shape_marks.vein --ticks 4
+//
+// In tools/check-backend.sh, because the marks are a LOWERING desugar: one shape declaration turns into
+// an `AddTag` beside every `AddComponent` and a `RemoveTag` beside every `RemoveComponent`, in `bring`
+// and in a bare `attach` alike. Both runtimes read that same IR, and a diff is what proves the pairing
+// survives into generated C#.
+//
+// THE PROBLEM IT SOLVES. A mark is how other bundles find an identity without knowing its data — a
+// capability bundle writes `target #CameraFollow` and never names `$GameCamera`. Before this, the two
+// had to be written apart:
+//
+//     builder Hero { $GameCamera   mark #CameraFollow }      // fine, but only for identities THIS
+//                                                            // builder makes
+//     shard Adopt { settled { target $GameCamera as c { mark c #CameraFollow } } }   // …and this,
+//                                                            // for every other way one arrives
+//
+// That adoption shard is the trap. A structural change commits at the phase boundary (RULES 11/12b), so
+// the shard cannot see the identity until the frame after it was brought, and cannot mark it until the
+// frame after that. A `target` merely misses for a frame and catches up. An EVENT does not: a `@KeyDown`
+// in that window hits a shard whose target filters on a mark not yet applied, and there is no retry for
+// an event — it is dropped, not delayed. The bug looks like input that misses on the first frame.
+//
+// THE RULE (RULES 15c). A mark written in a shape body means: carrying this shape is what wearing this
+// mark means. Attach adds it, `unattach` removes it, and both go into the same phase's command list —
+// so they commit together and no window exists at all. Marks stay a set in the store, with no refcount,
+// so detaching does remove a mark that was also set by hand; the alternative is a mark left on an
+// identity whose data is gone, which every query then matches and none can read.
+//
+// AND ONE CONSEQUENCE WORTH STATING. `builder Ghost` below has no `mark` line, yet it builds an identity
+// — because the shape it includes brings one. Without that, moving `mark #Ghost` out of a builder and
+// into its shape would silently turn an identity template into one that emits a fragment, and `bring`
+// would stop creating anything with nothing reported.
+
+bundle ShapeMarks by you {
+
+    mark #CameraFollow
+    mark #Rendered
+    mark #Cullable
+    mark #Ghost
+    mark #Shielded
+
+    // Four marks, comma-separated among the fields. A shape body still takes fields and nothing else
+    // (VS0007) — a mark is not a field, it is what carrying the fields MEANS.
+    shape $GameCamera { zoom: float, #CameraFollow, #Rendered, #Cullable }
+
+    // The other spelling, reading like a builder's. One shape, one mark.
+    shape $Shield { hp: int
+                    mark #Shielded }
+
+    shape $Ghost { alpha: float, #Ghost }
+
+    shape $Actor { n: int }
+
+    // Says what the thing HAS. Never separately what it IS.
+    builder Cam { $Actor   $GameCamera }
+
+    // No `mark` member anywhere, and still an identity template.
+    builder Ghost { $Ghost }
+
+    shard Boot {
+        run once {
+            bring Cam(1, 2.5)
+            bring Ghost(0.5)
+        }
+    }
+
+    // Frame 2: a shape attached at RUNTIME, long after any builder ran. Its mark comes with it — the
+    // desugar is on the attach, not on the template.
+    shard Guard {
+        settled {
+            target $Actor as b {
+                attach $Shield to b { hp: 7 }
+            }
+        }
+    }
+
+    // Frame 3: and off again. `carrying` and `marked` below move together, never one without the other.
+    shard Drop {
+        settled {
+            target $Actor $Shield as b {
+                unattach $Shield from b
+            }
+        }
+    }
+
+    // The whole proof is that these two counts are equal on every line. A frame where the shape is on
+    // and the mark is not — or the reverse — is the bug this rule exists to remove.
+    shard Watch {
+        settled {
+            var carrying = 0
+            target $Actor $Shield as b { carrying = carrying + 1 }
+            var marked = 0
+            target $Actor #Shielded as b { marked = marked + 1 }
+            emit *Vein.Console.Io.@Print { text: "shield: carrying " + carrying + ", marked " + marked }
+
+            var cams = 0
+            target $GameCamera #CameraFollow #Rendered #Cullable as c { cams = cams + 1 }
+            emit *Vein.Console.Io.@Print { text: "cameras wearing all four marks: " + cams }
+
+            var ghosts = 0
+            target $Ghost #Ghost as g { ghosts = ghosts + 1 }
+            emit *Vein.Console.Io.@Print { text: "identities from a builder with no mark line: " + ghosts }
+        }
+    }
+}

@@ -251,6 +251,16 @@ one component whether or not they agree on its fields. Only builders and events 
 a shape body takes fields, so reusing `Vein.Transform.Spatial.$Position` means retyping its fields. Get
 them wrong and it is **VS0220** at declaration, or **VS0332** when an app links both.
 
+**15c. A shape may BRING marks, and they arrive and leave with it.** `shape $GameCamera { zoom: float,
+#CameraFollow }` — or `mark #A #B` in the body, or several bare marks between the fields — means carrying
+this shape is what wearing these marks means. Attaching it adds them and `unattach` removes them, **in the
+same commit**, so a `target $GameCamera #CameraFollow` matches on the very frame the shape lands. That is
+the point: an adoption shard that marks carriers afterwards can only run a frame later, and an event aimed
+at the identity in between is *dropped, not delayed*. There is no refcount, so detaching also removes a
+mark that was set by hand — the alternative leaves the mark on an identity whose data is gone. A builder
+including such a shape builds an **identity** even with no `mark` line of its own (rule 5), so moving the
+mark from the builder into the shape never quietly changes what `bring` does.
+
 **16. A mark is a name unless declared.** `mark #Enemy` at bundle or publicator level declares it, and a
 bundle that declares *any* mark has its mark names checked — an undeclared one is **VS0218**. A bundle
 that declares none is unchecked, so a misspelling there is silently a new mark. `shared("…")` exports a

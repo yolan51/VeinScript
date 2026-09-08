@@ -18,6 +18,12 @@ public sealed class Lower
     private readonly Dictionary<string, BuilderDecl> _builders = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<FieldDecl>> _shapeFields = new(StringComparer.Ordinal);
 
+    /// The marks a shape brings with it — `shape $GameCamera { zoom: float, #CameraFollow }`.
+    ///
+    /// Held for shapes DECLARED here and for ones resolved through `use`, because the desugar below runs
+    /// wherever the shape is attached and the declaring bundle is usually not this one.
+    private readonly Dictionary<string, List<string>> _shapeMarks = new(StringComparer.Ordinal);
+
     // Shared functions pulled in from another bundle by a qualified call, keyed by their mangled name.
     // Appended to the module so the interpreter can dispatch them like any local function.
     private readonly Dictionary<string, IrFunction> _imported = new(StringComparer.Ordinal);
@@ -126,7 +132,10 @@ public sealed class Lower
                 switch (m)
                 {
                     case BuilderDecl bd: _builders[bd.Name] = bd; break;
-                    case ShapeDecl s: _shapeFields[s.Name] = s.Members.OfType<FieldDecl>().ToList(); break;
+                    case ShapeDecl s:
+                        _shapeFields[s.Name] = s.Members.OfType<FieldDecl>().ToList();
+                        if (ShapeMarksOf(s) is { Count: > 0 } sm) _shapeMarks[s.Name] = sm;
+                        break;
                     case EventDecl ed: _events[ed.Name] = ed; break;
                     case FuncDecl fd: _localFuncs.Add(fd.Name); _funcDecls[fd.Name] = fd; break;
                     case MarkDecl md: _declaredMarks.Add(md.Name); break;
@@ -397,6 +406,104 @@ public sealed class Lower
             RegisterImportedShape(name, fields);
     }
 
+    /// The marks written inside a shape body, in order, without repeats.
+    private static List<string> ShapeMarksOf(ShapeDecl s) =>
+        s.Members.OfType<MarkMember>().SelectMany(m => m.Marks)
+                 .Distinct(StringComparer.Ordinal).ToList();
+
+    /// The marks `$name` brings with it, resolved the same way its FIELDS are — a bare name against this
+    /// bundle then `use`, a `*path` against the index, an imported builder's include against its owner.
+    ///
+    /// It has to resolve, rather than read the local table only, because the desugar runs at the ATTACH
+    /// site and the shape is usually declared in another bundle. A name that resolves to nothing yields
+    /// no marks and no diagnostic: `attach` has never reported an unknown shape, and this is not the
+    /// place to start.
+    private IReadOnlyList<string> MarksOfShape(
+        string name, IReadOnlyList<string>? path, string? ownerKey, SourceSpan span)
+    {
+        if (_shapeMarks.TryGetValue(name, out var known)) return known;
+        if (_shapeFields.ContainsKey(name)) return Array.Empty<string>();  // declared here, marks none
+
+        ShapeDecl? decl = path is { Count: > 0 } ? FindShapeDecl(RefKey(path, name))
+                        : ownerKey is not null ? FindOwnedShapeDecl(ownerKey, name)
+                        : ResolveUsed(Index.Shapes, "$", name, span)?.Value;
+
+        var marks = decl is null ? new List<string>() : ShapeMarksOf(decl);
+        _shapeMarks[name] = marks;
+
+        // Declared in ANOTHER bundle, so the author here never wrote the mark. Counting it as this
+        // bundle's own use would demand a `mark #X` line for a name they cannot see (VS0218).
+        foreach (var m in marks) _importedMarks.Add(m);
+        return marks;
+    }
+
+    private ShapeDecl? FindShapeDecl(string refKey)
+    {
+        foreach (var kv in Index.Shapes)
+            if (kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal))
+                return kv.Value;
+        return null;
+    }
+
+    private ShapeDecl? FindOwnedShapeDecl(string ownerKey, string name)
+    {
+        int firstDot = ownerKey.IndexOf('.');
+        int secondDot = firstDot < 0 ? -1 : ownerKey.IndexOf('.', firstDot + 1);
+        if (secondDot < 0) return null;
+        string bundlePrefix = ownerKey[..(secondDot + 1)];
+
+        foreach (var kv in Index.Shapes)
+            if (kv.Key.StartsWith(bundlePrefix, StringComparison.Ordinal) &&
+                kv.Key.EndsWith("." + name, StringComparison.Ordinal))
+                return kv.Value;
+        return null;
+    }
+
+    /// Follow an attach or detach with the marks its shape brings.
+    ///
+    /// Both calls go into the SAME phase's command list, so they commit together (RULES 11/12b) and a
+    /// `target $GameCamera #CameraFollow` matches on the frame the shape lands. That is the whole point:
+    /// an adoption shard that marks carriers afterwards can only run a frame later, and an event aimed
+    /// at the identity in between is dropped rather than delayed.
+    ///
+    /// The target is bound to a temp first — `attach $Marked to spawn()` would otherwise spawn once per
+    /// mark. Transparent, because in the interpreter an IrBlock shares its parent's locals; the name is
+    /// unique so sharing costs nothing.
+    private IrStmt WithShapeMarks(IrStmt core, IrExpr target, IReadOnlyList<string> marks, bool remove)
+    {
+        if (marks.Count == 0) return core;
+
+        string tmp = "__att" + _identityDepth++;
+        var stmts = new List<IrStmt> { new IrLet(tmp, null, target, false) };
+
+        // The core statement was built against the original expression; rebuild it against the temp.
+        stmts.Add(core is IrExprStmt { Expr: IrRuntimeCall rc }
+            ? new IrExprStmt(new IrRuntimeCall(rc.Name,
+                  new[] { (IrExpr)new IrLocalRef(tmp) }.Concat(rc.Args.Skip(1)).ToArray()))
+            : core);
+
+        string fn = remove ? "RemoveTag" : "AddTag";
+        foreach (var m in marks)
+            stmts.Add(new IrExprStmt(new IrRuntimeCall(fn,
+                new IrExpr[] { new IrLocalRef(tmp), new IrTypeNameExpr(m) })));
+
+        return new IrBlock(stmts, Transparent: true);
+    }
+
+    /// Whether a builder constructs an IDENTITY rather than emitting a fragment or an event.
+    ///
+    /// A `mark` member says so outright (RULES 5). A shape that BRINGS marks says the same thing, and has
+    /// to count: otherwise moving `mark #Hero` out of the builder and into `shape $Hero { …, #Hero }` —
+    /// the same line, written one level in — silently turns an identity template into one that emits, and
+    /// `bring Hero(…)` stops creating anything. Nothing would report it; the world would just be empty.
+    private bool BuildsIdentity(BuilderDecl b, string? ownerKey)
+    {
+        if (b.Members.OfType<MarkMember>().Any()) return true;
+        foreach (var si in b.Members.OfType<ShapeInclude>())
+            if (MarksOfShape(si.Shape, si.Path, ownerKey, si.Span).Count > 0) return true;
+        return false;
+    }
+
     private IEnumerable<IrType> LowerShape(ShapeDecl s)
     {
         var fields = new List<IrField>();
@@ -408,8 +515,19 @@ public sealed class Lower
             else if (member is EnumDecl en)
                 extraEnums.Add(LowerEnum(en, scope: s.Name));
         }
+
+        // The marks the shape brings. Written HERE by this author, so they count as this bundle's uses
+        // and a bundle that declares marks must declare these too (VS0218) — the same as writing the
+        // mark in a builder. Recorded on the type as well, so the IR says what the shape implies rather
+        // than leaving it visible only in the desugared attach sites.
+        var marks = ShapeMarksOf(s);
+        foreach (var m in marks) UseMark(m, s.Span);
+
+        var attrs = new List<IrAttr> { IrAttr.Of("component") };
+        if (marks.Count > 0) attrs.Add(IrAttr.Of("marks", marks.Cast<object?>().ToArray()));
+
         yield return new IrType(s.Name, IrTypeKind.Component, fields, Array.Empty<IrEnumCase>(),
-            s.Doc, new[] { IrAttr.Of("component") });
+            s.Doc, attrs);
         foreach (var e in extraEnums) yield return e;
     }
 
@@ -1047,7 +1165,7 @@ public sealed class Lower
         // it is read. There is no `event` declaration anywhere for it, so nothing described the payload:
         // the event exists only as a consequence of how the builder is shaped.
         if (ResolveExternalBuilder(path, name) is { Key: { } owner, Value: { } b }
-            && !b.Members.OfType<MarkMember>().Any()
+            && !BuildsIdentity(b, owner)
             && !b.Members.OfType<FieldDecl>().Any(f => OutputFields.Contains(f.Name)))
         {
             // `owner` is load-bearing: the builder's `$Shape` includes belong to the bundle that
@@ -1182,9 +1300,18 @@ public sealed class Lower
                 return new IrExprStmt(new IrRuntimeCall("DestroyEntity", new[] { LowerExpr(d.Target) }));
             case AttachStmt at:
             {
+                // Detaching takes the shape's marks off with it: the mark says the identity carries this
+                // shape, and it no longer does. There is no refcount anywhere in the store, so this does
+                // remove a mark that was also set by hand — the alternative leaves `#CameraFollow` on an
+                // identity with no `$GameCamera`, which every query then acts on and cannot read.
                 if (at.Remove)
-                    return new IrExprStmt(new IrRuntimeCall("RemoveComponent",
-                        new IrExpr[] { LowerExpr(at.Target), new IrTypeNameExpr(at.Shape) }));
+                {
+                    RegisterAttachedShape(at.Shape, at.Span);
+                    return WithShapeMarks(
+                        new IrExprStmt(new IrRuntimeCall("RemoveComponent",
+                            new IrExpr[] { LowerExpr(at.Target), new IrTypeNameExpr(at.Shape) })),
+                        LowerExpr(at.Target), MarksOfShape(at.Shape, null, null, at.Span), remove: true);
+                }
 
                 // THE SAME IMPORT A BUILDER INCLUDE DOES, and for the same reason. `use Transform` then
                 // `attach $Position to e { … }` resolved the name well enough to lower and to match a
@@ -1197,8 +1324,10 @@ public sealed class Lower
                 IrExpr init = at.Init is null
                     ? new IrTypeNameExpr(at.Shape)
                     : new IrStructInit(at.Shape, at.Init.Select(LowerFieldInit).ToList());
-                return new IrExprStmt(new IrRuntimeCall("AddComponent",
-                    new IrExpr[] { LowerExpr(at.Target), init }));
+                return WithShapeMarks(
+                    new IrExprStmt(new IrRuntimeCall("AddComponent",
+                        new IrExpr[] { LowerExpr(at.Target), init })),
+                    LowerExpr(at.Target), MarksOfShape(at.Shape, null, null, at.Span), remove: false);
             }
             case ChanceStmt c:
                 return new IrIf(
@@ -1349,6 +1478,13 @@ public sealed class Lower
                     }
                     stmts.Add(new IrExprStmt(new IrRuntimeCall("AddComponent",
                         new IrExpr[] { new IrLocalRef(ent), new IrStructInit(si.Shape, init) })));
+
+                    // …and the marks the shape brings, beside the component rather than a frame after it.
+                    // A `$Shape.field` include still gets them: it narrows what this bring SUPPLIES, not
+                    // what the identity ends up carrying.
+                    foreach (var tag in MarksOfShape(si.Shape, si.Path, ownerKey, si.Span))
+                        stmts.Add(new IrExprStmt(new IrRuntimeCall("AddTag",
+                            new IrExpr[] { new IrLocalRef(ent), new IrTypeNameExpr(tag) })));
                     break;
                 }
 
@@ -1497,7 +1633,7 @@ public sealed class Lower
         //     attach $Health to e { hp: 10 }
         //     attach $Shield to e { sp: 6 }
         //     mark e #Unit
-        if (b.Members.OfType<MarkMember>().Any()) return LowerIdentityBring(br, b, ownerKey);
+        if (BuildsIdentity(b, ownerKey)) return LowerIdentityBring(br, b, ownerKey);
 
         // Past here the builder emits a FRAGMENT or an event — it constructs no identity, so there is
         // nothing for `as` to name. Silently ignoring the binding would leave a name that reads like an

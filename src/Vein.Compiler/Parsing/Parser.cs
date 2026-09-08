@@ -242,6 +242,20 @@ public sealed class Parser
         while (!Check(TokenKind.RBrace) && !AtEnd)
         {
             if (Check(TokenKind.KwEnum)) members.Add(ParseEnum());
+            // `#CameraFollow` — a mark that comes WITH the shape. Carrying the shape is what wearing
+            // this mark means, so the two arrive in the same commit and no adoption shard is needed to
+            // put them together (RULES 15c). Both spellings parse: bare `#A, #B` among the fields, and
+            // `mark #A #B` for a body that reads like a builder's.
+            else if (Check(TokenKind.MarkRef) || Check(TokenKind.KwMark))
+            {
+                var s2 = Here;
+                Match(TokenKind.KwMark);
+                var marks = new List<string>();
+                while (Check(TokenKind.MarkRef)) { marks.Add(Advance().Text); Match(TokenKind.Comma); }
+                if (marks.Count == 0)
+                    _diag.Error("VS0100", $"Expected a #Mark after `mark`, found {Cur.Kind} '{Cur.Text}'.", Here);
+                else members.Add(new MarkMember(marks, s2));
+            }
             // A SHAPE CANNOT INCLUDE A SHAPE (RULES 15b), and the parse error for trying said nothing of
             // the kind. Builders and events can — `event @KeyDown { $Key }` is in stdlib/Input.vein —
             // so `shape $Ticking { *Vein.Time.Clock.$Clock }` looks like it should work, fails on the
