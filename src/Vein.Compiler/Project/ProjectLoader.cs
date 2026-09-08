@@ -34,32 +34,44 @@ public static class ProjectLoader
         if (appUnit is not null) { Collect(appUnit, symbols); CollectEventRefs(appUnit, refs); }
 
         var baseDir = Path.GetDirectoryName(Path.GetFullPath(appFilePath)) ?? ".";
-        if (app is not null)
-            foreach (var load in app.Loads)
-            {
-                var full = Path.GetFullPath(Path.Combine(baseDir, load.Path));
-                if (!File.Exists(full)) { diag.Error("VS0301", $"app '{appName}' load target not found: {load.Path}", app.Span); continue; }
-                // BundleLoader, not a bare parse: a bundle is its main file PLUS its publicators/ and
-                // shards/ fragments, and reading only the main file made a fragment-shaped bundle look
-                // like it had no public API at all. It went unnoticed because the scaffold used to
-                // declare its `publicator Api` inline, so the one bundle anyone generated had nothing in
-                // its folders — `veinc symbols` and the Bundle Inspector both read this.
-                var lu = BundleLoader.Load(full, diag);
-                Collect(lu, symbols);
-                CollectEventRefs(lu, refs);
+        if (app is not null && appUnit is not null)
+        {
+            // THE SAME LIST THE LINKER RUNS. This used to walk `app.Loads` on its own, which was fine
+            // while a `load` line was the only way a bundle joined an app. Now a bundle joins by being
+            // `need`ed too, and two walks that can disagree is how the Bundle Inspector shows a kit the
+            // linker did not run — or hides one it did. AppResolver is the one answer.
+            //
+            // The manifest's own inline bundles are in `appUnit` and were collected above, so they are
+            // skipped here rather than counted twice.
+            var resolved = AppResolver.Resolve(app, appUnit, appFilePath, diag);
+            var seenUnits = new HashSet<CompilationUnit>(ReferenceEqualityComparer.Instance) { appUnit };
+            var withStartByLoad = new Dictionary<AppLoad, List<(BundleDecl B, StartDecl S, List<Sig.Field> Fields)>>();
 
-                // Record each loaded bundle's boot signature, then validate this load's start override.
-                var withStart = new List<(BundleDecl B, StartDecl S, List<Sig.Field> Fields)>();
-                foreach (var b in lu.Bundles)
+            foreach (var r in resolved)
+            {
+                // A bundle is its main file PLUS its publicators/ and shards/ fragments, which is why the
+                // resolver goes through BundleLoader: reading only the main file made a fragment-shaped
+                // bundle look like it had no public API at all.
+                if (seenUnits.Add(r.Unit))
                 {
-                    var sd = b.Members.OfType<StartDecl>().FirstOrDefault();
-                    if (sd is null) continue;
-                    var fields = StartFields(lu, sd.Event);
-                    starts.Add(new BundleStart(b.Author ?? "local", b.Name, sd.Event, fields));
-                    withStart.Add((b, sd, fields));
+                    Collect(r.Unit, symbols);
+                    CollectEventRefs(r.Unit, refs);
                 }
-                if (load.HasStart) ValidateOverride(load, withStart, diag);
+
+                var sd = r.Bundle.Members.OfType<StartDecl>().FirstOrDefault();
+                if (sd is null) continue;
+                var fields = StartFields(r.Unit, sd.Event);
+                starts.Add(new BundleStart(r.Bundle.Author ?? "local", r.Bundle.Name, sd.Event, fields));
+
+                if (r.Load is { } load)
+                    (withStartByLoad.TryGetValue(load, out var list) ? list : withStartByLoad[load] = new()).Add((r.Bundle, sd, fields));
             }
+
+            // Then validate each load-site `start { … }` override against the bundles that load brought.
+            foreach (var load in app.Loads)
+                if (load.HasStart)
+                    ValidateOverride(load, withStartByLoad.TryGetValue(load, out var ws) ? ws : new(), diag);
+        }
 
         // Auto-load the stdlib's shared symbols so `*Vein.*` references resolve even when a file doesn't
         // explicitly `load` the stdlib. Dedup: skip any bundle the app already loaded (by author+name), so

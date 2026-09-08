@@ -54,10 +54,10 @@ event/builder signature, and `*Author.Bundle.Publicator.name(…)` calls to a sh
 **Where those references resolve.** Two roots, searched in order: the `stdlib/` folder, then this
 project's **`<app>/bundles/`** — so a bundle someone else wrote is usable simply by dropping it there.
 stdlib is searched first, so an installed bundle can never shadow `*Vein.Console.Io.print`. Resolution
-imports the external declaration into your module **at compile time**, which is why it needs no link step;
-the consequence is that only *leaf* primitives cross today (`fn`/`SF`, builders, shapes). An installed
-bundle's own shards, views and `start` are not lowered into your module and will not run until app
-link+run exists.
+imports the external declaration into your module **at compile time**, which is why the standard library needs no link step;
+the consequence is that only *leaf* primitives cross this way (`fn`/`SF`, builders, shapes, events). An installed
+bundle's own shards, views and `start` are not lowered into your module — they are LINKED, by an app that
+`need`s it (docs/RUNTIME.md §5): a manifest names its root, and every kit the root needs runs too.
 
 ## 2. Current capabilities vs. what the stdlib needs
 
@@ -66,8 +66,8 @@ link+run exists.
 | shape/event + `folds`, publicator, `shared`, `by author` | **works** | stdlib is authored with these |
 | `veinc symbols` cross-bundle discovery + `*` validation | **works** | stdlib's public API is discoverable/validated |
 | single-bundle render (`emit`/`hear`/`bring`/`ShardView`) | **works** | a stdlib bundle can render *within itself* (proof) |
-| `use N` import resolution | **works** | `use Console` makes a bare `print(…)`, `bring Button(…)` and `$Vec2` include resolve; local declarations still win |
-| `bring *Bundle.Builder` (qualified builders) | **works** | `LowerBring` resolves a builder path, so another bundle's builders are consumable — bare too, via `use` |
+| `need "Author.Bundle"` import resolution | **works** | `need "Vein.Console"` makes a bare `print(…)`, `bring Button(…)` and `$Vec2` include resolve; local declarations still win. In an app, a needed kit is linked and its shards run |
+| `bring *Bundle.Builder` (qualified builders) | **works** | `LowerBring` resolves a builder path, so another bundle's builders are consumable — bare too, via `need` |
 | app **link + run** (load bundles, run together) | **works** | the principal bundle boots; every loaded bundle joins **one** runtime, so a `hear` in one sees an `emit` from another (RUNTIME.md §5.1) |
 | `target`/`each tick`/`settled`/`folds` execution | **works** (`--ticks N` drives the clock) | a stdlib shard's schedule blocks run like any other |
 | **mark declaration** (`#Mark { }`) | **does not exist** | marks are implicit names; "shared marks" can't be declared |

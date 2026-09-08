@@ -295,6 +295,12 @@ reported as **VS0217** (`need "Vein.Console"` used to capture `spawn`, so `let e
 entity). Two needed bundles exporting one name is **VS0216** — reach for the
 `*Author.Bundle.Publicator.member` path, where rule 17b allows one.
 
+**And it LINKS.** In an app, everything a loaded bundle needs is linked too — transitively, each file
+once, a cycle terminating on the same set — so `app KitDemo { load "KitDemo.vein" }` is the whole
+manifest and the game is the principal. The standard library is the one exception: it declares no
+shards, so a `need` on it resolves names and links nothing, and its every shape stays out of the app's
+shared table (where a game's own `$Counter` beside `Vein.Core.Quantity.$Counter` would be VS0332).
+
 The **author is part of the name**, and that is why it is a quoted string rather than a bare word. The
 retired `use N` matched on the bundle segment alone, so `use Combat` matched every author's `Combat` at
 once: two were indistinguishable and collapsed into VS0216, after which the reference resolved to

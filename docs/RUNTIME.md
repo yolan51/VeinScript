@@ -528,7 +528,10 @@ shard, entity or event in scope for anything else to evaluate against (`VS0335`)
 
 ### 5.3 What linking still does not do
 
-- **`use` resolution** is untouched — cross-bundle references are still written `*Author.Bundle.…`.
+- **`need` is the other way in.** A manifest names its root with `load`; everything the root's bundles
+  `need` is linked from there, transitively, each file once. A kit both loaded and needed is in once.
+  The standard library is the exception — it declares no shards, so a `need` on it resolves names and
+  links nothing. Cross-bundle references are still written `*Author.Bundle.…`, or bare under a `need`.
 - Only *leaf* primitives cross at **compile** time (shapes, builders, `fn`/`SF`). Linking merges the
   **runtime** — shards, handlers, schedules — which is a different axis; a bundle still cannot call
   another's private helper.

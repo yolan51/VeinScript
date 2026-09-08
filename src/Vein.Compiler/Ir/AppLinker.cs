@@ -31,7 +31,12 @@ public static class AppLinker
         string AppName,
         string Principal,
         IReadOnlyList<string> Bundles,
-        IReadOnlyDictionary<string, object?> BootOverrides);
+        IReadOnlyDictionary<string, object?> BootOverrides)
+    {
+        /// The subset of `Bundles` that arrived through a `need` rather than a `load` line — so the
+        /// linker's report can say which kits a manifest never had to mention.
+        public IReadOnlyList<string> Needed { get; init; } = Array.Empty<string>();
+    }
 
     /// Link `appFilePath` if it is an app manifest. Returns null when the file declares no `app`, so the
     /// caller can fall through to its ordinary single-bundle path.
@@ -51,86 +56,36 @@ public static class AppLinker
         var span = app.Span;
         string baseDir = Path.GetDirectoryName(Path.GetFullPath(appFilePath)) ?? ".";
 
-        // Bundles declared inline in the manifest come first, then each `load` in order. Load order IS
-        // the app's structure: the principal is simply the first bundle the app names.
-        var loaded = new List<(BundleDecl Bundle, AppLoad? Load)>();
+        // Which bundles, and in what order, is AppResolver's answer — the same one the editor's project
+        // model reads, so what runs and what is shown cannot disagree. Inline bundles, then each `load`,
+        // then everything they `need`, transitively; the principal is the first.
+        var resolved = AppResolver.Resolve(app, unit, appFilePath, diag);
 
-        // EACH FILE ONCE, EACH BUNDLE NAME ONCE. There was no dedup here at all, and a file loaded
-        // twice was parsed, lowered and merged twice: both copies' shards took the same qualified name
-        // (the rename prefix is the bundle name, which is identical), `Interp.Setup` registered both,
-        // and every `run once` and `each tick` in the bundle ran twice — compounding, since two
-        // schedules then ran over two counters. Nothing said so: the types unified happily, and VS0333
-        // compared "'One' and 'One'" over a function neither bundle declared.
-        //
-        // A repeated PATH is a warning and the repeat is dropped, because there is exactly one thing it
-        // can mean. Two DIFFERENT files declaring one bundle name is an error, on the argument VS0310
-        // already makes for two search roots: the linker merges by name, so no spelling could pick one.
-        var pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-        var seenPaths = new HashSet<string>(pathComparer);
-        var owners = new Dictionary<string, string>(StringComparer.Ordinal);   // bundle name → file
-        string appFull = Path.GetFullPath(appFilePath);
-
-        foreach (var b in unit.Bundles)
-        {
-            owners[b.Name] = appFull;
-            loaded.Add((b, null));
-        }
-
-        foreach (var load in app.Loads)
-        {
-            string full = Path.GetFullPath(Path.Combine(baseDir, load.Path));
-            if (!File.Exists(full))
-            {
-                diag.Error("VS0301", $"app '{app.Name}' load target not found: {load.Path}", span);
-                continue;
-            }
-            if (!seenPaths.Add(full))
-            {
-                diag.Warning("VS0336",
-                    $"app '{app.Name}' loads \"{load.Path}\" more than once; the repeat is ignored. " +
-                    "Loaded twice, every reaction and schedule in it would run twice.", load.Span);
-                continue;
-            }
-            // BundleLoader, not a bare parse, so a multi-file bundle (publicators/ + shards/) links as
-            // the one bundle it is rather than losing its fragments.
-            var lu = BundleLoader.Load(full, diag);
-            foreach (var b in lu.Bundles)
-            {
-                if (owners.TryGetValue(b.Name, out var first))
-                {
-                    diag.Error("VS0337",
-                        $"bundle '{b.Name}' is declared in both \"{Path.GetRelativePath(baseDir, first)}\" " +
-                        $"and \"{load.Path}\". The app links bundles by name, so nothing can tell these " +
-                        "apart — rename one, or load only one of them.", load.Span);
-                    continue;
-                }
-                owners[b.Name] = full;
-                loaded.Add((b, load));
-            }
-        }
-
-        if (loaded.Count == 0)
+        if (resolved.Count == 0)
         {
             diag.Error("VS0334", $"app '{app.Name}' links no bundles — nothing to run.", span);
             return null;
         }
 
-        // ONE LOWER PER BUNDLE. A single instance across the loop carried `_used`, `_aliases` and
+        // ONE LOWER PER BUNDLE. A single instance across the loop carried `_needed`, `_aliases` and
         // `_imported` from each bundle into the next — so a bundle that was VS0234 on its own compiled
-        // and ran when linked after one that said `use Console`, and the first bundle's imported
-        // functions were re-emitted into every later module, colliding in Merge as a VS0333 about a
-        // function neither declared. Whether a program is valid cannot depend on what was loaded
-        // before it. The index behind a Lower is cached, so a fresh one costs nothing.
+        // and ran when linked after one that said `need "Vein.Console"`, and the first bundle's
+        // imported functions were re-emitted into every later module, colliding in Merge as a VS0333
+        // about a function neither declared. Whether a program is valid cannot depend on what was
+        // loaded before it. The index behind a Lower is cached, so a fresh one costs nothing.
         var modules = new List<(string Name, IrModule Module, AppLoad? Load)>();
-        foreach (var (bundle, load) in loaded)
-            modules.Add((bundle.Name, new Lower(diag, baseDir).LowerBundle(bundle), load));
+        foreach (var r in resolved)
+            modules.Add((r.Bundle.Name, new Lower(diag, baseDir).LowerBundle(r.Bundle), r.Load));
 
         var principal = modules[0];
         var merged = Merge(app.Name, modules, principal.Name, diag, span);
         var overrides = BootOverrides(principal.Load, diag, span);
 
         return new LinkedApp(merged, app.Name, principal.Name,
-                             modules.Select(m => m.Name).ToList(), overrides);
+                             modules.Select(m => m.Name).ToList(), overrides)
+        {
+            Needed = resolved.Where(r => r.Needed).Select(r => r.Bundle.Name).ToList(),
+        };
     }
 
     /// Fold every module into one. Types dedupe by name; shards and functions accumulate; only the

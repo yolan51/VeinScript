@@ -45,9 +45,12 @@ static AppLinker.LinkedApp? LinkApp(string file, string src, DiagnosticBag diag,
     foreach (var d in diag.Items) Console.Error.WriteLine(d);
     reported = diag.Items.Count;
 
+    // Loaded bundles by name; needed ones the same, so the report says what the manifest never had to.
+    string needed = linked.Needed.Count == 0 ? ""
+                  : $"; {linked.Needed.Count} of them by `need` [{string.Join(", ", linked.Needed)}]";
     Console.Error.WriteLine(
         $"app {linked.AppName}: principal '{linked.Principal}' boots; " +
-        $"{linked.Bundles.Count} bundle(s) linked into one runtime [{string.Join(", ", linked.Bundles)}]");
+        $"{linked.Bundles.Count} bundle(s) linked into one runtime [{string.Join(", ", linked.Bundles)}]{needed}");
     return linked;
 }
 
