@@ -60,6 +60,11 @@ public sealed class Lower
 
     private static readonly string[] OutputFields = { "markup", "code", "css", "line" };
 
+    /// Type names, so VS0241 can tell `int i = 0` (a C-style declaration this language does not have)
+    /// from an ordinary stray identifier.
+    private static readonly HashSet<string> TypeNames = new(StringComparer.Ordinal)
+        { "int", "float", "string", "bool", "Entity", "Mark", "list", "map" };
+
     /// `Author.Bundle` for each un-aliased `need`, in declaration order. A bare name that resolves
     /// nowhere locally is looked for in these — the widening half of what a `need` buys.
     ///
@@ -1570,6 +1575,22 @@ public sealed class Lower
             case BreakStmt: return new IrBreak();
             case ContinueStmt: return new IrContinue();
             case AssignStmt a: return LowerAssign(a);
+            // A STATEMENT THAT IS JUST A NAME DOES NOTHING, in either runtime — no call, no assignment,
+            // no effect. It is worth reporting because of how it is usually reached: `int i = 0` is not
+            // VeinScript (locals are `let`/`var`, LANGUAGE §7), and it parses as TWO statements — a bare
+            // `int`, then an assignment to `i`. The interpreter created `i` on that assignment and ran
+            // the program, so the mistake survived every check and surfaced only at `veinc build`, as
+            // `error CS0103: The name 'int' does not exist` in a file nobody wrote.
+            case ExprStmt { Expr: NameExpr n } e2 when !_localFuncs.Contains(n.Name):
+                _diag.Error("VS0241", TypeNames.Contains(n.Name)
+                    ? $"`{n.Name}` is a type, and a declaration here does not lead with one. VeinScript " +
+                      $"spells a local `let i = 0` or `var i: {n.Name} = 0` — `{n.Name} i = 0` parses as " +
+                      "two statements, a bare type name and an assignment, which is why it runs " +
+                      "interpreted and will not compile."
+                    : $"`{n.Name}` on its own does nothing — a statement has to call, assign or emit.",
+                    e2.Span);
+                return new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
+
             case ExprStmt e: return new IrExprStmt(LowerExpr(e.Expr));
 
             // IOP surface sugar → runtime calls / if

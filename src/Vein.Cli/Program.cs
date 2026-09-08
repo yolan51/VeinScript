@@ -232,13 +232,23 @@ switch (command)
             if (args[i] == "-o" && i + 1 < args.Length) outDir = args[++i];
             else if (args[i].StartsWith("-o=")) outDir = args[i]["-o=".Length..];
         }
-        var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
+        // AN APP MANIFEST IS EMITTED AS THE ONE MODULE IT LINKS TO, exactly as `run` runs it. This used
+        // to fall through `BundleLoader.Load`, which finds no `bundle` in a manifest and returns zero of
+        // them — so the loop below ran zero times, `veinc emit KitDemo.app.vein` exited 0, wrote nothing
+        // and said nothing. A kit-built game IS an app, so no kit-built game could be compiled at all,
+        // and the interpreter's ceiling was the only ceiling such a game had.
+        var linkedEmit = LinkApp(path, source, diagnostics, out reportedDiagnostics);
+        var unit = linkedEmit is null ? BundleLoader.Load(path, diagnostics, editing: (path, source)) : null;
         if (diagnostics.HasErrors) break;
 
         var backend = new CSharpBackend();
-        foreach (var bundle in unit.Bundles)
+        var toEmit = linkedEmit is { } la
+            ? new[] { la.Module }
+            : unit!.Bundles.Select(b => new Lower(diagnostics, projectDir).LowerBundle(b)).ToArray();
+
+        foreach (var module in toEmit)
         {
-            var result = backend.Emit(new Lower(diagnostics, projectDir).LowerBundle(bundle));
+            var result = backend.Emit(module);
             foreach (var note in result.Notes) Console.Error.WriteLine($"  note: {note}");
             foreach (var file in result.Files)
             {

@@ -45,6 +45,18 @@ public sealed class CSharpBackend : IVeinBackend
     /// sample hit because none of them used a function.
     private readonly HashSet<string> _functions = new(StringComparer.Ordinal);
 
+    /// Names already declared in the method body being emitted. An assignment to a name NOT in here is
+    /// the first mention of a local, and the interpreter treats that as a declaration — so the backend
+    /// emits one too, or the generated C# assigns to a variable it never declared. Reset per method,
+    /// because C# scopes a local to its method and two shards may each have their own `i`.
+    private readonly HashSet<string> _bound = new(StringComparer.Ordinal);
+
+    /// The CURRENT shard's state fields. A `var total: int` at shard level is a FIELD, and an
+    /// assignment to it is an assignment — declaring a local of the same name shadows the field with an
+    /// inferred type, so `total = 0` became `var total = 0` (an int) and the next `total = total + a_long`
+    /// stopped compiling. Fields are not locals and must never be re-declared.
+    private readonly HashSet<string> _fields = new(StringComparer.Ordinal);
+
     /// The C# name `Index` resolves to in the loop being emitted. Tracked and restored like
     /// the self locals, and made unique per depth: C# forbids a nested local shadowing an outer one
     /// (CS0136), so a fixed name would refuse to compile the moment two loops nested.
@@ -573,6 +585,8 @@ public sealed class CSharpBackend : IVeinBackend
         sb.AppendLine("{");
         foreach (var f in module.Functions)
         {
+            _bound.Clear();
+            foreach (var p in f.Params) _bound.Add(p.Name);
             string ps = string.Join(", ", f.Params.Select(p => $"{Cs(p.Type)} {Ident(p.Name)}"));
             sb.AppendLine($"    public static {Cs(f.Return)} {Ident(f.Name)}({ps})");
             EmitBlock(sb, f.Body, 1);
@@ -590,6 +604,8 @@ public sealed class CSharpBackend : IVeinBackend
         _currentShard = shard.Name;
         sb.AppendLine($"public sealed class {ShardIdent(shard)} : VeinSystem");
         sb.AppendLine("{");
+        _fields.Clear();
+        foreach (var f in shard.State) _fields.Add(f.Name);
         foreach (var f in shard.State) sb.AppendLine($"    public {Cs(f.Type)} {Ident(f.Name)};");
         if (shard.State.Count > 0) sb.AppendLine();
 
@@ -615,6 +631,7 @@ public sealed class CSharpBackend : IVeinBackend
 
             if (phase is not null)
             {
+                _bound.Clear();
                 sb.AppendLine($"    public override void {phase}()");
                 EmitBlock(sb, m.Body, 1);
                 continue;
@@ -631,6 +648,8 @@ public sealed class CSharpBackend : IVeinBackend
                     continue;
                 }
                 var p = m.Params.FirstOrDefault();
+                _bound.Clear();
+                _bound.Add(p?.Name ?? "e");
                 sb.AppendLine($"    private void {Ident(m.Name)}({EventType(ev)} {Ident(p?.Name ?? "e")})");
                 EmitBlock(sb, m.Body, 1);
                 continue;
@@ -682,11 +701,24 @@ public sealed class CSharpBackend : IVeinBackend
             case IrBlock b: EmitBlock(sb, b, depth); break;
 
             case IrLet l:
+                _bound.Add(l.Name);
                 sb.AppendLine($"{pad}var {Ident(l.Name)} = {Expr(l.Init)};");
                 break;
 
+            // ASSIGNMENT TO A NAME NOTHING DECLARED IS A DECLARATION, because that is what the
+            // interpreter does: `EntityStore`/`Interp` create the local on first write, so `i = 0`
+            // followed by a `while` is a working program there. The backend emitted a bare `i = 0` and
+            // the generated C# did not compile — a program that ran interpreted, passed `veinc check`,
+            // and failed at `veinc build` with a line number in a file nobody wrote.
+            //
+            // Matching the interpreter here rather than reporting it: whether the language should
+            // REQUIRE `let` is a separate decision, and making it an error would reject programs that
+            // run correctly today. A bare `x` as a whole statement is a different matter and is VS0241.
             case IrAssign a:
-                sb.AppendLine($"{pad}{Expr(a.Target)} = {Expr(a.Value)};");
+                if (a.Target is IrLocalRef bare && !_fields.Contains(bare.Name) && _bound.Add(bare.Name))
+                    sb.AppendLine($"{pad}var {Ident(bare.Name)} = {Expr(a.Value)};");
+                else
+                    sb.AppendLine($"{pad}{Expr(a.Target)} = {Expr(a.Value)};");
                 break;
 
             case IrIf i:
@@ -703,7 +735,7 @@ public sealed class CSharpBackend : IVeinBackend
                 _indexVar = "__i" + _loopDepth++;
                 sb.AppendLine($"{pad}for (long {_indexVar} = 0; {_indexVar} < {Expr(r.Count)}; {_indexVar}++)");
                 sb.AppendLine(pad + "{");
-                if (r.Var is not null) sb.AppendLine($"{pad}    var {Ident(r.Var)} = {_indexVar};");
+                if (r.Var is not null) { _bound.Add(r.Var); sb.AppendLine($"{pad}    var {Ident(r.Var)} = {_indexVar};"); }
                 foreach (var s in r.Body.Statements) EmitStmt(sb, s, depth + 1);
                 sb.AppendLine(pad + "}");
                 _indexVar = prevR;

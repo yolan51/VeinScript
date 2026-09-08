@@ -8,6 +8,24 @@ internal static class BuildCommand
 {
     public static int Build(string sourcePath, string source, string? outPath, string? rid, bool selfContained)
     {
+        // A MANIFEST IS REFUSED HERE, LOUDLY, and that is the whole fix rather than a limitation newly
+        // introduced. `build` embeds ONE source file and re-parses it inside the published exe; an app
+        // manifest declares `load`s and no bundles, so the embedded program had zero bundles, ran
+        // nothing, and exited 0 — the same silence `emit` used to give, and the least useful answer a
+        // command can produce.
+        //
+        // `emit` DOES link a manifest now, because the C# backend takes a merged module and a merged
+        // module is exactly what linking produces. Embedding a whole app's file set is a different job,
+        // and saying so beats pretending.
+        if (source.Contains("\napp ", StringComparison.Ordinal) || source.TrimStart().StartsWith("app ", StringComparison.Ordinal))
+        {
+            Console.Error.WriteLine(
+                $"build: '{Path.GetFileName(sourcePath)}' is an app manifest, and `build` embeds a single " +
+                "bundle's source. Build the principal bundle directly, or use `veinc emit` — it links a " +
+                "manifest into one module and writes the C# for the whole app.");
+            return 1;
+        }
+
         string name = Sanitize(Path.GetFileNameWithoutExtension(sourcePath));
         rid ??= RuntimeInformation.RuntimeIdentifier;
 
