@@ -85,6 +85,48 @@ public static class EventCatalog
         return shapes;
     }
 
+
+    /// The marks each in-scope shape BRINGS (RULES 15c) — local declarations first, then the shared
+    /// shapes of needed bundles, the same precedence their fields get.
+    ///
+    /// The tooling needs this because a mark can now arrive two ways. `builder Cam { $Actor $GameCamera }`
+    /// applies `#CameraFollow` if `$GameCamera` brings it, and reading only the builder's own `mark`
+    /// lines sees none — so the editor's layer list lost the mark, and worse, the same count decides
+    /// whether bringing it makes an IDENTITY. A builder whose marks all arrive through its shapes was
+    /// classified as emitting an event, and every surface that lists identity builders filtered it out:
+    /// it compiled, ran, and brought a perfectly good identity the editor said did not exist.
+    private static Dictionary<string, List<string>> ShapeMarksInScope(
+        CompilationUnit unit, BundleIndex? index, IReadOnlyList<string> uses)
+    {
+        var map = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+
+        void Walk(IEnumerable<Decl> ms)
+        {
+            foreach (var m in ms)
+                switch (m)
+                {
+                    case ShapeDecl s:
+                        map[s.Name] = s.Members.OfType<MarkMember>().SelectMany(x => x.Marks)
+                                       .Distinct(StringComparer.Ordinal).ToList();
+                        break;
+                    case BundleDecl b: Walk(b.Members); break;
+                    case PublicatorDecl p: Walk(p.Members); break;
+                }
+        }
+        Walk(unit.Bundles);
+
+        if (index is not null)
+            foreach (var kv in FromUsed(index.Shapes, uses))
+            {
+                string bare = kv.Key[(kv.Key.LastIndexOf('.') + 1)..];
+                if (map.ContainsKey(bare)) continue;                      // local wins
+                map[bare] = kv.Value.Members.OfType<MarkMember>().SelectMany(x => x.Marks)
+                             .Distinct(StringComparer.Ordinal).ToList();
+            }
+
+        return map;
+    }
+
     public static List<EventEntry> Catalog(CompilationUnit unit, string? projectDir = null)
     {
         var index = projectDir is null ? null : BundleIndex.For(projectDir);
@@ -197,6 +239,7 @@ public static class EventCatalog
         var index = projectDir is null ? null : BundleIndex.For(projectDir);
         var uses = index is null ? new List<string>() : Uses(unit);
         var shapes = ShapesInScope(unit, index, uses);
+        var shapeMarks = ShapeMarksInScope(unit, index, uses);
         var list = new List<BuilderEntry>();
         void Walk(IEnumerable<Decl> decls)
         {
@@ -225,7 +268,17 @@ public static class EventCatalog
         {
             var output = bd.Members.OfType<FieldDecl>()
                 .FirstOrDefault(f => f.Name is "markup" or "code" or "css" or "line");
+
+            // The builder's own `mark` lines, THEN the marks its shapes bring (RULES 15c). Both are
+            // applied by `bring`, so both belong here — and the count below decides whether this builds
+            // an identity at all, which is why missing the second kind hid whole builders from the
+            // editor. `Lower.BuildsIdentity` draws the same line for the same reason.
             var marks = bd.Members.OfType<MarkMember>().SelectMany(m => m.Marks).ToList();
+            foreach (var si in bd.Members.OfType<ShapeInclude>())
+                if (shapeMarks.TryGetValue(si.Shape, out var brought))
+                    foreach (var mk in brought)
+                        if (!marks.Contains(mk, StringComparer.Ordinal)) marks.Add(mk);
+
             var fields = Sig.Expand(bd.Members.Where(m => !ReferenceEquals(m, output)).ToList(), shapes)
                 .Select(f => new EventField(f.Name, f.Type, f.Required, f.Default, f.OriginShape))
                 .ToList();
