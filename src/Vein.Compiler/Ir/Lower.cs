@@ -144,6 +144,14 @@ public sealed class Lower
                     case UseDecl { Alias: { } alias } ua: _aliases[alias] = ua.Name; break;
                     case UseDecl ud: if (!_used.Contains(ud.Name, StringComparer.Ordinal)) _used.Add(ud.Name); break;
                     case PublicatorDecl pub: Collect(pub.Members); break;
+
+                    // Every event this compilation HEARS, for VS0237 below.
+                    case ShardDecl sh:
+                        foreach (var hb in sh.Members.OfType<HearBlock>()) _heardEvents.Add(hb.Event);
+                        break;
+                    case ViewDecl vw:
+                        foreach (var hb in vw.Members.OfType<HearBlock>()) _heardEvents.Add(hb.Event);
+                        break;
                 }
         }
         Collect(bundle.Members);
@@ -488,6 +496,37 @@ public sealed class Lower
                 new IrExpr[] { new IrLocalRef(tmp), new IrTypeNameExpr(m) })));
 
         return new IrBlock(stmts, Transparent: true);
+    }
+
+    /// Every event name this compilation hears, in a shard or a view. Used only by VS0237.
+    private readonly HashSet<string> _heardEvents = new(StringComparer.Ordinal);
+
+    /// VS0237 — `bring B(…)` where B builds nothing and nothing hears what it emits.
+    ///
+    /// A builder with no `mark` and no output channel EMITS `@B` carrying its parameters (RULES 5), and
+    /// that is a real, deliberate form: `*Vein.Rest.Db.&Connect` is `builder Connect { $Connection }`
+    /// with no mark, and its `@Connect` is heard by the consumer. So "includes a shape but has no mark"
+    /// on its own is not a mistake and must not be reported.
+    ///
+    /// What is a mistake is the same shape with nowhere for the event to go: a builder that is not
+    /// shared, so no other bundle can hear it by path, and whose event nothing in this compilation hears
+    /// either. Then `bring` runs, the world stays empty, and — the language being total — nothing is an
+    /// error. That is the silent no-op this reports.
+    ///
+    /// A warning rather than an error, because events also unify by bare name across a linked app
+    /// (RULES 20), so a sibling bundle in an app could hear `@B` without this compilation knowing.
+    private void WarnBringsNothing(BringStmt br, BuilderDecl b)
+    {
+        if (b.Exported || _heardEvents.Contains(b.Name)) return;
+        if (!b.Members.OfType<ShapeInclude>().Any()) return;       // no shapes: emitting is the point
+        if (b.Members.OfType<FieldDecl>().Any(f => f.Name is "markup" or "code" or "css")) return;
+
+        _diag.Warning("VS0237",
+            $"`bring {b.Name}(…)` creates nothing. Builder '{b.Name}' includes a shape but nothing marks " +
+            $"it, so it emits `@{b.Name}` instead of building an identity (RULES 5) — and no `hear " +
+            $"@{b.Name}` exists here, nor is '{b.Name}' shared for another bundle to hear. Add `mark " +
+            $"#{b.Name}` to the builder, or a mark to one of its shapes, to make it build an identity.",
+            br.Span);
     }
 
     /// Whether a builder constructs an IDENTITY rather than emitting a fragment or an event.
@@ -1634,6 +1673,10 @@ public sealed class Lower
         //     attach $Shield to e { sp: 6 }
         //     mark e #Unit
         if (BuildsIdentity(b, ownerKey)) return LowerIdentityBring(br, b, ownerKey);
+
+        // Not an identity template. If it is also a builder whose event has nowhere to go, say so —
+        // otherwise this line runs, does nothing, and reports nothing.
+        if (ownerKey is null) WarnBringsNothing(br, b);
 
         // Past here the builder emits a FRAGMENT or an event — it constructs no identity, so there is
         // nothing for `as` to name. Silently ignoring the binding would leave a name that reads like an

@@ -1,3 +1,4 @@
+using Vein.Compiler.Diagnostics;
 using Vein.Compiler.Ir;
 using Vein.Compiler.Service;
 using Xunit;
@@ -180,6 +181,64 @@ public class ShapeMarkTests
             "  shard Boot { run once { bring P(1) } }\n}", ticks: 2);
 
         Assert.Empty(interp.World.Snapshot());
+    }
+
+    // ---- VS0237, the other half of the same problem -----------------------------------------------
+    //
+    // `BuildsIdentity` closes the case where the mark moved into the shape. It cannot help a builder
+    // whose shapes carry no mark at all: `builder Sun { $Light }` still emits `@Sun`, and if nothing
+    // hears it, `bring Sun(…)` runs, the world stays empty, and the language being total, nothing is an
+    // error anywhere.
+
+    private static Diagnostic[] Diags(string src) =>
+        new VeinCompilerService().Compile(new CompileRequest("t.vein", src)).Diagnostics.ToArray();
+
+    [Fact]
+    public void A_bring_that_creates_nothing_and_is_heard_by_nothing_warns()
+    {
+        var d = Assert.Single(Diags(
+            "bundle Two by you {\n" +
+            "  shape $Light { x: float, y: float, z: float }\n" +
+            "  builder Sun { $Light }\n" +
+            "  shard Boot { run once { bring Sun(1.0, 0.0, 0.0) } }\n}"),
+            x => x.Code == "VS0237");
+
+        // The fix is the value of the message — somebody who wrote this was one word away.
+        Assert.Contains("mark #Sun", d.Message);
+    }
+
+    [Fact]
+    public void Adding_a_mark_to_the_shape_silences_it()
+    {
+        Assert.DoesNotContain(Diags(
+            "bundle Two by you {\n  mark #Sun\n" +
+            "  shape $Light { x: float, #Sun }\n" +
+            "  builder Sun { $Light }\n" +
+            "  shard Boot { run once { bring Sun(1.0) } }\n}"), d => d.Code == "VS0237");
+    }
+
+    [Fact]
+    public void A_builder_whose_event_is_heard_is_not_reported()
+    {
+        // Emitting is the whole point of a no-channel builder (RULES 5). Nothing is wrong here.
+        Assert.DoesNotContain(Diags(
+            "bundle H by you {\n" +
+            "  shape $Light { x: float }\n" +
+            "  builder Sun { $Light }\n" +
+            "  shard Boot { run once { bring Sun(1.0) } }\n" +
+            "  shard L { hear @Sun as s { } }\n}"), d => d.Code == "VS0237");
+    }
+
+    [Fact]
+    public void A_shared_builder_is_not_reported()
+    {
+        // `*Vein.Rest.Db.&Connect` is exactly this: `builder Connect { $Connection }`, no mark, and its
+        // `@Connect` is heard by the CONSUMER. Reporting it would call the standard library a bug.
+        Assert.DoesNotContain(Diags(
+            "bundle S by you {\n  publicator P {\n" +
+            "    shared(\"data\") shape $Conn { base: string }\n" +
+            "    shared(\"announce\") builder Connect { $Conn }\n  }\n" +
+            "  shard Boot { run once { bring Connect(\"x\") } }\n}"), d => d.Code == "VS0237");
     }
 
     // ---- declaration and the IR -------------------------------------------------------------------
