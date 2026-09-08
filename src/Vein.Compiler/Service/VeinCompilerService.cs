@@ -96,9 +96,10 @@ public sealed class VeinCompilerService
             tree = new AstTree(unit, request.FullStrings).Roots(unit);
             irText = IrTreeRenderer.Render(request.FileName, tree, opts);
 
-            var lower = new Lower(diag, request.ProjectDir);
+            // One Lower per bundle — its `use` list and imports are per-bundle state, and a shared
+            // instance leaked them from each bundle into the next (see AppLinker for the full account).
             foreach (var bundle in unit.Bundles)
-                modules.Add(lower.LowerBundle(bundle));
+                modules.Add(new Lower(diag, request.ProjectDir).LowerBundle(bundle));
         }
 
         sw.Stop();

@@ -144,9 +144,9 @@ internal static class BuildCommand
             rs.CopyTo(fs);
         }
 
-        var lower = new Lower(diag, root);
+        // One Lower per bundle — a shared one leaked each bundle's `use` list into the next.
         var modules = new List<IrModule>();
-        foreach (var b in unit.Bundles) modules.Add(lower.LowerBundle(b));
+        foreach (var b in unit.Bundles) modules.Add(new Lower(diag, root).LowerBundle(b));
 
         // CHECKED AFTER LOWERING, which is where a missing builder, an unknown shape or a bad `use`
         // are found. The check above only covers the parse; a program that lowered `bring Console(…)`

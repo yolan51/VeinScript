@@ -50,12 +50,31 @@ public static class AppLinker
 
         var span = app.Span;
         string baseDir = Path.GetDirectoryName(Path.GetFullPath(appFilePath)) ?? ".";
-        var lower = new Lower(diag, baseDir);
 
         // Bundles declared inline in the manifest come first, then each `load` in order. Load order IS
         // the app's structure: the principal is simply the first bundle the app names.
         var loaded = new List<(BundleDecl Bundle, AppLoad? Load)>();
-        foreach (var b in unit.Bundles) loaded.Add((b, null));
+
+        // EACH FILE ONCE, EACH BUNDLE NAME ONCE. There was no dedup here at all, and a file loaded
+        // twice was parsed, lowered and merged twice: both copies' shards took the same qualified name
+        // (the rename prefix is the bundle name, which is identical), `Interp.Setup` registered both,
+        // and every `run once` and `each tick` in the bundle ran twice — compounding, since two
+        // schedules then ran over two counters. Nothing said so: the types unified happily, and VS0333
+        // compared "'One' and 'One'" over a function neither bundle declared.
+        //
+        // A repeated PATH is a warning and the repeat is dropped, because there is exactly one thing it
+        // can mean. Two DIFFERENT files declaring one bundle name is an error, on the argument VS0310
+        // already makes for two search roots: the linker merges by name, so no spelling could pick one.
+        var pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var seenPaths = new HashSet<string>(pathComparer);
+        var owners = new Dictionary<string, string>(StringComparer.Ordinal);   // bundle name → file
+        string appFull = Path.GetFullPath(appFilePath);
+
+        foreach (var b in unit.Bundles)
+        {
+            owners[b.Name] = appFull;
+            loaded.Add((b, null));
+        }
 
         foreach (var load in app.Loads)
         {
@@ -65,10 +84,29 @@ public static class AppLinker
                 diag.Error("VS0301", $"app '{app.Name}' load target not found: {load.Path}", span);
                 continue;
             }
+            if (!seenPaths.Add(full))
+            {
+                diag.Warning("VS0336",
+                    $"app '{app.Name}' loads \"{load.Path}\" more than once; the repeat is ignored. " +
+                    "Loaded twice, every reaction and schedule in it would run twice.", load.Span);
+                continue;
+            }
             // BundleLoader, not a bare parse, so a multi-file bundle (publicators/ + shards/) links as
             // the one bundle it is rather than losing its fragments.
             var lu = BundleLoader.Load(full, diag);
-            foreach (var b in lu.Bundles) loaded.Add((b, load));
+            foreach (var b in lu.Bundles)
+            {
+                if (owners.TryGetValue(b.Name, out var first))
+                {
+                    diag.Error("VS0337",
+                        $"bundle '{b.Name}' is declared in both \"{Path.GetRelativePath(baseDir, first)}\" " +
+                        $"and \"{load.Path}\". The app links bundles by name, so nothing can tell these " +
+                        "apart — rename one, or load only one of them.", load.Span);
+                    continue;
+                }
+                owners[b.Name] = full;
+                loaded.Add((b, load));
+            }
         }
 
         if (loaded.Count == 0)
@@ -77,9 +115,15 @@ public static class AppLinker
             return null;
         }
 
+        // ONE LOWER PER BUNDLE. A single instance across the loop carried `_used`, `_aliases` and
+        // `_imported` from each bundle into the next — so a bundle that was VS0234 on its own compiled
+        // and ran when linked after one that said `use Console`, and the first bundle's imported
+        // functions were re-emitted into every later module, colliding in Merge as a VS0333 about a
+        // function neither declared. Whether a program is valid cannot depend on what was loaded
+        // before it. The index behind a Lower is cached, so a fresh one costs nothing.
         var modules = new List<(string Name, IrModule Module, AppLoad? Load)>();
         foreach (var (bundle, load) in loaded)
-            modules.Add((bundle.Name, lower.LowerBundle(bundle), load));
+            modules.Add((bundle.Name, new Lower(diag, baseDir).LowerBundle(bundle), load));
 
         var principal = modules[0];
         var merged = Merge(app.Name, modules, principal.Name, diag, span);
@@ -151,6 +195,11 @@ public static class AppLinker
             {
                 if (funcs.TryGetValue(f.Name, out var seen))
                 {
+                    // The same EXTERNAL declaration, imported by two bundles — `use Console` in both,
+                    // and each carries its own `Vein_Console_Io_print`. One thing, not two; keep the
+                    // first and say nothing. Only two real declarations of one name are a clash.
+                    if (ImportOrigin(f) is { } origin && ImportOrigin(seen.Fn) == origin) continue;
+
                     diag.Warning("VS0333",
                         $"function '{f.Name}' is declared in both '{seen.Owner}' and '{name}'; " +
                         $"the app links '{seen.Owner}'s. Qualify the call or rename one.", span);
@@ -185,6 +234,10 @@ public static class AppLinker
 
     /// Two declarations of one name are interchangeable when they carry the same fields in the same
     /// order with the same types — the only thing a handler binding actually depends on.
+    /// The qualified key an imported function was lowered from; null for one the bundle declared.
+    private static string? ImportOrigin(IrFunction f) =>
+        f.Attrs.FirstOrDefault(a => a.Name == "imported")?.Args.FirstOrDefault() as string;
+
     private static bool SameShape(IrType a, IrType b)
     {
         if (a.Fields.Count != b.Fields.Count) return false;

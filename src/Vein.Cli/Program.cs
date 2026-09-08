@@ -84,8 +84,9 @@ switch (command)
         var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
         if (!diagnostics.HasErrors)
         {
-            var checker = new Lower(diagnostics, projectDir);
-            foreach (var bundle in unit.Bundles) checker.LowerBundle(bundle);
+            // One Lower per bundle — its state is per-bundle, and a shared one leaked each bundle's
+            // `use` list into the next (see Lower.LowerBundle).
+            foreach (var bundle in unit.Bundles) new Lower(diagnostics, projectDir).LowerBundle(bundle);
         }
 
         foreach (var d in diagnostics.Items) Console.Error.WriteLine(d);
@@ -109,9 +110,8 @@ switch (command)
         {
             if (legacy)
             {
-                var lower = new Lower(diagnostics, projectDir);
                 foreach (var bundle in unit.Bundles)
-                    Console.Write(IrPrinter.Print(lower.LowerBundle(bundle)));
+                    Console.Write(IrPrinter.Print(new Lower(diagnostics, projectDir).LowerBundle(bundle)));
             }
             else
             {
@@ -123,8 +123,7 @@ switch (command)
                 // that `veinc graph` called out, which is a worse failure than not checking at all: it
                 // looks like an answer. Lower for the DIAGNOSTICS and throw the module away; the tree
                 // printed is still the AST one, unchanged.
-                var checker = new Lower(diagnostics, projectDir);
-                foreach (var bundle in unit.Bundles) checker.LowerBundle(bundle);
+                foreach (var bundle in unit.Bundles) new Lower(diagnostics, projectDir).LowerBundle(bundle);
             }
         }
         break;
@@ -160,8 +159,8 @@ switch (command)
             }
             else
             {
-                var lower = new Lower(diagnostics, projectDir);
-                foreach (var bundle in unit!.Bundles) modules.Add(lower.LowerBundle(bundle));
+                foreach (var bundle in unit!.Bundles)
+                    modules.Add(new Lower(diagnostics, projectDir).LowerBundle(bundle));
             }
 
             foreach (var module in modules)
@@ -211,9 +210,9 @@ switch (command)
             }
             else
             {
-                var lower = new Lower(diagnostics, projectDir);
                 foreach (var bundle in unit!.Bundles)
-                    new Interp { Ticks = ticks }.Run(lower.LowerBundle(bundle), Console.In, Console.Out, messaging: true);
+                    new Interp { Ticks = ticks }.Run(new Lower(diagnostics, projectDir).LowerBundle(bundle),
+                                                     Console.In, Console.Out, messaging: true);
             }
         }
         break;
@@ -233,11 +232,10 @@ switch (command)
         var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
         if (diagnostics.HasErrors) break;
 
-        var lower = new Lower(diagnostics, projectDir);
         var backend = new CSharpBackend();
         foreach (var bundle in unit.Bundles)
         {
-            var result = backend.Emit(lower.LowerBundle(bundle));
+            var result = backend.Emit(new Lower(diagnostics, projectDir).LowerBundle(bundle));
             foreach (var note in result.Notes) Console.Error.WriteLine($"  note: {note}");
             foreach (var file in result.Files)
             {
@@ -272,10 +270,9 @@ switch (command)
         if (!diagnostics.HasErrors)
         {
             string requestPath = args.Length > 2 ? args[2] : "/";
-            var lower = new Lower(diagnostics, projectDir);
             foreach (var bundle in unit.Bundles)
             {
-                var result = new Interp().Render(lower.LowerBundle(bundle), requestPath);
+                var result = new Interp().Render(new Lower(diagnostics, projectDir).LowerBundle(bundle), requestPath);
                 Console.WriteLine($"Vein First-Class graph — bundle {bundle.Name}");
                 Console.WriteLine("  nodes:");
                 foreach (var n in result.Nodes)

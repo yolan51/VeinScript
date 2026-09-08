@@ -116,8 +116,25 @@ public sealed class Lower
         if (!_markUses.ContainsKey(name)) _markUses[name] = span;
     }
 
+    private bool _lowered;
+    private string? _loweredName;
+
     public IrModule LowerBundle(BundleDecl bundle)
     {
+        // ONE BUNDLE PER INSTANCE. Everything this class holds — `_used`, `_aliases`, `_imported`, the
+        // shape and mark tables — is one bundle's state, and none of it is cleared between calls. A
+        // single Lower driven over a list of bundles carried each one's `use` list into the next: a
+        // bundle that was VS0234 on its own compiled and ran when linked after one that said
+        // `use Console`, and the first bundle's imported functions were re-emitted into every later
+        // module. A fresh instance cannot leak. This makes a reused one fail HERE, loudly, instead of
+        // as a program whose validity depends on what was loaded before it.
+        if (_lowered)
+            throw new InvalidOperationException(
+                $"This Lower already lowered '{_loweredName}'; construct a new one for '{bundle.Name}'. " +
+                "Its state is per-bundle.");
+        _lowered = true;
+        _loweredName = bundle.Name;
+
         var types = new List<IrType>();
         var funcs = new List<IrFunction>();
         var shards = new List<IrShard>();
@@ -706,6 +723,11 @@ public sealed class Lower
 
         _imported[mangled] = null!;                       // reserve first: the body may recurse into itself
         var lowered = LowerFunc(hit.Value) with { Name = mangled };
+        // Tagged with WHERE IT CAME FROM. Every bundle that calls `print` imports its own copy under
+        // this same mangled name, and the app linker then saw the name twice and warned (VS0333) that
+        // two bundles had "declared" it — advising a rename of a function neither of them wrote. The
+        // tag lets the linker tell one external declaration imported twice from two real declarations.
+        lowered = lowered with { Attrs = lowered.Attrs.Append(IrAttr.Of("imported", hit.Key)).ToList() };
         _imported[mangled] = lowered;
         return mangled;
     }
