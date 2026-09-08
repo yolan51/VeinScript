@@ -26,8 +26,8 @@ bundle WebApp by you {
     // Two bundles, and the split between them is the point. Vein.Web is the machinery: the channels,
     // and the primitives to write on them. Vein.WebTheme is the look — palettes, foundation,
     // components — so this file selects a style instead of transcribing one.
-    use Web
-    use WebTheme
+    need "Vein.Web"
+    need "Vein.WebTheme"
 
     // ---- page furniture, which is this SITE and not the library ------------------------------------
     // A hero and a card are still decisions this page makes: the theme styles `.card`, but what goes

@@ -53,7 +53,7 @@ public class AppLoadTests : IDisposable
     private static int Count(string s, string needle) => s.Split(needle).Length - 1;
 
     private static string Printer(string bundle, string text) =>
-        "bundle " + bundle + " by me {\n  use Console\n  shard Boot { run once { print(\"" + text + "\") } }\n}";
+        "bundle " + bundle + " by me {\n  need \"Vein.Console\"\n  shard Boot { run once { print(\"" + text + "\") } }\n}";
 
     // ---- M: one Lower per bundle ------------------------------------------------------------------
 
@@ -95,9 +95,9 @@ public class AppLoadTests : IDisposable
         // exercised it was the false positive — so this is what stops the import exemption from quietly
         // widening into "never warn".
         Write("A.vein", "bundle Alpha by me {\n  fn twice(n: int) -> int { return n * 2 }\n" +
-                        "  use Console\n  shard Boot { run once { print(twice(2)) } }\n}");
+                        "  need \"Vein.Console\"\n  shard Boot { run once { print(twice(2)) } }\n}");
         Write("B.vein", "bundle Beta by me {\n  fn twice(n: int) -> int { return n + n }\n" +
-                        "  use Console\n  shard Boot { run once { print(twice(3)) } }\n}");
+                        "  need \"Vein.Console\"\n  shard Boot { run once { print(twice(3)) } }\n}");
         var app = Write("Clash.app.vein", "app Clash { load \"A.vein\"   load \"B.vein\" }");
 
         var (_, diag) = Link(app);
@@ -129,7 +129,7 @@ public class AppLoadTests : IDisposable
     public void The_same_file_loaded_twice_links_once_and_warns()
     {
         Write("One.vein",
-            "bundle One by me {\n  use Console\n" +
+            "bundle One by me {\n  need \"Vein.Console\"\n" +
             "  shard Boot { run once { print(\"booted\") } }\n" +
             "  shard T { each tick { print(\"tick\") } }\n}");
         var app = Write("D.app.vein", "app Doubled { load \"One.vein\"   load \"One.vein\" }");

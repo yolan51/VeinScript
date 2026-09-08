@@ -35,7 +35,25 @@ public sealed record BundleDecl(string Name, IReadOnlyList<Decl> Members, Source
     /// name `Author.Bundle.Publicator.member` used for cross-bundle discovery/`*` references.
     public string? Author { get; init; }
 }
-public sealed record UseDecl(string Name, string? Alias, SourceSpan Span) : Decl(Span);
+/// `need "Author.Bundle" [as Alias]` — the bundle this one depends on.
+///
+/// Replaces `use`, which named a bundle without its author and validated nothing. Three things the old
+/// form could not say: WHICH author's `Combat` (the match ignored the author segment entirely, so two
+/// were indistinguishable and collapsed into VS0216), that the name must RESOLVE (a misspelled `use`
+/// was completely silent — the failure surfaced later as VS0234 at each call that needed the widening),
+/// and that the bundle is wanted at all rather than merely readable.
+///
+/// `Author` is null only for a legacy `use` line, which the parser still accepts so `Lower` can name the
+/// author the writer meant in the migration diagnostic.
+public sealed record NeedDecl(string? Author, string Bundle, string? Alias, SourceSpan Span) : Decl(Span)
+{
+    /// `Author.Bundle` — the identity a `need` names and the key everything dedupes on.
+    public string Key => Author is null ? Bundle : Author + "." + Bundle;
+
+    /// The string was not `Author.Bundle` at all. Already reported by the parser, so `Lower` stays quiet
+    /// rather than reporting the same line twice under a second code.
+    public bool Malformed { get; init; }
+}
 
 /// `app N { load "path" [start { … }] … }` — the set of bundles (across files) that compose one project.
 /// IOP is reactive: an app has no boot event of its own; it composes bundles, each of which has its own

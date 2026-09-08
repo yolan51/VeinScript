@@ -728,7 +728,7 @@ public class ServiceTests
     {
         // `use Web` makes `addNumber(…)` resolve bare, so hover has to reach the same one — and say
         // where it came from, since its declaration is in another file entirely.
-        var r = Compile("bundle T by me { use Web\n shard S { run once { } } }");
+        var r = Compile("bundle T by me { need \"Vein.Web\"\n shard S { run once { } } }");
 
         var hit = FuncIndex.Find(r.Ast!, "addNumber", null);
         Assert.NotNull(hit.Fn);

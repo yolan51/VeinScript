@@ -6,7 +6,7 @@
 // Save: veinc render samples/mypage.vein / > page.html   (open in a browser)
 
 bundle App {
-    use Web
+    need "Vein.Web"
 
     publicator PageApi {
         event @Request  { path: string }

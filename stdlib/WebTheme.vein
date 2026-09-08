@@ -16,7 +16,7 @@
 
 bundle WebTheme by Vein {
 
-    use Web
+    need "Vein.Web"
 
     // Palettes — custom properties and NOTHING else. This is the whole reason the pieces below compose:
     // every component reads var(--brand), var(--card), var(--line), so swapping the one palette line

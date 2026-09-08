@@ -41,7 +41,7 @@
 // ============================================================================================
 
 bundle Demo {
-    use Core
+    need "Vein.Core"
 
     publicator DemoCore {
         shared("Hit points and mana for any living identity.")
@@ -165,7 +165,7 @@ bundle Demo {
 // ============================================================================================
 
 bundle Site {
-    use Web
+    need "Vein.Web"
 
     publicator SiteApi {
         shared("An inbound HTTP request.")
@@ -224,7 +224,7 @@ bundle Site {
 // ============================================================================================
 
 bundle App {
-    use Web
+    need "Vein.Web"
 
     publicator PageApi {
         event @Request  { path: string }
@@ -289,7 +289,7 @@ bundle App {
 // ============================================================================================
 
 bundle App {
-    use Web
+    need "Vein.Web"
 
     publicator PageApi {
         event @Request  { path: string }
@@ -344,7 +344,7 @@ bundle App {
 // ============================================================================================
 
 bundle App {
-    use Web
+    need "Vein.Web"
 
     publicator PageApi {
         event @Request  { path: string }
@@ -421,7 +421,7 @@ bundle App {
 // ============================================================================================
 
 bundle Entities {
-    use Core
+    need "Vein.Core"
 
     shape $Health {
         hp: int folds sum      // many shards may drain hp in one tick; sum the deltas
@@ -713,9 +713,9 @@ bundle Store by you {
 
 bundle UseDemo by you {
 
-    use Console                    // print / send / spawn …
-    use Math                       // $Vec2 / $Vec3 / $Color …
-    use Web                        // &Heading / &Button / &Paragraph …
+    need "Vein.Console"                    // print / send / spawn …
+    need "Vein.Math"                       // $Vec2 / $Vec3 / $Color …
+    need "Vein.Web"                        // &Heading / &Button / &Paragraph …
 
     // `$Vec2` with no qualifier — resolved through `use Math`.
     event @Placed { $Vec2, label: string }

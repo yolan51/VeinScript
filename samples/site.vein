@@ -4,7 +4,7 @@
 // Run it:  veinc render samples/site.vein  /
 
 bundle Site {
-    use Web
+    need "Vein.Web"
 
     publicator SiteApi {
         shared("An inbound HTTP request.")

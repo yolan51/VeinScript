@@ -182,6 +182,7 @@ public sealed class Parser
     {
         switch (Cur.Kind)
         {
+            case TokenKind.KwNeed: return ParseNeed();
             case TokenKind.KwUse: return ParseUse();
             case TokenKind.KwPublicator: return ParsePublicator();
             case TokenKind.KwShape: return ParseShape();
@@ -203,12 +204,41 @@ public sealed class Parser
         }
     }
 
-    private UseDecl ParseUse()
+    /// `need "Author.Bundle" [as Alias]`.
+    ///
+    /// A STRING rather than a bare path, because `Author.Bundle` is one name and a dotted identifier
+    /// sequence would read as a member access. It is also what lets the author be required: the old
+    /// `use Console` had nowhere to put one.
+    private NeedDecl ParseNeed()
+    {
+        var s = Here; Advance();
+
+        var tok = Expect(TokenKind.String, "a quoted \"Author.Bundle\" after 'need'");
+        string text = tok.Value as string ?? "";
+        string? alias = Match(TokenKind.KwAs) ? Expect(TokenKind.Ident, "alias").Text : null;
+
+        int dot = text.IndexOf('.');
+        if (dot <= 0 || dot == text.Length - 1)
+        {
+            _diag.Error("VS0339",
+                $"`need \"{text}\"` is missing the author. A bundle is named `Author.Bundle` — the author " +
+                "is the `by` line in its declaration, and naming it is what tells two authors' bundles of " +
+                "the same name apart. Write `need \"Vein.Console\"`, not `need \"Console\"`.", tok.Span);
+            return new NeedDecl(null, text, alias, s) { Malformed = true };
+        }
+
+        return new NeedDecl(text[..dot], text[(dot + 1)..], alias, s);
+    }
+
+    /// The retired `use N [as M]`. Still PARSED, so the migration reads as one diagnostic pointing at the
+    /// replacement rather than a cascade of syntax errors — and so `Lower`, which has the bundle index,
+    /// can name the author the writer meant.
+    private NeedDecl ParseUse()
     {
         var s = Here; Advance();
         string name = Expect(TokenKind.Ident, "bundle name").Text;
         string? alias = Match(TokenKind.KwAs) ? Expect(TokenKind.Ident, "alias").Text : null;
-        return new UseDecl(name, alias, s);
+        return new NeedDecl(null, name, alias, s);
     }
 
     private PublicatorDecl ParsePublicator()
@@ -1242,7 +1272,8 @@ public sealed class Parser
         {
             if (Cur.Kind is TokenKind.KwBundle or TokenKind.KwShape or TokenKind.KwShard
                 or TokenKind.KwShardView or TokenKind.KwBridge or TokenKind.KwEvent or TokenKind.KwType
-                or TokenKind.KwSf or TokenKind.KwUse or TokenKind.KwPublicator) return;
+                or TokenKind.KwSf or TokenKind.KwUse or TokenKind.KwNeed
+                or TokenKind.KwPublicator) return;
             if (Cur.Kind == TokenKind.RBrace) { Advance(); return; }
             Advance();
         }

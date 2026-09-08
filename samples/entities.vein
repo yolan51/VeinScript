@@ -8,7 +8,7 @@
 // The clock is explicit (`--ticks N`) and `random` is seeded, so the run is reproducible.
 
 bundle Entities {
-    use Core
+    need "Vein.Core"
 
     shape $Health {
         hp: int folds sum      // many shards may drain hp in one tick; sum the deltas

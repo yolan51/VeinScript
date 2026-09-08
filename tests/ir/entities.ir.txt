@@ -1,6 +1,6 @@
 VeinIR v1  file=samples/entities.vein
 Bundle Entities
-|--- Use Core
+|--- Need Vein.Core
 |--- Shape $Health
 |    `--- Field hp: int  folds=sum
 |--- Shard Spawner

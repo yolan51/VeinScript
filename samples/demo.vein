@@ -4,7 +4,7 @@
 // Traced end-to-end in docs/EXAMPLE-PIPELINE.md.
 
 bundle Demo {
-    use Core
+    need "Vein.Core"
 
     publicator DemoCore {
         shared("Hit points and mana for any living identity.")

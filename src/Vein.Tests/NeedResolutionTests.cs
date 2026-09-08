@@ -5,20 +5,19 @@ using Xunit;
 
 namespace Vein.Tests;
 
-// `use N` — the bare-name fallback.
+// `need "Author.Bundle"` — the bare-name fallback, and the alias that deliberately is not one.
 //
-// `use` lexed, parsed into a UseDecl, printed in the AST dump, and was then dropped by Lower under a
-// comment reading "resolved away" that described a resolution nobody had written. Samples said
-// `use Core` and got nothing for it.
+// These are the resolution rules, all of which the retired `use` already had and `need` keeps: after
+// every LOCAL lookup misses, a bare name is looked for in the bundles this one needs. Local always
+// wins, then built-ins, then the fallback — which is the property most of these tests exist to hold
+// down, since the risk is not "does it resolve" but "did resolving it change something that worked".
 //
-// What it does now: after every LOCAL lookup misses, a bare name is looked for in the bundles this one
-// `use`s. Local always wins, so the change is strictly additive — which is the property most of these
-// tests exist to hold down, since the risk here is not "does it resolve" but "did resolving it change
-// something that already worked".
+// NeedDeclarationTests covers what `need` added on top: the author being part of the name, and the
+// declaration being validated where it is written.
 //
 // Events are deliberately not involved. A bare `@Response` already dispatches, because an emit lowers
 // to its bare event name and Interp.Drain matches on that — samples rely on it (boot_shared.vein).
-public class UseResolutionTests
+public class NeedResolutionTests
 {
     private static CompilationResult Compile(string src) =>
         new VeinCompilerService().Compile(new CompileRequest("t.vein", src));
@@ -43,7 +42,7 @@ public class UseResolutionTests
     {
         var output = Run(
             "bundle T by me {\n" +
-            "  use Console\n" +
+            "  need \"Vein.Console\"\n" +
             "  shard S { run once { print(\"hi\") } }\n}");
 
         Assert.Equal("hi", output.Trim());
@@ -55,7 +54,7 @@ public class UseResolutionTests
         // `bring Button(…)` with no qualifier resolved only against this bundle before.
         var output = Run(
             "bundle T by me {\n" +
-            "  use Web\n" +
+            "  need \"Vein.Web\"\n" +
             "  shard S { run once { bring Button(\"Go\") } }\n" +
             "  shard L { hear @Html as h { *Vein.Console.Io.print(h.markup) } }\n}");
 
@@ -70,7 +69,7 @@ public class UseResolutionTests
     {
         var output = Run(
             "bundle T by me {\n" +
-            "  use Math\n" +
+            "  need \"Vein.Math\"\n" +
             "  event @Where { $Vec2, tag: string }\n" +
             "  shard S { run once { emit @Where { x: 1.0, y: 2.0, tag: \"t\" } } }\n" +
             "  shard L { hear @Where as w { *Vein.Console.Io.print(\"at \" + w.x + \",\" + w.y + \" \" + w.tag) } }\n}");
@@ -111,7 +110,7 @@ public class UseResolutionTests
         // nothing can change meaning. A local `print` must shadow Console's.
         var output = Run(
             "bundle T by me {\n" +
-            "  use Console\n" +
+            "  need \"Vein.Console\"\n" +
             "  SF print(text: string) { emit *Vein.Console.Io.@Print { text: \"local:\" + text } }\n" +
             "  shard S { run once { print(\"hi\") } }\n}");
 
@@ -131,7 +130,7 @@ public class UseResolutionTests
         // the call went back to launching console windows.
         const string src =
             "bundle T by me {\n" +
-            "  use Console\n" +
+            "  need \"Vein.Console\"\n" +
             "  shape $Tag { n: int }\n" +
             "  shard S {\n" +
             "    run once { let e = spawn()\n" +
@@ -156,7 +155,7 @@ public class UseResolutionTests
         // depend on dictionary order.
         var hits = Warnings(
             "bundle T by me {\n" +
-            "  use Console\n  use Net\n" +
+            "  need \"Vein.Console\"\n  need \"Vein.Net\"\n" +
             "  shard S { run once { send(#X, \"hi\") } }\n}", "VS0216").ToList();
 
         Assert.Single(hits);
@@ -171,7 +170,7 @@ public class UseResolutionTests
         // or the warning becomes noise on the common case.
         Assert.Empty(Warnings(
             "bundle T by me {\n" +
-            "  use Console\n" +
+            "  need \"Vein.Console\"\n" +
             "  shard S { run once { send(#X, \"hi\") } }\n}", "VS0216"));
     }
 
@@ -183,7 +182,7 @@ public class UseResolutionTests
         // VS0234 rather than as a program that runs and prints nothing.
         Assert.Contains(Compile(
             "bundle T by me {\n" +
-            "  use Math\n" +
+            "  need \"Vein.Math\"\n" +
             "  shard S { run once { print(\"hi\") } }\n}").Diagnostics,
             d => d.Code == "VS0234");
     }
@@ -207,7 +206,7 @@ public class UseResolutionTests
     {
         var output = Run("""
             bundle T by me {
-                use Math as M
+                need "Vein.Math" as M
                 shard S {
                     run once {
                         emit *Vein.Console.Io.@Print { text: "sqrt " + *M.Roots.sqrt(16.0) }
@@ -225,7 +224,7 @@ public class UseResolutionTests
         // The load-bearing half. Without this an alias is a plain `use` with extra syntax.
         Assert.Contains(Compile("""
             bundle T by me {
-                use Math as M
+                need "Vein.Math" as M
                 shard S { run once { let x = sqrt(16.0) } }
             }
             """).Diagnostics, d => d.Code == "VS0234");
@@ -238,7 +237,7 @@ public class UseResolutionTests
         // away from an ordinary `use`.
         Assert.DoesNotContain(Compile("""
             bundle T by me {
-                use Math
+                need "Vein.Math"
                 shard S { run once { let x = sqrt(16.0) } }
             }
             """).Diagnostics, d => d.Code == "VS0234");
@@ -251,8 +250,8 @@ public class UseResolutionTests
         // ambiguous about — VS0216 cannot fire, and both vocabularies stay reachable.
         var diags = Compile("""
             bundle T by me {
-                use Math as M
-                use Console as C
+                need "Vein.Math" as M
+                need "Vein.Console" as C
                 shard S {
                     run once {
                         emit *Vein.Console.Io.@Print { text: "" + *M.Round.floor(-2.5) }
@@ -273,7 +272,7 @@ public class UseResolutionTests
         // segment of `*Vein.Math.Round.floor` and resolve somewhere absurd.
         var output = Run("""
             bundle T by me {
-                use Math as Round
+                need "Vein.Math" as Round
                 shard S {
                     run once {
                         emit *Vein.Console.Io.@Print { text: "" + *Round.Round.floor(-2.5) }
@@ -297,7 +296,7 @@ public class UseResolutionTests
 
     private const string UsedShape = """
         bundle T by me {
-            use Transform
+            need "Vein.Transform"
             mark #Moving
             shard Make {
                 run once {
@@ -357,7 +356,7 @@ public class UseResolutionTests
         // `use` line could silently change the shape of data a program already stores.
         var result = Compile("""
             bundle T by me {
-                use Transform
+                need "Vein.Transform"
                 shape $Position { label: string }
                 mark #Here
                 shard Make {

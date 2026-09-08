@@ -24,7 +24,7 @@
 
 bundle UiWidgets by you {
 
-    use UI
+    need "Vein.UI"
 
     mark #Widget
     mark #Focused

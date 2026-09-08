@@ -41,7 +41,7 @@ public sealed class AstTree
         AppDecl app => Node("App", app.Name, app.Span, app.Loads.Select(LoadNode)),
         StartDecl st => Node("Start", AstPrinter.EventText(st.EventPath, st.Event), st.Span, st.Fields.Select(ArgField).Concat(st.FillRest ? new[] { Leaf("Fill", "?", st.Span) } : Enumerable.Empty<IrNode>())),
         PublicatorDecl p => Node("Publicator", p.Name, p.Span, p.Members.Select(Decl)),
-        UseDecl u => Leaf("Use", u.Alias is null ? u.Name : $"{u.Name} as {u.Alias}", u.Span),
+        NeedDecl n => Leaf("Need", n.Alias is null ? n.Key : $"{n.Key} as {n.Alias}", n.Span),
         ShapeDecl s => WithAttrs(Node("Shape", "$" + s.Name, s.Span, s.Members.Select(ShapeMember)), Doc(s.Doc)),
         MarkDecl mk => WithAttrs(Leaf("Mark", "#" + mk.Name, mk.Span), Doc(mk.Doc)),
         TypeDecl t => Node("Type", t.Name, t.Span, t.Fields.Select(Field)),

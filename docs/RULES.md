@@ -8,7 +8,7 @@ short list of things that will otherwise be re-derived.
 **When this document is wrong, these are:** the lexer's `Keywords` map
 ([Lexer.cs](../src/Vein.Compiler/Lexing/Lexer.cs)) for what is a keyword · `samples/`, because
 `SamplesTests` compiles every `.vein` in it, so anything there provably parses · then the prose docs.
-*Verified 2026-08-31.*
+*Verified 2026-09-07.*
 
 ---
 
@@ -41,7 +41,7 @@ arm may sit on its own line — `ParseMatch` reads `else` explicitly — which i
 **3. A string literal is one line.** `\n \t \r \\ \"` are the escapes; a literal newline inside quotes is
 VS0003. To emit a multi-line string, use `\n` and wrap the source with trailing `+` per rule 1.
 
-**4. All 62 lexer keywords are reserved as EXPRESSIONS; most are still legal as field and member names.** `target` is a keyword,
+**4. All 63 lexer keywords are reserved as EXPRESSIONS; most are still legal as field and member names.** `target` is a keyword,
 so `builder Clock { target: string }` is a parse error — it was renamed to `id`. Check the map before
 choosing a name; do not count entries by line, because the table holds two per line.
 
@@ -289,21 +289,27 @@ now adds the type to the module, and rule 17b still holds at the use site: `targ
 it is declared in the bundle that owns the builder, and reporting **VS0218** for it pointed the author
 at a span in stdlib source.
 
-**18. `use` only WIDENS what a bare name may mean.** Precedence is local declaration → built-in → `use`
-fallback. A built-in wins and the shadowed member is reported as **VS0217** (`use Console` used to
-capture `spawn`, so `let e = spawn()` built no entity). Two used bundles exporting one name is
-**VS0216** — reach for the `*Author.Bundle.Publicator.member` path, where rule 17b allows one.
+**18. `need "Author.Bundle"` names what this bundle is built on, and WIDENS what a bare name may mean.**
+Precedence is local declaration → built-in → `need` fallback. A built-in wins and the shadowed member is
+reported as **VS0217** (`need "Vein.Console"` used to capture `spawn`, so `let e = spawn()` built no
+entity). Two needed bundles exporting one name is **VS0216** — reach for the
+`*Author.Bundle.Publicator.member` path, where rule 17b allows one.
 
-**18b. `use X as Y` imports QUALIFIED, and widens nothing.** The alias names the bundle segment of a
-`*` path — `use Math as M` makes `*M.Roots.sqrt(16.0)` resolve — and deliberately does *not* make bare
-`sqrt` mean anything. That is what makes it the answer to VS0216: two bundles exporting one name are
+The **author is part of the name**, and that is why it is a quoted string rather than a bare word. The
+retired `use N` matched on the bundle segment alone, so `use Combat` matched every author's `Combat` at
+once: two were indistinguishable and collapsed into VS0216, after which the reference resolved to
+nothing. It also validated nothing — `use Movemnet` was completely silent, and the failure surfaced later
+and elsewhere as **VS0234** at each call that needed the widening, so a misspelled bundle read as a
+broken call. A `need` that names no bundle on the search path is **VS0340** at the declaration, and one
+written without an author is **VS0339**. `use` itself is **VS0338**, which names the `need` line to write.
+
+**18b. `need "Author.Bundle" as Y` imports QUALIFIED, and widens nothing.** The alias names the head of a
+`*` path — `need "Vein.Math" as M` makes `*M.Roots.sqrt(16.0)` resolve — and deliberately does *not* make
+bare `sqrt` mean anything. That is what makes it the answer to VS0216: two bundles exporting one name are
 ambiguous only because both contribute bare names, so aliasing both removes the ambiguity instead of
-restating it, and each vocabulary stays reachable under its own head. Only the FIRST segment
-substitutes; an alias names a bundle, and a publicator that happens to share its spelling is not one.
-This is `import numpy as np`, not `from numpy import *`.
-
-The syntax parsed from the day `use` was added and nothing consumed the alias, so `use X as Y` behaved
-as a plain `use X` — widening bare names, with `*Y.…` resolving nowhere.
+restating it, and each vocabulary stays reachable under its own head. Only the FIRST segment substitutes;
+an alias names a bundle, and a publicator that happens to share its spelling is not one. This is
+`import numpy as np`, not `from numpy import *`.
 
 **19. A bundle can span files, and FRAGMENTS MERGE BEFORE THE MAIN FILE.** `publicators/*.vein` is API,
 `shards/*.vein` is behaviour, and a fragment carrying an API declaration is **VS0321**. Member order is

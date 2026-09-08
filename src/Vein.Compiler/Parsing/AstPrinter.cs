@@ -29,7 +29,7 @@ public static class AstPrinter
             case StartDecl st:
                 Line(sb, ind, StartText(st));
                 break;
-            case UseDecl u: Line(sb, ind, $"use {u.Name}{(u.Alias is null ? "" : " as " + u.Alias)}"); break;
+            case NeedDecl n: Line(sb, ind, $"need \"{n.Key}\"{(n.Alias is null ? "" : " as " + n.Alias)}"); break;
             case MarkDecl mk: Line(sb, ind, tag($"mark #{mk.Name}") + Doc(d)); break;
             case ShapeDecl s:
                 Line(sb, ind, tag($"shape {s.Name}") + Doc(d));

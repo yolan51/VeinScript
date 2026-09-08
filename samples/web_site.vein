@@ -16,7 +16,7 @@
 
 bundle WebSite by you {
 
-    use Web                          // &Heading / &Paragraph / &Link — bare, via `use`
+    need "Vein.Web"                          // &Heading / &Paragraph / &Link — bare, via `need`
 
     // ---- pages ---------------------------------------------------------------------------------
 

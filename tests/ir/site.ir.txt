@@ -1,6 +1,6 @@
 VeinIR v1  file=samples/site.vein
 Bundle Site
-|--- Use Web
+|--- Need Vein.Web
 |--- Publicator SiteApi
 |    |--- Event @Request  doc="An inbound HTTP request."
 |    |    `--- Field path: string

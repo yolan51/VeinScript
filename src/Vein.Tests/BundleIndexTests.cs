@@ -266,7 +266,7 @@ public class BundleIndexTests : IDisposable
         string dir = AppWithInstalledBundle("acme.Tags.vein", AcmeTags);
 
         var r = new VeinCompilerService().Compile(new CompileRequest("Demo.vein",
-            "bundle Demo by me { use Tags\n mark #Spent\n shape $H { hp: int folds sum }\n" +
+            "bundle Demo by me { need \"acme.Tags\"\n mark #Spent\n shape $H { hp: int folds sum }\n" +
             " shard S { settled { target $H #Enemy as self { mark self #Spent } } } }",
             ProjectDir: dir));
 
@@ -281,7 +281,7 @@ public class BundleIndexTests : IDisposable
         string dir = AppWithInstalledBundle("acme.Tags.vein", AcmeTags);
 
         var r = new VeinCompilerService().Compile(new CompileRequest("Demo.vein",
-            "bundle Demo by me { use Tags\n mark #Spent\n shape $H { hp: int folds sum }\n" +
+            "bundle Demo by me { need \"acme.Tags\"\n mark #Spent\n shape $H { hp: int folds sum }\n" +
             " shard S { settled { target $H #Ghost as self { mark self #Spent } } } }",
             ProjectDir: dir));
 
@@ -298,7 +298,7 @@ public class BundleIndexTests : IDisposable
         string dir = AppWithInstalledBundle("acme.Tags.vein", AcmeTags);
 
         var r = new VeinCompilerService().Compile(new CompileRequest("Demo.vein",
-            "bundle Demo by me { use Tags\n shape $H { hp: int folds sum }\n" +
+            "bundle Demo by me { need \"acme.Tags\"\n shape $H { hp: int folds sum }\n" +
             " shard S { settled { target $H #Anything as self { mark self #Whatever } } } }",
             ProjectDir: dir));
 
@@ -401,7 +401,7 @@ public class BundleIndexTests : IDisposable
         // It walked the local AST only, so the one case `?` is most wanted in — a builder you did not
         // write and cannot see — silently produced nothing.
         string dir = AppWithInstalledBundle("acme.Kit.vein", AcmeKit);
-        var unit = Parse("bundle Demo by me { use Kit\n shard S { run once { bring Box(\"hi\", 3) } } }", dir);
+        var unit = Parse("bundle Demo by me { need \"acme.Kit\"\n shard S { run once { bring Box(\"hi\", 3) } } }", dir);
 
         var b = Assert.Single(EventCatalog.Builders(unit, dir), x => x.Name == "Box");
         Assert.Equal(new[] { "label", "width" }, b.Fields.Select(f => f.Name).ToArray());
@@ -413,7 +413,7 @@ public class BundleIndexTests : IDisposable
     {
         // The same for `emit @Greet ?`, defaults included — `loud` is optional, `who` is not.
         string dir = AppWithInstalledBundle("acme.Kit.vein", AcmeKit);
-        var unit = Parse("bundle Demo by me { use Kit }", dir);
+        var unit = Parse("bundle Demo by me { need \"acme.Kit\" }", dir);
 
         var e = Assert.Single(EventCatalog.Catalog(unit, dir), x => x.Name == "Greet");
         Assert.Equal(new[] { "who", "loud" }, e.Fields.Select(f => f.Name).ToArray());
@@ -427,7 +427,7 @@ public class BundleIndexTests : IDisposable
         // `use` WIDENS what a bare name may mean; it never displaces a local declaration. The catalog
         // has to agree with that, or `?` would scaffold the imported payload for a local event.
         string dir = AppWithInstalledBundle("acme.Kit.vein", AcmeKit);
-        var unit = Parse("bundle Demo by me { use Kit\n event @Greet { mine: int } }", dir);
+        var unit = Parse("bundle Demo by me { need \"acme.Kit\"\n event @Greet { mine: int } }", dir);
 
         var e = Assert.Single(EventCatalog.Catalog(unit, dir), x => x.Name == "Greet");
         Assert.Equal(new[] { "mine" }, e.Fields.Select(f => f.Name).ToArray());
@@ -438,7 +438,7 @@ public class BundleIndexTests : IDisposable
     {
         // The parameter is optional and every existing caller omits it, so the old behaviour has to be
         // exactly what it was — `veinc events` on one file still lists that file's events.
-        var unit = Parse("bundle Demo by me { use Kit\n event @Mine { a: int } }", TempDir());
+        var unit = Parse("bundle Demo by me { need \"acme.Kit\"\n event @Mine { a: int } }", TempDir());
 
         Assert.Equal(new[] { "Mine" }, EventCatalog.Catalog(unit).Select(e => e.Name).ToArray());
     }

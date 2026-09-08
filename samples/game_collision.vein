@@ -23,8 +23,8 @@
 
 bundle GameCollision by you {
 
-    use Game
-    use Transform
+    need "Vein.Game"
+    need "Vein.Transform"
 
     mark #Collidable
 

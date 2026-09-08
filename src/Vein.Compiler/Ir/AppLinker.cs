@@ -170,6 +170,17 @@ public static class AppLinker
             {
                 if (types.TryGetValue((t.Name, t.Kind), out var seen))
                 {
+                    // AN IMPORTED COPY IS NOT A SECOND DECLARATION. A bundle that only `hear`s another's
+                    // shared event carries a stand-in payload type so its handler can be typed, and the
+                    // real declaration is in the bundle being heard. Comparing the two reported the
+                    // LISTENER as having re-declared an event it never wrote, and a game hearing five
+                    // kits got one error per kit. The real declaration always wins, in either order.
+                    bool seenImported = IsImportedCopy(seen.Type);
+                    bool nowImported = IsImportedCopy(t);
+
+                    if (seenImported && !nowImported) types[(t.Name, t.Kind)] = (t, name);   // real replaces stand-in
+                    if (seenImported || nowImported) continue;                               // never a clash
+
                     // Unifying is deliberate — it is how a capability bundle hears the principal's
                     // events. Unifying two DIFFERENT declarations is not; that is a name clash wearing
                     // the costume of a shared vocabulary, and it would bind handlers to a payload whose
@@ -233,6 +244,10 @@ public static class AppLinker
     }
 
     /// Two declarations of one name are interchangeable when they carry the same fields in the same
+    /// A stand-in payload type `Lower` emitted so a `hear` could be typed against another bundle's
+    /// shared event — not a declaration this bundle wrote. `Lower.ImportedEvent` tags these.
+    private static bool IsImportedCopy(IrType t) => t.Attrs.Any(a => a.Name == "imported");
+
     /// order with the same types — the only thing a handler binding actually depends on.
     /// The qualified key an imported function was lowered from; null for one the bundle declared.
     private static string? ImportOrigin(IrFunction f) =>

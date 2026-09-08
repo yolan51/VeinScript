@@ -1,6 +1,6 @@
 VeinIR v1  file=samples/demo.vein
 Bundle Demo
-|--- Use Core
+|--- Need Vein.Core
 |--- Publicator DemoCore
 |    |--- Shape $Health  doc="Hit points and mana for any living identity."
 |    |    |--- Field hp: int  folds=sum

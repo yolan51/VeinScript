@@ -23,7 +23,7 @@ dialect. There is no general `class`.
 | `app` | `app N { load "f.vein" … }` | project manifest: the set of bundles that compose a program | multi-file |
 | `by` | `bundle N by author` | author/pseudo of a bundle (collision root) | |
 | `start` | `start @E { … }` (bundle entry — at most one; none = reactive) · `load "f" start { … }` (override) | a bundle's boot event; a load-site payload override (**no longer** a shard schedule — that's `run once`) | see RUNTIME.md |
-| `use` | `use N [as M]` | import | |
+| `need` | `need "Author.Bundle" [as M]` | what this bundle is built on — widens bare names, or binds `*M.…` when aliased | |
 | `publicator` | `publicator N { … }` | a bundle's public grouping — members are visible to this bundle's shards (bundle-wide) | namespace segment in `*` paths |
 | `shared` | `shared("doc")` **above a decl, inside a publicator** | marks that decl public **across all bundles** (+ doc) — only `shared` members appear in `veinc symbols` and are reachable via `*Author.Bundle.Publicator.@…` | error outside a publicator |
 | `let` / `var` | `let x [:T] = e` / `var x …` | immutable / mutable binding | |
@@ -34,7 +34,7 @@ dialect. There is no general `class`.
 | `when` | `when Pat { … }` (in `match`) | match arm; `Pat` is an enum case or a `#Mark` | D2 |
 | `while`* | `while c { … }` | conditional loop | *`while` is an **add** |
 | `and` `or` `not` | `a and b`, `not a` | logic (short-circuit) | |
-| `as` | `use N as M` · `target … as x` | alias / iteration binding | |
+| `as` | `need "a.B" as M` · `target … as x` | alias / iteration binding | |
 | `true` `false` | | bool literals | |
 | `map` | `map<K,V>` | built-in collection | |
 | `type` | `type N { fields }` | plain value data, not an identity component | `IrTypeKind.Struct` |
@@ -151,7 +151,7 @@ Two more the console runtime needs, same reasoning — ordinary calls, no new sy
 `pick` `len` `random` `join` (`Interp.PrebuiltNames`) — already resolve, and `use` only ever *widens*
 what a bare name may mean. A `use`d bundle exporting one of them is reported as **VS0217** and the
 built-in wins; reach the bundle's version by its qualified path. `*Vein.Console.Io.spawn(#Server, "hi")`
-is the live case: it launches a console window, and before this rule `use Console` silently made bare
+is the live case: it launches a console window, and before this rule `need "Vein.Console"` silently made bare
 `spawn()` mean *that*, so `let e = spawn()` created no entity and every `target` matched an empty world.
 A **local** declaration still wins over both (it is checked first).
 

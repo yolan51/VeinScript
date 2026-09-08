@@ -1,6 +1,6 @@
 VeinIR v1  file=samples/mypage.vein
 Bundle App
-|--- Use Web
+|--- Need Vein.Web
 |--- Publicator PageApi
 |    |--- Event @Request
 |    |    `--- Field path: string

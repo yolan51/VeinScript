@@ -40,7 +40,7 @@ public static class FuncIndex
             foreach (var d in ds)
                 switch (d)
                 {
-                    case UseDecl u when !uses.Contains(u.Name, StringComparer.Ordinal): uses.Add(u.Name); break;
+                    case NeedDecl n when !uses.Contains(n.Bundle, StringComparer.Ordinal): uses.Add(n.Bundle); break;
                     case BundleDecl b: Uses(b.Members); break;
                     case PublicatorDecl p: Uses(p.Members); break;
                 }

@@ -60,27 +60,27 @@ public sealed class Lower
 
     private static readonly string[] OutputFields = { "markup", "code", "css", "line" };
 
-    /// Bundles this one says `use` on, in declaration order. A bare name that resolves nowhere locally
-    /// is looked for in these, which is the whole of what `use` does.
+    /// `Author.Bundle` for each un-aliased `need`, in declaration order. A bare name that resolves
+    /// nowhere locally is looked for in these — the widening half of what a `need` buys.
     ///
-    /// An ALIASED use is deliberately absent from this list — see `_aliases`.
-    private readonly List<string> _used = new();
+    /// AN ALIASED need is deliberately absent from this list — see `_aliases`.
+    ///
+    /// The author is part of the key, and that is the point of the string form. The old `use` matched on
+    /// the bundle SEGMENT ALONE, so `use Combat` matched every author's `Combat` at once: two of them
+    /// were indistinguishable and collapsed into VS0216, after which the reference resolved to nothing.
+    private readonly List<string> _needed = new();
 
-    /// `use Combat as C` — the alias, to the bundle it names.
+    /// `need "alice.Combat" as C` — the alias, to the `Author.Bundle` it names.
     ///
-    /// AN ALIAS IMPORTS QUALIFIED, NOT BARE, and that is the whole point of it. `use Combat` widens
-    /// bare names, so `use Combat` beside `use UI` when both export `Damage` is VS0216 — ambiguous, and
-    /// the only escape was writing `*alice.Combat.Fx.Damage` at every use site. If an alias ALSO
-    /// widened, `use Combat as C` beside `use UI as U` would still be ambiguous on bare `Damage` and
-    /// the alias would have solved nothing.
+    /// AN ALIAS IMPORTS QUALIFIED, NOT BARE, and that is the whole point of it. A plain `need` widens
+    /// bare names, so two needs that both export `Damage` is VS0216 — ambiguous, and the only escape
+    /// was writing `*alice.Combat.Fx.Damage` at every use site. If an alias ALSO widened, aliasing both
+    /// would leave bare `Damage` just as ambiguous and would have solved nothing.
     ///
-    /// So it does not widen. It names the bundle segment of a `*` path instead: `*C.Fx.Damage` resolves
-    /// as `*Combat.Fx.Damage`, and two aliased bundles cannot collide because neither contributes a
+    /// So it does not widen. It names the head of a `*` path instead: `*C.Fx.Damage` resolves as
+    /// `*alice.Combat.Fx.Damage`, and two aliased bundles cannot collide because neither contributes a
     /// bare name. Same idea as `import numpy as np` — the alias is how you keep two vocabularies apart,
     /// not how you merge them.
-    ///
-    /// The syntax has parsed since `use` was added (`UseDecl.Alias`) and nothing consumed it, so an
-    /// alias silently behaved as a plain `use`. That was the bug.
     private readonly Dictionary<string, string> _aliases = new(StringComparer.Ordinal);
 
     /// Locally declared `fn`/`SF` names. Needed only to tell "this bare call is local" from "this bare
@@ -121,7 +121,7 @@ public sealed class Lower
 
     public IrModule LowerBundle(BundleDecl bundle)
     {
-        // ONE BUNDLE PER INSTANCE. Everything this class holds — `_used`, `_aliases`, `_imported`, the
+        // ONE BUNDLE PER INSTANCE. Everything this class holds — `_needed`, `_aliases`, `_imported`, the
         // shape and mark tables — is one bundle's state, and none of it is cleared between calls. A
         // single Lower driven over a list of bundles carried each one's `use` list into the next: a
         // bundle that was VS0234 on its own compiled and ran when linked after one that said
@@ -158,8 +158,13 @@ public sealed class Lower
                     case MarkDecl md: _declaredMarks.Add(md.Name); break;
                     // `use X` widens bare names; `use X as Y` does not — it binds the alias for `*Y.…`
                     // paths instead. One or the other, never both.
-                    case UseDecl { Alias: { } alias } ua: _aliases[alias] = ua.Name; break;
-                    case UseDecl ud: if (!_used.Contains(ud.Name, StringComparer.Ordinal)) _used.Add(ud.Name); break;
+                    // `need "a.B"` widens bare names; `need "a.B" as C` does not — it binds the alias for
+                    // `*C.…` paths instead. One or the other, never both.
+                    case NeedDecl nd:
+                        if (!CheckNeed(nd)) break;
+                        if (nd.Alias is { } alias) _aliases[alias] = nd.Key;
+                        else if (!_needed.Contains(nd.Key, StringComparer.Ordinal)) _needed.Add(nd.Key);
+                        break;
                     case PublicatorDecl pub: Collect(pub.Members); break;
 
                     // Every event this compilation HEARS, for VS0237 below.
@@ -190,7 +195,7 @@ public sealed class Lower
                 case BridgeDecl br: shards.Add(LowerShardLike(br.Name, br.Members, "bridge", br.Doc, br.CarriedShapes, br.CarriedMarks)); break;
                 // Consumed by the Collect pass above, which builds the bare-name fallback list; there is
                 // nothing to lower, because `use` adds no IR — it only widens what a bare name may mean.
-                case UseDecl: break;
+                case NeedDecl: break;
                 case VarDecl: break;                 // module-level state: not modeled yet
                 case StartDecl: break;               // captured separately below (module boot)
                 default: break;
@@ -267,6 +272,63 @@ public sealed class Lower
     /// stdlib's. `*Author.Bundle` carries no version, so a qualified reference silently resolves to
     /// whichever root wins and you get "why am I getting the old version of this function". An ERROR, not a
     /// warning: there is no spelling that disambiguates them, so the duplicate must go.
+    /// Validate one `need` at its DECLARATION, and report the retired `use` there too.
+    ///
+    /// Returns false when the line contributes nothing — it named no bundle that exists, so widening on
+    /// it or binding its alias would only turn one clear error into a scatter of unrelated ones.
+    ///
+    /// This is the whole reason `need` names an author. `use Movemnet` was completely silent: the name
+    /// went into a list used only as a filter over a folder index, so a name matching nothing simply
+    /// never matched anything, and the failure surfaced later and elsewhere — VS0234 "Unknown function"
+    /// at each call that needed the widening. A misspelled bundle read as a broken call.
+    private bool CheckNeed(NeedDecl need)
+    {
+        if (need.Malformed) return false;                 // VS0339 already said so
+
+        // A legacy `use N`. The index knows which author owns `N`, so the migration names the exact line
+        // to write rather than describing the shape of one.
+        if (need.Author is null)
+        {
+            var owners = Index.Owners.Keys
+                              .Where(k => k.EndsWith("." + need.Bundle, StringComparison.Ordinal))
+                              .OrderBy(k => k, StringComparer.Ordinal).ToList();
+
+            string fix = owners.Count switch
+            {
+                1 => $"Write `need \"{owners[0]}\"{(need.Alias is null ? "" : " as " + need.Alias)}`.",
+                0 => $"No bundle named '{need.Bundle}' is on the search path, so there is no author to " +
+                     "name — check the spelling.",
+                _ => $"Several authors publish '{need.Bundle}' — {string.Join(", ", owners.Select(o => "\"" + o + "\""))} " +
+                     "— and `use` could not tell them apart. Pick one.",
+            };
+
+            _diag.Error("VS0338",
+                $"`use` has been replaced by `need`, which names the author as well as the bundle. {fix}",
+                need.Span);
+            return false;
+        }
+
+        if (Index.Owners.ContainsKey(need.Key)) return true;
+
+        // Not found. If the bundle name exists under a different author, that is almost always the
+        // mistake, and naming the author they meant is more use than listing every bundle on the path.
+        var sameName = Index.Owners.Keys
+                            .Where(k => k.EndsWith("." + need.Bundle, StringComparison.Ordinal))
+                            .OrderBy(k => k, StringComparer.Ordinal).ToList();
+
+        string hint = sameName.Count > 0
+            ? $" A bundle called '{need.Bundle}' does exist, under a different author — " +
+              $"{string.Join(", ", sameName.Select(o => "\"" + o + "\""))}."
+            : Nearest(need.Key, Index.Owners.Keys) is { } near
+                ? $" Did you mean \"{near}\"?"
+                : "";
+
+        _diag.Error("VS0340",
+            $"`need \"{need.Key}\"` names no bundle on the search path.{hint} " +
+            $"Searched: {string.Join(", ", Index.Roots)}.", need.Span);
+        return false;
+    }
+
     private void CheckDuplicateBundles(BundleDecl bundle)
     {
         foreach (var (name, first, second) in Index.Duplicates)
@@ -658,13 +720,12 @@ public sealed class Lower
             : head + "." + string.Join(".", path.Skip(1)) + "." + name;
     }
 
-    /// Resolve a BARE name against the bundles this one `use`s — the whole of what `use` does.
+    /// Resolve a BARE name against the bundles this one `need`s — the widening half of what `need` does.
     ///
-    /// Called only after every local lookup has missed, so a local declaration always wins and no
-    /// existing program can change meaning by this being added. `use` names a bundle, not a publicator,
-    /// so the publicator segment is skipped: index keys are `Author.Bundle[.Publicator].Name`, and a
-    /// match needs the bundle segment and the member to line up. That is the same "qualify only as far
-    /// as you need" rule the `*` matchers already use.
+    /// Called only after every local lookup has missed, so a local declaration always wins. A `need`
+    /// names a bundle, not a publicator, so the publicator segment is skipped: index keys are
+    /// `Author.Bundle[.Publicator].Name`, and a match needs the author, the bundle and the member to
+    /// line up. That is the same "qualify only as far as you need" rule the `*` matchers already use.
     ///
     /// Ambiguity is reported rather than guessed at. It can only arise in code that says `use`, so the
     /// warning cannot reach a program that compiles today.
@@ -674,14 +735,17 @@ public sealed class Lower
         IReadOnlyDictionary<string, T> index, string sigil, string name, SourceSpan span)
         where T : class
     {
-        if (_used.Count == 0) return null;
+        if (_needed.Count == 0) return null;
 
         var hits = new List<(string Key, T Value)>();
         foreach (var kv in index)
         {
             var parts = kv.Key.Split('.');
             if (parts.Length < 3 || !string.Equals(parts[^1], name, StringComparison.Ordinal)) continue;
-            if (_used.Contains(parts[1], StringComparer.Ordinal)) hits.Add((kv.Key, kv.Value));
+            // AUTHOR AND BUNDLE, not the bundle segment alone. Matching on `parts[1]` was how one
+            // author's `Combat` and another's became indistinguishable — both hit, and the ambiguity
+            // warning then resolved the reference to nothing.
+            if (_needed.Contains(parts[0] + "." + parts[1], StringComparer.Ordinal)) hits.Add((kv.Key, kv.Value));
         }
 
         if (hits.Count == 0) return null;
@@ -883,12 +947,15 @@ public sealed class Lower
     /// The closest known name within two edits, so a typo names its own fix. Two rather than three
     /// because at three edits the "suggestion" starts being a different function, and a confident wrong
     /// hint costs more than no hint.
-    private string? Nearest(string name)
+    private string? Nearest(string name) => Nearest(name, PrebuiltArity.Keys.Concat(_localFuncs));
+
+    /// The same rule over an explicit candidate set — bundle names, for `need`.
+    private static string? Nearest(string name, IEnumerable<string> candidates)
     {
         string? best = null;
         int bestDist = 3;
 
-        foreach (string cand in PrebuiltArity.Keys.Concat(_localFuncs))
+        foreach (string cand in candidates)
         {
             int d = Distance(name, cand);
             if (d < bestDist) { bestDist = d; best = cand; }
@@ -1069,21 +1136,8 @@ public sealed class Lower
     {
         var fields = ExpandMembers(e.Members)
             .Select(m => new IrField(m.Name, Ty(m.Type), null, LowerDefault(m.Default))).ToList();
-        // Every event is auto-tagged with its emitter's identity on emit (origin/source).
-        fields.Add(new IrField("origin", IrTypeRef.Of("Entity"), null));
-        fields.Add(new IrField("source", IrTypeRef.Of("Entity"), null));
-
-        // PROVENANCE, declared rather than merely attached. `Interp.Emit` puts a `from` on every payload
-        // — the emitting First-Class object — and programs read it (`d.from.kind`, `d.from.name`). It
-        // was in no declaration anywhere, so the field existed at runtime and nothing described it: a
-        // consumer learned about it by reading Interp.cs, and the C# backend emitted a payload class
-        // WITHOUT it, which is why samples/events.vein and samples/payload.vein did not compile.
-        //
-        // `Interp` also attaches `id`, `cause` and `trail` — the causation chain `veinc events` traces.
-        // Those are deliberately NOT declared: the language offers no way to read them, so they are
-        // tooling metadata rather than part of the payload's program-visible surface. Declaring fields a
-        // backend cannot reproduce would create the silent divergence this whole exercise is closing.
-        fields.Add(new IrField("from", IrTypeRef.Of(ProvenanceType), null));
+        // Every event carries its emitter's identity and its provenance — see AddPayloadTail.
+        AddPayloadTail(fields);
         return new IrType(e.Name, IrTypeKind.Message, fields, Array.Empty<IrEnumCase>(), e.Doc,
             new[] { IrAttr.Of("message"), IrAttr.Of("origin", "auto") });
     }
@@ -1235,12 +1289,32 @@ public sealed class Lower
         }
     }
 
-    private IrType ImportedEvent(string name, List<(string Name, TypeRef? Type, Expr? Default, string? From)> members, string? doc) =>
-        new(name, IrTypeKind.Message,
-            members.Select(m => new IrField(m.Name, Ty(m.Type), null, LowerDefault(m.Default)))
-                   .Append(new IrField("from", IrTypeRef.Of(ProvenanceType), null)).ToList(),
-            Array.Empty<IrEnumCase>(), doc,
+    /// The imported copy of a SHARED event declared in another bundle, so a `hear` here can type its
+    /// payload without that bundle being lowered into this module.
+    ///
+    /// It carries the SAME tail as the real declaration. It used to append only `from`, leaving out
+    /// `origin` and `source`, and the two consequences were both silent until an app was linked: a
+    /// handler here could not read `got.origin`, and `AppLinker.Merge` compared the copy against the
+    /// original, found field counts two apart and rejected the app with VS0332 — "'Collected' is
+    /// declared differently in bundles 'Collectable' and 'KitDemo'", naming the consumer as if it had
+    /// re-declared an event it only listened to. A game that hears five kits got one error per kit and
+    /// no way to act on any of them.
+    private IrType ImportedEvent(string name, List<(string Name, TypeRef? Type, Expr? Default, string? From)> members, string? doc)
+    {
+        var fields = members.Select(m => new IrField(m.Name, Ty(m.Type), null, LowerDefault(m.Default))).ToList();
+        AddPayloadTail(fields);
+        return new IrType(name, IrTypeKind.Message, fields, Array.Empty<IrEnumCase>(), doc,
             new[] { IrAttr.Of("message"), IrAttr.Of("imported") });
+    }
+
+    /// What every event payload carries beyond its own declaration: the emitter's identity, and the
+    /// provenance `Interp.Emit` attaches. One helper because two copies of this list DID drift.
+    private static void AddPayloadTail(List<IrField> fields)
+    {
+        fields.Add(new IrField("origin", IrTypeRef.Of("Entity"), null));
+        fields.Add(new IrField("source", IrTypeRef.Of("Entity"), null));
+        fields.Add(new IrField("from", IrTypeRef.Of(ProvenanceType), null));
+    }
 
     private readonly Dictionary<string, IrType> _importedEvents = new(StringComparer.Ordinal);
 

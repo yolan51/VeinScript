@@ -47,7 +47,7 @@ public static class EventCatalog
             foreach (var d in ds)
                 switch (d)
                 {
-                    case UseDecl u when !names.Contains(u.Name, StringComparer.Ordinal): names.Add(u.Name); break;
+                    case NeedDecl n when !names.Contains(n.Bundle, StringComparer.Ordinal): names.Add(n.Bundle); break;
                     case BundleDecl b: Walk(b.Members); break;
                     case PublicatorDecl p: Walk(p.Members); break;
                 }

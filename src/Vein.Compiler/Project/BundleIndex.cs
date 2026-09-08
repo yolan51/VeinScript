@@ -39,6 +39,11 @@ public sealed class BundleIndex
 
     public required IReadOnlyList<string> Roots { get; init; }
     public required IReadOnlyList<QualifiedSymbol> Symbols { get; init; }
+
+    /// `Author.Bundle` → the file that declares it. The folder indexes always built this; the merged view
+    /// dropped it, so nothing outside could ask the question `need` has to ask — does this bundle EXIST —
+    /// and a misspelled import was silent until each call site failed separately.
+    public required IReadOnlyDictionary<string, string> Owners { get; init; }
     public required IReadOnlyDictionary<string, BuilderDecl> Builders { get; init; }
     public required IReadOnlyDictionary<string, ShapeDecl> Shapes { get; init; }
 
@@ -102,7 +107,7 @@ public sealed class BundleIndex
         var index = new BundleIndex
         {
             Roots = roots, Symbols = symbols, Builders = builders, Shapes = shapes, Marks = marks, Events = events, Functions = functions,
-            Shadowed = shadowed, Duplicates = duplicates
+            Owners = owners, Shadowed = shadowed, Duplicates = duplicates
         };
         _composites[key] = index;
         return index;

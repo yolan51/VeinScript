@@ -21,7 +21,7 @@ public enum TokenKind
     KwFalse, KwFolds, KwFrom, KwHear, KwLet, KwMap, KwMark, KwMute,
     KwNot, KwOn, KwOr, KwPublicator, KwRandom, KwReturn, KwSettled,
     KwSf, KwShape, KwShard, KwShared, KwStart, KwSync, KwTarget, KwTick,
-    KwTo, KwTransform, KwTrue, KwUnattach, KwUnmark, KwUnmute, KwUse,
+    KwTo, KwTransform, KwTrue, KwUnattach, KwUnmark, KwUnmute, KwUse, KwNeed,
     KwVar, KwWhen,
 
     // keywords added in Milestone 2 (see docs/SYNTAX-DECISIONS.md, docs/KEYWORDS.md §2)

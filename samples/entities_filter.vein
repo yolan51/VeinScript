@@ -22,7 +22,7 @@
 
 bundle EntitiesFilter by you {
 
-    use Filter
+    need "Vein.Filter"
 
     shape $Row { title: string, rank: int }
     mark #Row

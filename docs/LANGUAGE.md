@@ -43,7 +43,7 @@ bundle Demo {
 bundle's shards (bundle-wide). Inside a publicator, a `shared("doc")` annotation (on its own line above
 a declaration) marks that one member **public across all bundles** — only `shared` members appear in
 `veinc symbols` and are reachable from another bundle via a `*Author.Bundle.Publicator.@…` reference.
-`shared` outside a publicator is an error. `use N as M` aliases an import (planned).
+`shared` outside a publicator is an error. `need "Author.Bundle" as M` aliases an import: the alias binds the head of a `*M.…` path and does NOT widen bare names (RULES 18b).
 
 **Data vs behaviour.** A publicator holds the shared **data/API** — `shape`s, `event`s, `builder`s. A
 `shard` is the bundle's **behaviour**: it runs when the bundle is loaded and is *not* part of the
@@ -568,10 +568,10 @@ the virtual newline terminator.
 program     = { bundle } EOF ;
 bundle      = "bundle" IDENT "{" { TERM } { decl { TERM } } "}" ;
 
-decl        = useDecl | publicator | shapeDecl | typeDecl | eventDecl
+decl        = needDecl | publicator | shapeDecl | typeDecl | eventDecl
             | shardDecl | funcDecl | varDecl ;
 
-useDecl     = "use" IDENT [ "as" IDENT ] ;
+needDecl    = "need" STRING [ "as" IDENT ] ;      // STRING is "Author.Bundle"
 publicator  = "publicator" IDENT "{" { TERM } { [attr] decl { TERM } } "}" ;
 attr        = "shared" "(" STRING ")" TERM ;
 

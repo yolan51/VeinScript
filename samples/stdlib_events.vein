@@ -27,7 +27,7 @@
 
 bundle StdlibEvents by you {
 
-    use UI
+    need "Vein.UI"
 
     shape $Log { line: string }
     mark #Logged

@@ -41,6 +41,7 @@ public sealed class Lexer
         ["transform"] = TokenKind.KwTransform, ["true"] = TokenKind.KwTrue,
         ["unattach"] = TokenKind.KwUnattach,   ["unmark"] = TokenKind.KwUnmark,
         ["unmute"] = TokenKind.KwUnmute,       ["use"] = TokenKind.KwUse,
+        ["need"] = TokenKind.KwNeed,
         ["var"] = TokenKind.KwVar,             ["when"] = TokenKind.KwWhen,
 
         // Milestone 2 additions (docs/KEYWORDS.md §2). `push` intentionally removed (D4).
