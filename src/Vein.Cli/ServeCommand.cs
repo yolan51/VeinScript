@@ -80,14 +80,14 @@ internal static class ServeCommand
             catch when (stopping.IsSet) { break; }      // Stop() unblocked us — an ordinary shutdown
             catch (Exception ex) { Console.Error.WriteLine($"accept failed: {ex.Message}"); continue; }
 
-            Handle(ctx, module);
+            Handle(ctx, module, projectDir);
         }
 
         Console.Error.WriteLine("stopped.");
         return 0;
     }
 
-    private static void Handle(HttpListenerContext ctx, IrModule module)
+    private static void Handle(HttpListenerContext ctx, IrModule module, string baseDir)
     {
         string requestPath = ctx.Request.Url?.AbsolutePath ?? "/";
         try
@@ -110,7 +110,7 @@ internal static class ServeCommand
                 foreach (var (key, value) in ParseForm(Str(inputs["body"])))
                     inputs[key] = value;
 
-            var result = new Interp().Render(module, requestPath, inputs);
+            var result = new Interp { BaseDirectory = baseDir }.Render(module, requestPath, inputs);
 
             // No @Response is a 404, not a crash: the program simply had nothing to say about this path,
             // which is what an unrouted URL IS.

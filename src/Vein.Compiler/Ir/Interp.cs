@@ -438,6 +438,15 @@ public sealed class Interp
     public void FireTicked(int frame, double delta) =>
         FireDevice("Ticked", ("frame", (long)frame), ("delta", delta));
 
+    /// A track reached its end. Only a NON-LOOPING one ever does, and only the host can know: it owns
+    /// the speaker and the clock, and a program cannot ask how long a file is.
+    ///
+    /// A named entry point beside `FireTicked` rather than a general host-raises-any-event API, because
+    /// that is the bigger question and this is the smaller need. `@SoundEnded` is pure DATA — an
+    /// occurrence and nothing more, like `@Ticked` and `@Collided` — so it is deliberately absent from
+    /// `HostEvents` and the C# backend compiles it like any other event.
+    public void FireSoundEnded(long track) => FireDevice("SoundEnded", ("track", track));
+
     /// One device occurrence, with the provenance envelope every event carries.
     ///
     /// The sender is a registered runtime identity named `device`, the way stdin is registered as
@@ -555,6 +564,29 @@ public sealed class Interp
     // is the same trust `veinc run` already implies, but it is worth naming: nothing here stops a
     // program reading outside its folder.
 
+    /// Where a RELATIVE path in `@ReadFile` / `@WriteFile` is anchored. Null keeps .NET's behaviour —
+    /// the process's current directory — which is what every embedded caller got before this existed.
+    ///
+    /// A GAME IS NOT LAUNCHED FROM A SHELL, and that is the whole reason this is settable. `veinc run`
+    /// makes the shell's folder look like the right answer by accident: run the same program from two
+    /// directories and its saves land in two places, neither of them beside the `.vein` that asked. Once
+    /// a program is opened from an editor or a desktop shortcut the folder is one the author never chose
+    /// and cannot predict — and the failure is silent, because the write SUCCEEDS and `@FileWritten`
+    /// fires. The save is not corrupt; it is somewhere else, and the next run starts a new game.
+    ///
+    /// It also settles an inconsistency with the language's own other kind of path: `$Image { source:
+    /// "art/hero.png" }` means relative to the program in every tool that reads one, so an author who
+    /// writes `"art/hero.png"` and `"saves/auto.save"` in one file has written two strings that look
+    /// identical and mean different folders.
+    public string? BaseDirectory { get; set; }
+
+    /// A relative path against `BaseDirectory`; an absolute one is left exactly as written, because a
+    /// program that computed a full path has already said where it means.
+    private string ResolvePath(string path) =>
+        BaseDirectory is { Length: > 0 } b && !Path.IsPathRooted(path)
+            ? Path.GetFullPath(Path.Combine(b, path))
+            : path;
+
     private void DoReadFile(Dictionary<string, object?> payload)
     {
         string path = Str(payload.GetValueOrDefault("path"));
@@ -565,7 +597,7 @@ public sealed class Interp
 
         try
         {
-            string text = File.ReadAllText(path);
+            string text = File.ReadAllText(ResolvePath(path));
             Emit("FileLoaded", new Dictionary<string, object?>(StringComparer.Ordinal)
             {
                 ["path"] = path,
@@ -604,10 +636,11 @@ public sealed class Interp
             // The folder is created on the way. Writing to `out/report.txt` when `out/` does not exist
             // is a mistake nobody makes on purpose, and the alternative is an error the program has to
             // handle before it can do the thing it asked for.
-            if (Path.GetDirectoryName(Path.GetFullPath(path)) is { Length: > 0 } dir)
+            string full = ResolvePath(path);
+            if (Path.GetDirectoryName(Path.GetFullPath(full)) is { Length: > 0 } dir)
                 Directory.CreateDirectory(dir);
 
-            if (append) File.AppendAllText(path, text); else File.WriteAllText(path, text);
+            if (append) File.AppendAllText(full, text); else File.WriteAllText(full, text);
 
             Emit("FileWritten", new Dictionary<string, object?>(StringComparer.Ordinal)
             {

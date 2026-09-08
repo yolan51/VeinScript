@@ -29,7 +29,7 @@ public class StdlibTests
         new VeinCompilerService().Compile(new CompileRequest("t.vein", src));
 
     public static readonly string[] Bundles =
-        { "Core.vein", "Math.vein", "Transform.vein", "Input.vein", "UI.vein", "Time.vein", "Game.vein", "Web.vein", "WebTheme.vein", "Net.vein", "Diagnostics.vein", "Console.vein" };
+        { "Core.vein", "Math.vein", "Transform.vein", "Input.vein", "UI.vein", "Time.vein", "Game.vein", "Web.vein", "WebTheme.vein", "Net.vein", "Diagnostics.vein", "Console.vein", "Audio.vein", "Files.vein", "Filter.vein", "Rest.vein" };
 
     public static IEnumerable<object[]> BundleFiles => Bundles.Select(b => new object[] { b });
 
@@ -344,5 +344,82 @@ public class StdlibTests
         Assert.True(emitted.Success);
         Assert.Contains("struct View", emitted.Files[0].Contents);
         Assert.Contains("public double width", emitted.Files[0].Contents);
+    }
+
+    // ---- Vein.Audio.Sound.$Track — handover T ------------------------------------------------------
+    //
+    // `@PlaySound` is right for a footstep and wrong for music, and not because it lacks a loop flag: a
+    // sound that HAPPENS is an event, and one that EXISTS is an identity. Music can be stopped, made
+    // quieter, swapped on the way into a cave and put back on the way out, and none of that is sayable
+    // about an event, which leaves nothing to refer to afterwards.
+
+    [Fact]
+    public void A_track_is_an_identity_and_brings_its_own_mark()
+    {
+        // The host never has to mark it: `$Track` brings `#Audible` (RULES 15c), so it is audible from
+        // the frame it is attached — no adoption shard, no frame where a track exists and is silent.
+        var r = CompileSrc("""
+            bundle T by me {
+                need "Vein.Audio"
+                shard Boot { run once {
+                    let t = spawn()
+                    attach $Track to t { source: "cave.ogg", volume: 0.8, looping: true, at: 0.0 }
+                } }
+                shard Show { settled { target $Track #Audible as t {
+                    emit *Vein.Console.Io.@Print { text: t.Track.source + "/" + t.Track.at } } } }
+            }
+            """);
+        Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
+
+        var sw = new StringWriter();
+        new Interp { Ticks = 1 }.Run(r.Modules[0], new StringReader(""), sw);
+
+        Assert.Contains("cave.ogg/0", sw.ToString());
+    }
+
+    [Fact]
+    public void A_track_carries_the_playback_position()
+    {
+        // `at` is in the FIRST version deliberately. Without it there is no pause — unmarking stops a
+        // track and marking it again restarts it — and adding the field later would be VS0332 for
+        // everyone who had already adopted the shape.
+        var track = Assert.Single(Compile(StdFile("Audio.vein")).Modules[0].Types,
+            t => t.Name == "Track" && t.Kind == IrTypeKind.Component);
+
+        Assert.Equal(new[] { "source", "volume", "looping", "at" }, track.Fields.Select(f => f.Name).ToArray());
+    }
+
+    [Fact]
+    public void The_host_can_say_a_track_ended()
+    {
+        // A non-looping track that finishes announces nothing on its own: only the host owns the speaker
+        // and the clock, and a program cannot ask how long a file is. `FireSoundEnded` is the entry
+        // point, beside `FireTicked`.
+        var r = CompileSrc("""
+            bundle T by me {
+                need "Vein.Audio"
+                shard Ended { hear *Vein.Audio.Sound.@SoundEnded as e {
+                    emit *Vein.Console.Io.@Print { text: "ended " + e.track } } }
+            }
+            """);
+        Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
+
+        var sw = new StringWriter();
+        var interp = new Interp { Output = sw };
+
+        interp.Boot(r.Modules[0]);
+        interp.FireSoundEnded(7);
+
+        Assert.Contains("ended 7", sw.ToString());
+    }
+
+    [Fact]
+    public void SoundEnded_is_data_so_the_backend_compiles_it()
+    {
+        // `@PlaySound` is TRANSPORT and stays in HostEvents — compiling it into a queued no-op would
+        // ship a game that is silent. `@SoundEnded` is an occurrence and nothing more, like `@Ticked`,
+        // so it must NOT be in that set or a compiled game could never hear a track finish.
+        Assert.Contains("PlaySound", Interp.HostEvents);
+        Assert.DoesNotContain("SoundEnded", Interp.HostEvents);
     }
 }

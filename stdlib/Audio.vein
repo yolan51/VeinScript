@@ -18,5 +18,39 @@ bundle Audio by Vein {
     publicator Sound {
         shared("Play a sound file once. `source` is a path or asset name the host resolves; `volume` is 0..1.")
         event @PlaySound { source: string, volume: float = 1.0 }
+
+        // A SOUND THAT HAPPENS IS AN EVENT; A SOUND THAT EXISTS IS AN IDENTITY. `@PlaySound` is the
+        // right shape for a footstep, a coin, a door — it occurs and it is over. It is the wrong shape
+        // for music, and not because it lacks a loop flag: music can be stopped, made quieter, swapped
+        // on the way into a cave and put back on the way out, and none of that is sayable about an
+        // event, which leaves nothing to refer to afterwards.
+        //
+        // As a shape it needs no API at all, because it inherits the one the language already has: stop
+        // is `destroy`, silence is `unmark #Audible`, quieter is a write, a fade is a write per frame,
+        // and layered music is two identities. A host reconciles the world against its speaker each
+        // frame, keyed by IDENTITY — so two identities naming one file are two tracks, and one identity
+        // whose `source` changed is a stop and a start.
+        //
+        // HERE RATHER THAN IN A KIT, for the reason `$View` is here (RULES 15b): a shape a HOST reads
+        // has to have one agreed spelling. Two bundles declaring `$Track` differently is VS0332 and an
+        // app that will not link, so a second music kit would collide with the first by existing.
+        //
+        // `at` IS THE PLAYBACK POSITION IN SECONDS, and it is in the first version deliberately.
+        // Without it there is no pause: unmarking stops a track and marking it again restarts it from
+        // the beginning. The host writes `at` as it plays, the way it writes `$View`, and reads it when
+        // a track starts — so a program can put one back where it was. Adding the field later would be
+        // VS0332 for everyone who had already adopted the shape, which is the whole argument for
+        // agreeing a spelling once.
+        shared("A sound that keeps playing until something stops it. Stop is `destroy`; silence is `unmark #Audible`; `at` is where the host has got to, in seconds.")
+        shape $Track { source: string, volume: float = 1.0, looping: bool = false, at: float = 0.0, #Audible }
+
+        shared("Wear this to be heard. Unmark to silence a track without forgetting it.")
+        mark #Audible
+
+        // A non-looping track that reaches its end announces nothing on its own — a host cannot raise an
+        // arbitrary event into a program, only the ones the runtime knows. `Interp.FireSoundEnded` is
+        // that entry point, beside `FireTicked` and the device events.
+        shared("Fact: a track reached its end. Only a non-looping one ever does.")
+        event @SoundEnded { track: Entity }
     }
 }

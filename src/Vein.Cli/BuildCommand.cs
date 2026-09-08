@@ -186,7 +186,12 @@ internal static class BuildCommand
 
         foreach (var m in modules)
         {
-            var interp = ticks > 0 ? new Interp { Ticks = ticks } : new Interp { FrameRate = fps };
+            // A relative `@WriteFile` path is anchored at the EXE, not at wherever the shortcut that
+            // launched it happened to start. A game is not launched from a shell, and a save that lands
+            // in an unpredictable folder is silent: the write succeeds and the next run starts anew.
+            string here = AppContext.BaseDirectory;
+            var interp = ticks > 0 ? new Interp { Ticks = ticks, BaseDirectory = here }
+                                   : new Interp { FrameRate = fps, BaseDirectory = here };
             interp.Run(m, Console.In, Console.Out, messaging: true);
         }
         return 0;

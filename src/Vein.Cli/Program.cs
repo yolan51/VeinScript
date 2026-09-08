@@ -168,7 +168,7 @@ switch (command)
 
             foreach (var module in modules)
             {
-                var result = new Interp { Ticks = ticks }.Render(module, requestPath, inputs);
+                var result = new Interp { Ticks = ticks, BaseDirectory = projectDir }.Render(module, requestPath, inputs);
                 foreach (var line in result.Log) Console.Error.WriteLine($"  · {line}");
                 if (result.Body is not null)
                     Console.WriteLine($"HTTP {result.Status}\n{result.Body}");
@@ -209,12 +209,16 @@ switch (command)
             {
                 // ONE interpreter for the whole app — one handler table and one event queue, which is
                 // exactly what lets a `hear` in a capability bundle see an `emit` from the principal.
-                new Interp { Ticks = ticks }.Run(la.Module, Console.In, Console.Out, messaging: true);
+                // A relative `@WriteFile` path means the PROGRAM's folder, not the shell's — run the same
+                // program from two directories and its saves used to land in two places, neither beside
+                // the `.vein` that asked for them.
+                new Interp { Ticks = ticks, BaseDirectory = projectDir }
+                    .Run(la.Module, Console.In, Console.Out, messaging: true);
             }
             else
             {
                 foreach (var bundle in unit!.Bundles)
-                    new Interp { Ticks = ticks }.Run(new Lower(diagnostics, projectDir).LowerBundle(bundle),
+                    new Interp { Ticks = ticks, BaseDirectory = projectDir }.Run(new Lower(diagnostics, projectDir).LowerBundle(bundle),
                                                      Console.In, Console.Out, messaging: true);
             }
         }
