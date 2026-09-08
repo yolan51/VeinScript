@@ -1,0 +1,106 @@
+// ui_view.vein — laying a HUD out against the edges of a view whose size the program does not know
+// until it asks.
+//
+//   veinc run samples/ui_view.vein --ticks 2
+//
+// In tools/check-backend.sh, because the arithmetic is the whole feature: a widget pinned to the RIGHT
+// edge is `view.width - margin - width`, and if the two runtimes disagree about a float the HUD is in a
+// different place compiled than interpreted — which is exactly the kind of thing nobody notices until a
+// score is half off the screen in a shipped build.
+//
+// THE PROBLEM. `Vein.Math.$Rect` is absolute pixels from the top-left, and until now nothing in the
+// standard library said how wide the surface was. A score in the top-left is fine — it is at (16, 16)
+// on every screen. A timer in the top-RIGHT could not be written at all: the best a program could do
+// was guess a number that is correct at one window size and wrong at every other.
+//
+// WHY A SHAPE AND NOT AN EVENT. `@Resized` would announce a change; it would not answer the question.
+// A game that never resizes would hear nothing and still not know how wide it is, and any shard wanting
+// the width would have had to be listening earlier and stored it. `$View` is an identity the host keeps
+// current, so any shard can ask at any time — the same arrangement a camera already has.
+//
+// `@Print` is reached by its qualified path rather than a `need "Vein.Console"`, because that bundle
+// exports a `spawn` and would shadow the built-in one every line below depends on (VS0217).
+//
+// The host attaches `$View`. This sample attaches it itself, because `veinc run` has no window: that is
+// the one thing here a real host does differently, and it is one `attach` either way.
+
+bundle UiView by you {
+
+    need "Vein.Math"
+    need "Vein.UI"
+
+    mark #Hud
+
+    shard Boot {
+        run once {
+            // Standing in for the host. A real one keeps this current as the window changes.
+            let screen = spawn()
+            attach $View to screen { width: 1280.0, height: 720.0 }
+
+            // Three widgets: one pinned to each top corner, one centred. Their rects are filled in
+            // below, once the view is readable — a `bring` here could only guess.
+            let score = spawn()
+            attach $Text to score { content: "SCORE 0" }
+            attach $Font to score { size: 24.0 }
+            attach $Rect to score { x: 0.0, y: 0.0, width: 160.0, height: 28.0 }
+            mark score #Hud
+
+            let timer = spawn()
+            attach $Text to timer { content: "01:30" }
+            attach $Font to timer { size: 24.0 }
+            attach $Rect to timer { x: 0.0, y: 0.0, width: 96.0, height: 28.0 }
+            mark timer #Hud
+
+            let title = spawn()
+            attach $Text to title { content: "PAUSED" }
+            attach $Font to title { size: 48.0 }
+            attach $Rect to title { x: 0.0, y: 0.0, width: 240.0, height: 56.0 }
+            mark title #Hud
+        }
+    }
+
+    // A structural change commits at the phase boundary (RULES 11/12b), so the layout runs a frame after
+    // the spawn — which is what a real HUD does too: the host attaches `$View` before the first frame,
+    // and the layout reads it on every frame after.
+    shard Layout {
+        settled {
+            target $View as v {
+                target $Text $Rect $Font #Hud as w {
+                    // Pinned by what the widget SAYS it is. `content` is the only thing distinguishing
+                    // these three, which is honest for a sample and is not how a real HUD would do it —
+                    // a real one carries a mark per corner, and that is a kit's job rather than the
+                    // standard library's.
+                    var margin = 16.0
+
+                    if w.Text.content == "SCORE 0" {
+                        w.Rect.x = margin
+                        w.Rect.y = margin
+                    }
+                    if w.Text.content == "01:30" {
+                        // THE LINE THAT COULD NOT BE WRITTEN. Right edge, minus the widget, minus the
+                        // margin — and it is correct at 1280 wide and at any other width.
+                        w.Rect.x = v.View.width - w.Rect.width - margin
+                        w.Rect.y = margin
+                    }
+                    if w.Text.content == "PAUSED" {
+                        w.Rect.x = (v.View.width - w.Rect.width) / 2.0
+                        w.Rect.y = (v.View.height - w.Rect.height) / 2.0
+                    }
+                }
+            }
+        }
+    }
+
+    shard Report {
+        settled {
+            target $View as v {
+                emit *Vein.Console.Io.@Print { text: "view " + v.View.width + "x" + v.View.height }
+            }
+            target $Text $Rect $Font #Hud as w {
+                emit *Vein.Console.Io.@Print {
+                    text: w.Text.content + " at " + w.Rect.x + "," + w.Rect.y + " @" + w.Font.size + "px"
+                }
+            }
+        }
+    }
+}

@@ -508,8 +508,26 @@ public sealed class CSharpBackend : IVeinBackend
         // The fold rule, generated per shape because which fields are `folds sum` is a fact about the
         // declaration. A Sum field accumulates each contribution's DELTA from its own snapshot — the
         // distinction that makes `hp -= 1` from two shards mean `hp − 2` and not `2·hp − 2`.
+        //
+        // ONLY A FIELD THAT CHANGED CONTRIBUTES, and that guard is load-bearing rather than an
+        // optimisation. `EntityStore` contributes the cells in its OVERLAY — the fields a unit actually
+        // wrote — so a `target` that merely reads contributes nothing at all. The backend cannot see
+        // writes: it snapshots the struct, hands the body a copy and contributes the copy back, whether
+        // the body touched it or not. Comparing against the snapshot is how it tells the two apart, and
+        // it is the only thing it can compare.
+        //
+        // Without it a READER clobbers a writer in the same phase. `target $Rect as w { print(w.x) }`
+        // contributed its stale snapshot, the no-reducer arm took the last absolute value, and a layout
+        // shard's write was silently undone — permanently, never converging. `folds sum` was immune
+        // (a reader's delta is zero) which is exactly why every existing sample passed and this went
+        // unseen: `samples/motion.vein` sums, and every other write in the suite happens in `each tick`,
+        // where the phase boundary separates the writer from the reader anyway.
         sb.AppendLine($"    public static {name} Fold({name} committed, List<({name} Snapshot, {name} Current)> contributions)");
         sb.AppendLine("    {");
+        // `First` means the first WRITER wins, so it cannot count loop iterations — a reader that
+        // contributed nothing would otherwise take the slot by being index 0.
+        foreach (var f in t.Fields)
+            if (f.Fold == FoldReducer.First) sb.AppendLine($"        bool __took_{Ident(f.Name)} = false;");
         sb.AppendLine("        for (int i = 0; i < contributions.Count; i++)");
         sb.AppendLine("        {");
         sb.AppendLine("            var snap = contributions[i].Snapshot;");
@@ -517,15 +535,16 @@ public sealed class CSharpBackend : IVeinBackend
         foreach (var f in t.Fields)
         {
             string fn = Ident(f.Name);
+            sb.AppendLine($"            if (cur.{fn} != snap.{fn})");
             sb.AppendLine("            " + (f.Fold switch
             {
-                FoldReducer.Sum => $"committed.{fn} += cur.{fn} - snap.{fn};",
-                FoldReducer.Min => $"if (cur.{fn} < committed.{fn}) committed.{fn} = cur.{fn};",
-                FoldReducer.Max => $"if (cur.{fn} > committed.{fn}) committed.{fn} = cur.{fn};",
-                FoldReducer.First => $"if (i == 0) committed.{fn} = cur.{fn};",
+                FoldReducer.Sum => $"    committed.{fn} += cur.{fn} - snap.{fn};",
+                FoldReducer.Min => $"    {{ if (cur.{fn} < committed.{fn}) committed.{fn} = cur.{fn}; }}",
+                FoldReducer.Max => $"    {{ if (cur.{fn} > committed.{fn}) committed.{fn} = cur.{fn}; }}",
+                FoldReducer.First => $"    {{ if (!__took_{fn}) {{ committed.{fn} = cur.{fn}; __took_{fn} = true; }} }}",
                 // Replace, All, Any and no-fold all take the last writer's absolute value, which is what
                 // a single-writer field means anyway.
-                _ => $"committed.{fn} = cur.{fn};"
+                _ => $"    committed.{fn} = cur.{fn};"
             }));
         }
         sb.AppendLine("        }");

@@ -33,6 +33,38 @@ bundle UI by Vein {
 
         shared("An image element, by source path/url.")
         shape $Image { source: string }
+
+        // HOW BIG THE TEXT IS, and it lives here because every renderer needs it and `$Text` does not
+        // carry it. Left to each consumer, this is a name collision waiting: components unify by bare
+        // name, so one bundle's `$Font { size }` beside another's `$Font { size, face }` is VS0332 the
+        // moment an app links both — and neither author did anything wrong. One declaration removes the
+        // question.
+        //
+        // JUST THE SIZE. A `face` would be a name this host ignores, and a field every renderer ignores
+        // is worse than one that is not there: it reads as a promise. A typeface is also a licensed
+        // asset rather than a value, so naming one in a program is the wrong shape for the problem.
+        // In pixels on the screen; world text scales with the zoom from there.
+        shared("How big a widget's text is, in pixels on the screen.")
+        shape $Font { size: float }
+    }
+
+    // WHAT THE PROGRAM IS BEING DRAWN ON. Maintained by the host, read by the program.
+    publicator Surface {
+        // A SHAPE, NOT AN EVENT, and the difference is the whole point. `$Rect` is absolute pixels from
+        // the top-left, so a score in the top-left needs no arithmetic and a timer in the top-RIGHT
+        // cannot be written at all without knowing the width — the best a program could do was guess a
+        // number that is correct at one window size.
+        //
+        // An `@Resized` event would announce a change; it would not answer the question. A game that
+        // never resizes would hear nothing and still not know how wide it is, and a shard that wants
+        // the width has to have been listening earlier and stored it. An identity carrying `$View` can
+        // be targeted from any shard at any time, which is what "how big is the view" actually needs.
+        // The host keeps it current exactly as it already reads a camera.
+        //
+        // Float, matching `Vein.Math.$Rect`, so laying a widget out against the view edge is arithmetic
+        // rather than a cast.
+        shared("The surface being drawn on, in pixels. The host keeps this current; a program reads it.")
+        shape $View { width: float, height: float }
     }
 
     // Interaction occurrences carry the target Entity, so any bundle can react to a specific widget.

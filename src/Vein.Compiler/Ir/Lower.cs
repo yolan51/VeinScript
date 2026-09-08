@@ -1381,6 +1381,23 @@ public sealed class Lower
                 // compile. Querying a mark nothing sets is legitimate — the query is simply always empty.
                 foreach (var tag in q.Tags) UseMark(tag, q.Span);
 
+                // A SHAPE THIS QUERY READS IS A SHAPE THIS MODULE NEEDS A TYPE FOR, and reading it is
+                // as much a use as attaching it. `RegisterAttachedShape` covered `attach` because that
+                // was the way an imported shape first arrived; a query is the other way, and it is the
+                // one a HOST-provided shape takes.
+                //
+                // `Vein.UI.Surface.$View` is the case that found this. The host attaches it and the
+                // program only ever reads it, so nothing in the program attached anything — the module
+                // carried no `View` component, and a field access resolves to a component only when the
+                // module declares one (Interp.IsComponent). The query MATCHED and `v.View.width` came
+                // back empty: no diagnostic, in either runtime, for a program that looks exactly right.
+                //
+                // It hid because a `.vein` host works by accident: its own bundle attaches the shape, so
+                // its module carries the type and `AppLinker.Merge` folds it into everyone's. A NATIVE
+                // host writing straight to the store has no module to contribute one.
+                foreach (var shape in q.Components) RegisterAttachedShape(shape, q.Span);
+
+
                 // A QUERY NAMES AT LEAST ONE SHAPE. `target #Enemy as e { … }` is marks only, and the
                 // binding it produces can read nothing — there is no component on it, so `e.Anything`
                 // resolves to nothing and the body can only count.

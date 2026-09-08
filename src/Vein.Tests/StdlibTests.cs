@@ -195,4 +195,154 @@ public class StdlibTests
         Assert.True(r.Success);
         Assert.Equal("btn=1", new Interp().Render(r.Modules[0], "/").Body);
     }
+
+    // ---- Vein.UI.Surface.$View and Vein.UI.Widgets.$Font ------------------------------------------
+    //
+    // Both filed from the editor, and both are about a question a program could not ask.
+    //
+    // `$View` is the real one: `$Rect` is absolute pixels from the top-left, so a score in the top-left
+    // was fine and a timer in the top-RIGHT could not be written at all — the best a program could do
+    // was guess a number correct at one window size. A SHAPE rather than an `@Resized` event, because an
+    // event announces a change without answering the question: a game that never resizes would hear
+    // nothing and still not know how wide it is.
+    //
+    // `$Font` was in a kit, which works and is the wrong home. `$Text` carries no size and every
+    // renderer needs one, so leaving it to consumers means one bundle's `$Font { size }` beside
+    // another's `$Font { size, face }` — VS0332 at link time, with neither author at fault.
+
+    [Fact]
+    public void The_view_size_is_a_shape_a_program_can_target()
+    {
+        var r = CompileSrc("""
+            bundle T by me {
+                need "Vein.UI"
+                shard S {
+                    settled {
+                        target $View as v {
+                            emit *Vein.Console.Io.@Print { text: "" + v.View.width }
+                        }
+                    }
+                }
+            }
+            """);
+
+        Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
+        Assert.Contains(r.Modules[0].Types, t => t.Name == "View" && t.Kind == IrTypeKind.Component);
+    }
+
+    [Fact]
+    public void A_widget_can_be_pinned_to_the_right_edge()
+    {
+        // The line that could not be written before. Asserted on the VALUE, not on compiling: an
+        // off-by-one in the arithmetic is exactly the bug that ships and is noticed by a player.
+        var r = CompileSrc("""
+            bundle T by me {
+                need "Vein.Math"
+                need "Vein.UI"
+                mark #Hud
+                shard Boot {
+                    run once {
+                        let screen = spawn()
+                        attach $View to screen { width: 800.0, height: 600.0 }
+                        let w = spawn()
+                        attach $Rect to w { x: 0.0, y: 0.0, width: 96.0, height: 28.0 }
+                        mark w #Hud
+                    }
+                }
+                shard Layout {
+                    settled {
+                        target $View as v {
+                            target $Rect #Hud as w { w.Rect.x = v.View.width - w.Rect.width - 16.0 }
+                        }
+                    }
+                }
+                shard Show {
+                    settled {
+                        target $Rect #Hud as w { emit *Vein.Console.Io.@Print { text: "" + w.Rect.x } }
+                    }
+                }
+            }
+            """);
+        Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
+
+        var sw = new StringWriter();
+        new Interp { Ticks = 2 }.Run(r.Modules[0], new StringReader(""), sw);
+
+        Assert.Contains("688", sw.ToString());      // 800 - 96 - 16
+    }
+
+    [Fact]
+    public void Font_carries_a_size_and_nothing_else()
+    {
+        // Deliberately just the size. A `face` would be a name this host ignores, and a field every
+        // renderer ignores is worse than one that is not there — it reads as a promise.
+        var r = CompileSrc("""
+            bundle T by me {
+                need "Vein.UI"
+                shard S { settled { target $Font as f { emit *Vein.Console.Io.@Print { text: "" + f.Font.size } } } }
+            }
+            """);
+        Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
+
+        var font = Assert.Single(r.Modules[0].Types, t => t.Name == "Font" && t.Kind == IrTypeKind.Component);
+        Assert.Equal(new[] { "size" }, font.Fields.Select(f => f.Name).ToArray());
+    }
+
+    [Fact]
+    public void The_view_matches_Rect_so_layout_needs_no_cast()
+    {
+        // Both float, on purpose: `v.View.width - w.Rect.width` is arithmetic, not a conversion.
+        var r = Compile(StdFile("UI.vein"));
+        var view = Assert.Single(r.Modules[0].Types, t => t.Name == "View");
+
+        Assert.All(view.Fields, f => Assert.Equal("float", f.Type.Name));
+    }
+
+    [Fact]
+    public void A_shape_only_QUERIED_is_still_a_component_this_module_carries()
+    {
+        // THE NATIVE-HOST CASE, and it was silent. `$View` is attached by the host and only ever read by
+        // the program, so nothing in the program attaches anything — the module carried no `View`
+        // component, and a field access resolves to a component only when the module declares one. The
+        // query matched and `v.View.width` came back EMPTY, in both runtimes, with no diagnostic.
+        //
+        // It hid because a `.vein` host works by accident: its own bundle attaches the shape, so its
+        // module carries the type and the linker folds it into everyone's. A native host writing
+        // straight to the store has no module to contribute one — which is exactly how the editor
+        // supplies this shape.
+        var r = CompileSrc("""
+            bundle T by me {
+                need "Vein.UI"
+                shard S {
+                    settled {
+                        target $View as v { emit *Vein.Console.Io.@Print { text: "" + v.View.width } }
+                    }
+                }
+            }
+            """);
+
+        Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
+
+        var view = Assert.Single(r.Modules[0].Types, t => t.Name == "View" && t.Kind == IrTypeKind.Component);
+        Assert.Equal(new[] { "width", "height" }, view.Fields.Select(f => f.Name).ToArray());
+    }
+
+    [Fact]
+    public void The_backend_emits_a_queried_only_component_too()
+    {
+        // The half that decides whether the fix cured a divergence or created one: the C# backend builds
+        // its component types from `module.Types`, so a shape imported for the interpreter and not for
+        // the backend would be a program that reads a field in one runtime and not the other.
+        var r = CompileSrc("""
+            bundle T by me {
+                need "Vein.UI"
+                shard S { settled { target $View as v { emit *Vein.Console.Io.@Print { text: "" + v.View.width } } } }
+            }
+            """);
+        var emitted = new Vein.Compiler.Backends.CSharpBackend().Emit(r.Modules[0]);
+
+        Assert.True(emitted.Success);
+        Assert.Contains("struct View", emitted.Files[0].Contents);
+        Assert.Contains("public double width", emitted.Files[0].Contents);
+    }
 }
