@@ -95,7 +95,20 @@ public sealed record EventDecl(string Name, IReadOnlyList<Node> Members, SourceS
 
 /// A pre-built element/template. Its body is a signature; the output field (markup/code/css) carries
 /// the template and determines the kind. Instantiated with `bring`.
-public sealed record BuilderDecl(string Name, IReadOnlyList<Node> Members, SourceSpan Span) : Decl(Span);
+public sealed record BuilderDecl(string Name, IReadOnlyList<Node> Members, SourceSpan Span) : Decl(Span)
+{
+    /// `builder BigCoin from Coin { value = 5 }` — the builder this one VARIES.
+    ///
+    /// A builder is already a prefab: `bring Coin(3.0, 0.0, 0.0, 1)` is instantiation by argument. What
+    /// was missing is NAMING a set of those arguments, and the only ways to say "a coin worth five" were
+    /// to type it at every call site or to write a second builder repeating the shape list — which
+    /// DUPLICATES the definition instead of deriving from it, so the day the base gains a shape the copy
+    /// silently stops being the same kind of thing.
+    ///
+    /// A variant takes the base's members, fixes some parameters BY NAME, and may add shapes and marks of
+    /// its own. Null for an ordinary builder.
+    public string? Base { get; init; }
+}
 
 // A field or var. Type is null when inferred (`x = 5`). Default set ⇒ optional; null ⇒ required.
 // `Fold` applies only to shape fields. In a builder, a field named markup/code/css is the output.

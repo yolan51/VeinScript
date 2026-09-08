@@ -608,6 +608,143 @@ public sealed class Lower
             br.Span);
     }
 
+    /// `builder BigCoin from Coin { value = 5 }` — flatten a variant into the builder it effectively is.
+    ///
+    /// A builder is already a prefab; what was missing was NAMING a set of its arguments. The two ways to
+    /// say "a coin worth five" were to type it at every call site, or to write a second builder repeating
+    /// the shape list — which DUPLICATES the definition rather than deriving from it, so the day `Coin`
+    /// gains a shape the copy silently stops being a coin and nothing says so.
+    ///
+    /// Returns the base's members followed by the variant's own additions, plus the parameters the
+    /// variant FIXES. Base members come first so the base's positional order is unchanged: a variant adds
+    /// to the end, and existing `bring Coin(…)` call sites keep meaning what they meant.
+    ///
+    /// FIXED BY NAME, NEVER BY POSITION, and that is the whole feature. Fixing slot 4 would break the
+    /// moment the base gained a shape — which is exactly the failure of writing a second builder, brought
+    /// back in a new spelling. A fixed parameter is then not a parameter at all: it consumes no argument,
+    /// so `bring BigCoin(x, y, z)` passes the base's REMAINING slots positionally.
+    private (List<Node> Members, Dictionary<string, Expr> Fixed) FlattenVariant(
+        BuilderDecl b, string? ownerKey, SourceSpan span)
+    {
+        var members = new List<Node>();
+        var fixedArgs = new Dictionary<string, Expr>(StringComparer.Ordinal);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        // The chain, base-most first. A variant of a variant is worth allowing — somebody will write one
+        // — and costs only the visited set that stops a cycle from hanging the compiler.
+        var chain = new List<(BuilderDecl Decl, string? Owner)>();
+        var cur = b;
+        string? curOwner = ownerKey;
+        while (true)
+        {
+            if (!seen.Add(cur.Name))
+            {
+                _diag.Error("VS0239",
+                    $"Builder '{cur.Name}' varies itself, directly or through a chain — " +
+                    $"{string.Join(" from ", chain.Select(c => c.Decl.Name))} from {cur.Name}. " +
+                    "A variant fixes a base's arguments, so the chain has to end somewhere.", span);
+                break;
+            }
+            chain.Add((cur, curOwner));
+            if (cur.Base is not { } baseName) break;
+
+            var found = ResolveBuilderNamed(baseName, curOwner, span);
+            if (found is null)
+            {
+                _diag.Error("VS0238",
+                    $"`builder {cur.Name} from {baseName}` names no builder. A variant fixes the arguments " +
+                    "of a builder that exists — check the spelling, or `need` the bundle that declares it.",
+                    span);
+                break;
+            }
+            (curOwner, cur) = (found.Value.Owner, found.Value.Decl);
+        }
+        chain.Reverse();
+
+        // Base-most members first, each carrying its OWN bundle: a bare `$Prize` inside an imported base
+        // means a shape beside THAT base, not one beside the variant. Qualifying it here is what lets the
+        // whole flattened body lower against the variant's bundle afterwards.
+        foreach (var (decl, owner) in chain)
+            foreach (var m in decl.Members)
+                members.Add(owner is null ? m : Qualify(m, owner));
+
+        // Then the fixes. A field whose name matches a parameter the members above supply is a FIX;
+        // anything else stays an ordinary member and the usual rules apply to it (an output channel makes
+        // a fragment builder, a loose field on an identity template is VS0206).
+        var supplied = ExpandMembers(members, ownerKey: null).Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+        var kept = new List<Node>();
+        foreach (var m in members)
+        {
+            // NEVER the output channel. `markup = "<b>…</b>"` is also a FieldDecl with a default and no
+            // type, and eating it as a "fix" turned every fragment builder into one that emits
+            // `@<BuilderName>` — it stopped being an @Html builder at all.
+            if (m is FieldDecl { Default: { } value } f && f.Type is null
+                && !OutputFields.Contains(f.Name) && supplied.Contains(f.Name))
+            {
+                fixedArgs[f.Name] = value;      // a later variant in the chain overrides an earlier fix
+                continue;
+            }
+            kept.Add(m);
+        }
+
+        foreach (var name in fixedArgs.Keys)
+            if (!supplied.Contains(name))
+                _diag.Warning("VS0240",
+                    $"`{b.Name}` fixes '{name}', which is not a parameter of '{b.Base}'.", span);
+
+        return (kept, fixedArgs);
+    }
+
+    /// A bare `$Shape` include rewritten to name the bundle it belongs to, so the flattened variant no
+    /// longer depends on which bundle is lowering it.
+    private Node Qualify(Node member, string ownerKey)
+    {
+        if (member is not ShapeInclude { Path.Count: 0 } si) return member;
+        if (OwnedShapeKey(ownerKey, si.Shape) is not { } key) return member;
+
+        var parts = key.Split('.');
+        return si with { Path = parts[..^1] };
+    }
+
+    /// The index key of a shape belonging to `ownerKey`'s bundle — `kit.Collectable.Pickups.Prize`.
+    private string? OwnedShapeKey(string ownerKey, string name)
+    {
+        int firstDot = ownerKey.IndexOf('.');
+        int secondDot = firstDot < 0 ? -1 : ownerKey.IndexOf('.', firstDot + 1);
+        if (secondDot < 0) return null;
+        string prefix = ownerKey[..(secondDot + 1)];
+
+        foreach (var kv in Index.Shapes)
+            if (kv.Key.StartsWith(prefix, StringComparison.Ordinal) &&
+                kv.Key.EndsWith("." + name, StringComparison.Ordinal))
+                return kv.Key;
+        return null;
+    }
+
+    /// Look a builder up the way `bring` does: this bundle first, then the bundles it needs.
+    private (BuilderDecl Decl, string? Owner)? ResolveBuilderNamed(string name, string? fromOwner, SourceSpan span)
+    {
+        // A base named inside an IMPORTED builder means one beside it, in its own bundle.
+        if (fromOwner is not null && ResolveOwnedBuilder(fromOwner, name) is { } owned) return owned;
+        if (_builders.TryGetValue(name, out var local)) return (local, null);
+        if (ResolveUsed(Index.Builders, "&", name, span) is { } hit) return (hit.Value, hit.Key);
+        return null;
+    }
+
+    private (BuilderDecl Decl, string? Owner)? ResolveOwnedBuilder(string ownerKey, string name)
+    {
+        int firstDot = ownerKey.IndexOf('.');
+        int secondDot = firstDot < 0 ? -1 : ownerKey.IndexOf('.', firstDot + 1);
+        if (secondDot < 0) return null;
+        string prefix = ownerKey[..(secondDot + 1)];
+
+        foreach (var kv in Index.Builders)
+            if (kv.Key.StartsWith(prefix, StringComparison.Ordinal) &&
+                kv.Key.EndsWith("." + name, StringComparison.Ordinal))
+                return (kv.Value, kv.Key);
+        return null;
+    }
+
     /// Whether a builder constructs an IDENTITY rather than emitting a fragment or an event.
     ///
     /// A `mark` member says so outright (RULES 5). A shape that BRINGS marks says the same thing, and has
@@ -1569,7 +1706,8 @@ public sealed class Lower
     /// Arguments bind positionally across the includes in declaration order — `$Health` takes hp, then
     /// `$Shield` takes sp — which is the same rule that flattens includes into a fragment builder's
     /// parameter list, just grouped back into one `attach` per shape.
-    private IrStmt LowerIdentityBring(BringStmt br, BuilderDecl b, string? ownerKey)
+    private IrStmt LowerIdentityBring(BringStmt br, BuilderDecl b, string? ownerKey,
+                                      IReadOnlyDictionary<string, Expr>? fixedArgs = null)
     {
         var stmts = new List<IrStmt>();
 
@@ -1589,7 +1727,10 @@ public sealed class Lower
         // only evaluates — and so only bumps the depth — when there is no name.
         // The identity path walks members rather than computing a parameter list, so the arity check
         // needs the list built for it — the same expansion the fragment path already does.
-        CheckTooFewArgs(br, b.Name, ExpandMembers(b.Members.Where(m => m is not MarkMember), ownerKey));
+        // A FIXED parameter consumes no argument, so it is not a slot the call has to fill.
+        CheckTooFewArgs(br, b.Name,
+            ExpandMembers(b.Members.Where(m => m is not MarkMember), ownerKey)
+                .Where(p => fixedArgs is null || !fixedArgs.ContainsKey(p.Name)).ToList());
 
         bool generated = br.Bind is null;
         string ent = br.Bind ?? ("__ent" + _identityDepth++);
@@ -1623,6 +1764,15 @@ public sealed class Lower
                     var init = new List<(string, IrExpr)>();
                     foreach (var f in take)
                     {
+                        // A FIXED parameter takes the variant's value and consumes NO argument slot —
+                        // which is what makes `bring BigCoin(x, y, z)` pass the base's remaining slots
+                        // positionally rather than shifting every one of them by however many the variant
+                        // happened to fix.
+                        if (fixedArgs is not null && fixedArgs.TryGetValue(f.Name, out var pinned))
+                        {
+                            init.Add((f.Name, LowerExpr(pinned)));
+                            continue;
+                        }
                         IrExpr value = BindArg(arg < br.Args.Count ? br.Args[arg] : null,
                                                f.Default, f.Type, br.FillRest, b.Name, f.Name);
                         arg++;
@@ -1785,7 +1935,22 @@ public sealed class Lower
         //     attach $Health to e { hp: 10 }
         //     attach $Shield to e { sp: 6 }
         //     mark e #Unit
-        if (BuildsIdentity(b, ownerKey)) return LowerIdentityBring(br, b, ownerKey);
+        // A VARIANT — `builder BigCoin from Coin { value = 5 }` — is flattened into the builder it
+        // effectively is before anything else looks at it, so every rule below applies to a variant
+        // exactly as it does to a builder written out by hand. That is the point: a variant that took a
+        // different code path would drift from the thing it varies.
+        IReadOnlyDictionary<string, Expr>? fixedArgs = null;
+        if (b.Base is not null)
+        {
+            var (members, pinned) = FlattenVariant(b, ownerKey, br.Span);
+            b = b with { Members = members, Base = null };
+            fixedArgs = pinned;
+            // The flattened body carries the base's includes already qualified, so it lowers against
+            // THIS bundle regardless of where the base came from.
+            ownerKey = null;
+        }
+
+        if (BuildsIdentity(b, ownerKey)) return LowerIdentityBring(br, b, ownerKey, fixedArgs);
 
         // Not an identity template. If it is also a builder whose event has nowhere to go, say so —
         // otherwise this line runs, does nothing, and reports nothing.
@@ -1812,16 +1977,29 @@ public sealed class Lower
 
         // Parameters = every member except the (optional) output channel field, with $Shape includes expanded.
         var prms = ExpandMembers(b.Members.Where(m => !ReferenceEquals(m, output)), ownerKey);
-        if (!br.FillRest && br.Args.Count > prms.Count)
-            _diag.Error("VS0204", $"Builder '{b.Name}' takes {prms.Count} param(s), got {br.Args.Count}.", br.Span);
-        CheckTooFewArgs(br, b.Name, prms);
+
+        // A FIXED parameter is not a slot the caller fills, here as on the identity path — a variant of a
+        // fragment builder (`builder Warning from Card { note = "careful" }`) is as ordinary as a variant
+        // of an identity template, and counting its fixed parameters as arguments reported VS0228 for a
+        // call that was complete and then emitted the fragment with the field left empty.
+        var callable = fixedArgs is null ? prms : prms.Where(p => !fixedArgs.ContainsKey(p.Name)).ToList();
+        if (!br.FillRest && br.Args.Count > callable.Count)
+            _diag.Error("VS0204", $"Builder '{b.Name}' takes {callable.Count} param(s), got {br.Args.Count}.", br.Span);
+        CheckTooFewArgs(br, b.Name, callable);
 
         var stmts = new List<IrStmt>();
+        int fragArg = 0;
         for (int i = 0; i < prms.Count; i++)
         {
             var (name, type, def, _) = prms[i];
-            IrExpr value = BindArg(i < br.Args.Count ? br.Args[i] : null, def, type,
+            if (fixedArgs is not null && fixedArgs.TryGetValue(name, out var pinned))
+            {
+                stmts.Add(new IrLet(name, null, LowerExpr(pinned), false));
+                continue;
+            }
+            IrExpr value = BindArg(fragArg < br.Args.Count ? br.Args[fragArg] : null, def, type,
                                    br.FillRest, b.Name, name);
+            fragArg++;
             stmts.Add(new IrLet(name, null, value, false));
         }
 

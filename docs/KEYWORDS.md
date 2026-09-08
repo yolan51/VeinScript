@@ -58,7 +58,7 @@ dialect. There is no general `class`.
 | `mark` (declaration) | `mark #Enemy` at bundle/publicator level | DECLARES the mark, so the name is checked rather than merely typed. Opt-in per bundle: declare one and an undeclared mark used there is **VS0218**; declare none and nothing changes. [LANGUAGE.md §3.6](LANGUAGE.md) | an `IrTypeKind.Tag`, emitted used or not |
 | `mark` (in a `builder`) | `mark #T` | no target — the marks the identity this builder BUILDS will wear. Its presence is what makes the builder an **identity template**: `bring Unit(10, 6)` spawns, attaches each included `$Shape`, then marks. [LANGUAGE.md §3.9](LANGUAGE.md) | `spawn` + `AddComponent`… + `AddTag`… |
 | `attach` `unattach` | `attach $C to self { … }` | add / remove a component | `AddComponent` / `RemoveComponent` |
-| `to` `from` | (with attach/unattach) | component target / source | operands |
+| `to` `from` | (with attach/unattach) · `builder V from Base` | component target / source; a builder VARIANT's base (rule 7c) | operands |
 | `emit` | `emit @E { … }` | send a message | `Emit(E{…})` |
 | `hear` | `hear @E as evt { … }` | react to a message | handler registration |
 | `destroy` | `destroy self` | remove an identity | `DestroyEntity(self)` |

@@ -58,6 +58,7 @@ choosing a name; do not count entries by line, because the table holds two per l
 | `code` | an `@Script` fragment |
 | `line` | an `@Print` line |
 | a `mark` member | an **identity** (see rule 7) |
+| *(inherited)* | whatever `from Base` builds (rule 7c) |
 | *(none of the above)* | emits `@<BuilderName>` carrying all its params |
 
 **6. Therefore `markup`, `css`, `code` and `line` cannot be parameter names.** A builder written
@@ -81,6 +82,19 @@ spawns lives in a local the program never sees, so anything that must REFER to i
 `spawn`/`attach`/`mark`. `as` fixes that, and means what it means in `target … as self`. Only an
 identity template can be bound — `as` on a fragment builder is **VS0221** — and a count cannot be
 combined with it (**VS0222**), since the name would bind only the last one.
+
+**7c. `builder BigCoin from Coin { value = 5 }` — a VARIANT fixes a base's arguments by name.** A builder
+is already a prefab, so what a variant adds is *naming* a set of its arguments. It takes the base's
+members, may add shapes and marks of its own, and inherits the base's marks — or it would not be the same
+kind of thing, and a shard reacting to coins would miss it. A chain is allowed (`GoldCoin from BigCoin`)
+and a cycle is **VS0239**; an unknown base is **VS0238**.
+
+**BY NAME, and a fixed parameter is then not a parameter at all** — it consumes no argument, so
+`bring BigCoin(x, y, z, sound)` passes four where the base takes five and the rest still bind in order.
+Fixing by position would break the moment the base gained a shape, which is exactly the failure of the
+alternative: writing a second builder that repeats the shape list duplicates the definition instead of
+deriving from it, so the day `Coin` gains a shape the copy silently stops being a coin. `veinc scaffold`
+and the editor's `?` list only the remaining parameters, because they flatten a variant the same way.
 
 **8. A `$Shape` include is a COMPILE-TIME field expansion, and `bring` attaches nothing.** The include
 copies the shape's fields into the signature; it does not make the built thing carry the component. So:

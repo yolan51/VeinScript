@@ -525,10 +525,12 @@ public sealed class Parser
     private BuilderDecl ParseBuilder()
     {
         var s = Here; Advance();
-        // `builder Name { members }` — same body as an event; the output field (markup/code/css)
-        // carries the template and determines the kind.
+        // `builder Name [from Base] { members }` — same body as an event; the output field
+        // (markup/code/css) carries the template and determines the kind. `from Base` makes this a
+        // VARIANT: it takes the base's members and fixes some of its parameters by name.
         string name = Expect(TokenKind.Ident, "builder name").Text;
-        return new BuilderDecl(name, ParseSigBody(), s);
+        string? bass = Match(TokenKind.KwFrom) ? Expect(TokenKind.Ident, "base builder name").Text : null;
+        return new BuilderDecl(name, ParseSigBody(), s) { Base = bass };
     }
 
     private ViewDecl ParseView()

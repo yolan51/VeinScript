@@ -1,0 +1,74 @@
+// builder_variants.vein — "a big coin is a coin worth five", said once instead of at every call site.
+//
+//   veinc run samples/builder_variants.vein --ticks 2
+//
+// In tools/check-backend.sh, because a variant is a LOWERING: it flattens into the builder it
+// effectively is, and if the two runtimes flattened it differently a level of two hundred coins would
+// be built differently compiled than interpreted.
+//
+// THE PROBLEM. A builder is already a prefab — `bring Coin(3.0, 0.0, 0.0, 1, "ping.wav")` is
+// instantiation by argument, which is the whole of what a prefab does. What was missing is NAMING a set
+// of those arguments. The two ways to say "a coin worth five" were:
+//
+//   1. Type it at every call site. That is what a level of two hundred coins looks like in a diff the
+//      day somebody changes the sound file.
+//   2. Write a second builder repeating the shape list with a different default — which DUPLICATES the
+//      definition rather than deriving from it. The day `Coin` gains a shape, the copy silently stops
+//      being a coin, and nothing says so.
+//
+// A builder cannot call a builder: a builder body is a signature, not statements, so there is no
+// expression position a `bring` could appear in. `from` is the answer instead.
+//
+// FIXED BY NAME, NEVER BY POSITION. Fixing "slot 4" would break the moment the base gained a shape,
+// which is failure 2 above wearing a new spelling. And a fixed parameter is then not a parameter at
+// all — it consumes no argument, so the remaining slots still bind positionally and in order.
+
+bundle BuilderVariants by you {
+
+    shape $Position { x: float, y: float, z: float }
+    shape $Prize { value: int, sound: string }
+
+    mark #Coin
+    mark #Shiny
+
+    // The base. Everything below derives from it, so a shape added HERE reaches all of them.
+    builder Coin { $Position   $Prize   mark #Coin }
+
+    // A variant fixes one parameter by name. `sound` is untouched, so `bring BigCoin(x, y, z, sound)`
+    // passes four arguments where the base takes five — the fixed slot is simply not there.
+    builder BigCoin from Coin { value = 5 }
+
+    // A variant of a variant: allowed, because somebody will write one. It inherits `value = 5`,
+    // fixes `sound` as well, and ADDS a mark of its own — which is what makes it a variant rather
+    // than an alias.
+    builder GoldCoin from BigCoin { sound = "gold.wav"   mark #Shiny }
+
+    shard Boot {
+        run once {
+            bring Coin(1.0, 0.0, 0.0, 1, "ping.wav")   // the base, all five
+            bring BigCoin(2.0, 0.0, 0.0, "ping.wav")   // four: value is fixed
+            bring GoldCoin(3.0, 0.0, 0.0)              // three: value and sound are both fixed
+        }
+    }
+
+    // Every one of them is a `#Coin`, because a variant inherits the base's marks — or it would not be
+    // the same kind of thing, and a shard that reacts to coins would quietly miss two thirds of them.
+    shard Show {
+        settled {
+            target $Position $Prize #Coin as c {
+                emit *Vein.Console.Io.@Print {
+                    text: "coin at x=" + c.Position.x + " worth " + c.Prize.value + " goes " + c.Prize.sound
+                }
+            }
+        }
+    }
+
+    // …and only the one that added `#Shiny` carries it.
+    shard Shine {
+        settled {
+            var shiny = 0
+            target $Prize #Shiny as s { shiny = shiny + 1 }
+            emit *Vein.Console.Io.@Print { text: "shiny coins: " + shiny }
+        }
+    }
+}

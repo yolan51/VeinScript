@@ -240,6 +240,60 @@ public static class EventCatalog
         var uses = index is null ? new List<string>() : Uses(unit);
         var shapes = ShapesInScope(unit, index, uses);
         var shapeMarks = ShapeMarksInScope(unit, index, uses);
+
+        // Every builder reachable by a BARE name, so a variant can find the base it names. `Builders`
+        // walks declarations; a variant needs a lookup, and it needs the needed bundles too because the
+        // interesting variant is a game's local tweak of a kit's prefab.
+        var byName = new Dictionary<string, BuilderDecl>(StringComparer.Ordinal);
+        void Collect(IEnumerable<Decl> ds)
+        {
+            foreach (var d in ds)
+                switch (d)
+                {
+                    case BuilderDecl bd: byName[bd.Name] = bd; break;
+                    case BundleDecl b: Collect(b.Members); break;
+                    case PublicatorDecl p: Collect(p.Members); break;
+                }
+        }
+        Collect(unit.Bundles);
+        if (index is not null)
+            foreach (var kv in FromUsed(index.Builders, uses))
+            {
+                string bare = kv.Key[(kv.Key.LastIndexOf('.') + 1)..];
+                if (!byName.ContainsKey(bare)) byName[bare] = kv.Value;   // local wins
+            }
+
+        /// A variant's effective members and the parameters it fixes — the tooling's copy of
+        /// `Lower.FlattenVariant`, and it has to agree with it: `bring BigCoin ?` scaffolds the
+        /// REMAINING parameters, so a tooling that did not know `value` was fixed would offer a slot the
+        /// compiler does not have and the palette would place a coin with its arguments shifted by one.
+        (List<Node> Members, HashSet<string> Fixed) Flatten(BuilderDecl bd)
+        {
+            var chain = new List<BuilderDecl>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            for (var cur = bd; cur is not null && seen.Add(cur.Name);)
+            {
+                chain.Add(cur);
+                cur = cur.Base is { } bn && byName.TryGetValue(bn, out var nx) ? nx : null;
+            }
+            chain.Reverse();
+
+            var all = chain.SelectMany(c => c.Members).ToList();
+            var supplied = Sig.Expand(all, shapes).Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+            var fixedNames = new HashSet<string>(StringComparer.Ordinal);
+            var kept = new List<Node>();
+            foreach (var m in all)
+            {
+                // Never the output channel — `markup = "…"` is a FieldDecl with a default and no type
+                // too, and eating it stops the builder being an @Html one (see Lower.FlattenVariant).
+                if (m is FieldDecl { Default: not null, Type: null } f
+                    && f.Name is not ("markup" or "code" or "css" or "line") && supplied.Contains(f.Name))
+                { fixedNames.Add(f.Name); continue; }
+                kept.Add(m);
+            }
+            return (kept, fixedNames);
+        }
+
         var list = new List<BuilderEntry>();
         void Walk(IEnumerable<Decl> decls)
         {
@@ -266,22 +320,31 @@ public static class EventCatalog
 
         BuilderEntry Entry(BuilderDecl bd, string name)
         {
-            var output = bd.Members.OfType<FieldDecl>()
+            // A variant is the builder it effectively is: the base's members, minus what it fixes, plus
+            // its own additions. Flattened here for the same reason `Lower` flattens it — every rule
+            // below should apply to a variant exactly as to a builder written out by hand.
+            var (members, fixedNames) = Flatten(bd);
+
+            var output = members.OfType<FieldDecl>()
                 .FirstOrDefault(f => f.Name is "markup" or "code" or "css" or "line");
 
             // The builder's own `mark` lines, THEN the marks its shapes bring (RULES 15c). Both are
             // applied by `bring`, so both belong here — and the count below decides whether this builds
             // an identity at all, which is why missing the second kind hid whole builders from the
             // editor. `Lower.BuildsIdentity` draws the same line for the same reason.
-            var marks = bd.Members.OfType<MarkMember>().SelectMany(m => m.Marks).ToList();
-            foreach (var si in bd.Members.OfType<ShapeInclude>())
+            var marks = members.OfType<MarkMember>().SelectMany(m => m.Marks).ToList();
+            foreach (var si in members.OfType<ShapeInclude>())
                 if (shapeMarks.TryGetValue(si.Shape, out var brought))
                     foreach (var mk in brought)
                         if (!marks.Contains(mk, StringComparer.Ordinal)) marks.Add(mk);
 
-            var fields = Sig.Expand(bd.Members.Where(m => !ReferenceEquals(m, output)).ToList(), shapes)
+            // A FIXED parameter is not a slot the caller fills, so it is not in the list `?` scaffolds
+            // and not one the palette shows.
+            var fields = Sig.Expand(members.Where(m => !ReferenceEquals(m, output)).ToList(), shapes)
+                .Where(f => !fixedNames.Contains(f.Name))
                 .Select(f => new EventField(f.Name, f.Type, f.Required, f.Default, f.OriginShape))
                 .ToList();
+
             return new BuilderEntry(name, bd.Shared, fields, marks,
                 marks.Count > 0 ? "an identity" : output?.Name switch
                 {

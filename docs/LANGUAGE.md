@@ -391,6 +391,25 @@ error (**VS0206**): it would consume an argument and put it nowhere. A template 
 and **no** `mark` keeps the old meaning — it emits `@<BuilderName>` — so this changed no existing
 program.
 
+**Variants — `builder BigCoin from Coin { value = 5 }`.** A builder is already a prefab: `bring` is
+instantiation by argument. A variant NAMES a set of those arguments. It takes the base's members, may add
+shapes and marks of its own, and inherits the base's marks.
+
+```
+builder Coin    { $Position $Prize   mark #Coin }     // (x, y, z, value, sound)
+builder BigCoin from Coin { value = 5 }               // (x, y, z, sound)
+builder GoldCoin from BigCoin { sound = "gold.wav"   mark #Shiny }   // (x, y, z)
+```
+
+A parameter is fixed **by name**, and is then not a parameter at all: it consumes no argument, so the
+remaining slots still bind positionally and in order. Fixing by position would break the moment the base
+gained a shape — which is exactly the failure of the alternative, writing a second builder that repeats
+the shape list: that duplicates the definition instead of deriving from it, so the day `Coin` gains a
+shape the copy silently stops being a coin and nothing says so.
+
+Chains are allowed and a later variant may override an earlier fix. A cycle is **VS0239**; a base that
+names no builder is **VS0238**. `veinc scaffold` lists only the remaining parameters.
+
 ---
 
 ## 4. Behavior: `shard`
