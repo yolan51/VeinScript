@@ -1553,11 +1553,86 @@ public sealed class CSharpBackend : IVeinBackend
         sb.AppendLine("            else if (args[i].StartsWith(\"--ticks=\")) int.TryParse(args[i].Substring(8), out ticks);");
         sb.AppendLine();
         sb.AppendLine("        var world = new VeinWorld();");
+
+        // THE TRANSFORM HIERARCHY, emitted only when this program has one. The interpreter composes in
+        // `Interp.ComposeWorld`; this is the same rule in generated code, and it has to be, or a parented
+        // game is drawn and collides differently compiled than interpreted — the exact divergence the
+        // backend check exists to catch.
+        if (_components.Contains("Position") && _components.Contains("World"))
+            sb.AppendLine("        world.Compose = () => __Compose(world);");
+
         foreach (var s in module.Shards)
             sb.AppendLine($"        world.Register(new {ShardIdent(s)}());");
         sb.AppendLine("        world.Start();");
         sb.AppendLine("        world.Run(ticks);");
         sb.AppendLine("    }");
+
+        if (_components.Contains("Position") && _components.Contains("World")) EmitCompose(sb);
+
         sb.AppendLine("}");
+    }
+
+    /// `$World = $Position + the parent's $World`, depth-first with a memo, cycles kept local.
+    ///
+    /// Mirrors `Interp.ComposeWorld` line for line on purpose. The two runtimes disagreeing here would
+    /// not look like a bug: the renderer composes correctly either way, so a crate is DRAWN where it
+    /// belongs and simply fails to collide with what it is visibly touching.
+    private void EmitCompose(StringBuilder sb)
+    {
+        bool hasParent = _components.Contains("Parent");
+
+        sb.AppendLine();
+        sb.AppendLine("    // The transform hierarchy (RULES 13c). Generated because this program declares $World.");
+        sb.AppendLine("    private static void __Compose(VeinWorld world)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        var done = new Dictionary<int, (double X, double Y, double Z)>();");
+        sb.AppendLine("        var state = new Dictionary<int, int>();");
+        sb.AppendLine("        var stack = new List<int>();");
+        sb.AppendLine();
+        sb.AppendLine("        (double, double, double) Local(int e)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            var p = world.Get<Position>(e);");
+        sb.AppendLine("            return (p.x, p.y, p.z);");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+        sb.AppendLine("        (double X, double Y, double Z) Resolve(int e)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            if (done.TryGetValue(e, out var got)) return got;");
+        sb.AppendLine("            if (state.TryGetValue(e, out int s) && s == 1)");
+        sb.AppendLine("            {");
+        sb.AppendLine("                // A cycle: everything from here to the top of the stack keeps its own position.");
+        sb.AppendLine("                for (int i = stack.LastIndexOf(e); i >= 0 && i < stack.Count; i++)");
+        sb.AppendLine("                { done[stack[i]] = Local(stack[i]); state[stack[i]] = 2; }");
+        sb.AppendLine("                return done[e];");
+        sb.AppendLine("            }");
+        sb.AppendLine();
+        sb.AppendLine("            state[e] = 1;");
+        sb.AppendLine("            stack.Add(e);");
+        sb.AppendLine("            var r = Local(e);");
+        if (hasParent)
+        {
+            sb.AppendLine("            if (world.Has<Parent>(e))");
+            sb.AppendLine("            {");
+            sb.AppendLine("                int up = (int)world.Get<Parent>(e).of;");
+            sb.AppendLine("                if (up != 0 && up != e && world.Has<Position>(up))");
+            sb.AppendLine("                {");
+            sb.AppendLine("                    var p = Resolve(up);");
+            sb.AppendLine("                    if (done.TryGetValue(e, out var settled)) { stack.RemoveAt(stack.Count - 1); return settled; }");
+            sb.AppendLine("                    r = (r.Item1 + p.X, r.Item2 + p.Y, r.Item3 + p.Z);");
+            sb.AppendLine("                }");
+            sb.AppendLine("            }");
+        }
+        sb.AppendLine("            stack.RemoveAt(stack.Count - 1);");
+        sb.AppendLine("            state[e] = 2;");
+        sb.AppendLine("            done[e] = (r.Item1, r.Item2, r.Item3);");
+        sb.AppendLine("            return done[e];");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+        sb.AppendLine("        foreach (int e in world.Query<Position>())");
+        sb.AppendLine("        {");
+        sb.AppendLine("            var w = Resolve(e);");
+        sb.AppendLine("            world.Publish(e, new World { x = w.X, y = w.Y, z = w.Z });");
+        sb.AppendLine("        }");
+        sb.AppendLine("    }");
     }
 }

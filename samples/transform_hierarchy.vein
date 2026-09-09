@@ -1,0 +1,82 @@
+// transform_hierarchy.vein — a crate rides a platform, a bolt rides the crate.
+//
+//   veinc run samples/transform_hierarchy.vein --ticks 3
+//
+// In tools/check-backend.sh, and this one is not optional. The two runtimes compose the hierarchy in
+// two completely different places — `Interp.ComposeWorld` walks a name-keyed store, the C# backend
+// EMITS a `__Compose` over typed structs — and if they ever disagree it will not look like a bug: the
+// renderer composes correctly either way, so a crate is DRAWN exactly where it belongs and simply fails
+// to collide with what it is visibly touching. A game that looks right and collides wrong is the worst
+// failure this project has a name for, and a frame-for-frame diff is the only thing that catches it.
+//
+// THE RULE (RULES 13c). An identity carrying `*Vein.Core.Relations.$Parent` has its `$Position` read as
+// LOCAL to that parent. The runtime composes the chain and publishes `$World`.
+//
+//   $Position  — what the PROGRAM writes. Local when parented, absolute otherwise.
+//   $World     — what the RUNTIME writes, every phase, before `settled` runs. A program reads it.
+//
+// WHY TWO SHAPES RATHER THAN COMPOSING IN PLACE. Because a composed position only the renderer can see
+// is worse than none. Three lines of any collision kit:
+//
+//     target $Position $Collider as a { target $Position $Collider as b { let dx = b.Position.x - … } }
+//
+// If a parented crate's `$Position` were local, that subtraction compares a local against an absolute.
+// It does not fault, it does not warn, and nothing in the picture looks wrong. Keeping `$Position` as
+// the program's own value and giving the composed one a NAME means a shard that wants world coordinates
+// asks for them, and one that does not is unaffected.
+//
+// AND `$World` IS ON EVERY POSITIONED IDENTITY, parented or not — `free` below proves it. Publishing it
+// only for children would make every kit that reads it need a fallback, and a conditional migration is
+// where the silent bugs live.
+
+bundle TransformHierarchy by you {
+
+    need "Vein.Transform"
+    need "Vein.Core"
+
+    mark #Thing
+    mark #Platform
+
+    shard Boot {
+        run once {
+            // The platform starts at 10 and moves. Everything above it is expressed as an OFFSET and
+            // never touched again — which is the whole point: no shard rewrites a child's position.
+            let platform = spawn()
+            attach $Position to platform { x: 10.0, y: 0.0, z: 0.0 }
+            mark platform #Thing
+            mark platform #Platform
+
+            let crate = spawn()
+            attach $Position to crate { x: 2.0, y: 0.0, z: 0.0 }
+            attach $Parent to crate { of: platform }
+            mark crate #Thing
+
+            // Two deep. A chain composes parents-first, so the bolt is platform + crate + bolt.
+            let bolt = spawn()
+            attach $Position to bolt { x: 0.5, y: 0.0, z: 0.0 }
+            attach $Parent to bolt { of: crate }
+            mark bolt #Thing
+
+            // Unparented, and it still has a `$World` — equal to its `$Position`.
+            let free = spawn()
+            attach $Position to free { x: 7.0, y: 0.0, z: 0.0 }
+            mark free #Thing
+        }
+    }
+
+    // Only the platform is ever moved. The crate and the bolt follow because of what `$Parent` MEANS,
+    // not because anything writes to them.
+    shard Drive {
+        each tick {
+            target $Position #Platform as p { p.Position.x = p.Position.x + 5.0 }
+        }
+    }
+
+    shard Show {
+        settled {
+            target $Position $World #Thing as t {
+                emit *Vein.Console.Io.@Print { text: "local " + t.Position.x + "  world " + t.World.x }
+            }
+        }
+    }
+}

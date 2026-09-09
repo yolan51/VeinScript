@@ -159,6 +159,29 @@ Deriving a quantity fresh means zeroing it first; the fold will not. And a child
 component — `c.Parent.of.Deck.count += 1` — because an entity plus a component name is a handle, which
 is how `samples/entities_tree.vein` aggregates without the parent holding a list of children.
 
+**13c. `$Parent` makes a `$Position` LOCAL, and the runtime publishes `$World`.** An identity carrying
+`*Vein.Core.Relations.$Parent` has its position read as an offset from that parent; the runtime composes
+the chain — parents first, each chain once — and writes `*Vein.Transform.Spatial.$World`. A crate on a
+platform is written once as an offset and never touched again.
+
+| | written by | means |
+|---|---|---|
+| `$Position` | the PROGRAM | local when parented, absolute otherwise |
+| `$World` | the RUNTIME, every phase | where the identity actually is |
+
+**Two shapes, not one composed in place, and that is the load-bearing part.** A collision pass is
+`target $Position $Collider as a { target $Position $Collider as b { b.Position.x - a.Position.x } }`.
+If a parented identity's `$Position` were silently composed, that subtraction compares a local against an
+absolute — and it does not fault, does not warn, and does not look wrong, because the renderer composes
+correctly and the crate is *drawn* where it belongs while failing to collide with what it is visibly
+touching. Anything reading world coordinates asks for `$World` by name.
+
+**`$World` is on every positioned identity**, parented or not — an unparented one's equals its
+`$Position` — so a kit reads it unconditionally. Composition runs after the tick commits and **before
+`settled`**, which is where collision reads: composing later is a one-frame lag, invisible at 60fps and
+wrong at every speed. A cycle leaves every identity in it at its own position and reports once; a parent
+that was destroyed leaves the child where it is.
+
 **14. `target` binds ONE shape per loop, and nothing can ask an identity which shapes it carries.**
 Several shapes are an AND (`target $A $B`). There is no dispatch — a heterogeneous ordered sequence
 cannot be rebuilt by query, which is why `/docs` in `samples/web_app` renders from a literal sequence and

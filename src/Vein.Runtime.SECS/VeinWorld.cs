@@ -97,6 +97,23 @@ public sealed class VeinWorld
     public void Detach<T>(int entity) where T : struct, IVeinComponent<T> =>
         Defer(() => { _secs.Remove<T>(entity); _structuralVersion++; });
 
+    /// A component the RUNTIME owns, written straight through — NOT deferred.
+    ///
+    /// `Attach` is deferred like every other structural change, which is right for a program: no unit in
+    /// a phase should see a world another half-changed. Composition is not a unit and not a program: it
+    /// runs BETWEEN phases, and the whole reason it runs there is so `settled` reads the result. Going
+    /// through `Attach` put `$World` in one commit late, so a parented crate's world position was a frame
+    /// behind — which the backend check caught as a one-line-shifted diff, and which in a real game is a
+    /// child that lags its parent by exactly one frame at every speed.
+    ///
+    /// The interpreter's `EntityStore.Publish` is the same thing for the same reason.
+    public void Publish<T>(int entity, T component) where T : struct, IVeinComponent<T>
+    {
+        bool isNew = !_secs.Has<T>(entity);
+        _secs.Add(entity, component);
+        if (isNew) { _structuralVersion++; Of<T>().Touch(entity); }
+    }
+
     public bool Has<T>(int entity) where T : struct, IVeinComponent<T> => _secs.Has<T>(entity);
     public T Get<T>(int entity) where T : struct, IVeinComponent<T> => _secs.Get<T>(entity);
 
@@ -280,10 +297,24 @@ public sealed class VeinWorld
     public void Register(VeinSystem system) { system.Attach(this); _systems.Add(system); system.Subscribe(); }
 
     /// `run once` builds the world before anything else, so a query in a later phase finds it.
+    /// The transform hierarchy's composition pass, when the program has one (RULES 13c).
+    ///
+    /// A hook rather than a `VeinSystem`, because it has to run BETWEEN the tick commit and `settled` and
+    /// a system has no such phase. That ordering is the point: collision runs in `settled` precisely
+    /// because positions are written during the tick and reconciled at its end, so composing after it
+    /// would hand every collision pass a stale `$World` — a one-frame lag, invisible at 60fps and wrong
+    /// at every speed.
+    ///
+    /// Set by generated code, which is the only thing that knows whether `Position`, `Parent` and
+    /// `World` exist as types in this program. Null for a program with no positions, which then pays
+    /// nothing.
+    public Action? Compose;
+
     public void Start()
     {
         foreach (var s in _systems) s.Once();
         Commit();
+        Compose?.Invoke();   // so the first `settled` reads a composed world
         Drain();   // Interp: RunOnce() then Drain() — events raised at boot are handled before frame 1
     }
 
@@ -295,6 +326,7 @@ public sealed class VeinWorld
     {
         foreach (var s in _systems) s.Tick();
         Commit();
+        Compose?.Invoke();   // between the tick commit and `settled` — see the field
         foreach (var s in _systems) s.Settled();
         Commit();
         Drain();   // Interp.Frame: events from either phase are handled against a settled world

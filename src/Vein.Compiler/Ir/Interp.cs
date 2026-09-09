@@ -688,6 +688,7 @@ public sealed class Interp
     {
         RunPhase("once");
         CommitPhase();
+        ComposeWorld();   // so the first `settled` reads a composed world, not a half-built one
     }
 
     private void RunFrames() { for (int i = 0; i < Ticks; i++) Frame(); }
@@ -882,6 +883,13 @@ public sealed class Interp
             RunPhase("tick");
             RunPhase("frame");
             CommitPhase();
+
+            // BEFORE `settled`, and that ordering is the whole of why this is not a host job. Collision
+            // runs in `settled` precisely because positions are written during the tick and reconciled
+            // at its end, so composing after it would hand every collision pass a stale `$World` — a
+            // one-frame lag, invisible at 60fps and wrong at every speed.
+            ComposeWorld();
+
             RunPhase("settled");
             CommitPhase();
             Drain();           // events emitted by either phase are handled against a settled world
@@ -982,6 +990,125 @@ public sealed class Interp
     /// The one point in a phase where the world changes: the fold reducers reconcile every activation's
     /// contributions first, then the structural commands (mark/attach/destroy) queued during the phase
     /// apply on top of the reconciled state.
+    // ---- the transform hierarchy (RULES 13c) -------------------------------------------------------
+    //
+    // `$Parent { of: Entity }` has existed in `Vein.Core.Relations` since the beginning and meant nothing
+    // to anything: every `$Position` was absolute, and a kit that wanted a child to follow its parent
+    // rewrote the child's absolute position every tick at O(children x parents).
+    //
+    // Now: an identity carrying `$Parent` has its `$Position` read as LOCAL to that parent, and the
+    // runtime publishes the composed result as `$World`.
+    //
+    // WHY A SECOND SHAPE RATHER THAN COMPOSING IN PLACE. A composed position the HOST can see is not
+    // enough, and the counter-example is three lines of any collision kit:
+    //
+    //     target $Position $Collider as a { target $Position $Collider as b { let dx = b.Position.x - … } }
+    //
+    // If a parented crate's `$Position` were local, that subtraction compares a LOCAL against an
+    // ABSOLUTE. It does not fault and it does not look wrong — the renderer composes correctly, so the
+    // crate is DRAWN exactly where it belongs and simply fails to collide with what it is visibly
+    // touching. A game that looks right and collides wrong is the worst failure this project has a name
+    // for. So the program keeps writing `$Position` and every shard that wants a world value reads
+    // `$World`, which is a name it can see.
+    //
+    // AND `$World` EXISTS ON EVERY POSITIONED IDENTITY, parented or not. Publishing it only for children
+    // would mean every kit reading it needed a fallback, and a conditional migration is where the silent
+    // bugs live. An unparented identity's `$World` is simply its `$Position`.
+    private void ComposeWorld()
+    {
+        if (!_store.Declared("Position") || !_store.Declared("World")) return;
+
+        var positioned = _store.Query(PositionOnly, NoTags, null, null);
+        if (positioned.Length == 0) return;
+
+        // Depth-first with memo, so a chain is composed once however many children hang off it. The
+        // explicit stack is what lets a CYCLE be handled properly rather than merely detected: on
+        // finding an identity that is already being resolved, everything from it to the top of the stack
+        // IS the loop, and all of them fall back to their local position together. Breaking only at the
+        // point of detection leaves the rest of the loop composed against a half-answer — `a` parented
+        // to `b` parented to `a` came out at 4 and 3 rather than at 1 and 2.
+        var world = new Dictionary<long, (double X, double Y, double Z)>();
+        var state = new Dictionary<long, int>();
+        var stack = new List<long>();
+
+        (double X, double Y, double Z) Local(long e) =>
+            (Num(_store.Read(e, "Position", "x")),
+             Num(_store.Read(e, "Position", "y")),
+             Num(_store.Read(e, "Position", "z")));
+
+        (double X, double Y, double Z) Resolve(long e)
+        {
+            if (world.TryGetValue(e, out var done)) return done;
+
+            if (state.TryGetValue(e, out int s) && s == 1)
+            {
+                // A CYCLE. Reported once per identity for the life of the run, and every identity in the
+                // loop keeps its own position — a cycle is an authoring mistake, and moving things to
+                // some arbitrary partial sum hides it where leaving them still shows it.
+                int at = stack.LastIndexOf(e);
+                for (int i = at; i >= 0 && i < stack.Count; i++)
+                {
+                    long member = stack[i];
+                    world[member] = Local(member);
+                    state[member] = 2;
+                    if (_cycleReported.Add(member))
+                        Fault?.Invoke(new InterpFault(_tick, _bundle, "compose", member,
+                            new InvalidOperationException(
+                                $"identity {member} is its own ancestor through $Parent — the chain cannot be " +
+                                "composed, so it keeps its local position. Break the loop.")));
+                }
+                return world[e];
+            }
+
+            state[e] = 1;
+            stack.Add(e);
+            var result = Local(e);
+
+            if (_store.Has(e, "Parent") && _store.Read(e, "Parent", "of") is { } raw)
+            {
+                long parent = raw switch { long l => l, int i => i, double d => (long)d, _ => 0 };
+
+                // A parent that no longer exists, or one with no position of its own: the child keeps its
+                // own position and stops being moved. That is what a detach means, and it is what the
+                // kit this replaces already did deliberately.
+                if (parent != 0 && parent != e && _store.IsAlive(parent) && _store.Has(parent, "Position"))
+                {
+                    var p = Resolve(parent);
+                    // The recursion may have resolved THIS identity as part of a cycle, in which case its
+                    // answer is already decided and adding a parent's on top would undo it.
+                    if (world.TryGetValue(e, out var settled)) { stack.RemoveAt(stack.Count - 1); return settled; }
+                    var local = result;
+                    result = (local.X + p.X, local.Y + p.Y, local.Z + p.Z);
+                }
+            }
+
+            stack.RemoveAt(stack.Count - 1);
+            state[e] = 2;
+            world[e] = result;
+            return result;
+        }
+
+        foreach (long e in positioned)
+        {
+            var w = Resolve(e);
+            if (!_store.Has(e, "World")) _store.AddComponent(e, "World");
+            _store.Publish(e, "World", "x", w.X);
+            _store.Publish(e, "World", "y", w.Y);
+            _store.Publish(e, "World", "z", w.Z);
+        }
+    }
+
+    private static readonly string[] PositionOnly = { "Position" };
+    private static readonly string[] NoTags = Array.Empty<string>();
+
+    /// Cycles already reported, so a loop is named once rather than once per frame for the life of the run.
+    private readonly HashSet<long> _cycleReported = new();
+
+    private static double Num(object? v) => v switch
+    {
+        double d => d, long l => l, int i => i, float f => f, _ => 0.0
+    };
+
     private void CommitPhase()
     {
         _store.Commit();

@@ -115,9 +115,29 @@ public sealed class EntityStore
         if (init is not null) foreach (var (k, v) in init) row[k] = v;
     }
 
+    /// A field the RUNTIME owns, written straight to the committed store.
+    ///
+    /// Not `Write`, and the difference is the point: `Write` is a CONTRIBUTION — it opens an overlay, is
+    /// reconciled by the folds and competes with whatever else wrote that cell this phase. Composition
+    /// is not competing with anything; it is publishing a fact the program asked to be told, the way a
+    /// host publishes `$View`. Routing it through the fold machinery would also make `$World` show up as
+    /// a contribution in a frame the program never wrote, which is exactly the sort of ghost that makes
+    /// a fold rule impossible to reason about.
+    public void Publish(long entity, string shape, string field, object? value)
+    {
+        if (!_alive.Contains(entity)) return;
+        var table = Table(shape);
+        if (!table.TryGetValue(entity, out var row)) table[entity] = row = new Dictionary<string, object?>(StringComparer.Ordinal);
+        row[field] = value;
+    }
+
     public void RemoveComponent(long entity, string shape) => Table(shape).Remove(entity);
 
     public bool Has(long entity, string shape) => _components.TryGetValue(shape, out var t) && t.ContainsKey(entity);
+
+    /// Whether the MODULE declares this component at all. The composition pass asks before doing any
+    /// work: a program with no `$Position` has no hierarchy to compose, and should pay nothing for one.
+    public bool Declared(string shape) => _types.ContainsKey(shape);
 
     public void AddTag(long entity, string mark) { if (_alive.Contains(entity)) Tag(mark).Add(entity); }
 

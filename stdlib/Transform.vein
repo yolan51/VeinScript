@@ -12,6 +12,21 @@ bundle Transform by Vein {
         shared("Euler rotation (radians).")
         shape $Rotation { x: float, y: float, z: float }
 
+        // WHERE AN IDENTITY ACTUALLY IS, after its parents. Written by the RUNTIME every phase, before
+        // `settled` runs; a program reads it and never writes it. `$Position` stays what the PROGRAM
+        // writes — local when the identity carries `*Vein.Core.Relations.$Parent`, absolute otherwise.
+        //
+        // Two shapes rather than composing `$Position` in place, because a composed position only the
+        // renderer can see is worse than none: a collision pass subtracting one parented identity's
+        // local from another's absolute does not fault and does not look wrong. The crate is DRAWN
+        // where it belongs and fails to collide with what it is visibly touching.
+        //
+        // Present on EVERY positioned identity, parented or not — an unparented one's `$World` is its
+        // `$Position`. Publishing it only for children would make every kit that reads it need a
+        // fallback, and a conditional migration is where the silent bugs live.
+        shared("Where an identity actually is, after its parents. Written by the runtime; a program reads it.")
+        shape $World { x: float, y: float, z: float }
+
         shared("Non-uniform scale.")
         shape $Scale { x: float, y: float, z: float }
 
