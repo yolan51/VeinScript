@@ -800,6 +800,25 @@ public sealed class Interp
     /// One unit of user code that ran: which tick, whose block, what kind, and the event that caused it.
     public sealed record TraceEvent(int Tick, string Owner, string Kind, string? Event);
 
+    /// What one unit COST: the same identification as a TraceEvent, plus how long it took and how many
+    /// activations it made — one per identity a `target` inside it visited.
+    ///
+    /// Both numbers, because either alone misleads. Milliseconds say what the frame is spending; an
+    /// activation count says whether a shard is slow or merely busy, and the two want different fixes —
+    /// a slow one is a body to look at, a busy one is a query to narrow. The measured cost of a visit is
+    /// a few microseconds, so a shard walking ten thousand tiles is expensive without a single
+    /// questionable line in it.
+    public readonly record struct UnitCost(int Tick, string Owner, string Kind, double Milliseconds, long Activations);
+
+    /// Called after each unit, when a host is measuring. Null in an ordinary run, and the timing work
+    /// is skipped entirely when it is — a Stopwatch per unit is cheap but not free, and a profiler that
+    /// changes the number it reports is not a profiler.
+    ///
+    /// A hook rather than an accumulator on `Interp`, matching `Trace`: what a profiler wants to keep,
+    /// how it wants to bucket it, and how long it wants to remember are all the host's questions.
+    public Action<UnitCost>? Timed;
+
+
     /// Set to record execution. Null in an ordinary run, and the cost is then one null check per block.
     public Action<TraceEvent>? Trace;
 
@@ -826,6 +845,11 @@ public sealed class Interp
 
     /// Which tick is running. `Frame` advances it, so a trace line can say when it happened.
     private int _tick;
+
+    /// Activations since the run began — one per identity a `target` body visited. A running total
+    /// rather than a per-unit counter because units nest: a `hear` handler inside a schedule block is
+    /// its own unit, and a difference across the call is the only number that stays right when they do.
+    private long _activations;
     public int Tick => _tick;
 
     /// Boot the world and settle it, WITHOUT running any frames — the state a stepper starts from.
@@ -903,6 +927,15 @@ public sealed class Interp
         // sets it to build the timeline.
         Trace?.Invoke(new TraceEvent(_tick, owner.Name, what, _current is null ? null : Str(_current.GetValueOrDefault("__event"))));
 
+        // MEASURED ONLY WHEN SOMEONE IS MEASURING. The same choke point answers "what did this cost",
+        // which is the question a profiler asks and the one nothing could answer before — the frame
+        // budget was known and where it went was not. A Stopwatch per unit is cheap and not free, so an
+        // unmeasured run allocates none and reads no clock.
+        bool measuring = Timed is not null;
+        long startedAt = measuring ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+        long startedActivations = _activations;
+
+
         try { Exec(body, owner, locals); }
         catch (ReturnSignal) { /* a `return` that escaped its fn — the block simply ends */ }
         // A `break`/`continue` written outside any loop. It means nothing, and ending the block is the
@@ -931,6 +964,15 @@ public sealed class Interp
                 ["severity"] = 2L, ["message"] = $"{where}: {ex.Message}",
                 ["origin"] = null, ["bundle"] = _bundle,
             });
+        }
+        finally
+        {
+            // A unit that FAULTED still cost time, and a profiler that quietly omitted it would report a
+            // frame whose parts do not add up to its whole — which is the one thing a profiler must not do.
+            if (measuring)
+                Timed!.Invoke(new UnitCost(_tick, owner.Name, what,
+                    (System.Diagnostics.Stopwatch.GetTimestamp() - startedAt) * 1000.0 / System.Diagnostics.Stopwatch.Frequency,
+                    _activations - startedActivations));
         }
     }
 
@@ -1252,6 +1294,7 @@ public sealed class Interp
                         _targetBinds.Add(entity);
                         if (lp.Var is not null) locals[lp.Var] = entity;
 
+                        _activations++;
                         _store.BeginActivation();
                         bool more;
                         try { more = Iterate(lp.Body, self, locals); }

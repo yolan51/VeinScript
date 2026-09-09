@@ -217,4 +217,58 @@ public class BuilderVariantTests
 
         Assert.Equal("@Html", Assert.Single(EventCatalog.Builders(unit), b => b.Name == "Card").Generates);
     }
+
+    // ---- R: a variant should SAY that it is one -----------------------------------------------------
+
+    /// The `BuilderEntry` for `name`, from a bundle whose base `Coin` takes (x, y, z, value, sound).
+    private static BuilderEntry Entry(string extra, string name)
+    {
+        var diag = new DiagnosticBag();
+        var src = Bundle(extra, "    bring Coin(1.0, 0.0, 0.0, 1, \"p\")");
+        var unit = new Parser(new Lexer(src, "t.vein", diag).Tokenize(), diag).ParseUnit();
+        return Assert.Single(EventCatalog.Builders(unit), b => b.Name == name);
+    }
+
+    [Fact]
+    public void A_variant_reports_the_builder_it_varies_and_what_it_fixed()
+    {
+        // `Fields` alone is correct and enough to PLACE a variant — which is why the editor needed no
+        // changes to support one — but a palette showing `Coin` and `BigCoin` side by side can only tell
+        // them apart by one asking for fewer arguments, which reads as an unrelated builder with a
+        // similar name. Base + Fixed is the sentence: "BigCoin: a Coin with value 5".
+        var e = Entry("  builder BigCoin from Coin { value = 5 }", "BigCoin");
+
+        Assert.Equal("Coin", e.Base);
+        Assert.Equal("5", e.Fixed["value"]);
+    }
+
+    [Fact]
+    public void The_base_of_a_chain_is_the_one_it_ends_at()
+    {
+        // `GoldCoin from BigCoin from Coin` IS a Coin, which is what a palette wants to say.
+        var e = Entry("  builder BigCoin from Coin { value = 5 }\n" +
+                      "  builder GoldCoin from BigCoin { sound = \"gold.wav\" }", "GoldCoin");
+
+        Assert.Equal("Coin", e.Base);
+        Assert.Equal(2, e.Fixed.Count);      // `value` inherited from BigCoin, `sound` its own
+    }
+
+    [Fact]
+    public void An_ordinary_builder_reports_no_base_and_no_fixes()
+    {
+        var e = Entry("  builder BigCoin from Coin { value = 5 }", "Coin");
+
+        Assert.Null(e.Base);
+        Assert.Empty(e.Fixed);
+    }
+
+    [Fact]
+    public void What_is_fixed_is_exactly_what_is_missing_from_the_parameters()
+    {
+        // The two halves have to agree, or the sentence contradicts the form beside it.
+        var e = Entry("  builder BigCoin from Coin { value = 5 }", "BigCoin");
+
+        Assert.DoesNotContain(e.Fields, f => e.Fixed.ContainsKey(f.Name));
+        Assert.Equal(new[] { "x", "y", "z", "sound" }, e.Fields.Select(f => f.Name).ToArray());
+    }
 }

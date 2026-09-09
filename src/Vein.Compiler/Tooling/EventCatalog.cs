@@ -15,7 +15,22 @@ public sealed record EventEntry(string Name, bool Shared, IReadOnlyList<EventFie
 /// binds positionally and `?` fills), the marks it applies, and what bringing it produces.
 public sealed record BuilderEntry(
     string Name, bool Shared, IReadOnlyList<EventField> Fields,
-    IReadOnlyList<string> Marks, string Generates);
+    IReadOnlyList<string> Marks, string Generates)
+{
+    /// The builder this one VARIES (`builder BigCoin from Coin { value = 5 }`), or null for an ordinary
+    /// one. `Fields` is already the flattened, remaining list — correct, and enough to PLACE a variant
+    /// but not to say what it is.
+    ///
+    /// A palette showing `Coin` and `BigCoin` side by side can only distinguish them by one asking for
+    /// fewer arguments, which reads as an unrelated builder with a similar name. With the base and the
+    /// fixes it can write the sentence that makes a variant obvious: "BigCoin: a Coin with value 5".
+    public string? Base { get; init; }
+
+    /// What the variant fixed, by parameter name, rendered as written. Empty for an ordinary builder.
+    /// These are exactly the parameters ABSENT from `Fields`, which is the other half of the sentence.
+    public IReadOnlyDictionary<string, string> Fixed { get; init; } =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+}
 
 public static class EventCatalog
 {
@@ -267,7 +282,7 @@ public static class EventCatalog
         /// `Lower.FlattenVariant`, and it has to agree with it: `bring BigCoin ?` scaffolds the
         /// REMAINING parameters, so a tooling that did not know `value` was fixed would offer a slot the
         /// compiler does not have and the palette would place a coin with its arguments shifted by one.
-        (List<Node> Members, HashSet<string> Fixed) Flatten(BuilderDecl bd)
+        (List<Node> Members, Dictionary<string, string> Fixed, string? Base) Flatten(BuilderDecl bd)
         {
             var chain = new List<BuilderDecl>();
             var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -280,7 +295,7 @@ public static class EventCatalog
 
             var all = chain.SelectMany(c => c.Members).ToList();
             var supplied = Sig.Expand(all, shapes).Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
-            var fixedNames = new HashSet<string>(StringComparer.Ordinal);
+            var fixedNames = new Dictionary<string, string>(StringComparer.Ordinal);
             var kept = new List<Node>();
             foreach (var m in all)
             {
@@ -288,10 +303,12 @@ public static class EventCatalog
                 // too, and eating it stops the builder being an @Html one (see Lower.FlattenVariant).
                 if (m is FieldDecl { Default: not null, Type: null } f
                     && f.Name is not ("markup" or "code" or "css" or "line") && supplied.Contains(f.Name))
-                { fixedNames.Add(f.Name); continue; }
+                { fixedNames[f.Name] = Sig.DefaultText(f.Default) ?? ""; continue; }
                 kept.Add(m);
             }
-            return (kept, fixedNames);
+            // The base is the one the chain ENDS at — `GoldCoin from BigCoin from Coin` is a Coin, which is
+            // the sentence a palette wants to write.
+            return (kept, fixedNames, chain.Count > 1 ? chain[0].Name : null);
         }
 
         var list = new List<BuilderEntry>();
@@ -323,7 +340,7 @@ public static class EventCatalog
             // A variant is the builder it effectively is: the base's members, minus what it fixes, plus
             // its own additions. Flattened here for the same reason `Lower` flattens it — every rule
             // below should apply to a variant exactly as to a builder written out by hand.
-            var (members, fixedNames) = Flatten(bd);
+            var (members, fixedNames, baseName) = Flatten(bd);
 
             var output = members.OfType<FieldDecl>()
                 .FirstOrDefault(f => f.Name is "markup" or "code" or "css" or "line");
@@ -341,7 +358,7 @@ public static class EventCatalog
             // A FIXED parameter is not a slot the caller fills, so it is not in the list `?` scaffolds
             // and not one the palette shows.
             var fields = Sig.Expand(members.Where(m => !ReferenceEquals(m, output)).ToList(), shapes)
-                .Where(f => !fixedNames.Contains(f.Name))
+                .Where(f => !fixedNames.ContainsKey(f.Name))
                 .Select(f => new EventField(f.Name, f.Type, f.Required, f.Default, f.OriginShape))
                 .ToList();
 
@@ -350,7 +367,8 @@ public static class EventCatalog
                 {
                     "code" => "@Script", "css" => "@Style", "line" => "@Print",
                     "markup" => "@Html", _ => "@" + name
-                });
+                })
+            { Base = baseName, Fixed = fixedNames };
         }
     }
 
