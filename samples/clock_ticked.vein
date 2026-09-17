@@ -1,0 +1,52 @@
+// clock_ticked.vein — a game that moves on the CLOCK rather than on `each tick`.
+//
+//   veinc run samples/clock_ticked.vein --ticks 3
+//
+// In tools/check-backend.sh, because the two runtimes fire this event from two different places —
+// `Interp.RunFrames` calls `FireTicked` directly, the C# backend wires `world.Ticked` to an emit of a
+// generated payload type — and a game that moves on the clock moving differently compiled is not a
+// difference anybody would spot in a screenshot.
+//
+// THE BUG THIS PINS. `@Ticked` used to be the WALL CLOCK's alone: a built exe with a real frame loop
+// fired it, and `veinc run --ticks N` did not. So N frames ran, N `each tick` blocks ran, and every
+// `hear @Ticked` ran zero times — a game booted under the compiler's own runner and did nothing, with
+// no diagnostic, because nothing was wrong with it. Every game written against the clock was affected,
+// which is most of them, and they were being tested through a host that fires the event instead —
+// keeping the whole set out of the differential check that would have caught it.
+//
+// `each tick` and `@Ticked` are not alternatives. A tick block is THIS bundle's frame work; the event
+// is a fact about the world that any bundle can hear, which is how a kit reacts to a frame in a game
+// it was not written for.
+
+bundle ClockTicked by you {
+
+    need "Vein.Time"
+
+    shape $Odometer { frames: int, seconds: float }
+    mark #Odometer
+
+    builder Odometer { $Odometer   mark #Odometer }
+
+    shard Boot { run once { bring Odometer(0, 0.0) } }
+
+    // Driven by the event, not by `each tick`. The delta is the runtime's, so the accumulated time is
+    // the frame count times the step and a test can assert it exactly.
+    shard Advance {
+        hear *Vein.Time.Clock.@Ticked as t {
+            target $Odometer #Odometer as o {
+                o.Odometer.frames = t.frame
+                o.Odometer.seconds = o.Odometer.seconds + t.delta
+            }
+        }
+    }
+
+    shard Report {
+        settled {
+            target $Odometer #Odometer as o {
+                emit *Vein.Console.Io.@Print {
+                    text: "frame " + o.Odometer.frames + " at " + *Vein.Math.Round.roundTo(o.Odometer.seconds, 4) + "s"
+                }
+            }
+        }
+    }
+}

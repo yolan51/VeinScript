@@ -140,6 +140,23 @@ public class NeedResolutionTests
 
         Assert.Equal("found 7", Run(src, ticks: 1).Trim());
 
+        // AND IT NO LONGER WARNS, which is the change this rule needed. The built-in won, the call got
+        // what it asked for, and saying so at every `spawn()` meant a game with one debug `@Print` could
+        // not be warning-free — noise at that volume teaches people to stop reading diagnostics.
+        Assert.Empty(Warnings(src, "VS0217"));
+    }
+
+    [Fact]
+    public void A_call_that_cannot_be_the_built_in_is_still_reported()
+    {
+        // The signal that survives, and the bug VS0217 was actually written for: built-in `spawn()`
+        // takes no arguments and `*Vein.Console.Io.spawn` takes two, so a two-argument call is somebody
+        // reaching for the console launcher and silently getting the entity one.
+        const string src =
+            "bundle T by me {\n" +
+            "  need \"Vein.Console\"\n  mark #Screen2\n" +
+            "  shard S { run once { spawn(#Screen2, \"second\") } }\n}";
+
         var hits = Warnings(src, "VS0217").ToList();
         Assert.Single(hits);
         Assert.Contains("Vein.Console.Io.spawn", hits[0].Message);

@@ -24,6 +24,10 @@ public sealed class Lower
     /// wherever the shape is attached and the declaring bundle is usually not this one.
     private readonly Dictionary<string, List<string>> _shapeMarks = new(StringComparer.Ordinal);
 
+    /// Enum cases by the enum's BARE name — `State` → Kickoff, Play, Over — whether it was declared at
+    /// bundle level or inside a shape, because both are written `State.Kickoff` at the use site.
+    private readonly Dictionary<string, IReadOnlyList<string>> _enums = new(StringComparer.Ordinal);
+
     // Shared functions pulled in from another bundle by a qualified call, keyed by their mangled name.
     // Appended to the module so the interpreter can dispatch them like any local function.
     private readonly Dictionary<string, IrFunction> _imported = new(StringComparer.Ordinal);
@@ -157,9 +161,13 @@ public sealed class Lower
                     case ShapeDecl s:
                         _shapeFields[s.Name] = s.Members.OfType<FieldDecl>().ToList();
                         if (ShapeMarksOf(s) is { Count: > 0 } sm) _shapeMarks[s.Name] = sm;
+                        // An enum nested in a shape is written `State.Kickoff` at the use site, not
+                        // `Match.State.Kickoff` — the shape scopes the TYPE name, not the spelling.
+                        foreach (var en in s.Members.OfType<EnumDecl>()) _enums[en.Name] = en.Cases;
                         break;
                     case EventDecl ed: _events[ed.Name] = ed; break;
                     case FuncDecl fd: _localFuncs.Add(fd.Name); _funcDecls[fd.Name] = fd; break;
+                    case EnumDecl ed2: _enums[ed2.Name] = ed2.Cases; break;
                     case MarkDecl md: _declaredMarks.Add(md.Name); break;
                     // `use X` widens bare names; `use X as Y` does not — it binds the alias for `*Y.…`
                     // paths instead. One or the other, never both.
@@ -2095,6 +2103,32 @@ public sealed class Lower
             case ShapeRefExpr sr: return new IrTypeNameExpr(sr.Name);
             case EventRefExpr er: return new IrTypeNameExpr(er.Name);
             case MarkRefExpr mr: UseMark(mr.Name, mr.Span); return new IrTypeNameExpr(mr.Name);
+            // AN ENUM CASE IS ITS OWN NAME. `State.Kickoff` used to lower as a field access on a name
+            // that resolves to nothing, so it evaluated to EMPTY — which made every case equal to every
+            // other (`state == State.Kickoff` and `state == State.Over` both true), printed as nothing,
+            // and matched no `when` arm. A state machine could not be written with the feature that
+            // exists for writing one, and the workaround was to store the string and match bare names.
+            //
+            // The name is exactly what the rest of the language already agrees a case IS: `ExecMatch`
+            // compares an arm to `Str(subject)`, so a case that evaluates to its own name is equal to
+            // itself, unequal to its siblings, printable, and what `when Kickoff` matches — all four of
+            // the things the request asked for, from one change.
+            //
+            // A TARGET BINDING WINS, checked first: `m.Match.state` has `m` as its receiver, and an enum
+            // must never capture a name the query already bound.
+            case MemberExpr { Receiver: NameExpr en } mex
+                when !IsTargetBind(en.Name) && _enums.TryGetValue(en.Name, out var cases):
+            {
+                if (!cases.Contains(mex.Name, StringComparer.Ordinal))
+                {
+                    _diag.Error("VS0242",
+                        $"'{en.Name}' has no case '{mex.Name}'. It declares {string.Join(", ", cases)}.",
+                        mex.Span);
+                    return new IrLiteral("", IrLiteralKind.String);
+                }
+                return new IrLiteral(mex.Name, IrLiteralKind.String);
+            }
+
             case MemberExpr me: return new IrFieldAccess(LowerExpr(me.Receiver), me.Name);
             case IndexExpr ix: return new IrIndex(LowerExpr(ix.Receiver), LowerExpr(ix.Index));
             // `*Author.Bundle.Publicator.name(…)` — a cross-bundle call. The callee resolves to a shared
@@ -2128,9 +2162,25 @@ public sealed class Lower
                 // appeared nowhere near the cause, which is why this warns rather than quietly winning.
                 if (Interp.PrebuiltNames.Contains(n.Name))
                 {
-                    _diag.Warning("VS0217",
-                        $"'{n.Name}' is built in, so `use` cannot rebind it — '*{found.Key}' is shadowed here. " +
-                        $"Call it by its qualified path to reach it.", c.Span);
+                    // WARNED ONLY WHEN THE CALL LOOKS LIKE IT MEANT THE OTHER ONE. The built-in wins and
+                    // that is the documented rule (local → built-in → `need`), so a call whose arity
+                    // matches the built-in got exactly what its author asked for — and saying so at every
+                    // call site meant a game with fifty `spawn()`s and one debug `@Print` could not be
+                    // warning-free. Noise at that volume trains people to stop reading diagnostics,
+                    // which costs more than this warning was ever worth.
+                    //
+                    // The signal that survives is an ARITY MISMATCH. Built-in `spawn()` takes none;
+                    // `*Vein.Console.Io.spawn` takes two. So `spawn(#Screen2, "hi")` is someone reaching
+                    // for the console launcher and silently getting the entity one — which is the bug
+                    // this diagnostic was written for, and it is still reported.
+                    bool fitsBuiltIn = !PrebuiltArity.TryGetValue(n.Name, out var ar)
+                                       || (c.Args.Count >= ar.Min && c.Args.Count <= ar.Max);
+                    if (!fitsBuiltIn)
+                        _diag.Warning("VS0217",
+                            $"'{n.Name}' is built in, so `need` cannot rebind it — this call passes " +
+                            $"{c.Args.Count} argument(s), which the built-in does not take, and " +
+                            $"'*{found.Key}' is shadowed here. Call it by its qualified path to reach it.",
+                            c.Span);
                     return new IrCall(LowerExpr(c.Callee), c.Args.Select(LowerExpr).ToList());
                 }
 

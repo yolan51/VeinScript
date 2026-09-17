@@ -691,7 +691,26 @@ public sealed class Interp
         ComposeWorld();   // so the first `settled` reads a composed world, not a half-built one
     }
 
-    private void RunFrames() { for (int i = 0; i < Ticks; i++) Frame(); }
+    /// `--ticks N`: advance exactly N frames, firing the clock for each.
+    ///
+    /// `@Ticked` USED TO BE THE WALL CLOCK'S ALONE. `StartFrameTimer` fired it per frame and this path
+    /// did not, so `veinc run --ticks 3` ran three `each tick` blocks and no `hear @Ticked` at all —
+    /// and a game that moves on `@Ticked` booted under the compiler's own runner and did nothing. Every
+    /// game in `samples/` is written that way, which is exactly the set that most wanted testing here.
+    ///
+    /// Fired SYNCHRONOUSLY, before the frame, in the same order the timer uses — so N ticks means N
+    /// `@Ticked`s and the count a test asserts stays exact. The delta is the frame rate's when one is
+    /// set and 1/60 otherwise: a deterministic run has no wall clock to ask, and a fixed step is what
+    /// makes it reproducible.
+    private void RunFrames()
+    {
+        double delta = 1.0 / (FrameRate > 0 ? FrameRate : 60.0);
+        for (int i = 0; i < Ticks; i++)
+        {
+            FireTicked(i + 1, delta);
+            Frame();
+        }
+    }
 
     /// Frames per second to advance on the wall clock, for a run that owns a real one. 0 — the default
     /// — means no loop, which is what `veinc run` and every test want: `Ticks` runs a fixed count and
@@ -1962,7 +1981,18 @@ public sealed class Interp
             case IrBinOp.Sub: return Num(AsDouble(l) - AsDouble(r), l, r);
             case IrBinOp.Mul: return Num(AsDouble(l) * AsDouble(r), l, r);
             case IrBinOp.Div: return Num(AsDouble(l) / AsDouble(r), l, r);
-            case IrBinOp.Mod: return (long)AsDouble(l) % (long)AsDouble(r);
+            // `%` alone truncated BOTH operands to long, so `7.5 % 2.0` was 1 rather than 1.5 while
+            // `7 / 2.0` was correctly 3.5 — and the C# backend emits `%` on doubles, so the two
+            // runtimes disagreed silently about every float remainder.
+            //
+            // TWO INTS STAY INTEGER MODULO, which is not merely "the part that was right": it is the
+            // one operation reachable from VeinScript that genuinely throws, and `DiagnosticsTests`
+            // uses `5 % 0` as its only way to produce a fault. Routing ints through doubles made that
+            // NaN, and `Num` then cast NaN to long — so a division by zero became -9.2e18, a number
+            // that looks like an answer. Float remainder is IEEE, so `7.5 % 0.0` is NaN and says so.
+            case IrBinOp.Mod:
+                return IsInt(l) && IsInt(r) ? AsLong(l) % AsLong(r)
+                                            : (object)(AsDouble(l) % AsDouble(r));
             case IrBinOp.Eq: return LooseEq(l, r);
             case IrBinOp.Ne: return !LooseEq(l, r);
             // TWO STRINGS COMPARE ORDINALLY, everything else numerically.

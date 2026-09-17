@@ -310,6 +310,17 @@ public sealed class VeinWorld
     /// nothing.
     public Action? Compose;
 
+    /// The frame clock, when the program hears one (`*Vein.Time.Clock.@Ticked`).
+    ///
+    /// A hook for the same reason `Compose` is one: the payload is a type the generated code declares
+    /// and this runtime has never heard of. Set by generated code when the program declares `Ticked`,
+    /// null otherwise, so a program that does not hear the clock pays nothing.
+    ///
+    /// Fired synchronously before each frame, matching `Interp.RunFrames` — N frames means N ticks, in
+    /// both runtimes, or a game that moves on the clock moves differently compiled.
+    public Action<int, double>? Ticked;
+
+
     public void Start()
     {
         foreach (var s in _systems) s.Once();
@@ -332,7 +343,14 @@ public sealed class VeinWorld
         Drain();   // Interp.Frame: events from either phase are handled against a settled world
     }
 
-    public void Run(int frames) { for (int i = 0; i < frames; i++) Frame(); }
+    public void Run(int frames)
+    {
+        for (int i = 0; i < frames; i++)
+        {
+            Ticked?.Invoke(i + 1, 1.0 / 60.0);   // before the frame, as Interp.RunFrames does
+            Frame();
+        }
+    }
 
     public void Print(string text) => Out.WriteLine(text);
 

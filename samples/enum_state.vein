@@ -1,0 +1,65 @@
+// enum_state.vein — a state machine written with the feature that exists for writing one.
+//
+//   veinc run samples/enum_state.vein --ticks 4
+//
+// In tools/check-backend.sh, because an enum case is a VALUE now and the two runtimes carry values
+// differently — the interpreter compares loosely-typed objects, the backend emits typed C#. A state
+// machine that advances differently compiled is a game that ends at the wrong moment.
+//
+// THE BUG THIS PINS. `enum State { … }` inside a shape parsed, and `state: State` was accepted, but
+// `State.Kickoff` in value position lowered as a field access on a name that resolves to nothing. So
+// it evaluated to EMPTY, which meant:
+//
+//     m.state == State.Kickoff     // true
+//     m.state == State.Over        // ALSO true — every case equalled every other
+//     match m.state { when Kickoff … }   // matched nothing at all
+//
+// A referee written this way compiled, ran, and sat in no state. The workaround was to store the plain
+// string "Kickoff" and match bare names — which works, and which meant the enum was decoration.
+//
+// THE RULE. A case evaluates to its own NAME, which is what the rest of the language already agreed a
+// case is: `match` compares an arm against the subject's text, so one change makes a case equal to
+// itself, unequal to its siblings, printable, and matchable — and a misspelt case is VS0242 at the
+// spelling rather than a state nothing ever reaches.
+
+bundle EnumState by you {
+
+    shape $Match {
+        enum State { Kickoff, Play, Over }
+        state: State
+        clock: int
+    }
+    mark #Match
+
+    builder Referee { $Match   mark #Match }
+
+    shard Boot { run once { bring Referee(State.Kickoff, 0) } }
+
+    // The referee. Each frame it advances the clock and decides what state the match is in — and it
+    // decides by COMPARING CASES, which is the thing that could not be written.
+    shard Whistle {
+        each tick {
+            target $Match #Match as m {
+                m.Match.clock = m.Match.clock + 1
+
+                if m.Match.state == State.Kickoff { m.Match.state = State.Play }
+                if m.Match.state == State.Play and m.Match.clock >= 3 { m.Match.state = State.Over }
+            }
+        }
+    }
+
+    // …and reading it back by `match`, which is the other half. An `else` arm would have caught every
+    // frame before this worked, so its absence from the output is the assertion.
+    shard Commentary {
+        settled {
+            target $Match #Match as m {
+                match m.Match.state {
+                    when Kickoff { emit *Vein.Console.Io.@Print { text: "t" + m.Match.clock + " awaiting kickoff" } }
+                    when Play    { emit *Vein.Console.Io.@Print { text: "t" + m.Match.clock + " in play" } }
+                    when Over    { emit *Vein.Console.Io.@Print { text: "t" + m.Match.clock + " full time" } }
+                    else         { emit *Vein.Console.Io.@Print { text: "t" + m.Match.clock + " NO STATE" } }
+                }
+            }
+        }
+    }
+}
