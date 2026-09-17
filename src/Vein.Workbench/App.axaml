@@ -5,5 +5,8 @@
   <Application.Styles>
     <FluentTheme />
     <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
+    <!-- LAST, so it wins. Fluent and AvaloniaEdit set the base; this is the palette and the corner
+         radius the mockup draws, and a style that loses to the theme it is correcting is no style. -->
+    <StyleInclude Source="avares://VeinScript-Workbench/Theme.axaml" />
   </Application.Styles>
 </Application>

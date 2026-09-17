@@ -309,7 +309,7 @@ internal sealed class AssistantPanel : UserControl
                 header,
                 new Border
                 {
-                    Background = new SolidColorBrush(Color.Parse("#1E1E1E")),
+                    Background = Palette.Panel,
                     BorderBrush = new SolidColorBrush(Color.Parse(ok ? "#2C4038" : "#4A2C2C")),
                     BorderThickness = new Avalonia.Thickness(1),
                     Padding = new Avalonia.Thickness(4, 6),
@@ -331,7 +331,7 @@ internal sealed class AssistantPanel : UserControl
         // drag fight itself.
         return new Border
         {
-            Background = new SolidColorBrush(Color.Parse("#252526")),
+            Background = Palette.Raised,
             CornerRadius = new Avalonia.CornerRadius(3),
             Padding = new Avalonia.Thickness(10),
             Child = body

@@ -106,17 +106,20 @@ public partial class MainWindow : Window
     // Bottom-panel tabs, by name. They were bare indices until inserting Preview silently moved
     // Terminal from 5 to 6 — a magic number that points at the wrong tab is exactly the bug that
     // does not announce itself.
-    private const int TabDiagnostics = 0;
-    private const int TabRawIr = 1;
-    private const int TabOutput = 2;
-    private const int TabDependencies = 3;
-    private const int TabExecution = 4;
-    private const int TabConsoles = 5;
-    private const int TabRuntime = 6;
-    private const int TabLive = 7;
-    private const int TabTranscript = 8;
-    private const int TabPreview = 9;
-    private const int TabTerminal = 10;
+    // THE ORDER THE XAML DECLARES THEM IN, and the Terminal leads it — the first tab is the one a
+    // fresh window lands on, and what a person wants to see under the editor is what they just ran.
+    // Renumber these together with the TabItems or `ShowBottomTab` opens the wrong panel.
+    private const int TabTerminal = 0;
+    private const int TabDiagnostics = 1;
+    private const int TabRawIr = 2;
+    private const int TabOutput = 3;
+    private const int TabDependencies = 4;
+    private const int TabExecution = 5;
+    private const int TabConsoles = 6;
+    private const int TabRuntime = 7;
+    private const int TabLive = 8;
+    private const int TabTranscript = 9;
+    private const int TabPreview = 10;
 
     private ComboBox _runConfigs = null!;
     private TextBlock _runHint = null!;

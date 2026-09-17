@@ -93,8 +93,8 @@ internal sealed class ApplyFileDialog : Window
                 new Border
                 {
                     Margin = new Avalonia.Thickness(18, 0),
-                    Background = new SolidColorBrush(Color.Parse("#1E1E1E")),
-                    BorderBrush = new SolidColorBrush(Color.Parse("#3C3C3C")),
+                    Background = Palette.Panel,
+                    BorderBrush = Palette.Line,
                     BorderThickness = new Avalonia.Thickness(1),
                     CornerRadius = new Avalonia.CornerRadius(3),
                     Child = new ScrollViewer

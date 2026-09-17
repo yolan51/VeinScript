@@ -1,0 +1,214 @@
+<!--
+  Theme.axaml — how the Workbench looks.
+
+  THE PALETTE IS THE MOCKUP'S. `VeinEditorLayout/INeedThisLayout.png` draws a near-black blue-grey
+  ground, panels a step lighter, inputs a step darker, one saturated blue for whatever is selected —
+  the active tab, the chosen row, the checked box — light text, grey secondary text, rounded corners
+  and room to breathe. Written down here once, as named brushes, so a panel that wants "the accent"
+  asks for `Accent` rather than inventing a fourth blue.
+
+  IT REPLACES SEVENTEEN HARDCODED HEXES. `MainWindow.axaml` carried `#1E1E1E`, `#252526` and `#333`
+  inline — VS Code's 2015 greys, flat, with no accent and no rounding. They could not be changed in one
+  place and they did not agree with each other: three different panel greys and two different borders.
+  Every one of them is now a `DynamicResource` naming what the colour is FOR.
+
+  WHY BRUSHES AND STYLES RATHER THAN A THEME VARIANT. Fluent's dark variant is the base and stays —
+  this overrides the keys that decide the look and restyles the handful of controls the mockup draws
+  differently (pill tabs, rounded raised buttons, sunken inputs). Replacing the whole theme would mean
+  owning every control template, including AvaloniaEdit's, for a change that is a palette and a corner
+  radius.
+-->
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <Styles.Resources>
+    <ResourceDictionary>
+
+      <!-- the palette -->
+
+      <!-- The window behind everything — the darkest thing on screen. -->
+      <SolidColorBrush x:Key="Ground" Color="#12141A" />
+      <!-- A panel's body. -->
+      <SolidColorBrush x:Key="Panel" Color="#191C23" />
+      <!-- A panel's title row, the menu strip and the toolbar. -->
+      <SolidColorBrush x:Key="Header" Color="#15181E" />
+      <!-- Inputs, lists, the source listing: things you look INTO. -->
+      <SolidColorBrush x:Key="Sunken" Color="#0E1015" />
+      <!-- A button at rest, and the lane an unselected tab sits in. -->
+      <SolidColorBrush x:Key="Raised" Color="#232830" />
+      <SolidColorBrush x:Key="RaisedHover" Color="#2E343F" />
+      <SolidColorBrush x:Key="Line" Color="#282D36" />
+
+      <!-- The one blue: the active tab, the selected row, the checked box, the focused input. -->
+      <SolidColorBrush x:Key="Accent" Color="#2F6FED" />
+      <SolidColorBrush x:Key="AccentHover" Color="#4A84F5" />
+      <SolidColorBrush x:Key="AccentPressed" Color="#245BC8" />
+      <!-- The accent as a wash, for a selected row that still has to show its text. -->
+      <SolidColorBrush x:Key="AccentWash" Color="#2F6FED" Opacity="0.35" />
+
+      <SolidColorBrush x:Key="Ink" Color="#E6E9F0" />
+      <SolidColorBrush x:Key="Muted" Color="#9AA2B2" />
+
+      <SolidColorBrush x:Key="Good" Color="#3BA55D" />
+      <SolidColorBrush x:Key="Bad" Color="#E0575B" />
+
+      <!-- what Fluent reads -->
+      <!--
+        Fluent's own keys, repointed. These are what the controls this file does NOT restyle will use —
+        a scrollbar, a menu flyout, a tooltip — so they stay part of the same scheme rather than being
+        the one grey that did not get the message.
+      -->
+      <SolidColorBrush x:Key="SystemControlBackgroundAltHighBrush" Color="#12141A" />
+      <SolidColorBrush x:Key="SystemControlBackgroundChromeMediumLowBrush" Color="#191C23" />
+      <SolidColorBrush x:Key="SystemControlForegroundBaseHighBrush" Color="#E6E9F0" />
+      <SolidColorBrush x:Key="SystemControlForegroundBaseMediumBrush" Color="#9AA2B2" />
+      <SolidColorBrush x:Key="SystemAccentColorBrush" Color="#2F6FED" />
+      <Color x:Key="SystemAccentColor">#2F6FED</Color>
+      <Color x:Key="SystemAccentColorLight1">#4A84F5</Color>
+      <Color x:Key="SystemAccentColorDark1">#245BC8</Color>
+
+      <!-- metrics -->
+      <!-- Rounded and roomy, which is most of what "modern" means in a panel: the mockup's pills are
+           buttons with 6px corners and 8px of air, not a different widget. -->
+      <CornerRadius x:Key="Round">6</CornerRadius>
+      <CornerRadius x:Key="RoundSmall">4</CornerRadius>
+
+    </ResourceDictionary>
+  </Styles.Resources>
+
+  <!-- the window and its strips -->
+
+  <Style Selector="Window">
+    <Setter Property="Background" Value="{DynamicResource Ground}" />
+    <Setter Property="Foreground" Value="{DynamicResource Ink}" />
+  </Style>
+
+  <Style Selector="Menu">
+    <Setter Property="Background" Value="{DynamicResource Header}" />
+    <Setter Property="Padding" Value="4,2" />
+  </Style>
+
+  <Style Selector="MenuItem">
+    <Setter Property="CornerRadius" Value="{DynamicResource RoundSmall}" />
+  </Style>
+
+  <!-- buttons -->
+  <!--
+    A BUTTON IS A PILL. The mockup's toolbar is a row of them — rounded, a step lighter than the strip
+    they sit on, lifting on hover and taking the accent when pressed. Fluent's default is a flat grey
+    rectangle, which is the single biggest reason the old toolbar read as dated.
+  -->
+  <Style Selector="Button">
+    <Setter Property="Background" Value="{DynamicResource Raised}" />
+    <Setter Property="Foreground" Value="{DynamicResource Ink}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Line}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Round}" />
+    <Setter Property="Padding" Value="10,4" />
+  </Style>
+
+  <Style Selector="Button:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource RaisedHover}" />
+    <Setter Property="TextBlock.Foreground" Value="{DynamicResource Ink}" />
+  </Style>
+
+  <Style Selector="Button:pressed /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource Accent}" />
+    <Setter Property="TextBlock.Foreground" Value="White" />
+  </Style>
+
+  <!-- things you look into -->
+
+  <Style Selector="TextBox">
+    <Setter Property="Background" Value="{DynamicResource Sunken}" />
+    <Setter Property="Foreground" Value="{DynamicResource Ink}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Line}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Round}" />
+    <Setter Property="Padding" Value="8,4" />
+  </Style>
+
+  <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
+    <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+  </Style>
+
+  <Style Selector="ComboBox">
+    <Setter Property="Background" Value="{DynamicResource Sunken}" />
+    <Setter Property="Foreground" Value="{DynamicResource Ink}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Line}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Round}" />
+    <Setter Property="Padding" Value="8,4" />
+  </Style>
+
+  <Style Selector="TreeView, ListBox">
+    <Setter Property="Background" Value="{DynamicResource Sunken}" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+
+  <!-- A SELECTED ROW IS THE ACCENT, which is the mockup's Hierarchy and asset grid both. A wash rather
+       than the solid colour, so the row's own text stays readable on top of it. -->
+  <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource AccentWash}" />
+  </Style>
+  <Style Selector="TreeViewItem:selected /template/ Border#PART_LayoutRoot">
+    <Setter Property="Background" Value="{DynamicResource AccentWash}" />
+  </Style>
+  <Style Selector="ListBoxItem, TreeViewItem">
+    <Setter Property="CornerRadius" Value="{DynamicResource RoundSmall}" />
+  </Style>
+
+  <Style Selector="CheckBox">
+    <Setter Property="Foreground" Value="{DynamicResource Ink}" />
+  </Style>
+
+  <!-- tabs are the pills -->
+  <!--
+    THE ACTIVE ONE IS THE ACCENT, SOLID; the rest sit on the panel almost invisibly until hovered —
+    which is how the mockup draws every tab row it has, on all four sides. Fluent's default is an
+    underline on a transparent strip, which reads as a web page rather than a tool.
+  -->
+  <Style Selector="TabControl">
+    <Setter Property="Background" Value="{DynamicResource Panel}" />
+    <Setter Property="Padding" Value="0" />
+  </Style>
+
+  <Style Selector="TabItem">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource Muted}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Round}" />
+    <Setter Property="Padding" Value="12,5" />
+    <Setter Property="Margin" Value="2,3,2,3" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="FontSize" Value="13" />
+  </Style>
+
+  <Style Selector="TabItem:pointerover /template/ Border#PART_LayoutRoot">
+    <Setter Property="Background" Value="{DynamicResource Raised}" />
+  </Style>
+
+  <Style Selector="TabItem:selected /template/ Border#PART_LayoutRoot">
+    <Setter Property="Background" Value="{DynamicResource Accent}" />
+  </Style>
+
+  <Style Selector="TabItem:selected">
+    <Setter Property="Foreground" Value="White" />
+  </Style>
+
+  <!-- the splitters -->
+  <!-- A HAIRLINE THAT LIGHTS UP. Four pixels of #333 is a visible bar between every pair of panels;
+       the mockup has none — its panels meet on a line. It still grabs at four pixels, and says so by
+       taking the accent under the pointer. -->
+  <Style Selector="GridSplitter">
+    <Setter Property="Background" Value="{DynamicResource Line}" />
+  </Style>
+  <Style Selector="GridSplitter:pointerover">
+    <Setter Property="Background" Value="{DynamicResource Accent}" />
+  </Style>
+
+  <Style Selector="ToolTip">
+    <Setter Property="Background" Value="{DynamicResource Panel}" />
+    <Setter Property="Foreground" Value="{DynamicResource Ink}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Line}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Round}" />
+  </Style>
+
+</Styles>

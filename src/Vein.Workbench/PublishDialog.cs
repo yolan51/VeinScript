@@ -174,7 +174,7 @@ internal sealed class PublishDialog : Window
                             Foreground = new SolidColorBrush(Color.Parse("#8A8A8A")) },
             new Border
             {
-                Background = new SolidColorBrush(Color.Parse("#252526")),
+                Background = Palette.Raised,
                 Padding = new Avalonia.Thickness(10, 8),
                 CornerRadius = new Avalonia.CornerRadius(3),
                 Child = new ScrollViewer { Content = inner, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,

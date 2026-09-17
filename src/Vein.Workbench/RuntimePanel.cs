@@ -51,7 +51,7 @@ internal sealed class RuntimePanel : UserControl
 
         var split = new Grid { ColumnDefinitions = new ColumnDefinitions("*,4,*") };
         Grid.SetColumn(_timeline, 0);
-        var splitter = new GridSplitter { Width = 4, Background = new SolidColorBrush(Color.Parse("#333")) };
+        var splitter = new GridSplitter { Width = 4, Background = Palette.Line };
         Grid.SetColumn(splitter, 1);
         Grid.SetColumn(_entities, 2);
         split.Children.Add(_timeline);
