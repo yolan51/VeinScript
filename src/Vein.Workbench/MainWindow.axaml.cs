@@ -84,7 +84,16 @@ public partial class MainWindow : Window
     private DefinitionIndex _definitions = DefinitionIndex.Empty;
 
     /// Non-null while the Diagnostics pane is showing a Find References result instead of diagnostics.
-    private IReadOnlyList<SymbolSite>? _references;
+    /// <summary>One result row in the Diagnostics pane while a Find References is standing.</summary>
+    /// <remarks>
+    /// IT CARRIES ITS FILE, because the results no longer all come from the document on screen. A row
+    /// that had lost track of that would jump to its line number in whatever happened to be open, which
+    /// is a wrong answer that looks exactly like a right one. Null file means the live buffer — its text
+    /// may differ from disk, and the buffer is the version you are looking at.
+    /// </remarks>
+    private sealed record SiteHit(string? File, int Line, int Col, string Text);
+
+    private IReadOnlyList<SiteHit>? _references;
     private AvaloniaEdit.Search.SearchPanel _search = null!;
 
     // ---- compile as you type ---------------------------------------------
@@ -2626,14 +2635,100 @@ public partial class MainWindow : Window
             return;
         }
 
-        var all = _definitions.All(site.Name, site.Kind);
+        var all = FindSites(site.Name, site.Kind);
         _references = all;
-        _diagBox.ItemsSource = all
-            .Select(s => $"{s.Span.Line}:{s.Span.Col}  {(s.IsDefinition ? "declared" : "used")} in {s.Owner}")
-            .ToList();
+        _diagBox.ItemsSource = all.Select(h => h.Text).ToList();
 
         ShowBottomTab(TabDiagnostics);
-        SetStatus($"{site.Kind} {site.Name} — {all.Count} site(s). Double-click to jump; build to go back to diagnostics.");
+        int files = all.Select(h => h.File ?? "").Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        SetStatus($"{site.Kind} {site.Name} — {all.Count} site(s) in {files} file(s). " +
+                  "Double-click to jump; build to go back to diagnostics.");
+    }
+
+    /// <summary>Every site naming this symbol, across the project.</summary>
+    /// <remarks>
+    /// <para>
+    /// THE OPEN BUNDLE COMES FROM THE BUFFER, the rest from disk. `_definitions` was built from the
+    /// text you are editing — unsaved and all — and it already spans the whole bundle, because the
+    /// compiler service merges `publicators/` and `shards/` fragments before analysing. So that
+    /// bundle's main file is skipped in the disk walk rather than read twice and disagreed with.
+    /// </para>
+    /// <para>
+    /// Every other file is the LAST SAVED version. There is no way around that short of threading each
+    /// dirty tab through the parse, and a stale hit is better than a silently missing one — but it is
+    /// why the status line says how many files were searched rather than implying it searched a state
+    /// that exists nowhere.
+    /// </para>
+    /// <para>
+    /// Spans are resolved to real paths the same way the symbol index does it, because a span carries
+    /// only a file NAME (`BundleLoader.PathOf`) and a bundle's declarations come from several files.
+    /// </para>
+    /// </remarks>
+    private IReadOnlyList<SiteHit> FindSites(string name, SymbolKind kind)
+    {
+        var hits = new List<SiteHit>();
+        var seen = new HashSet<(string, int, int)>();
+
+        void Add(string? file, SymbolSite s)
+        {
+            if (!seen.Add((file ?? "", s.Span.Line, s.Span.Col))) return;
+            string where = file is null ? "" : Path.GetFileName(file) + "  ";
+            hits.Add(new SiteHit(file, s.Span.Line, s.Span.Col,
+                                 $"{where}{s.Span.Line}:{s.Span.Col}  {(s.IsDefinition ? "declared" : "used")} in {s.Owner}"));
+        }
+
+        string? currentMain = _currentPath is null ? null
+            : BundleLoader.IsFragment(_currentPath) ? BundleLoader.LocateMainFile(_currentPath) ?? _currentPath
+            : _currentPath;
+
+        var ownSources = currentMain is null ? Array.Empty<string>() : BundleLoader.SourceFiles(currentMain);
+        foreach (var s in _definitions.All(name, kind))
+        {
+            string? path = BundleLoader.PathOf(s.Span, ownSources);
+            Add(path is not null && string.Equals(path, _currentPath, StringComparison.OrdinalIgnoreCase)
+                    ? null            // the live buffer, not the copy on disk
+                    : path, s);
+        }
+
+        if (_rootFolder is null) return hits;
+
+        foreach (string file in ProjectVeinFiles(_rootFolder))
+        {
+            if (currentMain is not null && string.Equals(file, currentMain, StringComparison.OrdinalIgnoreCase))
+                continue;   // that bundle is already in, from the buffer
+
+            try
+            {
+                var unit = BundleLoader.Load(file, new DiagnosticBag());
+                var sources = BundleLoader.SourceFiles(file);
+                foreach (var s in DefinitionIndex.Analyze(unit).All(name, kind))
+                    Add(BundleLoader.PathOf(s.Span, sources) ?? file, s);
+            }
+            catch (Exception) { /* a malformed file is skipped, not fatal to the search */ }
+        }
+
+        return hits;
+    }
+
+    /// <summary>Every `.vein` in the project that can be parsed on its own.</summary>
+    /// <remarks>
+    /// Fragments are excluded because they have no `bundle` header — parsing one standalone is VS0101
+    /// and zero bundles. They are reached through their main file, which merges them, and their sites
+    /// come back carrying their own span. This is the same rule `BundleIndex` walks the search path by.
+    /// </remarks>
+    private static IEnumerable<string> ProjectVeinFiles(string root)
+    {
+        IEnumerable<string> files;
+        try { files = Directory.EnumerateFiles(root, "*.vein", SearchOption.AllDirectories); }
+        catch (Exception) { yield break; }
+
+        foreach (string f in files)
+        {
+            if (BundleLoader.IsFragment(f)) continue;
+            string leaf = Path.GetFileName(f);
+            if (leaf.EndsWith(".app.vein", StringComparison.OrdinalIgnoreCase)) continue;   // a manifest
+            yield return f;
+        }
     }
 
     /// The symbol under the caret, using the line/column the index records.
@@ -2765,7 +2860,11 @@ public partial class MainWindow : Window
         // were shown would jump to whatever diagnostic happened to share the row number.
         if (_references is { } refs)
         {
-            if (i < refs.Count) GoTo(refs[i].Span.Line, refs[i].Span.Col);
+            if (i >= refs.Count) return;
+            var hit = refs[i];
+            if (hit.File is null) GoTo(hit.Line, hit.Col);
+            else if (!GoTo(hit.File, hit.Line, hit.Col))
+                SetStatus($"{Path.GetFileName(hit.File)} cannot be opened.");
             return;
         }
 
