@@ -100,17 +100,62 @@ public static class BundleLoader
         return name is not null && FragmentFolders.Contains(name, StringComparer.OrdinalIgnoreCase);
     }
 
+    /// Every file a `Load` of `mainFile` reads: the main file first, then its fragments in merge order.
+    ///
+    /// WHY THIS EXISTS. The lexer is handed `Path.GetFileName(file)` at both call sites above, so a
+    /// declaration's `Span.File` reads `Movement.vein` — enough to say WHICH of a bundle's files
+    /// declared it, and not enough to open that file. Deriving the path from the main file's directory
+    /// would be wrong for every fragment, which is most of the API in a bundle that uses the folders at
+    /// all. This is the list a span's name is resolved against, by `PathOf` below.
+    ///
+    /// Do not fix this by giving the lexer full paths instead: `SourceSpan.ToString` is `File:Line:Col`
+    /// and every diagnostic renders through it, so that trades a tooling gap for a worse error message.
+    public static IReadOnlyList<string> SourceFiles(string mainFile)
+    {
+        var files = new List<string> { Path.GetFullPath(mainFile) };
+
+        string? dir = Path.GetDirectoryName(Path.GetFullPath(mainFile));
+        if (dir is null) return files;
+
+        files.AddRange(FragmentFiles(Path.Combine(dir, PublicatorsFolder)));
+        files.AddRange(FragmentFiles(Path.Combine(dir, ShardsFolder)));
+        return files;
+    }
+
+    /// The full path a span came from, resolved against the bundle's files. Null when it cannot be
+    /// resolved to exactly one.
+    ///
+    /// AMBIGUITY RETURNS NULL DELIBERATELY. `publicators/Api.vein` and `shards/Api.vein` are both
+    /// `Api.vein` to a span. Picking either would send an editor to a declaration that is not the one
+    /// it asked about — silently, and plausibly enough to be believed. No location beats a wrong one.
+    public static string? PathOf(SourceSpan span, IReadOnlyList<string> sourceFiles)
+    {
+        string? found = null;
+        foreach (var f in sourceFiles)
+        {
+            if (!string.Equals(Path.GetFileName(f), span.File, StringComparison.OrdinalIgnoreCase)) continue;
+            if (found is not null) return null;
+            found = f;
+        }
+        return found;
+    }
+
+    /// Ordered by path: merged member order is load-bearing for `Replace`/`First` folds and for the
+    /// order shards run in, so it must not depend on the filesystem's enumeration order.
+    private static List<string> FragmentFiles(string folder)
+    {
+        if (!Directory.Exists(folder)) return new List<string>();
+        try
+        {
+            return Directory.EnumerateFiles(folder, "*.vein", SearchOption.AllDirectories)
+                            .OrderBy(p => p, StringComparer.Ordinal).ToList();
+        }
+        catch { return new List<string>(); }
+    }
+
     private static IEnumerable<Decl> Fragments(string folder, bool exported, (string Path, string Source)? editing, DiagnosticBag diag)
     {
-        if (!Directory.Exists(folder)) yield break;
-
-        List<string> files;
-        // Ordered by path: merged member order is load-bearing for `Replace`/`First` folds and for the
-        // order shards run in, so it must not depend on the filesystem's enumeration order.
-        try { files = Directory.EnumerateFiles(folder, "*.vein", SearchOption.AllDirectories).OrderBy(p => p, StringComparer.Ordinal).ToList(); }
-        catch { yield break; }
-
-        foreach (var file in files)
+        foreach (var file in FragmentFiles(folder))
         {
             string? text = Text(file, editing);
             if (text is null) continue;

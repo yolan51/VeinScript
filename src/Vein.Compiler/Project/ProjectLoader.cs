@@ -31,7 +31,7 @@ public static class ProjectLoader
 
         var starts = new List<BundleStart>();
         var refs = new List<(IReadOnlyList<string> Path, string Name, SourceSpan Span)>();
-        if (appUnit is not null) { Collect(appUnit, symbols); CollectEventRefs(appUnit, refs); }
+        if (appUnit is not null) { Collect(appUnit, symbols, appFilePath); CollectEventRefs(appUnit, refs); }
 
         var baseDir = Path.GetDirectoryName(Path.GetFullPath(appFilePath)) ?? ".";
         if (app is not null && appUnit is not null)
@@ -54,7 +54,7 @@ public static class ProjectLoader
                 // bundle look like it had no public API at all.
                 if (seenUnits.Add(r.Unit))
                 {
-                    Collect(r.Unit, symbols);
+                    Collect(r.Unit, symbols, r.File);
                     CollectEventRefs(r.Unit, refs);
                 }
 
@@ -188,35 +188,47 @@ public static class ProjectLoader
 
     // Walk every bundle → its named top-level members (recursing publicators), tagging each with the
     // author (bundle's `by`, else "local") + optional publicator so the qualified name is complete.
-    private static void Collect(CompilationUnit unit, List<QualifiedSymbol> into)
+    /// `mainFile` is the unit's own file, so each symbol can record where it is written. Null for a
+    /// unit with no file behind it, and the symbols then simply carry no location.
+    private static void Collect(CompilationUnit unit, List<QualifiedSymbol> into, string? mainFile = null)
     {
+        var sources = mainFile is null ? Array.Empty<string>() : BundleLoader.SourceFiles(mainFile);
+
         foreach (var b in unit.Bundles)
         {
             string author = b.Author ?? "local";
-            into.Add(new QualifiedSymbol(author, b.Name, null, SymbolKind.Bundle, b.Name, Doc: b.Doc));
-            foreach (var m in b.Members) Member(m, author, b.Name, null, into);
+            into.Add(new QualifiedSymbol(author, b.Name, null, SymbolKind.Bundle, b.Name, Doc: b.Doc, At: At(b, sources)));
+            foreach (var m in b.Members) Member(m, author, b.Name, null, into, sources);
         }
     }
 
-    private static void Member(Decl d, string author, string bundle, string? pub, List<QualifiedSymbol> into)
+    /// A declaration's location, resolved per declaration: a bundle's members come from its main file
+    /// AND from every fragment under publicators/ and shards/, so one path per bundle would be wrong
+    /// for most of the API in a bundle that uses the folders.
+    private static SymbolLocation? At(Decl d, IReadOnlyList<string> sources) =>
+        BundleLoader.PathOf(d.Span, sources) is { } path ? new SymbolLocation(path, d.Span.Line, d.Span.Col) : null;
+
+    private static void Member(Decl d, string author, string bundle, string? pub, List<QualifiedSymbol> into,
+                               IReadOnlyList<string> sources)
     {
         // A `publicator` is a namespace grouping (visible to this bundle's shards). Recurse into it, but
         // it is not itself a cross-bundle symbol.
-        if (d is PublicatorDecl p) { foreach (var m in p.Members) Member(m, author, bundle, p.Name, into); return; }
+        if (d is PublicatorDecl p) { foreach (var m in p.Members) Member(m, author, bundle, p.Name, into, sources); return; }
 
         // Only `shared("…")` declarations are part of the cross-bundle public API.
         if (!d.Shared) return;
+        var at = At(d, sources);
         switch (d)
         {
-            case ShapeDecl s: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Shape, s.Name, Doc: s.Doc)); break;
-            case MarkDecl md: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Mark, md.Name, Doc: md.Doc)); break;
-            case EventDecl e: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Event, e.Name, Doc: e.Doc)); break;
-            case BuilderDecl bl: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Builder, bl.Name, Doc: bl.Doc)); break;
-            case ShardDecl sh: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Shard, sh.Name, Doc: sh.Doc)); break;
-            case ViewDecl vw: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.ShardView, vw.Name, Doc: vw.Doc)); break;
-            case BridgeDecl br: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Bridge, br.Name, Doc: br.Doc)); break;
-            case FuncDecl f: into.Add(new QualifiedSymbol(author, bundle, pub, f.IsPure ? SymbolKind.SF : SymbolKind.Fn, f.Name, Doc: f.Doc)); break;
-            case VarDecl v: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Var, v.Name)); break;
+            case ShapeDecl s: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Shape, s.Name, Doc: s.Doc, At: at)); break;
+            case MarkDecl md: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Mark, md.Name, Doc: md.Doc, At: at)); break;
+            case EventDecl e: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Event, e.Name, Doc: e.Doc, At: at)); break;
+            case BuilderDecl bl: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Builder, bl.Name, Doc: bl.Doc, At: at)); break;
+            case ShardDecl sh: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Shard, sh.Name, Doc: sh.Doc, At: at)); break;
+            case ViewDecl vw: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.ShardView, vw.Name, Doc: vw.Doc, At: at)); break;
+            case BridgeDecl br: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Bridge, br.Name, Doc: br.Doc, At: at)); break;
+            case FuncDecl f: into.Add(new QualifiedSymbol(author, bundle, pub, f.IsPure ? SymbolKind.SF : SymbolKind.Fn, f.Name, Doc: f.Doc, At: at)); break;
+            case VarDecl v: into.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Var, v.Name, At: at)); break;
         }
     }
 }

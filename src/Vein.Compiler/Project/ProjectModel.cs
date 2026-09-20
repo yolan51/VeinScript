@@ -10,11 +10,19 @@ namespace Vein.Compiler.Project;
 
 public enum SymbolKind { Bundle, Publicator, Shape, Mark, Event, Builder, Shard, ShardView, Bridge, SF, Fn, Var }
 
+/// Where a declaration is written: a full path, and the line and column within it.
+///
+/// ONE RECORD RATHER THAN THREE NULLABLE FIELDS, because the parts are only meaningful together — a
+/// line with no file navigates nowhere — and because "we could not work out where this is" is then a
+/// single null rather than a combination a caller has to check.
+public sealed record SymbolLocation(string File, int Line, int Col);
+
 /// One discoverable member, fully qualified. The canonical name is `*Author.Bundle[.Publicator].member`
 /// with the member carrying its sigil (`@`/`$`/`#`) where it has one.
 public sealed record QualifiedSymbol(
     string Author, string Bundle, string? Publicator,
-    SymbolKind Kind, string Name, string? Type = null, string? Doc = null)
+    SymbolKind Kind, string Name, string? Type = null, string? Doc = null,
+    SymbolLocation? At = null)
 {
     // `Shape` and `Mark` are separate kinds carrying separate sigils on purpose: `$Enemy` and `#Enemy`
     // are different things and may both exist, so a symbol table keyed on the name alone would lose one.

@@ -219,11 +219,12 @@ public sealed class BundleIndex
             {
                 var diag = new DiagnosticBag();
                 var unit = BundleLoader.Load(file, diag);
+                var sources = BundleLoader.SourceFiles(file);
                 foreach (var b in unit.Bundles)
                 {
                     string author = b.Author ?? "local";
                     owners.TryAdd($"{author}.{b.Name}", file);
-                    Collect(b.Members, author, b.Name, null, symbols, builders, shapes, marks, events, functions);
+                    Collect(b.Members, author, b.Name, null, sources, symbols, builders, shapes, marks, events, functions);
                 }
             }
             catch { /* skip a malformed file rather than fail the whole index */ }
@@ -235,8 +236,12 @@ public sealed class BundleIndex
     }
 
     /// `shared` is the whole gate: only these declarations exist outside their own bundle.
+    ///
+    /// `sources` is the bundle's files, so every symbol can carry where it is written — the one thing
+    /// that lets an editor navigate to a declaration in another bundle rather than merely name it.
     private static void Collect(
         IEnumerable<Decl> members, string author, string bundle, string? pub,
+        IReadOnlyList<string> sources,
         List<QualifiedSymbol> symbols,
         Dictionary<string, BuilderDecl> builders,
         Dictionary<string, ShapeDecl> shapes,
@@ -246,11 +251,16 @@ public sealed class BundleIndex
     {
         string Key(string name) => pub is null ? $"{author}.{bundle}.{name}" : $"{author}.{bundle}.{pub}.{name}";
 
+        // Resolved per declaration rather than per bundle, because a bundle's declarations come from
+        // several files: the main file and every fragment under publicators/ and shards/.
+        SymbolLocation? At(Decl d) =>
+            BundleLoader.PathOf(d.Span, sources) is { } path ? new SymbolLocation(path, d.Span.Line, d.Span.Col) : null;
+
         foreach (var m in members)
         {
             if (m is PublicatorDecl p)
             {
-                Collect(p.Members, author, bundle, p.Name, symbols, builders, shapes, marks, events, functions);
+                Collect(p.Members, author, bundle, p.Name, sources, symbols, builders, shapes, marks, events, functions);
                 continue;
             }
             if (!m.Shared) continue;
@@ -259,34 +269,34 @@ public sealed class BundleIndex
             {
                 case ShapeDecl s:
                     shapes[Key(s.Name)] = s;
-                    symbols.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Shape, s.Name, Doc: s.Doc));
+                    symbols.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Shape, s.Name, Doc: s.Doc, At: At(s)));
                     break;
                 // Keyed in its OWN dictionary rather than beside shapes: `$Enemy` and `#Enemy` share a
                 // key under `Key(name)`, and one would overwrite the other.
                 case MarkDecl md:
                     marks[Key(md.Name)] = md;
-                    symbols.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Mark, md.Name, Doc: md.Doc));
+                    symbols.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Mark, md.Name, Doc: md.Doc, At: At(md)));
                     break;
                 case EventDecl e:
                     events[Key(e.Name)] = e;
-                    symbols.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Event, e.Name, Doc: e.Doc));
+                    symbols.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Event, e.Name, Doc: e.Doc, At: At(e)));
                     break;
                 case BuilderDecl bl:
                     builders[Key(bl.Name)] = bl;
-                    symbols.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Builder, bl.Name, Doc: bl.Doc));
+                    symbols.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Builder, bl.Name, Doc: bl.Doc, At: At(bl)));
                     break;
                 case FuncDecl f:
                     functions[Key(f.Name)] = f;
-                    symbols.Add(new QualifiedSymbol(author, bundle, pub, f.IsPure ? SymbolKind.SF : SymbolKind.Fn, f.Name, Doc: f.Doc));
+                    symbols.Add(new QualifiedSymbol(author, bundle, pub, f.IsPure ? SymbolKind.SF : SymbolKind.Fn, f.Name, Doc: f.Doc, At: At(f)));
                     break;
                 case ShardDecl sh:
-                    symbols.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Shard, sh.Name, Doc: sh.Doc));
+                    symbols.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Shard, sh.Name, Doc: sh.Doc, At: At(sh)));
                     break;
                 case ViewDecl vw:
-                    symbols.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.ShardView, vw.Name, Doc: vw.Doc));
+                    symbols.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.ShardView, vw.Name, Doc: vw.Doc, At: At(vw)));
                     break;
                 case BridgeDecl br:
-                    symbols.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Bridge, br.Name, Doc: br.Doc));
+                    symbols.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Bridge, br.Name, Doc: br.Doc, At: At(br)));
                     break;
             }
         }

@@ -58,9 +58,19 @@ public static class ScopeIndex
     /// `x: float, y: float, z: float` — what the shape or event actually holds, rendered. Null for a
     /// mark, which holds nothing, and for a name with no declaration to read (a mark that is only used).
     /// </param>
+    /// <param name="At">
+    /// Where the declaration is written, so the name can be OPENED and not merely offered.
+    ///
+    /// <para>
+    /// Null for a local entry — the editor already has that file and resolves it through
+    /// `DefinitionIndex`, which knows about uses as well as declarations. Null too for a cross-bundle
+    /// name whose file could not be pinned down to one (see `BundleLoader.PathOf`) and for a mark that
+    /// is only ever used, which has no declaration to point at.
+    /// </para>
+    /// </param>
     public sealed record ScopeEntry(
         string Name, string Sigil, string? Origin, string Qualified, bool Needed, bool Local,
-        string? Doc = null, string? Fields = null)
+        string? Doc = null, string? Fields = null, SymbolLocation? At = null)
     {
         /// <summary>`$Position`.</summary>
         public string SigilName => Sigil + Name;
@@ -124,7 +134,8 @@ public static class ScopeIndex
                 Needed: needs.Contains(s.Author + "." + s.Bundle, StringComparer.Ordinal),
                 Local: false,
                 Doc: s.Doc,
-                Fields: SharedFields(index, s));
+                Fields: SharedFields(index, s),
+                At: s.At);
         }
 
         // Local, then what a bare name already reaches, then the merely discoverable — and alphabetical
