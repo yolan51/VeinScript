@@ -2589,18 +2589,78 @@ public partial class MainWindow : Window
         if (e.Text == "&") { ShowBuilderCompletion(); return; }  // &Elements — the Vein.Web builders and any local one
         if (e.Text is not ("$" or "#" or "@")) return;
 
-        // Recompile lazily so completion reflects the current text (not just the last Build).
-        var ast = _service.Compile(new CompileRequest("untitled.vein", _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
-        if (ast is not null) _symbols = SymbolIndex.Collect(ast);
-
-        (IReadOnlyList<string> names, string kind) = e.Text switch
+        (SymbolKind kind, string label) = e.Text switch
         {
-            "$" => (_symbols.Shapes, "shape"),
-            "#" => (_symbols.Marks, "mark"),
-            _ => (_symbols.Events, "event")
+            "$" => (SymbolKind.Shape, "shape"),
+            "#" => (SymbolKind.Mark, "mark"),
+            _ => (SymbolKind.Event, "event"),
         };
-        ShowCompletion(names, kind);
+        ShowScopeCompletion(kind, label);
     }
+
+    /// <summary>
+    /// The list behind `$`, `#`, `@` and `&amp;` — everything of that kind reachable from here, each row
+    /// naming the bundle it came from.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>IT USED TO BE THE OPEN FILE AND NOTHING ELSE.</b> `SymbolIndex.Collect` walks one
+    /// `CompilationUnit`, so a dev who needed ten bundles was offered the shapes and marks of none of
+    /// them — while `&amp;` had been cross-bundle all along through `EventCatalog`. The sigils disagreed
+    /// about what "in scope" meant, and `$`/`#` were the poor relations.
+    /// </para>
+    /// <para>
+    /// <b>WHAT IS INSERTED DEPENDS ON WHERE THE CARET IS.</b> `target`, `mark`, `attach` and a `when`
+    /// arm take a BARE name — the qualified form parses there and resolves to nothing (RULES 17b), so
+    /// inserting it would write a query that matches no identity and reports nothing. The ROW still
+    /// shows the full origin, because telling two bundles' `$Health` apart is the point.
+    /// </para>
+    /// </remarks>
+    private void ShowScopeCompletion(SymbolKind kind, string label)
+    {
+        // The project dir has to be AMBIENT as well as passed: `Sig.Lookup` and friends read
+        // `BundleSearch.Current`, and without it a completion silently resolves against the
+        // Workbench's own bin/ — the trap `Build()` documents at its own scope line.
+        using var _ = BundleSearch.Scope(ProjectDir);
+
+        // Recompile lazily so completion reflects the current text, not just the last Build.
+        string name = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
+        var ast = _service.Compile(new CompileRequest(name, _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
+        if (ast is null) return;
+
+        var site = SourceContext.At(_editor.Text, _editor.CaretOffset);
+        var entries = ScopeIndex.For(ast, kind, ProjectDir);
+        if (entries.Count == 0) return;
+
+        // A shape or mark at a use site MUST be bare. Everything else takes the qualified path, which
+        // is the form that says which of ten bundles a name came from.
+        bool bareOnly = site == SourceContext.SigilSite.UseSite
+                        && kind is SymbolKind.Shape or SymbolKind.Mark;
+
+        var items = entries
+            .Select(entry => (
+                Label: entry.Label,
+                // The sigil is already typed — it opened this window — so the insertion replaces the
+                // word after it, never the sigil itself.
+                Insert: bareOnly || entry.Local
+                    ? entry.Name
+                    : entry.Qualified[1..]))   // drop the leading `*`; `$`/`#`/`@` was the trigger char
+            .ToList();
+
+        ShowCompletion(items, label);
+        _pendingNeed = bareOnly ? entries.Where(en => !en.Needed).ToList() : null;
+    }
+
+    /// <summary>
+    /// Entries from the open list whose bundle this file does not yet `need`, so picking one can add
+    /// the line. Null when the list cannot produce that situation.
+    /// </summary>
+    /// <remarks>
+    /// A BARE NAME WITHOUT ITS `need` RESOLVES TO NOTHING. At a use site the qualified form is not
+    /// available as a fallback (RULES 17b), so the choice is between writing the import and handing
+    /// back a line that does not work. Writing it is the only one that leaves the file compiling.
+    /// </remarks>
+    private IReadOnlyList<ScopeIndex.ScopeEntry>? _pendingNeed;
 
     // ---- hover: show a field's / symbol's type --------------------------
 
@@ -2954,9 +3014,19 @@ public partial class MainWindow : Window
     /// `&` completes the builders in scope — the `Vein.Web.Elements` set for a site, plus any declared
     /// locally. The parameter names come along, because a builder's list is flattened from someone
     /// else's shape and is not visible in this file at all.
+    /// <summary>
+    /// `&amp;Builder` — the local builders with their parameter lists, then every shared builder on the
+    /// search path with the bundle it came from.
+    /// </summary>
+    /// <remarks>
+    /// The local half keeps its signature (`Coin   x: float, y: float`), which is what makes `&amp;` worth
+    /// typing at all. The cross-bundle half adds the ones `_catalogBuilders` never had — it is built
+    /// from this unit plus its `need`s, so a builder in a bundle you have not needed yet was invisible,
+    /// which is exactly the discovery problem `$` and `#` had.
+    /// </remarks>
     private void ShowBuilderCompletion()
     {
-        var items = _catalogBuilders
+        var local = _catalogBuilders
             .Select(b => (
                 Label: b.Fields.Count == 0
                     ? b.Name
@@ -2965,7 +3035,18 @@ public partial class MainWindow : Window
             .OrderBy(x => x.Insert, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        ShowCompletion(items, "builder");
+        var known = local.Select(x => x.Insert).ToHashSet(StringComparer.Ordinal);
+
+        using var _ = BundleSearch.Scope(ProjectDir);
+        string name = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
+        var ast = _service.Compile(new CompileRequest(name, _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
+
+        if (ast is not null)
+            foreach (var entry in ScopeIndex.For(ast, SymbolKind.Builder, ProjectDir))
+                if (known.Add(entry.Name))
+                    local.Add((entry.Label, entry.Qualified[1..]));   // `bring *A.B.P.&Name(…)`
+
+        ShowCompletion(local, "builder");
     }
 
     private void ShowStarCompletion()
@@ -3007,8 +3088,36 @@ public partial class MainWindow : Window
         _completion.CompletionList.IsFiltering = true;   // search-first: typing any segment narrows the list
         foreach (var (label, insert) in items)
             _completion.CompletionList.CompletionData.Add(new VeinCompletion(label, kind, insert));
-        _completion.Closed += (_, _) => _completion = null;
+
+        // PICKING A NAME CAN ALSO WRITE ITS IMPORT. A bare `$Shape` from a bundle this file does not
+        // `need` resolves to nothing, and at a use site the qualified form is not available instead
+        // (RULES 17b) — so the alternative to writing the line is handing back a query that silently
+        // matches no identity. Done after the insertion, so the offset the edit computed is still good.
+        _completion.CompletionList.InsertionRequested += (_, _) => AddNeedForPick();
+
+        _completion.Closed += (_, _) => { _completion = null; _pendingNeed = null; };
         _completion.Show();
+    }
+
+    /// <summary>Write the `need` for whichever entry the completion list just inserted, if it wants one.</summary>
+    private void AddNeedForPick()
+    {
+        if (_pendingNeed is not { Count: > 0 } candidates) return;
+        if (_completion?.CompletionList.SelectedItem is not VeinCompletion picked) return;
+
+        // Matched on the LABEL, which is what the row showed and what `VeinCompletion` kept — the
+        // inserted text is the bare name and two bundles may share one.
+        var entry = candidates.FirstOrDefault(e => e.Label == picked.Text);
+        if (entry?.Origin is not { } origin) return;
+
+        // `Origin` is `Author.Bundle[.Publicator]`; a `need` names the bundle, so take the first two.
+        var parts = origin.Split('.');
+        if (parts.Length < 2) return;
+
+        if (NeedEdit.For(_editor.Text, parts[0] + "." + parts[1]) is not var (offset, text)) return;
+
+        _editor.Document.Insert(offset, text);
+        SetStatus($"Added need \"{parts[0]}.{parts[1]}\" for {entry.SigilName}.");
     }
 
     /// The receiver text immediately before a `.` (identifiers, dots, and a leading `::`).
