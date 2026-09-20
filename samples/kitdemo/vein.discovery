@@ -12,9 +12,53 @@
 # Delete the `expose kit.Movement` line and type `$` in game.vein: `$Mover` disappears from the list
 # while the program still compiles and runs. That is the distinction, in one edit.
 
+# ---- the root default --------------------------------------------------------------------------
+#
+# Start from nothing. The alternative, `expose all`, is the default when this file does not exist at
+# all — fine for a two-bundle project and unusable once the standard library and a few kits are on the
+# search path, which is the moment anybody writes one of these.
+
 silent all
 
-expose Vein.Console
-expose Vein.Math
+
+# ---- what this project works with ----------------------------------------------------------------
+#
+# A path is `Author`, `Author.Bundle`, or `Author.Bundle.Publicator`, and these four are all the middle
+# form. `expose Vein` would take the whole standard library in one line; naming the bundles is the
+# difference between a list you read and a list you scroll.
+
+expose Vein.Console          # `@Print`, which the Watch shard emits to
 expose Vein.Transform        # `$Position`, which the game and the kit both target
 expose kit.Movement          # the installed kit's `$Mover` / `#Moving`
+
+# Exposed although nothing here uses it yet, and deliberately: a game reaches for `sqrt` and `clamp`
+# about ten minutes in, and discovery is how you find out those exist. Enumerating a bundle you have
+# not needed is free — `need` is still what makes a bare name resolve, and `$`/`#` will say the row
+# came from a bundle you have not needed yet.
+expose Vein.Math
+
+
+# ---- the rule that catches people: the MOST SPECIFIC path wins ------------------------------------
+#
+# `Vein.Transform` is exposed above, and this silences one publicator inside it. `$Position` and
+# `$Velocity` (publicator `Spatial`) stay in the `$` list; `@Moved` (publicator `Motion`) leaves the
+# `@` list, because a rule on `Author.Bundle.Publicator` is consulted before the one on
+# `Author.Bundle`, which is consulted before `Author`, which is consulted before `silent all`.
+#
+# It reads backwards — an `expose` line and a `silent` line about the same bundle — and it is the
+# normal shape of a real policy: take the bundle, drop the corner of it you never touch. The order of
+# the lines does not matter, only how many segments each one names.
+#
+# This one is honest rather than illustrative: kitdemo never emits or hears `@Moved`. Comment the line
+# out and type `@` in game.vein to watch it come back.
+
+silent Vein.Transform.Motion
+
+
+# ---- what this file has no opinion about ----------------------------------------------------------
+#
+# `$Budget`, in bundles/Movement.vein. It is missing from every list here and nothing above is why:
+# the kit declares it outside its publicator, so it is not `shared`, so it does not exist beyond its
+# own bundle at all. No `expose` line can reveal it, and that is the difference between the two
+# mechanisms — this file filters what you are SHOWN of the reachable, and `shared` decides what is
+# reachable. A missing name is a `shared` question first and a discovery question second.
