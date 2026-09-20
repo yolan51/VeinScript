@@ -2399,9 +2399,13 @@ public partial class MainWindow : Window
     private readonly Stack<(string? File, int Offset)> _forward = new();
 
     /// Push where the caret is now, before moving it.
-    private void RecordPosition()
+    private void RecordPosition() => RecordPosition((_currentPath, _editor.CaretOffset));
+
+    /// Push a position captured earlier. A jump into another file has to read the position BEFORE the
+    /// tab changes, or the history would record the line you arrived at instead of the one you left.
+    private void RecordPosition((string? File, int Offset) at)
     {
-        _back.Push((_currentPath, _editor.CaretOffset));
+        _back.Push(at);
         _forward.Clear();
         if (_back.Count > 100) { var keep = _back.Take(100).Reverse().ToList(); _back.Clear(); foreach (var p in keep) _back.Push(p); }
     }
@@ -2416,26 +2420,80 @@ public partial class MainWindow : Window
         to.Push((_currentPath, _editor.CaretOffset));
         var (file, offset) = from.Pop();
 
-        // The position may belong to another tab. Switching to it is the point — a jump across files is
-        // exactly the one worth being able to undo.
+        // The position may belong to another tab — or to one CLOSED since the jump. Reopening it is the
+        // point: a jump across files is exactly the one worth being able to undo. Reveal is also what
+        // fixes the bug this replaced, which only switched tabs when the file happened to still be open
+        // and otherwise fell through, applying the offset to whatever document was current — Alt+← then
+        // moved the caret in the wrong file, silently and plausibly.
         if (file is not null && !string.Equals(file, _currentPath, StringComparison.OrdinalIgnoreCase) &&
-            _tabs.Docs.FirstOrDefault(d => d.Path is not null && string.Equals(d.Path, file, StringComparison.OrdinalIgnoreCase)) is { } doc)
-            _tabs.Activate(doc);
+            !Reveal(file))
+        {
+            SetStatus($"Cannot go there — {Path.GetFileName(file)} is gone.");
+            return;
+        }
 
-        _editor.CaretOffset = Math.Clamp(offset, 0, _editor.Document.TextLength);
-        _editor.ScrollToLine(_editor.Document.GetLineByOffset(_editor.CaretOffset).LineNumber);
-        _editor.TextArea.Focus();
+        Place(offset);
     }
 
-    /// Move the caret to a source position and show it. Clamped: a span from a stale compile can point
-    /// past the end of a document being edited, and scrolling nowhere is better than throwing.
+    /// Move the caret to a source position in THIS file and show it.
     private void GoTo(int line, int col)
     {
         RecordPosition();
+        Place(line, col);
+    }
+
+    /// The same jump, into a file that may not be the one on screen.
+    ///
+    /// THE ROUTE EVERY CROSS-BUNDLE JUMP TAKES — F12 into another bundle, a Ctrl+T pick, a
+    /// find-references or find-in-files row. False when the file cannot be read, so the caller can say
+    /// so; jumping nowhere and reporting success is how a navigation feature becomes untrustworthy.
+    private bool GoTo(string file, int line, int col)
+    {
+        var from = (_currentPath, _editor.CaretOffset);
+        if (!Reveal(file)) return false;
+
+        RecordPosition(from);
+        Place(line, col);
+        return true;
+    }
+
+    /// Focus the tab holding `file`, opening one when none does.
+    ///
+    /// Reads from disk only when the file is not already open, which also means an UNSAVED buffer is
+    /// never clobbered by a jump into it — you land on your own edits, not on the last saved text.
+    private bool Reveal(string file)
+    {
+        if (_tabs.Docs.FirstOrDefault(d => d.Path is not null &&
+                string.Equals(d.Path, file, StringComparison.OrdinalIgnoreCase)) is { } already)
+        {
+            _tabs.Activate(already);
+            return true;
+        }
+
+        try { _tabs.Open(file, File.ReadAllText(file)); }
+        catch { return false; }
+
+        SaveSession();   // the tab set changed, and it survives a kill rather than only a clean close
+        return true;
+    }
+
+    /// Position the caret and show it, without touching the history.
+    ///
+    /// Clamped: a span from a stale compile can point past the end of a document being edited, and
+    /// scrolling nowhere is better than throwing.
+    private void Place(int line, int col)
+    {
         int n = Math.Clamp(line, 1, Math.Max(1, _editor.Document.LineCount));
         var target = _editor.Document.GetLineByNumber(n);
         _editor.CaretOffset = Math.Clamp(target.Offset + Math.Max(0, col - 1), target.Offset, target.EndOffset);
         _editor.ScrollToLine(n);
+        _editor.TextArea.Focus();
+    }
+
+    private void Place(int offset)
+    {
+        _editor.CaretOffset = Math.Clamp(offset, 0, _editor.Document.TextLength);
+        _editor.ScrollToLine(_editor.Document.GetLineByOffset(_editor.CaretOffset).LineNumber);
         _editor.TextArea.Focus();
     }
 
