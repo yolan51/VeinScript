@@ -22,7 +22,8 @@ internal sealed class ShortcutsWindow : Window
         ("File",       "Ctrl+Shift+S",   "Save as"),
 
         ("Edit",       "Ctrl+Z / Ctrl+Y", "Undo / redo — per file, not shared between tabs"),
-        ("Edit",       "Ctrl+F",         "Find and replace"),
+        ("Edit",       "Ctrl+F",         "Find and replace — in this file"),
+        ("Edit",       "Ctrl+Shift+F",   "Find in files — every .vein in the project"),
         ("Edit",       "Ctrl+G",         "Go to line"),
         ("Edit",       "Ctrl+T",         "Go to symbol"),
         ("Edit",       "Ctrl+/",         "Toggle comment on the selection"),

@@ -533,6 +533,9 @@ public partial class MainWindow : Window
             case Key.S: _ = SaveAsync(); e.Handled = true; break;
             case Key.O: _ = OpenAsync(); e.Handled = true; break;
             case Key.W: OnCloseTab(sender, e); e.Handled = true; break;
+            // Ctrl+Shift+F before Ctrl+F: the editor's own search panel owns the unshifted one, and
+            // AvaloniaEdit binds it internally rather than through this switch.
+            case Key.F when shift: OnFindInFiles(sender, e); e.Handled = true; break;
             case Key.G: OnGoToLine(sender, e); e.Handled = true; break;
             case Key.T: OnGoToSymbol(sender, e); e.Handled = true; break;
             case Key.J: OnToggleBottom(sender, e); e.Handled = true; break;
@@ -2710,19 +2713,79 @@ public partial class MainWindow : Window
         return hits;
     }
 
+    // ---- find in files ---------------------------------------------------
+    //
+    // Ctrl+F is AvaloniaEdit's search panel and searches the open document, which is the right scope
+    // for "where else on this screen". It was also the only scope there was: a project is first-class
+    // in the tabs, the semantic tree, the app composition and now navigation, and nothing could look
+    // across it for a piece of text.
+
+    private void OnFindInFiles(object? sender, RoutedEventArgs e) => _ = FindInFilesAsync();
+
+    private async Task FindInFilesAsync()
+    {
+        if (_rootFolder is null) { SetStatus("Find in files: open a folder first (Ctrl+K)."); return; }
+
+        // Seeded with the selection, so searching for the name under the caret is one keystroke and a
+        // press of Enter — which is most of what this is for.
+        string seed = _editor.SelectedText is { Length: > 0 } s && !s.Contains('\n') ? s : "";
+        if (await PromptDialog.ShowAsync(this, "Find in files", $"Text to find in {Path.GetFileName(_rootFolder)}:", seed)
+            is not { } needle || needle.Length == 0) return;
+
+        // The open file is searched as it READS, not as it was last saved. Every other file comes off
+        // disk, which the status line says plainly rather than implying otherwise.
+        var result = TextSearch.InFiles(
+            AllVeinFiles(_rootFolder), needle,
+            read: path => _currentPath is not null && string.Equals(path, _currentPath, StringComparison.OrdinalIgnoreCase)
+                ? _editor.Text
+                : SafeRead(path));
+
+        _references = result.Matches
+            .Select(m => new SiteHit(
+                string.Equals(m.File, _currentPath, StringComparison.OrdinalIgnoreCase) ? null : m.File,
+                m.Line, m.Col,
+                $"{Path.GetFileName(m.File)}  {m.Line}:{m.Col}  {m.Text}"))
+            .ToList();
+
+        _diagBox.ItemsSource = _references.Select(h => h.Text).ToList();
+        ShowBottomTab(TabDiagnostics);
+
+        int files = result.Matches.Select(m => m.File).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        SetStatus(result.Matches.Count == 0
+            ? $"\"{needle}\" — nothing found."
+            : $"\"{needle}\" — {result.Matches.Count} hit(s) in {files} file(s)" +
+              (result.Truncated ? $", stopped at {TextSearch.DefaultLimit}. " : ". ") +
+              "Double-click to jump; build to go back to diagnostics.");
+    }
+
+    private static string? SafeRead(string path)
+    {
+        try { return File.ReadAllText(path); } catch (Exception) { return null; }
+    }
+
+    /// <summary>Every `.vein` under the project, whatever it is.</summary>
+    /// <remarks>
+    /// The set for a TEXT search, which has no opinion about what parses: a fragment and a manifest are
+    /// files somebody edits, and a search that quietly skipped them would report a name as unused when
+    /// it is used in the file next door. Contrast <see cref="ProjectVeinFiles"/>.
+    /// </remarks>
+    private static IEnumerable<string> AllVeinFiles(string root)
+    {
+        try { return Directory.EnumerateFiles(root, "*.vein", SearchOption.AllDirectories); }
+        catch (Exception) { return Array.Empty<string>(); }
+    }
+
     /// <summary>Every `.vein` in the project that can be parsed on its own.</summary>
     /// <remarks>
     /// Fragments are excluded because they have no `bundle` header — parsing one standalone is VS0101
     /// and zero bundles. They are reached through their main file, which merges them, and their sites
     /// come back carrying their own span. This is the same rule `BundleIndex` walks the search path by.
+    ///
+    /// For a text search the exclusions are wrong, and <see cref="AllVeinFiles"/> is the set to use.
     /// </remarks>
     private static IEnumerable<string> ProjectVeinFiles(string root)
     {
-        IEnumerable<string> files;
-        try { files = Directory.EnumerateFiles(root, "*.vein", SearchOption.AllDirectories); }
-        catch (Exception) { yield break; }
-
-        foreach (string f in files)
+        foreach (string f in AllVeinFiles(root))
         {
             if (BundleLoader.IsFragment(f)) continue;
             string leaf = Path.GetFileName(f);

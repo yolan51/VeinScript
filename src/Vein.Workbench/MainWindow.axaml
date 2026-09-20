@@ -42,6 +42,7 @@
         <MenuItem Header="Select _All" Click="OnSelectAll" InputGesture="Ctrl+A" />
         <Separator />
         <MenuItem Header="_Find / Replace…" Click="OnFind" InputGesture="Ctrl+F" />
+        <MenuItem Header="Find in _Files…" Click="OnFindInFiles" InputGesture="Ctrl+Shift+F" />
         <MenuItem Header="_Go to Line…" Click="OnGoToLine" InputGesture="Ctrl+G" />
         <MenuItem Header="Go to _Symbol…" Click="OnGoToSymbol" InputGesture="Ctrl+T" />
         <Separator />
