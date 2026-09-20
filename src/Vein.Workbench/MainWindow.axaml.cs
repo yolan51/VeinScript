@@ -2572,9 +2572,13 @@ public partial class MainWindow : Window
     /// F12. Resolve what the caret is on and jump to where it is declared.
     private void OnGoToDefinition(object? sender, RoutedEventArgs e)
     {
+        // A `need` line names a bundle, and a bundle is somewhere. Checked first because the caret is
+        // not on a symbol there, so the ordinary path would only tell you to go and find one.
+        if (NeedOnCaretLine() is { } need) { GoToNeeded(need); return; }
+
         if (CaretSymbol() is not { } site)
         {
-            SetStatus("Go to definition: put the caret on a $shape, #mark, @event or &builder.");
+            SetStatus("Go to definition: put the caret on a $shape, #mark, @event, &builder or `need` line.");
             return;
         }
 
@@ -2602,6 +2606,53 @@ public partial class MainWindow : Window
         // somewhere plausible and wrong — and the two halves are worth distinguishing, because a
         // private declaration in another bundle is a `shared` problem and not a typo.
         SetStatus($"{site.Kind} {site.Name} is not declared in this file, and no bundle here shares it.");
+    }
+
+    /// <summary>The `need` declared on the caret's line, or null when the caret is not on one.</summary>
+    /// <remarks>
+    /// Read from the AST rather than by matching the line against `need "…"`, because the editor
+    /// already has a parse and a second reader of the syntax is a second thing to keep correct. It
+    /// finds an aliased `need "kit.Movement" as M` for free, where a pattern would need widening.
+    /// </remarks>
+    private NeedDecl? NeedOnCaretLine()
+    {
+        int line = _editor.Document.GetLineByOffset(_editor.CaretOffset).LineNumber;
+
+        try
+        {
+            string name = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
+            var ast = _service.Compile(new CompileRequest(name, _editor.Text,
+                                                          ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
+            if (ast is null) return null;
+
+            return ast.Bundles
+                      .SelectMany(b => b.Members)
+                      .OfType<NeedDecl>()
+                      .FirstOrDefault(n => n.Span.Line == line);
+        }
+        catch (Exception) { return null; }
+    }
+
+    /// <summary>Open the bundle a `need` names.</summary>
+    /// <remarks>
+    /// `BundleIndex.Owners` is the same map that answers "does this bundle exist" for VS0340, so a
+    /// `need` the compiler accepts is one this can open, and a `need` it cannot open is one the build
+    /// is already complaining about. Two answers from one source rather than two that can disagree.
+    /// </remarks>
+    private void GoToNeeded(NeedDecl need)
+    {
+        string? file = null;
+        try { BundleIndex.For(ProjectDir).Owners.TryGetValue(need.Key, out file); }
+        catch (Exception) { /* no search path — reported as "not on the search path" below */ }
+
+        if (file is null)
+        {
+            SetStatus($"need \"{need.Key}\" — no bundle of that name is on the search path.");
+            return;
+        }
+
+        if (GoTo(file, 1, 1)) SetStatus($"need \"{need.Key}\" — {Path.GetFileName(file)}");
+        else SetStatus($"need \"{need.Key}\" is {file}, which cannot be opened.");
     }
 
     /// <summary>The shared declaration of this name in another bundle, or null when nothing shares it.</summary>

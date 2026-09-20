@@ -176,6 +176,21 @@ public class SymbolLocationTests : IDisposable
     }
 
     [Fact]
+    public void A_need_names_a_bundle_the_index_can_point_at()
+    {
+        // What F12 on a `need` line resolves through. Owners is also the map that answers "does this
+        // bundle exist" for VS0340, so a `need` the compiler accepts is one the editor can open and a
+        // `need` it cannot open is one the build already complains about — one source, not two.
+        Write("Movement.vein", "bundle Movement by kit {\n}");
+
+        Assert.True(BundleIndex.For(_dir).Owners.TryGetValue("kit.Movement", out var file));
+        Assert.Equal("Movement.vein", Path.GetFileName(file!));
+        Assert.True(File.Exists(file));
+
+        Assert.False(BundleIndex.For(_dir).Owners.ContainsKey("kit.Movemnet"));   // the misspelling
+    }
+
+    [Fact]
     public void Every_shared_symbol_in_a_normal_bundle_gets_one()
     {
         // A location that is usually null is a feature nobody can rely on, so this asserts the ordinary
