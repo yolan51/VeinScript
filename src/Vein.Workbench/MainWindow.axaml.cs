@@ -567,14 +567,72 @@ public partial class MainWindow : Window
     private void OnGoToLine(object? sender, RoutedEventArgs e) => _ = GoToLineAsync();
     private void OnGoToSymbol(object? sender, RoutedEventArgs e) => _ = GoToSymbolAsync();
 
-    /// Ctrl+T — type a few letters, land on the declaration.
+    /// Ctrl+T — type a few letters, land on the declaration, anywhere in the project.
     private async Task GoToSymbolAsync()
     {
-        if (await SymbolSearchDialog.ShowAsync(this, _definitions) is { } pick)
+        if (await SymbolSearchDialog.ShowAsync(this, SymbolPicks()) is not { } pick) return;
+
+        if (pick.File is null)
         {
-            GoTo(pick.Span.Line, pick.Span.Col);
-            SetStatus($"{pick.Kind} {pick.Name} — declared in {pick.Owner}, line {pick.Span.Line}");
+            GoTo(pick.Line, pick.Col);
+            SetStatus($"{pick.Kind} {pick.Name} — {pick.Where}");
+            return;
         }
+
+        if (GoTo(pick.File, pick.Line, pick.Col))
+            SetStatus($"{pick.Kind} {pick.Name} — {pick.Where}, {Path.GetFileName(pick.File)} line {pick.Line}");
+        else
+            SetStatus($"{pick.Kind} {pick.Name} is in {pick.Where}, but {Path.GetFileName(pick.File)} cannot be opened.");
+    }
+
+    /// <summary>Everything Ctrl+T can land on: this file's declarations, then the project's shared ones.</summary>
+    /// <remarks>
+    /// THE TWO HALVES ANSWER DIFFERENT QUESTIONS, which is why both are here. `DefinitionIndex` knows
+    /// every declaration in the open file whatever its visibility — including the private ones, which
+    /// are most of a bundle. `ScopeIndex` knows only what is `shared`, which is the only thing that
+    /// exists outside its bundle at all (RULES 17). A local name wins on a clash, for the same reason
+    /// F12 asks the local index first: `need` widens what a bare name may mean, it does not replace it.
+    ///
+    /// A local row carries no file — the editor is already showing it, and `GoTo(line, col)` is the
+    /// cheaper jump.
+    /// </remarks>
+    private IReadOnlyList<SymbolPick> SymbolPicks()
+    {
+        var picks = new List<SymbolPick>();
+        var seen = new HashSet<(SymbolKind, string)>();
+
+        foreach (var d in _definitions.Definitions)
+        {
+            seen.Add((d.Kind, d.Name));
+            picks.Add(new SymbolPick(d.Name, d.Kind, $"{d.Kind} · line {d.Span.Line} · {d.Owner}",
+                                     File: null, d.Span.Line, d.Span.Col, Local: true));
+        }
+
+        try
+        {
+            string name = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
+            var ast = _service.Compile(new CompileRequest(name, _editor.Text,
+                                                          ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
+            if (ast is null) return picks;
+
+            // One compile, four kinds — the sigils that have somewhere to jump to. `BundleIndex` and the
+            // discovery policy are both cached, so the four passes cost one parse of the search path.
+            foreach (var kind in new[] { SymbolKind.Shape, SymbolKind.Mark, SymbolKind.Event, SymbolKind.Builder })
+                foreach (var entry in ScopeIndex.For(ast, kind, ProjectDir))
+                {
+                    // No location, nowhere to go — a mark that is only ever used, or a name whose file
+                    // could not be pinned down. Offering a row that cannot move the caret is worse than
+                    // leaving it out, because the row looks exactly like one that works.
+                    if (entry.Local || entry.At is not { } at) continue;
+                    if (!seen.Add((kind, entry.Name))) continue;
+
+                    picks.Add(new SymbolPick(entry.Name, kind, entry.Origin ?? "", at.File, at.Line, at.Col,
+                                             Local: false));
+                }
+        }
+        catch (Exception) { /* no search path is a project with no bundles, not an error */ }
+
+        return picks;
     }
 
     /// Jump to a line number. Clamped rather than refused — asking for line 900 of a 400-line file
