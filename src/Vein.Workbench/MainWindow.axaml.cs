@@ -2508,17 +2508,54 @@ public partial class MainWindow : Window
             return;
         }
 
+        // THE LOCAL INDEX FIRST, always. `need` only ever WIDENS what a bare name may mean (RULES 18),
+        // so a declaration in this bundle shadows a shared one of the same name — and jumping to the
+        // other bundle's would show you a declaration that is not the one this file is using.
         var def = _definitions.Define(site.Name, site.Kind);
-        if (def is null)
+        if (def is not null)
         {
-            // Declared elsewhere — the stdlib, another bundle — or not at all. Saying so beats jumping
-            // somewhere plausible and wrong.
-            SetStatus($"{site.Kind} {site.Name} is not declared in this file.");
+            GoTo(def.Span.Line, def.Span.Col);
+            SetStatus($"{site.Kind} {site.Name} — declared in {def.Owner}, line {def.Span.Line}");
             return;
         }
 
-        GoTo(def.Span.Line, def.Span.Col);
-        SetStatus($"{site.Kind} {site.Name} — declared in {def.Owner}, line {def.Span.Line}");
+        if (CrossBundleDefinition(site) is { At: { } at } found)
+        {
+            if (GoTo(at.File, at.Line, at.Col))
+                SetStatus($"{site.Kind} {site.Name} — declared in {found.Origin}, {Path.GetFileName(at.File)} line {at.Line}");
+            else
+                SetStatus($"{site.Kind} {site.Name} is in {found.Origin}, but {Path.GetFileName(at.File)} cannot be opened.");
+            return;
+        }
+
+        // Not in this file and not shared by anything on the search path. Saying so beats jumping
+        // somewhere plausible and wrong — and the two halves are worth distinguishing, because a
+        // private declaration in another bundle is a `shared` problem and not a typo.
+        SetStatus($"{site.Kind} {site.Name} is not declared in this file, and no bundle here shares it.");
+    }
+
+    /// <summary>The shared declaration of this name in another bundle, or null when nothing shares it.</summary>
+    /// <remarks>
+    /// Goes through <c>ScopeIndex</c> rather than <c>BundleIndex</c> directly, so the jump obeys exactly
+    /// what the completion list offered: the same `shared` gate, the same `vein.discovery` filter, the
+    /// same local-wins rule. A name the editor would not suggest is not a name F12 should reach.
+    /// </remarks>
+    private ScopeIndex.ScopeEntry? CrossBundleDefinition(SymbolSite site)
+    {
+        if (site.Kind is not (SymbolKind.Shape or SymbolKind.Mark or SymbolKind.Event or SymbolKind.Builder))
+            return null;
+
+        try
+        {
+            string name = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
+            var ast = _service.Compile(new CompileRequest(name, _editor.Text,
+                                                          ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
+            if (ast is null) return null;
+
+            return ScopeIndex.For(ast, site.Kind, ProjectDir)
+                             .FirstOrDefault(en => !en.Local && en.Name == site.Name);
+        }
+        catch (Exception) { return null; }
     }
 
     /// Shift+F12. List every site naming the same symbol in the Diagnostics pane, which is already the

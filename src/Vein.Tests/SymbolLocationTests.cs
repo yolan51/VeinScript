@@ -152,6 +152,30 @@ public class SymbolLocationTests : IDisposable
     }
 
     [Fact]
+    public void The_shipped_kit_sample_resolves_to_a_real_file()
+    {
+        // The fixtures above build their own bundles, so they prove the rule and not that it survives
+        // contact with a project somebody actually installs. samples/kitdemo is the installed-kit
+        // layout, and this is the F12 the by-hand check performs, minus the window.
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "samples"))) dir = dir.Parent;
+        Assert.NotNull(dir);
+
+        string kitdemo = Path.Combine(dir!.FullName, "samples", "kitdemo");
+        Assert.True(Directory.Exists(kitdemo), kitdemo + " is missing");
+
+        var diag = new Vein.Compiler.Diagnostics.DiagnosticBag();
+        var unit = BundleLoader.Load(Path.Combine(kitdemo, "game.vein"), diag);
+        var scope = Vein.Compiler.Tooling.ScopeIndex.For(unit, SymbolKind.Shape, kitdemo);
+
+        var mover = Assert.Single(scope, e => e.Name == "Mover");
+        Assert.False(mover.Local);
+        Assert.NotNull(mover.At);
+        Assert.True(File.Exists(mover.At!.File), $"$Mover points at {mover.At.File}, which is not there");
+        Assert.Equal("Movement.vein", Path.GetFileName(mover.At.File));
+    }
+
+    [Fact]
     public void Every_shared_symbol_in_a_normal_bundle_gets_one()
     {
         // A location that is usually null is a feature nobody can rely on, so this asserts the ordinary
