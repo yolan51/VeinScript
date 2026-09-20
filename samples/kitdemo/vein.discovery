@@ -1,0 +1,20 @@
+# vein.discovery — what the editor's `$`, `#`, `@`, `&` and `*` lists ENUMERATE here.
+#
+# THE THIRD PIECE OF THE STORY, and the one that surprises people. `shared("…")` decides what MAY be
+# consumed across a bundle boundary; this decides what is OFFERED when you type a sigil. They are
+# different questions: a silenced bundle is still fully usable by an explicit
+# `*kit.Movement.Drive.$Mover` — it simply does not clutter a list you are scrolling.
+#
+# `samples/vein.discovery` one directory up says `silent all`, because the samples folder holds sixty
+# unrelated programs and a completion list spanning all of them would be noise. This file overrides it
+# for this project — the nearest policy wins — which is what a real game directory would do.
+#
+# Delete the `expose kit.Movement` line and type `$` in game.vein: `$Mover` disappears from the list
+# while the program still compiles and runs. That is the distinction, in one edit.
+
+silent all
+
+expose Vein.Console
+expose Vein.Math
+expose Vein.Transform        # `$Position`, which the game and the kit both target
+expose kit.Movement          # the installed kit's `$Mover` / `#Moving`

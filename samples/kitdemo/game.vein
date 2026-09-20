@@ -1,0 +1,47 @@
+// samples/kitdemo/game.vein — a game built on an installed kit.
+//
+//   veinc run samples/kitdemo/kitdemo.app.vein --ticks 3
+//
+// WHAT IT DEMONSTRATES, and why it is a directory rather than one more file in `samples/`:
+//
+//   * `bundles/` — where an installed kit lives, found by name rather than by path.
+//   * `need "kit.Movement"` — one line that both RESOLVES the kit's bare names and LINKS its shards,
+//     so `Drift` below runs without the manifest naming it.
+//   * a one-line manifest, because everything else arrives transitively.
+//
+// AND IT IS THE FIXTURE FOR EDITOR COMPLETION. Open this file in the Workbench and type `$`: the list
+// shows this bundle's own shapes first, then `$Mover   kit.Movement.Drive`, then everything else
+// discoverable. `$Budget` is NOT there — the kit keeps it outside its publicator, so no other bundle
+// may name it. Type `#` for the same story in marks.
+
+bundle KitDemo by you {
+
+    need "Vein.Transform"
+    need "kit.Movement"
+
+    // This bundle's OWN shape. Unshared, and completion still offers it here — everything in your own
+    // bundle is yours whatever its visibility. It is only the boundary that `shared` guards.
+    shape $Score { points: int }
+
+    mark #Player
+
+    builder Player {
+        $Position
+        $Mover                                  // the kit's, by its BARE name — that is what `need` buys
+        $Score
+        mark #Player   mark #Moving
+    }
+
+    shard Boot { run once { bring Player(0.0, 0.0, 0.0,   1.0, 0.5,   0) } }
+
+    shard Watch {
+        settled {
+            target $Position $Score #Player as p {
+                p.Score.points = p.Score.points + 1
+                emit *Vein.Console.Io.@Print {
+                    text: "at " + p.Position.x + "," + p.Position.y + " after " + p.Score.points
+                }
+            }
+        }
+    }
+}

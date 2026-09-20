@@ -40,8 +40,13 @@ public class SamplesTests
         // SourcePath is what pulls in the bundle's fragments. Without it a multi-file sample compiles as
         // only its main file, and a shard living under shards/ would go unchecked — which is precisely
         // the silent break BundleLoader's own header warns about.
+        // AND `ProjectDir`, which is what `veinc` passes — `Path.GetDirectoryName(Path.GetFullPath(path))`.
+        // Without it a sample with its own `bundles/` folder compiles against stdlib alone, so
+        // `samples/kitdemo` ran correctly under the CLI and failed here with VS0340. A harness that
+        // compiles a sample differently from the way it ships is not guarding the sample.
         var result = new VeinCompilerService().Compile(new CompileRequest(
-            Path.GetFileName(path), File.ReadAllText(path), SourcePath: path));
+            Path.GetFileName(path), File.ReadAllText(path),
+            ProjectDir: Path.GetDirectoryName(path), SourcePath: path));
         Assert.True(result.Success, $"{relative}:\n  " + string.Join("\n  ", result.Diagnostics.Select(d => d.ToString())));
     }
 
@@ -61,7 +66,8 @@ public class SamplesTests
         {
             if (IsFragment(path)) continue;
             var result = svc.Compile(new CompileRequest(
-                Path.GetFileName(path), File.ReadAllText(path), SourcePath: path));
+                Path.GetFileName(path), File.ReadAllText(path),
+                ProjectDir: Path.GetDirectoryName(path), SourcePath: path));
 
             foreach (var d in result.Diagnostics.Where(d => d.Severity == Severity.Warning))
                 found.Add($"{Path.GetRelativePath(RepoRoot(), path).Replace('\\', '/')}: {d.Code} {d.Message}");

@@ -1,0 +1,46 @@
+// samples/kitdemo/bundles/Movement.vein — an INSTALLED KIT, as a dev would receive one.
+//
+// It lives under `bundles/`, which is where `BundleIndex.SearchRoots` looks after the standard
+// library. Nothing in the game below reaches into this file; it is found by NAME.
+//
+// WHAT THIS FILE IS FOR, beyond running. It is the fixture the Workbench's `$`/`#` completion needs
+// to have anything to find: a second bundle, with a publicator, some of it shared and some of it not.
+// Open `game.vein` beside it and type `$` — `$Mover` appears with `kit.Movement.Drive` next to it, and
+// `$Internals` does not appear at all, because only `shared("…")` crosses a bundle boundary (RULES 17).
+
+bundle Movement by kit {
+
+    // The kit needs the standard library too, for the same reason the game does: `$Position` below is
+    // a BARE name, and `need` is what makes a bare name mean something from another bundle.
+    need "Vein.Transform"
+
+    // THE PUBLIC HALF. These two are the whole API, and the `shared("…")` on each is what puts them in
+    // `BundleIndex` — a completion list, `veinc symbols`, and a `*kit.Movement.Drive.$Mover` reference
+    // all read the same gate.
+    publicator Drive {
+        shared("How fast a thing moves, per tick, on each axis.")
+        shape $Mover { dx: float, dy: float }
+
+        shared("Wear this to be moved by the kit.")
+        mark #Moving
+    }
+
+    // THE PRIVATE HALF, deliberately outside the publicator. The kit uses it; nothing else can see it,
+    // and completion in another bundle must never offer it — `ScopeIndexTests` asserts exactly that.
+    shape $Budget { remaining: int }
+
+    // The kit's own behaviour. It arrives because the game `need`s the bundle: a kit is linked, not
+    // merely readable (RULES 15c/18), so this shard runs in the game's runtime without the manifest
+    // mentioning it.
+    shard Drift {
+        each tick {
+            // BARE, and not by preference: a `target` takes bare shapes only — the qualified form does
+            // not even parse here (RULES 17b). This is the rule the Workbench's completion encodes, and
+            // writing this sample is how it was confirmed rather than assumed.
+            target $Position $Mover #Moving as m {
+                m.Position.x = m.Position.x + m.Mover.dx
+                m.Position.y = m.Position.y + m.Mover.dy
+            }
+        }
+    }
+}

@@ -1,0 +1,4 @@
+// One line. The game is the root; the kit it needs is linked from there.
+app KitDemo {
+    load "game.vein"
+}

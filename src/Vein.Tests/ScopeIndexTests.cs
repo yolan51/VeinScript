@@ -241,4 +241,50 @@ public class ScopeIndexTests : IDisposable
         Assert.Contains(ScopeIndex.For(unit, SymbolKind.Mark, dir.FullName),
                         e => e.Origin?.StartsWith("Vein.", StringComparison.Ordinal) == true);
     }
+
+    // ---- against the sample a person would actually open ------------------------------------------
+
+    [Fact]
+    public void The_kitdemo_sample_is_the_fixture_this_feature_exists_for()
+    {
+        // `samples/kitdemo` is a game with an installed kit under `bundles/` — the layout `need` was
+        // built for, and until now the repo had no example of it. Asserting against the real files
+        // rather than a synthetic kit is what catches the sample and the index drifting apart: if
+        // somebody un-shares `$Mover`, or moves `$Budget` into the publicator, this fails.
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "samples"))) dir = dir.Parent;
+        Assert.NotNull(dir);
+
+        string game = Path.Combine(dir!.FullName, "samples", "kitdemo", "game.vein");
+        Assert.True(File.Exists(game), $"the sample moved: {game}");
+
+        var diag = new DiagnosticBag();
+        var unit = BundleLoader.Load(game, diag);
+        string projectDir = Path.GetDirectoryName(game)!;
+
+        var shapes = ScopeIndex.For(unit, SymbolKind.Shape, projectDir);
+
+        // The kit's shared shape, with the publicator that owns it — the row a dev reads.
+        //
+        // This depends on `samples/kitdemo/vein.discovery` exposing the kit, and that is the point
+        // rather than an inconvenience: `samples/vein.discovery` one level up says `silent all`, so
+        // without the project's own policy this list is empty of everything but Console and Math.
+        // `shared` decides what MAY be consumed; discovery decides what is OFFERED.
+        var mover = Assert.Single(shapes.Where(e => e.Name == "Mover"));
+        Assert.Equal("kit.Movement.Drive", mover.Origin);
+        Assert.Equal("*kit.Movement.Drive.$Mover", mover.Qualified);
+        Assert.True(mover.Needed);
+
+        // The kit's PRIVATE shape, kept outside its publicator. Never offered.
+        Assert.DoesNotContain(shapes, e => e.Name == "Budget");
+
+        // The game's own unshared shape. Offered, bare, and first.
+        var score = Assert.Single(shapes, e => e.Name == "Score");
+        Assert.True(score.Local);
+
+        // And the marks tell the same story.
+        var marks = ScopeIndex.For(unit, SymbolKind.Mark, projectDir);
+        Assert.Contains(marks, e => e.Name == "Moving" && e.Origin == "kit.Movement.Drive");
+        Assert.Contains(marks, e => e.Name == "Player" && e.Local);
+    }
 }
