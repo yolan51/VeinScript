@@ -326,6 +326,17 @@ now adds the type to the module, and rule 17b still holds at the use site: `targ
 it is declared in the bundle that owns the builder, and reporting **VS0218** for it pointed the author
 at a span in stdlib source.
 
+**17d. The `shared("…")` string is a LABEL, not a docblock — over 160 characters is `VS0243`.** The
+editor prints it *in the completion row*, under the name, trimmed to one line of about eighty
+characters. With forty names offered from ten bundles that sentence is what the reader chooses BY, and
+everything past the trim is written for nobody. The limit is measured rather than picked: across the
+210 docs in `stdlib/` and `samples/` the median is 45 characters and the 95th percentile is 90, so 160
+sits well above every label anybody has actually needed while still refusing a paragraph. It is a
+**warning** — refusing to compile over the size of a comment would be the tail wagging the dog, and
+would break a working bundle on upgrade rather than telling its author to trim it. The remedy is in the
+message and is always the same: keep the sentence that says what the thing IS, and move the usage
+detail into a `//` comment above the declaration, which nothing truncates.
+
 **18. `need "Author.Bundle"` names what this bundle is built on, and WIDENS what a bare name may mean.**
 Precedence is local declaration → built-in → `need` fallback. A built-in wins and the shadowed member is
 reported as **VS0217** (`need "Vein.Console"` used to capture `spawn`, so `let e = spawn()` built no

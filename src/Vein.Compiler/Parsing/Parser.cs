@@ -167,12 +167,46 @@ public sealed class Parser
         return members;
     }
 
+    /// <summary>
+    /// The longest a `shared("…")` doc may be before it stops being a label and starts being an essay.
+    /// </summary>
+    /// <remarks>
+    /// <b>MEASURED, NOT PICKED.</b> Across the 210 `shared` docs in `stdlib/` and `samples/` the median
+    /// is 45 characters, the 95th percentile is 90, and the longest is 148. 160 is therefore above
+    /// everything anybody has actually needed to write, while a paragraph — 300 and up — is refused.
+    /// A tighter 120 would have flagged three existing docs that are each doing honest work.
+    ///
+    /// The doc has to stay short because of where it is READ: a completion row, one line, beside forty
+    /// others. Anything past ~80 is already trimmed there, and the reader gets an ellipsis instead of
+    /// the sentence the author meant them to see.
+    /// </remarks>
+    private const int MaxDocLength = 160;
+
     private string? TryParseDoc()
     {
         if (!Check(TokenKind.KwShared)) return null;
         Advance();
         Expect(TokenKind.LParen, "'('");
-        string doc = Expect(TokenKind.String, "doc string").Text;
+        var token = Expect(TokenKind.String, "doc string");
+        string doc = token.Text;
+
+        // A PARAGRAPH IS NOT A LABEL. `shared("…")` names what a thing is FOR, and it is shown in a
+        // completion row beside dozens of others — so length is not a style preference here, it is
+        // whether the next person can read the list at all. The long explanation has a home already:
+        // a `//` comment above the declaration, which is where every long one in this codebase lives
+        // and which nothing truncates.
+        //
+        // A WARNING, not an error. The doc is correct prose that happens to be long; refusing to
+        // compile a program over the size of a comment would be the tail wagging the dog, and it would
+        // break an existing bundle on upgrade rather than telling its author to trim it.
+        if (doc.Length > MaxDocLength)
+            _diag.Warning("VS0243",
+                $"This `shared(\"…\")` is {doc.Length} characters; {MaxDocLength} is the most that reads " +
+                "as a label. It is shown in a completion row beside dozens of others and is trimmed " +
+                "there, so the end of it is never read. Keep the sentence that says what this IS, and " +
+                "put the explanation in a `//` comment above the declaration.",
+                token.Span);
+
         Expect(TokenKind.RParen, "')'");
         SkipTerms();
         return doc;

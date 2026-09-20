@@ -136,10 +136,15 @@ bundle Rest by Vein {
         shared("Marks an endpoint this program talks to.")
         mark #Connection
 
-        shared("Hold a connection as an identity: bring Connection(\"https://xyz.supabase.co\", \"anon-key\"), then reach it from any later shard with target $Connection #Connection as c.")
+        // `bring Connection("https://xyz.supabase.co", "anon-key")` holds it, and any later shard
+        // reaches it with `target $Connection #Connection as c`.
+        shared("Hold a connection as an identity, for any later shard to find.")
         builder Connection { $Connection   mark #Connection }
 
-        shared("Announce a connection: bring Connect(\"https://xyz.supabase.co\", \"anon-key\") — hear *Vein.Rest.Db.@Connect in your own shard(s) to react, or skip bring and call get/post directly with the same two values.")
+        // `bring Connect("https://xyz.supabase.co", "anon-key")` emits it; `hear *Vein.Rest.Db.@Connect`
+        // in your own shard to react. Or skip the bring entirely and call get/post with the same two
+        // values — the announcement is for other shards, not for the request.
+        shared("Announce a connection, for other shards to hear.")
         builder Connect { $Connection }
 
         // THE PARAMETER IS `root`, NOT `base`, and the shape's field above still is `base`. Both are

@@ -25,7 +25,7 @@ dialect. There is no general `class`.
 | `start` | `start @E { … }` (bundle entry — at most one; none = reactive) · `load "f" start { … }` (override) | a bundle's boot event; a load-site payload override (**no longer** a shard schedule — that's `run once`) | see RUNTIME.md |
 | `need` | `need "Author.Bundle" [as M]` | what this bundle is built on — widens bare names, or binds `*M.…` when aliased | |
 | `publicator` | `publicator N { … }` | a bundle's public grouping — members are visible to this bundle's shards (bundle-wide) | namespace segment in `*` paths |
-| `shared` | `shared("doc")` **above a decl, inside a publicator** | marks that decl public **across all bundles** (+ doc) — only `shared` members appear in `veinc symbols` and are reachable via `*Author.Bundle.Publicator.@…` | error outside a publicator |
+| `shared` | `shared("doc")` **above a decl, inside a publicator** | marks that decl public **across all bundles** (+ doc) — only `shared` members appear in `veinc symbols` and are reachable via `*Author.Bundle.Publicator.@…` | error outside a publicator; the doc is a LABEL shown in the completion row, so over 160 chars is **VS0243** (a warning) |
 | `let` / `var` | `let x [:T] = e` / `var x …` | immutable / mutable binding | |
 | `SF` | `SF f(p: T) { … }` | shard function — emits events, returns nothing (`-> R` is VS0105) | |
 | `fn` | `fn f(p: T) -> R { … return e }` | function — computes and returns a value; callable in any expression | |
