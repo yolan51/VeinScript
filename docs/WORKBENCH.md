@@ -57,10 +57,30 @@ in `Tooling/SourceEdits.cs` — all-or-nothing for the block, markers aligned at
 and an exact round trip — so they are tested without needing an editor to exist.
 
 **Navigation** — **F12** jumps from a use to its declaration, **Shift+F12** lists every site naming the
-same symbol, **Ctrl+T** finds a declaration by typing a few letters of its name, the **Outline** pane
-lists everything the file declares grouped by kind, and **double-clicking an IR node** lands on the
-source line that produced it (`IrNode` has carried a `Span` since the tree was written, and nothing had
-ever read it).
+same symbol, **Ctrl+T** finds a declaration by typing a few letters of its name, **Ctrl+Shift+F**
+searches every `.vein` in the project for a piece of text, the **Outline** pane lists everything the
+file declares grouped by kind, and **double-clicking an IR node** lands on the source line that
+produced it (`IrNode` has carried a `Span` since the tree was written, and nothing had ever read it).
+
+**And all four cross bundles.** They did not, and the gap opened the moment `$`/`#` completion started
+offering every shared name in every bundle the project reaches: the editor would name a shape from
+another bundle and then answer F12 with "not declared in this file". `QualifiedSymbol` now carries a
+`SymbolLocation`, so a shared declaration says where it is written and not merely that it exists.
+
+Three rules hold across all of it. **The local index is asked first**, because `need` only WIDENS what
+a bare name may mean (RULES 18) — a local declaration shadows a shared one, and jumping to the other
+bundle's would show a declaration this file is not using. **Only `shared` is reachable**, inherited
+rather than re-checked: the jump goes through `ScopeIndex`, so it can only reach what the completion
+list would have offered, under the same `vein.discovery` filter. And **a span is resolved, not
+assumed** — the lexer stores a file NAME (`SourceSpan` renders into every diagnostic, so it must stay
+short), while a bundle's declarations come from its main file and every fragment under `publicators/`
+and `shards/`. `BundleLoader.SourceFiles` and `PathOf` do the resolving, and a name that matches two
+fragments yields no location rather than a guessed one.
+
+**What it does not see: unsaved edits in other tabs.** The open file is searched and analysed as it
+reads; every other file is the last saved version. `BundleLoader.Load` takes an `editing` overlay for
+exactly one file, and threading every dirty tab through the index is a real piece of work and a
+separate one.
 
 **Events** — who emits each event and who hears it, every row a jump. In an identity-oriented language
 this *is* the control flow: there are no calls between shards, so "what happens when this fires" can
@@ -74,10 +94,14 @@ different identities allowed to share a name (RULES 14e), and every use site say
 so `Tooling/DefinitionIndex.cs` keys on (name, kind), never on name alone. A lookup by name would land
 on whichever was declared first and be wrong half the time in exactly the files that use the pattern.
 
-A symbol declared elsewhere — the stdlib, another bundle — resolves to **nothing**, and the status bar
-says so. Jumping somewhere plausible and wrong is worse than not jumping. Local bindings (`let`,
-`target … as w`, `hear … as m`) are deliberately out of scope for the same reason: half-handling them
-would give confident wrong answers inside a shard body.
+A symbol declared elsewhere used to resolve to **nothing** — the status bar said "not declared in this
+file" and that was the whole answer, on the principle that jumping somewhere plausible and wrong is
+worse than not jumping. The principle stands; what changed is that the location is now known rather
+than guessed, so the jump is neither plausible nor wrong. A name nothing shares still resolves to
+nothing, and the message now separates the two cases: not here, and not shared by anything here.
+
+Local bindings (`let`, `target … as w`, `hear … as m`) remain deliberately out of scope for the
+original reason: half-handling them would give confident wrong answers inside a shard body.
 
 **Alt+←/→** walk back and forward through jumps, across files — an F12 you cannot return from is half a
 feature, since you jumped precisely because you were reading something else.
@@ -324,9 +348,10 @@ chat app of three files or a site of five shards means constant reopening.
 | D6 | ✅ **Auto-indent** | Press Enter after `{` and land one level in; type `}` and it pulls itself back out |
 | D6b | ✅ **Bracket match** | See a `{`'s partner boxed — and not a `{` inside a string or comment |
 | D13 | ✅ **Duplicate / move line** | `Ctrl+D`, `Alt+↑`, `Alt+↓` |
-| D7 | ✅ **Go to definition** (`F12`) | Jump from a `$Worker` use to its `shape` |
-| D8 | ✅ **Find references** (`Shift+F12`) | Every place `@Message` is emitted or heard, listed and jumpable |
-| D9 | ✅ **Symbol search** (`Ctrl+T`) | Reach any shape/mark/event/shard by typing its name |
+| D7 | ✅ **Go to definition** (`F12`) | Jump from a `$Worker` use to its `shape` — in this file, in another bundle, or on a `need` line to the bundle itself |
+| D8 | ✅ **Find references** (`Shift+F12`) | Every place `@Message` is emitted or heard, across every file in the project, listed and jumpable |
+| D9 | ✅ **Symbol search** (`Ctrl+T`) | Reach any shape/mark/event/shard by typing its name — this file first, then every bundle the project shares |
+| D14 | ✅ **Find in files** (`Ctrl+Shift+F`) | Find a piece of text anywhere under the project root, not only in the open document |
 | D10 | ✅ **Outline pane** | The file's shapes, marks, events, shards as a jumpable list |
 | D11 | ✅ **IR → source click-through** | Double-click an `IrNode` and land on the line that produced it |
 | D12 | ✅ **Back / forward** (`Alt+←/→`) | Return from an F12 jump, across files |
@@ -385,7 +410,7 @@ font size, shortcut map, recent folders).
 
 **Tracks A and D are complete.**
 
-**62 of the 63 items are done.** One remains, and it is a decision rather than work:
+**63 of the 64 items are done.** One remains, and it is a decision rather than work:
 
 **C1b — an embedded rendered view.** Avalonia ships no WebView, so this needs a third-party dependency,
 and the two realistic options trade differently:
