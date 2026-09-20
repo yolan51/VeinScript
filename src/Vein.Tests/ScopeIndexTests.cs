@@ -287,4 +287,66 @@ public class ScopeIndexTests : IDisposable
         Assert.Contains(marks, e => e.Name == "Moving" && e.Origin == "kit.Movement.Drive");
         Assert.Contains(marks, e => e.Name == "Player" && e.Local);
     }
+
+    // ---- what the tooltip says --------------------------------------------------------------------
+
+    [Fact]
+    public void A_row_carries_the_shared_comment_and_the_fields()
+    {
+        // The `shared("…")` string is the sentence the author wrote to say what a thing IS, and it is
+        // the reason that keyword takes a string rather than being a bare marker. Every reader of the
+        // index threw it away, so a list of forty names said what existed and nothing about which one
+        // you wanted. The fields matter for the same reason and separately: `bring` binds them
+        // positionally, so their ORDER is part of the answer.
+        Kit();
+        var mover = Named(Scope("bundle Game by you {\n  need \"kit.Movement\"\n}", SymbolKind.Shape), "Mover");
+
+        Assert.Equal("how fast", mover!.Doc);
+        Assert.Equal("speed: float", mover.Fields);
+
+        // All three, and the kind and name are still the first line — not replaced by the comment.
+        Assert.Equal(
+            "shape $Mover   kit.Movement.Drive\nspeed: float\nhow fast",
+            mover.Describe("shape"));
+    }
+
+    [Fact]
+    public void A_mark_has_its_comment_but_no_fields()
+    {
+        // A mark holds nothing, so a field line would be an empty promise.
+        Kit();
+        var moving = Named(Scope("bundle Game by you {\n  need \"kit.Movement\"\n}", SymbolKind.Mark), "Moving");
+
+        Assert.Equal("it moves", moving!.Doc);
+        Assert.Null(moving.Fields);
+        Assert.Equal("mark #Moving   kit.Movement.Drive\nit moves", moving.Describe("mark"));
+    }
+
+    [Fact]
+    public void A_local_declaration_shows_its_comment_too()
+    {
+        // A publicator in the bundle you are editing is still a publicator. Reading the doc from the
+        // index and not from the open file would make the list explain half its rows.
+        var own = Named(Scope(
+            "bundle Game by you {\n  publicator Api {\n" +
+            "    shared(\"what the player has earned\") shape $Score { points: int }\n  }\n}",
+            SymbolKind.Shape), "Score");
+
+        Assert.Equal("what the player has earned", own!.Doc);
+        Assert.Equal("points: int", own.Fields);
+    }
+
+    [Fact]
+    public void A_name_with_no_comment_still_describes_cleanly()
+    {
+        // Most marks are never declared at all, so most have no doc — the tooltip must not end up with
+        // a dangling blank line or the word "null" in it.
+        var used = Named(Scope(
+            "bundle Game by you {\n  shape $P { n: int }\n" +
+            "  shard S { run once { let e = spawn()   attach $P to e { n: 1 }   mark e #Plain } }\n}",
+            SymbolKind.Mark), "Plain");
+
+        Assert.Null(used!.Doc);
+        Assert.Equal("mark #Plain", used.Describe("mark"));
+    }
 }

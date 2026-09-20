@@ -11,7 +11,15 @@ namespace Vein.Compiler.Project;
 // resolves. So this only filters discovery surfaces, never resolution.
 public sealed class DiscoveryPolicy
 {
-    private static readonly Dictionary<string, DiscoveryPolicy> _cache = new(StringComparer.OrdinalIgnoreCase);
+    /// Parsed policies by file path, WITH the write time they were parsed at.
+    ///
+    /// THE STAMP IS NOT AN OPTIMISATION. Cached on the path alone, an edited `vein.discovery` never took
+    /// effect until the process restarted — you would add `expose kit.Movement`, type `$`, and see the
+    /// old list. That was survivable while only `veinc symbols` read this; completion now reads it on
+    /// every keystroke, so a policy you cannot change without restarting the editor is a policy nobody
+    /// will edit. Same shape as `BundleIndex`, which stamps its folders for the same reason.
+    private static readonly Dictionary<string, (DateTime Written, DiscoveryPolicy Policy)> _cache =
+        new(StringComparer.OrdinalIgnoreCase);
 
     private readonly bool _rootExpose;
     private readonly Dictionary<string, bool> _rules;   // path (Author[.Bundle[.Pub]]) → expose(true)/silent(false)
@@ -29,9 +37,18 @@ public sealed class DiscoveryPolicy
     {
         var file = Locate(startDir);
         if (file is null) return Permissive;
-        if (_cache.TryGetValue(file, out var cached)) return cached;
-        var policy = Parse(File.ReadAllLines(file));
-        _cache[file] = policy;
+
+        DateTime written;
+        try { written = File.GetLastWriteTimeUtc(file); }
+        catch (Exception) { return Permissive; }   // vanished between Locate and here
+
+        if (_cache.TryGetValue(file, out var cached) && cached.Written == written) return cached.Policy;
+
+        DiscoveryPolicy policy;
+        try { policy = Parse(File.ReadAllLines(file)); }
+        catch (Exception) { return Permissive; }   // mid-save, or unreadable — do not hide everything
+
+        _cache[file] = (written, policy);
         return policy;
     }
 

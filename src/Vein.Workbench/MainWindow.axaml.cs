@@ -1540,9 +1540,13 @@ public partial class MainWindow : Window
                     IsExpanded = true,
                     Tag = new BundleRef(principal.File, principal.Name, true)
                 };
-                foreach (var vf in Directory.EnumerateFiles(Path.GetDirectoryName(principal.File)!, "*.vein")
-                                            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
-                    pNode.Items.Add(new TreeViewItem { Header = Path.GetFileName(vf), Tag = vf });
+                // The program's own folder, and the files that CONFIGURE it — `vein.discovery` most of
+                // all, because it decides what this editor's `$`/`#`/`*` lists enumerate and was
+                // invisible in the one view a person browses a project from.
+                foreach (var vf in new DirectoryInfo(Path.GetDirectoryName(principal.File)!)
+                                       .GetFiles().Where(IsProjectFile)
+                                       .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
+                    pNode.Items.Add(new TreeViewItem { Header = Decorate(vf.Name), Tag = vf.FullName });
                 appNode.Items.Add(pNode);
             }
 
@@ -1613,10 +1617,42 @@ public partial class MainWindow : Window
         // build/VCS blocklist — so a freshly scaffolded bundle/app shows its full structure.
         foreach (var sub in dir.GetDirectories().OrderBy(d => d.Name))
             if (ShowFolder(sub)) item.Items.Add(FolderNode(sub));
-        foreach (var f in dir.GetFiles("*.vein").OrderBy(f => f.Name))
-            item.Items.Add(new TreeViewItem { Header = f.Name, Tag = f.FullName });
+        foreach (var f in dir.GetFiles().Where(IsProjectFile).OrderBy(f => f.Name))
+            item.Items.Add(new TreeViewItem { Header = Decorate(f.Name), Tag = f.FullName });
         return item;
     }
+
+    /// <summary>
+    /// Files the Project Explorer shows: the program, and the files that CONFIGURE the program.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>IT WAS `*.vein` ALONE, AND THAT HID THINGS A PERSON HAS TO EDIT.</b> `vein.discovery` decides
+    /// what the editor's own `$`/`#`/`*` lists enumerate — and it was invisible in the tree, so the one
+    /// file that changes what completion offers could not be opened from the editor that offers it. A
+    /// `.veinproj` was hidden the same way.
+    /// </para>
+    /// <para>
+    /// Deliberately a SHORT list rather than "every file". A project folder holds art, audio and
+    /// binaries that an editor for a text language has nothing to do with, and a tree that shows a
+    /// thousand PNGs is a tree nobody scrolls.
+    /// </para>
+    /// </remarks>
+    private static bool IsProjectFile(FileInfo f) =>
+        f.Extension.Equals(".vein", StringComparison.OrdinalIgnoreCase) ||
+        f.Extension.Equals(".veinproj", StringComparison.OrdinalIgnoreCase) ||
+        f.Name.Equals("vein.discovery", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>A configuration file reads as one, so it is not mistaken for a bundle.</summary>
+    private static string Decorate(string name) =>
+        name.EndsWith(".vein", StringComparison.OrdinalIgnoreCase) ? name : "⚙ " + name;
+
+    /// <summary>
+    /// Whether this path is a program the compiler should be handed. An untitled buffer counts — it is
+    /// what a new file is before it has been saved anywhere.
+    /// </summary>
+    private static bool IsVeinSource(string? path) =>
+        path is null || path.EndsWith(".vein", StringComparison.OrdinalIgnoreCase);
 
     private static bool ShowFolder(DirectoryInfo dir)
     {
@@ -2096,6 +2132,12 @@ public partial class MainWindow : Window
     /// when you asked for a build.
     private void Build(bool renderPreview = true)
     {
+        // A CONFIGURATION FILE IS NOT A PROGRAM. The Project Explorer now shows `vein.discovery` and
+        // `.veinproj`, because a person has to be able to edit what governs their own completion lists
+        // — but the auto-build fires on every keystroke and would compile one as VeinScript, filling
+        // the Diagnostics panel with parse errors for a file that is behaving perfectly.
+        if (!IsVeinSource(_currentPath)) { SetStatus($"{Path.GetFileName(_currentPath)} — configuration, not compiled."); return; }
+
         // The scope covers resolution sites too deep to take a parameter (Sig.Lookup, reached from
         // ProjectLoader and BundleModel); CompileRequest.ProjectDir covers the rest. Both, deliberately:
         // a missed scope would silently fall back to resolving against the Workbench's own bin/ folder.
@@ -2644,7 +2686,11 @@ public partial class MainWindow : Window
                 // word after it, never the sigil itself.
                 Insert: bareOnly || entry.Local
                     ? entry.Name
-                    : entry.Qualified[1..]))   // drop the leading `*`; `$`/`#`/`@` was the trigger char
+                    : entry.Qualified[1..],   // drop the leading `*`; `$`/`#`/`@` was the trigger char
+                // The tooltip carries all three — kind, fields, doc. The doc goes separately into the
+                // ROW as well, because a tooltip is only read by someone who already guessed right.
+                Describe: (string?)entry.Describe(label),
+                Doc: entry.Doc))
             .ToList();
 
         ShowCompletion(items, label);
@@ -3081,13 +3127,22 @@ public partial class MainWindow : Window
     /// The list may SHOW more than it types. A builder entry reads `Panel   title: string, width: int`
     /// so the flattened parameter list is visible while choosing — those names come from someone else's
     /// shape and are not in this file — but inserts just `Panel`.
-    private void ShowCompletion(IReadOnlyList<(string Label, string Insert)> items, string kind)
+    private void ShowCompletion(IReadOnlyList<(string Label, string Insert)> items, string kind) =>
+        ShowCompletion(items.Select(i => (i.Label, i.Insert, (string?)null, (string?)null)).ToList(), kind);
+
+    private void ShowCompletion(
+        IReadOnlyList<(string Label, string Insert, string? Describe, string? Doc)> items, string kind)
     {
         if (items.Count == 0) return;
         _completion = new CompletionWindow(_editor.TextArea);
         _completion.CompletionList.IsFiltering = true;   // search-first: typing any segment narrows the list
-        foreach (var (label, insert) in items)
-            _completion.CompletionList.CompletionData.Add(new VeinCompletion(label, kind, insert));
+
+        // A ROW THAT CARRIES ITS OWN `shared("…")` LINE IS TALLER, so the window has to be, or the
+        // list shows three entries and a scrollbar. Sized only when there is a doc to show.
+        if (items.Any(i => i.Doc is { Length: > 0 })) _completion.MaxHeight = 420;
+
+        foreach (var (label, insert, describe, doc) in items)
+            _completion.CompletionList.CompletionData.Add(new VeinCompletion(label, kind, insert, describe, doc));
 
         // PICKING A NAME CAN ALSO WRITE ITS IMPORT. A bare `$Shape` from a bundle this file does not
         // `need` resolves to nothing, and at a use site the qualified form is not available instead

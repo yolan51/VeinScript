@@ -46,14 +46,46 @@ public static class ScopeIndex
     /// merely discoverable — offering it is the point, but a use site will want a `need` line first.
     /// </param>
     /// <param name="Local">Declared or used in this unit. Always reachable, bare, whatever its visibility.</param>
+    /// <param name="Doc">
+    /// The `shared("…")` text, which is the sentence the author wrote to explain what this IS.
+    ///
+    /// It is the reason `shared` takes a string at all rather than being a bare keyword, and it was
+    /// being thrown away by everything that read the index — so a list of forty names told you what
+    /// existed and nothing about which one you wanted. Null for a name with no doc, which includes
+    /// every mark that is only ever used.
+    /// </param>
+    /// <param name="Fields">
+    /// `x: float, y: float, z: float` — what the shape or event actually holds, rendered. Null for a
+    /// mark, which holds nothing, and for a name with no declaration to read (a mark that is only used).
+    /// </param>
     public sealed record ScopeEntry(
-        string Name, string Sigil, string? Origin, string Qualified, bool Needed, bool Local)
+        string Name, string Sigil, string? Origin, string Qualified, bool Needed, bool Local,
+        string? Doc = null, string? Fields = null)
     {
         /// <summary>`$Position`.</summary>
         public string SigilName => Sigil + Name;
 
         /// <summary>What a completion row reads: `$Position   Vein.Transform.Spatial`.</summary>
         public string Label => Origin is null ? SigilName : $"{SigilName}   {Origin}";
+
+        /// <summary>
+        /// The tooltip beside the row: what it is, what it holds, and the sentence its author wrote.
+        /// </summary>
+        /// <remarks>
+        /// ALL THREE, because they answer different questions. The kind and name say what you are
+        /// looking at; the fields say what you will get and in what order, which is what a `bring` binds
+        /// positionally; and the `shared("…")` doc says what it is FOR — the reason that keyword takes
+        /// a string instead of being a bare marker. A list of forty names with none of this tells you
+        /// what exists and nothing about which one you want.
+        /// </remarks>
+        public string Describe(string kind)
+        {
+            var text = new System.Text.StringBuilder(kind).Append(' ').Append(SigilName);
+            if (Origin is not null) text.Append("   ").Append(Origin);
+            if (Fields is { Length: > 0 }) text.Append('\n').Append(Fields);
+            if (Doc is { Length: > 0 }) text.Append('\n').Append(Doc);
+            return text.ToString();
+        }
     }
 
     /// <summary>
@@ -72,11 +104,16 @@ public static class ScopeIndex
         string sigil = SigilOf(kind);
         var byName = new Dictionary<string, ScopeEntry>(StringComparer.Ordinal);
 
+        var local = LocalDetail(unit, kind);
         foreach (string name in Locals(unit, kind))
+        {
+            local.TryGetValue(name, out var d);
             byName[name] = new ScopeEntry(name, sigil, Origin: null, Qualified: sigil + name,
-                                          Needed: true, Local: true);
+                                          Needed: true, Local: true, Doc: d.Doc, Fields: d.Fields);
+        }
 
         var needs = Needs(unit);
+        var index = Index(projectDir);
         foreach (var s in Shared(projectDir, kind))
         {
             if (byName.ContainsKey(s.Name)) continue;   // local wins
@@ -85,7 +122,9 @@ public static class ScopeIndex
                 Origin: string.Join(".", s.PathSegments),
                 Qualified: s.QualifiedName,
                 Needed: needs.Contains(s.Author + "." + s.Bundle, StringComparer.Ordinal),
-                Local: false);
+                Local: false,
+                Doc: s.Doc,
+                Fields: SharedFields(index, s));
         }
 
         // Local, then what a bare name already reaches, then the merely discoverable — and alphabetical
@@ -105,6 +144,83 @@ public static class ScopeIndex
         SymbolKind.Builder => "&",
         _ => "",
     };
+
+    /// <summary>
+    /// The `shared("…")` text of this unit's OWN declarations, by name.
+    /// </summary>
+    /// <remarks>
+    /// `SymbolIndex` returns names, because that is all completion needed when it could only see one
+    /// file. A local declaration carries a doc as readily as a cross-bundle one — a publicator in the
+    /// bundle you are editing is still a publicator — and reading one from the index and not the other
+    /// would make the list explain half its rows.
+    /// </remarks>
+    private static Dictionary<string, (string? Doc, string? Fields)> LocalDetail(
+        CompilationUnit unit, SymbolKind kind)
+    {
+        var found = new Dictionary<string, (string? Doc, string? Fields)>(StringComparer.Ordinal);
+
+        void Walk(IEnumerable<Decl> ds)
+        {
+            foreach (var d in ds)
+            {
+                switch (d)
+                {
+                    case BundleDecl b: Walk(b.Members); continue;
+                    case PublicatorDecl p: Walk(p.Members); continue;
+                }
+
+                (string Name, string? Fields)? hit = (kind, d) switch
+                {
+                    (SymbolKind.Shape, ShapeDecl s) => (s.Name, FieldList(s.Members)),
+                    (SymbolKind.Mark, MarkDecl m) => (m.Name, null),
+                    (SymbolKind.Event, EventDecl e) => (e.Name, FieldList(e.Members)),
+                    (SymbolKind.Builder, BuilderDecl bl) => (bl.Name, FieldList(bl.Members)),
+                    _ => null,
+                };
+
+                if (hit is { } h) found[h.Name] = (d.Doc, h.Fields);
+            }
+        }
+
+        Walk(unit.Bundles);
+        return found;
+    }
+
+    /// <summary>The declared fields of a shared shape or event, from the decl the index kept.</summary>
+    /// <remarks>
+    /// `BundleIndex` holds the real `ShapeDecl`/`EventDecl` as the dictionary VALUE, not merely a name,
+    /// which is what makes this a lookup rather than a second parse. Keys are `Author.Bundle[.Pub].Name`
+    /// — the same shape `QualifiedSymbol.PathSegments` produces.
+    /// </remarks>
+    private static string? SharedFields(BundleIndex? index, QualifiedSymbol s)
+    {
+        if (index is null) return null;
+        string key = string.Join(".", s.PathSegments) + "." + s.Name;
+
+        return s.Kind switch
+        {
+            SymbolKind.Shape => index.Shapes.TryGetValue(key, out var sh) ? FieldList(sh.Members) : null,
+            SymbolKind.Event => index.Events.TryGetValue(key, out var ev) ? FieldList(ev.Members) : null,
+            SymbolKind.Builder => index.Builders.TryGetValue(key, out var bl) ? FieldList(bl.Members) : null,
+            _ => null,   // a mark holds nothing
+        };
+    }
+
+    /// <summary>`x: float, y: float` — the fields of a body, in declaration order.</summary>
+    private static string? FieldList(IEnumerable<Node> members)
+    {
+        var fields = members.OfType<FieldDecl>()
+                            .Select(f => f.Name + ": " + Sig.TypeStr(f.Type))
+                            .ToList();
+        return fields.Count == 0 ? null : string.Join(", ", fields);
+    }
+
+    /// <summary>The index, or null when there is no search path. Cached by `BundleIndex` itself.</summary>
+    private static BundleIndex? Index(string? projectDir)
+    {
+        try { return BundleIndex.For(projectDir); }
+        catch (Exception) { return null; }
+    }
 
     /// <summary>What this unit declares or uses. Any visibility — it is all yours in your own bundle.</summary>
     private static IReadOnlyList<string> Locals(CompilationUnit unit, SymbolKind kind)
