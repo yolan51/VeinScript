@@ -237,6 +237,9 @@
         <TabItem Header="Dependencies">
           <TreeView Name="DepsTree" />
         </TabItem>
+        <TabItem Header="Symbols">
+          <local:SymbolsPanel Name="Symbols" />
+        </TabItem>
         <TabItem Header="Execution">
           <ScrollViewer Name="ExecPanel" Padding="12,8" />
         </TabItem>

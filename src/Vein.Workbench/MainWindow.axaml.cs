@@ -61,6 +61,7 @@ public partial class MainWindow : Window
     private ListBox _diagBox = null!;
     private TreeView _projectTree = null!;
     private TreeView _depsTree = null!;
+    private SymbolsPanel _symbolsPanel = null!;
     private ScrollViewer _execPanel = null!;
     private Grid _topCols = null!;
     private Grid _mainRows = null!;
@@ -123,12 +124,13 @@ public partial class MainWindow : Window
     private const int TabRawIr = 2;
     private const int TabOutput = 3;
     private const int TabDependencies = 4;
-    private const int TabExecution = 5;
-    private const int TabConsoles = 6;
-    private const int TabRuntime = 7;
-    private const int TabLive = 8;
-    private const int TabTranscript = 9;
-    private const int TabPreview = 10;
+    private const int TabSymbols = 5;
+    private const int TabExecution = 6;
+    private const int TabConsoles = 7;
+    private const int TabRuntime = 8;
+    private const int TabLive = 9;
+    private const int TabTranscript = 10;
+    private const int TabPreview = 11;
 
     private ComboBox _runConfigs = null!;
     private TextBlock _runHint = null!;
@@ -156,11 +158,20 @@ public partial class MainWindow : Window
         _projectTree = this.FindControl<TreeView>("ProjectTree")!;
         BuildExplorerMenu();
         _depsTree = this.FindControl<TreeView>("DepsTree")!;
+        _symbolsPanel = this.FindControl<SymbolsPanel>("Symbols")!;
+        // The window owns navigation, so the panel hands a location back rather than opening files.
+        _symbolsPanel.Activate = at => GoTo(at.File, at.Line, at.Col);
         _execPanel = this.FindControl<ScrollViewer>("ExecPanel")!;
         _topCols = this.FindControl<Grid>("TopCols")!;
         _mainRows = this.FindControl<Grid>("MainRows")!;
         _bottomToggle = this.FindControl<Button>("BottomToggle");
         _bottomPanel = this.FindControl<TabControl>("BottomPanel")!;
+        // Symbols is built on demand: it parses every bundle the app links, which is too much to do on
+        // a build you cannot see the result of. Selecting the tab is the request for it.
+        _bottomPanel.SelectionChanged += (_, _) =>
+        {
+            if (_bottomPanel.SelectedIndex == TabSymbols) _symbolsPanel.Update(_rootFolder, _currentPath);
+        };
         _statusBar = this.FindControl<TextBlock>("StatusBar")!;
         _bundleInspector = this.FindControl<Border>("BundleInspector")!;
         _terminal = this.FindControl<Terminal.TerminalPanel>("TerminalPanel")!;
@@ -2370,6 +2381,9 @@ public partial class MainWindow : Window
         _rawIr.Text = result.IrText;
         PopulateTree(result.IrTree);
         PopulateDependencies(result.Ast);
+        // Loads and parses every bundle the app links, so only when the Symbols tab is actually up.
+        // The answer changes with a `load` or a `need`, not with what you type inside a shard.
+        if (_bottomPanel.SelectedIndex == TabSymbols) _symbolsPanel.Update(_rootFolder, _currentPath);
         PopulateExecution(result.Ast);
         UpdateMarks();
         RefreshRunConfigs();
