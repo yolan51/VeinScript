@@ -15,6 +15,7 @@ internal sealed class ShortcutsWindow : Window
     private static readonly (string Group, string Keys, string Does)[] Bindings =
     {
         ("File",       "Ctrl+N",         "New file"),
+        ("File",       "Ctrl+Shift+N",   "New project"),
         ("File",       "Ctrl+O",         "Open file"),
         ("File",       "Ctrl+K",         "Open folder"),
         ("File",       "Ctrl+W",         "Close tab"),
@@ -29,9 +30,11 @@ internal sealed class ShortcutsWindow : Window
         ("Edit",       "Ctrl+/",         "Toggle comment on the selection"),
         ("Edit",       "Ctrl+D",         "Duplicate line"),
         ("Edit",       "Alt+↑ / Alt+↓",  "Move line up / down"),
+        ("Edit",       "Ctrl+Space",     "Reopen the completion list for the sigil already typed"),
 
-        ("Navigate",   "F12",            "Go to definition"),
-        ("Navigate",   "Shift+F12",      "Find references — listed in the Diagnostics pane"),
+        ("Navigate",   "F12",            "Go to definition — including into another bundle, or a `need` line's bundle"),
+        ("Navigate",   "Shift+F12",      "Find references across the project — listed in the Diagnostics pane"),
+        ("Navigate",   "Alt+← / Alt+→",  "Back / forward through jumps, across files"),
 
         ("Build",      "Ctrl+B",         "Build"),
         ("Build",      "Ctrl+Shift+B",   "Build and show the IR tree"),
@@ -40,7 +43,9 @@ internal sealed class ShortcutsWindow : Window
         ("Run",        "Ctrl+F5",        "Run every participant the file declares, in header order"),
         ("Run",        "Shift+F5",       "Run in an external console window"),
 
-        ("View",       "Ctrl+`",         "Focus the terminal prompt"),
+        ("View",       "Ctrl+`",         "Focus the terminal prompt — and again to come back to the editor"),
+        ("View",       "Ctrl+J",         "Show or hide the bottom panel"),
+        ("View",       "Ctrl+= / Ctrl+- / Ctrl+0", "Zoom in / out / reset"),
 
         ("Terminal",   "Enter",          "Run the command — or send the line to a running program"),
         ("Terminal",   "↑ / ↓",          "Command history"),

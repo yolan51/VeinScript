@@ -500,7 +500,41 @@ public partial class MainWindow : Window
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.Key == Key.F5) { OnRun(sender, e); e.Handled = true; return; }
+        // TYPING SOMEWHERE ELSE IS NOT A COMMAND. This handler is on the Window, so without the guard
+        // it fired while the caret was in the terminal prompt, the diagnostics filter or the run-args
+        // box — where Ctrl+W closed an editor tab you could not see and Ctrl+D duplicated a line in a
+        // file you were not looking at.
+        //
+        // The editor is not caught by this: it is an AvaloniaEdit `TextEditor` and focus lands on its
+        // `TextArea`, which is not a `TextBox`. That is the distinction the guard rests on, so it is
+        // worth knowing before someone "tidies" the type test.
+        bool inTextBox = FocusManager?.GetFocusedElement() is TextBox;
+
+        // Ctrl+` is the one command that has to work from inside a text box, because it is the way
+        // BACK: pressed in the editor it focuses the terminal, pressed in the terminal it returns you.
+        // A one-way trip to a prompt you then have to leave with the mouse is half a shortcut.
+        // `OemTilde` on a US layout, `Oem3` on several others — the same split as Ctrl+/ below.
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key is Key.OemTilde or Key.Oem3)
+        {
+            if (inTextBox) _editor.TextArea.Focus(); else OnFocusTerminal(sender, e);
+            e.Handled = true;
+            return;
+        }
+
+        if (inTextBox) return;
+
+        // The three F5s are three different commands, and the unshifted test used to answer for all of
+        // them: `Ctrl+F5` (Run All) and `Shift+F5` (external console) both ran a plain Run, while both
+        // were advertised in the Run menu and in the shortcuts window.
+        if (e.Key == Key.F5)
+        {
+            if (e.KeyModifiers.HasFlag(KeyModifiers.Control)) OnRunAll(sender, e);
+            else if (e.KeyModifiers.HasFlag(KeyModifiers.Shift)) OnRunExternal(sender, e);
+            else OnRun(sender, e);
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.F12)
         {
             if (e.KeyModifiers.HasFlag(KeyModifiers.Shift)) OnFindReferences(sender, e); else OnGoToDefinition(sender, e);
@@ -527,6 +561,11 @@ public partial class MainWindow : Window
         bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         switch (e.Key)
         {
+            // Advertised in the File menu and bound nowhere until now. Avalonia's `MenuItem.InputGesture`
+            // only DRAWS the gesture — it does not handle it — so this switch is the whole binding
+            // table, and a menu entry is a promise it has to keep.
+            case Key.N when shift: _ = NewProjectAsync(); e.Handled = true; break;
+            case Key.N: OnNew(sender, e); e.Handled = true; break;
             case Key.B when shift: OnBuildInspect(sender, e); e.Handled = true; break;
             case Key.B: Build(); e.Handled = true; break;
             case Key.S when shift: _ = SaveAsAsync(); e.Handled = true; break;
@@ -546,6 +585,7 @@ public partial class MainWindow : Window
             // Ctrl+/ — the key reports as OemQuestion on a US layout and Oem2 on several others.
             case Key.OemQuestion or Key.Oem2: EditorCommands.ToggleComment(_editor); e.Handled = true; break;
             case Key.K: _ = OpenFolderAsync(); e.Handled = true; break;
+            case Key.Space: OnInvokeCompletion(); e.Handled = true; break;
         }
     }
 
@@ -1708,14 +1748,29 @@ public partial class MainWindow : Window
     /// thousand PNGs is a tree nobody scrolls.
     /// </para>
     /// </remarks>
-    private static bool IsProjectFile(FileInfo f) =>
-        f.Extension.Equals(".vein", StringComparison.OrdinalIgnoreCase) ||
-        f.Extension.Equals(".veinproj", StringComparison.OrdinalIgnoreCase) ||
-        f.Name.Equals("vein.discovery", StringComparison.OrdinalIgnoreCase);
+    /// <summary>What the Project Explorer shows.</summary>
+    /// <remarks>
+    /// IT USED TO BE THREE KINDS AND NOTHING ELSE — `.vein`, `.veinproj`, `vein.discovery` — so a
+    /// README, a `.json`, a shader or an asset sitting beside your code did not exist as far as the
+    /// tree was concerned, and there was no way to open one without leaving the app. A project is a
+    /// folder, not a set of extensions.
+    ///
+    /// Still hidden: what an editor should not invite you to open by accident — build output, version
+    /// control internals, and the settings folders of other editors. Everything else is yours.
+    /// </remarks>
+    private static bool IsProjectFile(FileInfo f) => !f.Name.StartsWith('.');
 
-    /// <summary>A configuration file reads as one, so it is not mistaken for a bundle.</summary>
+    /// <summary>A file the compiler understands reads plainly; everything else is marked as along for the ride.</summary>
+    /// <remarks>
+    /// `⚙` was for configuration, when configuration was the only non-`.vein` thing shown. Now that
+    /// the tree shows a folder's real contents, the glyph separates the two questions a reader has:
+    /// which of these is a program, and which of these is a file I happen to keep here.
+    /// </remarks>
     private static string Decorate(string name) =>
-        name.EndsWith(".vein", StringComparison.OrdinalIgnoreCase) ? name : "⚙ " + name;
+        name.EndsWith(".vein", StringComparison.OrdinalIgnoreCase) ? name
+        : name.EndsWith(".veinproj", StringComparison.OrdinalIgnoreCase)
+          || name.Equals("vein.discovery", StringComparison.OrdinalIgnoreCase) ? "⚙ " + name
+        : "· " + name;
 
     /// <summary>
     /// Whether this path is a program the compiler should be handed. An untitled buffer counts — it is
@@ -1738,9 +1793,32 @@ public partial class MainWindow : Window
                 ShowBundleInspector(bundle);
                 break;
             case TreeViewItem { Tag: string path } when File.Exists(path):
+                // The tree shows a folder's real contents now, which includes files this editor has no
+                // business loading into a text buffer. Opening a PNG as text shows you mojibake and,
+                // worse, lets you save it back — so the tree lists it and Reveal in File Explorer is
+                // how you get to it.
+                if (LooksBinary(path)) { SetStatus($"{Path.GetFileName(path)} is not a text file — right-click to reveal it."); break; }
                 await OpenPathAsync(path);
                 break;
         }
+    }
+
+    /// <summary>A cheap "would this be nonsense in a text editor" test: a NUL byte near the front.</summary>
+    /// <remarks>
+    /// By content and not by extension, because an extension list is a list somebody has to maintain
+    /// and it is wrong about the file the day someone invents one. A NUL in the first few KB is what
+    /// every other tool uses for the same decision, and text files do not contain them.
+    /// </remarks>
+    private static bool LooksBinary(string path)
+    {
+        try
+        {
+            using var s = File.OpenRead(path);
+            Span<byte> head = stackalloc byte[4096];
+            int n = s.Read(head);
+            return head[..n].IndexOf((byte)0) >= 0;
+        }
+        catch (Exception) { return false; }   // unreadable is the open path's problem to report, not ours
     }
 
     // ---- the Project Explorer's context menu -----------------------------------------------------
@@ -2226,11 +2304,11 @@ public partial class MainWindow : Window
         UpdateMarks();
         RefreshRunConfigs();
         if (renderPreview || _bottomPanel.SelectedIndex == TabPreview)
-            _webPreview.Update(result.Modules, result.Ast is null ? RouteMap.Empty : RouteMap.Analyze(result.Ast));
+            _webPreview.Update(result.Entry, result.Ast is null ? RouteMap.Empty : RouteMap.Analyze(result.Ast));
         _consoles.Update(result.Ast is null ? null : ConsoleGraph.Analyze(result.Ast));
         _terminal.UndeliveredPrefixes = result.Ast is null ? Array.Empty<string>() : UndeliveredSignals.Analyze(result.Ast);
         _live.Expect(result.Ast is null ? null : ConsoleGraph.Analyze(result.Ast), ServePort);
-        _runtime.Update(result.Modules);
+        _runtime.Update(result.Entry);
         _definitions = result.Ast is null ? DefinitionIndex.Empty : DefinitionIndex.Analyze(result.Ast);
         _outline.Update(_definitions);
         _eventGraph.Update(_definitions);
@@ -2934,7 +3012,7 @@ public partial class MainWindow : Window
 
         _diagWhy.Text = note is null ? "" : $"{note.Why}   ·   {note.Doc}";
 
-        if (QuickFixes.For(d, _editor.Text).FirstOrDefault() is { } fix)
+        if (QuickFixes.For(d, _editor.Text, ProjectDir).FirstOrDefault() is { } fix)
         {
             _pendingFix = fix;
             _quickFixButton.Content = fix.Title;
@@ -3004,6 +3082,41 @@ public partial class MainWindow : Window
             _ => (SymbolKind.Event, "event"),
         };
         ShowScopeCompletion(kind, label);
+    }
+
+    /// <summary>Ctrl+Space — reopen the list for the sigil already typed.</summary>
+    /// <remarks>
+    /// THERE WERE SEVEN WAYS IN AND NO WAY BACK. Completion opened on a trigger character only, so
+    /// once a list was dismissed — Escape, a click, a keystroke it did not like — the only way to see
+    /// it again was to delete the sigil and type it afresh, mid-word, which loses what you had typed.
+    ///
+    /// It reopens rather than guesses: it reads back over the partial word to the sigil that started
+    /// it, and offers that sigil's list. With no sigil behind the caret there is no honest answer —
+    /// VeinScript has no "everything in scope" list, because `$Name` and `#Name` are different things
+    /// (RULES 14e) and a merged one would be a list of names that cannot all be inserted here — so it
+    /// says which characters open which list instead of opening an arbitrary one.
+    /// </remarks>
+    private void OnInvokeCompletion()
+    {
+        if (_completion is not null) return;
+
+        var doc = _editor.Document;
+        int at = _editor.CaretOffset;
+
+        int start = at;
+        while (start > 0 && (char.IsLetterOrDigit(doc.GetCharAt(start - 1)) || doc.GetCharAt(start - 1) == '_')) start--;
+        if (start == 0) { SetStatus("Completion: type $ shape, # mark, @ event, & builder, * qualified, or . member."); return; }
+
+        switch (doc.GetCharAt(start - 1))
+        {
+            case '$': ShowScopeCompletion(SymbolKind.Shape, "shape"); break;
+            case '#': ShowScopeCompletion(SymbolKind.Mark, "mark"); break;
+            case '@': ShowScopeCompletion(SymbolKind.Event, "event"); break;
+            case '&': ShowBuilderCompletion(); break;
+            case '*': ShowStarCompletion(); break;
+            case '.': ShowMemberCompletion(); break;
+            default: SetStatus("Completion: type $ shape, # mark, @ event, & builder, * qualified, or . member."); break;
+        }
     }
 
     /// <summary>
