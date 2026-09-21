@@ -1,0 +1,22 @@
+// samples/bundle_collisions/bundles/Radio.vein — one of two kits that chose the same word.
+//
+// Nothing is wrong with this file. `@Dispatch` is the right name for what it does, and the author
+// had no way of knowing somebody else would think so too — which is the point: a collision is not a
+// mistake anybody made, it is what happens when two good libraries meet in one program.
+//
+// ITS FIELDS MATCH THE OTHER KIT'S ON PURPOSE. Events unify by NAME across a linked app (RULES 20),
+// so `acme.Radio.Wire.@Dispatch` and `zenith.Courier.Post.@Dispatch` are ONE event in one queue at
+// runtime. Two declarations that disagree about their fields is VS0332 and the app will not link.
+// The standard library obeys the same rule where it collides with itself: `Vein.Console.Io.@Send`
+// and `Vein.Net.Peer.@Send` are both `{ to: Mark, text: string }`, to the character.
+
+bundle Radio by acme {
+
+    publicator Wire {
+        shared("Broadcast a line to a channel — same payload as Courier's, on purpose.")
+        event @Dispatch { to: Mark, text: string }
+
+        shared("A channel an identity is tuned to.")
+        shape $Channel { name: string }
+    }
+}

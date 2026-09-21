@@ -14,6 +14,9 @@ namespace Vein.Compiler.Tooling;
 // Two deliberate details:
 //   * Events match on their UNQUALIFIED name, exactly as Interp.Drain routes them — the *Vein.Console.Io.
 //     qualifier is dropped at lower time, so this follows the runtime rather than inventing a second rule.
+//     But a qualifier that names a DIFFERENT bundle is not dropped, it is decisive: `*acme.Radio.Wire.@Send`
+//     is somebody else's event that happens to share a word, and reading it as a console send made VS0212
+//     ask for a console to be spawned in a program with no consoles in it. See `IsTransport` below.
 //   * Both `#Mark` and a string literal are accepted at every site. Marks and strings evaluate to the same
 //     value, so mixed or not-yet-migrated code must not produce false warnings.
 public sealed class ConsoleGraph
@@ -99,11 +102,11 @@ public sealed class ConsoleGraph
                     case MatchStmt m: foreach (var a in m.Arms) Blk(a.Body); if (m.Else is not null) Blk(m.Else); break;
                     case ChanceStmt c: Blk(c.Body); break;
 
-                    case EmitStmt em when em.Event == "Console":
+                    case EmitStmt em when em.Event == "Console" && IsTransport(em.EventPath):
                         if (Field(em, "name") is { } spawned) spawns.Add(new Spawn(spawned, owner, em.Span));
                         break;
 
-                    case EmitStmt em when em.Event == "Send":
+                    case EmitStmt em when em.Event == "Send" && IsTransport(em.EventPath):
                         if (Field(em, "to") is { } target) addresses.Add(new Address(target, owner, em.Span));
                         break;
 
@@ -112,11 +115,11 @@ public sealed class ConsoleGraph
                     // this one. Both make an address real, so both resolve a `@Send` — without this,
                     // VS0212 fires on every Vein.Net program, telling it to spawn a console for a peer
                     // that is not a console and cannot be spawned.
-                    case EmitStmt em when em.Event == "Link":
+                    case EmitStmt em when em.Event == "Link" && IsTransport(em.EventPath):
                         if (Field(em, "name") is { } linked) spawns.Add(new Spawn(linked, owner, em.Span));
                         break;
 
-                    case EmitStmt em when em.Event == "Listen":
+                    case EmitStmt em when em.Event == "Listen" && IsTransport(em.EventPath):
                         if (Field(em, "as") is { } self) spawns.Add(new Spawn(self, owner, em.Span));
                         break;
 
@@ -129,6 +132,21 @@ public sealed class ConsoleGraph
 
             static string? Field(EmitStmt em, string name) =>
                 Literal(em.Fields.FirstOrDefault(f => f.Name == name)?.Value);
+
+            // IS THIS THE TRANSPORT, or somebody else's event that happens to share a word?
+            //
+            // A BARE name is the transport by definition: `@Send` with nothing in front of it is the
+            // one a `need` put in scope, and the runtime routes on the unqualified name. A QUALIFIED
+            // one has already said which bundle it means, and `*acme.Radio.Wire.@Send` is not this.
+            //
+            // Ignoring the path made VS0212 demand that a console be spawned for `#alice` because two
+            // libraries both called their event `Send` — a warning about the console subsystem on a
+            // program that does not use it. Found by writing samples/bundle_collisions, which is a
+            // sample about exactly that word being taken twice.
+            static bool IsTransport(IReadOnlyList<string> path) =>
+                path.Count == 0 ||
+                path.Contains("Console", StringComparer.Ordinal) ||
+                path.Contains("Net", StringComparer.Ordinal);
 
             foreach (var n in members)
                 switch (n)

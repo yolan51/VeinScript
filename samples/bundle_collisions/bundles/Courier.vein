@@ -1,0 +1,16 @@
+// samples/bundle_collisions/bundles/Courier.vein — the other one.
+//
+// A different author, a different publicator, the same member name, and — necessarily — the same
+// payload. See the note in Radio.vein: rename `text` to `body` here and the whole app stops linking
+// with VS0332, because these two are ONE event once they are in one runtime.
+
+bundle Courier by zenith {
+
+    publicator Post {
+        shared("Deliver a line to one recipient — same payload as Radio's, on purpose.")
+        event @Dispatch { to: Mark, text: string }
+
+        shared("A recipient's postbox.")
+        shape $Postbox { unread: int }
+    }
+}

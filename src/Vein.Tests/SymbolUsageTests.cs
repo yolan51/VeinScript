@@ -268,6 +268,44 @@ public class SymbolUsageTests : IDisposable
     }
 
     [Fact]
+    public void The_collisions_sample_collides_as_advertised()
+    {
+        // samples/bundle_collisions exists to be READ, and it makes two claims in its header: that
+        // the two kits clash on `@Dispatch`, and that uncommenting one line turns that into VS0216.
+        // A sample whose comments have drifted from what it does is worse than no sample, so both
+        // halves are checked — the shipped file as it stands, and the edit it tells you to make.
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "samples"))) dir = dir.Parent;
+        Assert.NotNull(dir);
+
+        string sample = Path.Combine(dir!.FullName, "samples", "bundle_collisions");
+        var model = ProjectLoader.Load(Path.Combine(sample, "bundle_collisions.app.vein"), new DiagnosticBag());
+
+        // Two owners, one name — the clash the sample is about.
+        Assert.Contains("@Dispatch", model.Collisions);
+        Assert.Equal(2, model.Symbols.Count(s => s.SigilName == "@Dispatch"));
+
+        // And as shipped it is clean, because every reference in it is qualified.
+        Assert.Empty(UsageMap.For(model).LiveCollisions);
+
+        // Now the edit the header tells you to make: uncomment the bare emit, in a copy.
+        foreach (var f in Directory.EnumerateFiles(Path.Combine(sample, "bundles"), "*.vein"))
+            File.Copy(f, Path.Combine(_bundles, Path.GetFileName(f)), overwrite: true);
+
+        string edited = File.ReadAllText(Path.Combine(sample, "collisions.vein"))
+                            .Replace("            // emit @Dispatch", "            emit @Dispatch");
+        File.WriteAllText(Path.Combine(_dir, "Game.vein"), edited);
+        File.WriteAllText(Path.Combine(_dir, "Game.app.vein"), "app G {\n  load \"Game.vein\"\n}");
+        ProjectLoader.InvalidateAll();
+
+        var clash = Assert.Single(UsageMap.For(
+            ProjectLoader.Load(Path.Combine(_dir, "Game.app.vein"), new DiagnosticBag())).LiveCollisions);
+
+        Assert.Equal("@Dispatch", clash.SigilName);
+        Assert.Equal(new[] { "*acme.Radio.Wire.@Dispatch", "*zenith.Courier.Post.@Dispatch" }, clash.Candidates);
+    }
+
+    [Fact]
     public void The_inverted_loop_agrees_with_the_naive_one()
     {
         // The map indexes the symbol table once and walks each bundle against it, rather than building

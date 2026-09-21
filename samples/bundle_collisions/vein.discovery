@@ -1,0 +1,14 @@
+# vein.discovery — what `$`, `#`, `@`, `&` and `*` ENUMERATE in this sample.
+#
+# `samples/vein.discovery` one directory up says `silent all`, because the samples folder holds
+# sixty unrelated programs. This file overrides it for this project — the nearest one wins.
+#
+# BOTH COLLIDING KITS ARE EXPOSED, which is the whole point: type `@` in collisions.vein and the
+# list shows `@Dispatch` twice, once per owner, each row naming the bundle it came from. That is
+# the editor showing you the collision before the compiler has to.
+
+silent all
+
+expose Vein.Console        # `@Print`, which the Listen shard emits to
+expose acme.Radio          # one `@Dispatch`
+expose zenith.Courier      # the other `@Dispatch`
