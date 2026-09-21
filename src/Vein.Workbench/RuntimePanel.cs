@@ -25,7 +25,7 @@ internal sealed class RuntimePanel : UserControl
     private readonly TextBox _watch = new() { Watermark = "watch: shape or field name…", Width = 200, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
 
     private readonly List<Interp.TraceEvent> _trace = new();
-    private IReadOnlyList<IrModule> _modules = Array.Empty<IrModule>();
+    private IrModule? _entry;
     private Interp? _interp;
 
     public RuntimePanel()
@@ -64,9 +64,14 @@ internal sealed class RuntimePanel : UserControl
 
     /// The compiled program, from each build. A rebuild invalidates the stepped world, because the
     /// entities in it were made by code that no longer exists.
-    public void Update(IReadOnlyList<IrModule> modules)
+    ///
+    /// THE MODULE TO RUN, not the list to guess from. This took every module and booted the first one,
+    /// which is right for a single bundle and wrong the moment an app links several: `samples/kitdemo`
+    /// links two, and whichever the linker happened to order first is not necessarily the one with the
+    /// `start`. `CompilationResult.Entry` is the answer to exactly that question and had no readers.
+    public void Update(IrModule? entry)
     {
-        _modules = modules;
+        _entry = entry;
         if (_interp is not null)
         {
             _interp = null;
@@ -77,13 +82,13 @@ internal sealed class RuntimePanel : UserControl
 
     private void BootWorld()
     {
-        if (_modules.Count == 0) { _status.Text = "nothing built to run"; return; }
+        if (_entry is null) { _status.Text = "nothing built to run"; return; }
 
         _trace.Clear();
         try
         {
             _interp = new Interp { Trace = _trace.Add };
-            _interp.Boot(_modules[0]);
+            _interp.Boot(_entry);
             Refresh("booted — `run once` has built the world");
         }
         catch (Exception ex)

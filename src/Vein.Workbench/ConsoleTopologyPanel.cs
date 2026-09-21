@@ -13,7 +13,9 @@ namespace Vein.Workbench;
 // it out of `emit @Send { to: … }` scattered across four shards is the part that is genuinely hard.
 //
 // Static: it reads the code, not the running processes. A running-registry view ("who is bound right
-// now") is a different feature (B7) and would answer a different question.
+// now") answers a different question and is its own panel — `LiveConsolesPanel`, the Live tab. This
+// note used to say that view did not exist yet; it shipped, and the two are meant to be read together:
+// this one says what the program INTENDS, that one says what is actually bound on the machine.
 internal sealed class ConsoleTopologyPanel : UserControl
 {
     private readonly StackPanel _body = new() { Spacing = 10, Margin = new Avalonia.Thickness(12, 10) };

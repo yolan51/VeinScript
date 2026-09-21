@@ -32,7 +32,7 @@ internal sealed class WebPreviewPanel : UserControl
         FontSize = 13
     };
 
-    private IReadOnlyList<IrModule> _modules = Array.Empty<IrModule>();
+    private IrModule? _entry;
     private RouteMap _map = RouteMap.Empty;
     private string? _lastBody;
 
@@ -106,9 +106,10 @@ internal sealed class WebPreviewPanel : UserControl
 
     /// Called after each Build. Rendering RUNS the program, so it only happens for a bundle that
     /// actually answers @Request — a console sample must not be executed because you clicked a tab.
-    public void Update(IReadOnlyList<IrModule> modules, RouteMap map)
+    /// THE MODULE TO RUN, not the list to guess from — see the note on `RuntimePanel.Update`.
+    public void Update(IrModule? entry, RouteMap map)
     {
-        _modules = modules;
+        _entry = entry;
         _map = map;
 
         if (!map.IsWeb)
@@ -134,12 +135,11 @@ internal sealed class WebPreviewPanel : UserControl
 
     private void Render()
     {
-        if (_modules.Count == 0 || _routes.SelectedItem is not string path) return;
+        if (_entry is null || _routes.SelectedItem is not string path) return;
 
         try
         {
-            // Only the first module: a plain file holds one bundle, and an app links to one module.
-            var result = new Interp().Render(_modules[0], path);
+            var result = new Interp().Render(_entry, path);
 
             _lastBody = result.Body;
             _html.Text = result.Body ?? "";
@@ -203,7 +203,7 @@ internal sealed class WebPreviewPanel : UserControl
     /// what a static host looks for.
     private async Task ExportAsync()
     {
-        if (_modules.Count == 0 || !_map.IsWeb) { _status.Text = "nothing to export — this is not a web bundle"; return; }
+        if (_entry is null || !_map.IsWeb) { _status.Text = "nothing to export — this is not a web bundle"; return; }
 
         var top = TopLevel.GetTopLevel(this);
         if (top is null) return;
@@ -219,7 +219,7 @@ internal sealed class WebPreviewPanel : UserControl
         {
             try
             {
-                var result = new Interp().Render(_modules[0], path);
+                var result = new Interp().Render(_entry, path);
                 if (result.Body is null) { empty++; continue; }
 
                 // `/` → index.html; `/about` → about.html. A nested path keeps its folders.
