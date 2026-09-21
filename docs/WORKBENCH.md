@@ -117,11 +117,19 @@ all**, and positional binding means the slot itself carries no name. `&` complet
 scope with their parameters shown.
 
 **Quick fixes** — a selected diagnostic offers a fix when one is *mechanically certain*: VS0228 inserts
-the `?` its own message tells you to write (inside the bracket, per RULES 14), VS0218 declares the mark.
+the `?` its own message tells you to write (inside the bracket, per RULES 14), VS0218 declares the mark,
+and VS0338/VS0339 rewrite a bundle named without its author into the `need "Author.Bundle"` line.
 Deliberately only those. A fix that removed a field or invented an argument would be editing on your
 behalf, and a wrong automatic edit is far worse than no button — you accept it without reading, and the
 bug moves somewhere you have stopped looking. The same pane shows the *background* a message has no
 room for and where the rule is written down, without restating the message itself.
+
+The author fix shows where the line is drawn. `use Movement` becomes `need "kit.Movement"` **only when
+the search path holds exactly one `Movement`** — then the author is not a guess but the single thing
+the name can mean. Two authors publishing it is the ambiguity that retired `use` in the first place
+(RULES 18), and putting a button on that choice would be the same mistake with a button on it, so
+nothing is offered and the message lists the candidates. A name matching nothing is a typo, and
+inventing an author would turn a caught mistake into a working program that is wrong.
 
 **Runtime** — boot the world, step a tick at a time, and watch identities change. A line-stepping
 debugger answers "where is execution", which in this language has no useful answer: there are no calls
@@ -365,7 +373,7 @@ exists rather than writing new analysis.
 |---|---|---|
 | E1 | ✅ **Compile as you type** | See VS0228 while typing the bad `bring`, not after `Ctrl+B` |
 | E2 | ✅ **Problems filtering** | Show only errors, or only the lines mentioning VS0212 |
-| E3 | ✅ **Quick fixes** | One click to fix VS0228 (arity), VS0231 (`base` with no default), VS0217 (shadowed built-in), VS0212 (unknown console) |
+| E3 | ✅ **Quick fixes** | One click for VS0228 (fill the rest with `?`), VS0218 (declare the mark), VS0338/VS0339 (write the `need` line with its author) — and deliberately no others: see the note below |
 | E4 | ✅ **Signature help** | Parameter names and defaults while typing a `bring`, so `base` is obvious |
 | E5 | ✅ **Event graph** | Who emits `@X` and who hears it, each row a jump — and which events go nowhere |
 | E6 | ✅ **Tick stepper** | Run 3 ticks, pause, step one more, and watch entities change |

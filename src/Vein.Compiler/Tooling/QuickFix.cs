@@ -20,14 +20,72 @@ public sealed record QuickFix(string Title, TextEdit Edit);
 public static class QuickFixes
 {
     /// Fixes available for `diagnostic` against `source`, or empty when none is certain.
-    public static IReadOnlyList<QuickFix> For(Diagnostic diagnostic, string source)
+    ///
+    /// `projectDir` lets a fix consult the bundle index — which bundles exist, and who publishes them.
+    /// Null degrades to the fixes that need only the file, so a caller without a project is no worse
+    /// off than before.
+    public static IReadOnlyList<QuickFix> For(Diagnostic diagnostic, string source, string? projectDir = null)
     {
         return diagnostic.Code switch
         {
             "VS0228" => FillRest(diagnostic, source),
             "VS0218" => DeclareMark(diagnostic, source),
+            "VS0338" or "VS0339" => NameTheAuthor(diagnostic, source, projectDir),
             _ => Array.Empty<QuickFix>()
         };
+    }
+
+    /// VS0338 (`use N`) and VS0339 (`need "N"`) — a bundle named without its author.
+    ///
+    /// CERTAIN ONLY WHEN THE SEARCH PATH HOLDS EXACTLY ONE `N`. Then the author is not a guess: it is
+    /// the single thing the name can mean, and it is what `Lower` already writes into the message
+    /// ("Write `need \"kit.Movement\"`"). Two authors publishing `N` is the ambiguity that retired
+    /// `use` in the first place (RULES 18), and picking one for you would be the exact mistake the
+    /// keyword was removed for — so nothing is offered, and the message lists the candidates.
+    ///
+    /// Read from the index rather than parsed back out of the message: the message is prose, and a
+    /// fix that breaks when a sentence is reworded is a fix that breaks silently.
+    private static IReadOnlyList<QuickFix> NameTheAuthor(Diagnostic d, string source, string? projectDir)
+    {
+        int start = OffsetOf(source, d.Span.Line, 1);
+        if (start < 0) return Array.Empty<QuickFix>();
+
+        int end = source.IndexOf('\n', start);
+        if (end < 0) end = source.Length;
+        string line = source[start..end];
+
+        if (BundleOn(line) is not { } named) return Array.Empty<QuickFix>();
+
+        IReadOnlyDictionary<string, string> owners;
+        try { owners = Project.BundleIndex.For(projectDir).Owners; }
+        catch (Exception) { return Array.Empty<QuickFix>(); }
+
+        var matches = owners.Keys
+            .Where(k => k.EndsWith("." + named.Bundle, StringComparison.Ordinal))
+            .OrderBy(k => k, StringComparer.Ordinal)
+            .ToList();
+        if (matches.Count != 1) return Array.Empty<QuickFix>();
+
+        string alias = named.Alias is null ? "" : " as " + named.Alias;
+        string replacement = named.Indent + $"need \"{matches[0]}\"{alias}";
+
+        return new[] { new QuickFix($"Write `need \"{matches[0]}\"{alias}`",
+                                    new TextEdit(start, line.Length, replacement)) };
+    }
+
+    /// `use N`, `use N as X`, `need "N"` or `need "N" as X` on one line — the bundle it names, any
+    /// alias, and the line's own indentation so the replacement sits where the original did.
+    private static (string Bundle, string? Alias, string Indent)? BundleOn(string line)
+    {
+        string indent = line[..(line.Length - line.TrimStart().Length)];
+        var parts = line.Trim().TrimEnd(';').Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2 || parts[0] is not ("use" or "need")) return null;
+
+        string bundle = parts[1].Trim('"');
+        if (bundle.Length == 0 || bundle.Contains('.')) return null;   // already authored — nothing to fix
+
+        string? alias = parts.Length >= 4 && parts[2] == "as" ? parts[3].Trim('"') : null;
+        return (bundle, alias, indent);
     }
 
     /// VS0228 — `bring B(a)` needs more arguments. Insert `?` before the closing bracket, which is the
