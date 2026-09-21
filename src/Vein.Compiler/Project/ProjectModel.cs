@@ -59,6 +59,13 @@ public sealed class ProjectModel
     /// The boot signature of every loaded bundle that declares a `start`.
     public IReadOnlyList<BundleStart> Starts { get; init; } = Array.Empty<BundleStart>();
 
+    /// Every bundle the app is made of, with the parsed unit it came from.
+    ///
+    /// CARRIED RATHER THAN RE-RESOLVED, because `AppResolver` already produced this list to build the
+    /// symbol table and anything asking a second question about the same app — which bundle names
+    /// which symbol, say — would otherwise parse the whole program again to get back to it.
+    public IReadOnlyList<AppBundle> Bundles { get; init; } = Array.Empty<AppBundle>();
+
     /// Simple member names (with sigil) reachable under more than one distinct owner path — these are
     /// the collisions that FORCE the user to qualify a `*` reference with more segments (up to author).
     public IReadOnlyList<string> Collisions =>

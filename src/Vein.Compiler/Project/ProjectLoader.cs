@@ -11,7 +11,83 @@ namespace Vein.Compiler.Project;
 // in the app file are also indexed.
 public static class ProjectLoader
 {
+    /// Parsed models by app path, with the stamp they were parsed at and the diagnostics they raised.
+    ///
+    /// THE DIAGNOSTICS ARE PART OF THE ANSWER, not a side effect. Nine callers read the bag after
+    /// `Load` — `veinc symbols` prints it, `PublishGate` gates on it, and several tests assert on
+    /// specific codes — so a cache that returned the model and an empty bag would make a misspelled
+    /// `need` silent on every call but the first. They are replayed on a hit.
+    ///
+    /// SAME REASON AS `BundleIndex`: this parses every bundle the app links, and nothing cached it,
+    /// so every reader paid for the whole program. Invisible at eighteen bundles and not at five
+    /// hundred.
+    private static readonly Dictionary<string, (long Stamp, ProjectModel Model, Diagnostic[] Diagnostics)> _cache =
+        new(StringComparer.OrdinalIgnoreCase);
+
     public static ProjectModel Load(string appFilePath, DiagnosticBag diag)
+    {
+        string key;
+        try { key = Path.GetFullPath(appFilePath); }
+        catch (Exception) { key = appFilePath; }
+
+        long stamp = Stamp(appFilePath);
+        if (_cache.TryGetValue(key, out var hit) && hit.Stamp == stamp)
+        {
+            diag.AddRange(hit.Diagnostics);
+            return hit.Model;
+        }
+
+        // Built into its own bag so the cached copy is exactly what this build produced, and a caller
+        // that already had diagnostics in its bag does not get them stored as ours.
+        var own = new DiagnosticBag();
+        var model = Build(appFilePath, own);
+
+        _cache[key] = (stamp, model, own.Items.ToArray());
+        diag.AddRange(own.Items);
+        return model;
+    }
+
+    /// <summary>Forget what was parsed for this app. For tests, and for a caller that knows better.</summary>
+    public static void Invalidate(string appFilePath)
+    {
+        try { _cache.Remove(Path.GetFullPath(appFilePath)); }
+        catch (Exception) { _cache.Remove(appFilePath); }
+    }
+
+    public static void InvalidateAll() => _cache.Clear();
+
+    /// <summary>Cheap change detection across everything the answer depends on.</summary>
+    /// <remarks>
+    /// THE FOLDER, NOT JUST THE FILES THE LAST RESOLVE TOUCHED. Stamping only those misses the case
+    /// that matters most here: a `need "kit.Movement"` that resolved to nothing, and then the kit is
+    /// installed into `bundles/`. No file the last parse read has changed, and the answer is now
+    /// different — so the count and newest write time across the project's own `.vein` files are in
+    /// the stamp, exactly as `BundleIndex.Stamp` does it for a search root.
+    ///
+    /// The stdlib is outside that folder and is stamped by `BundleIndex` on its own; an app whose
+    /// answer changes because the standard library was edited underneath it is a case this
+    /// deliberately does not chase.
+    /// </remarks>
+    private static long Stamp(string appFilePath)
+    {
+        try
+        {
+            string? dir = Path.GetDirectoryName(Path.GetFullPath(appFilePath));
+            if (dir is null) return -1;
+
+            long newest = File.Exists(appFilePath) ? File.GetLastWriteTimeUtc(appFilePath).Ticks : 0;
+            int n = 0;
+            foreach (var f in Directory.EnumerateFiles(dir, "*.vein", SearchOption.AllDirectories))
+            {
+                newest = Math.Max(newest, File.GetLastWriteTimeUtc(f).Ticks);
+                n++;
+            }
+            return newest * 31 + n;
+        }
+        catch (Exception) { return -1; }
+    }
+
+    private static ProjectModel Build(string appFilePath, DiagnosticBag diag)
     {
         var symbols = new List<QualifiedSymbol>();
         var span = new SourceSpan(appFilePath, 1, 1, 0);
@@ -30,8 +106,19 @@ public static class ProjectLoader
         string appName = app?.Name ?? Path.GetFileNameWithoutExtension(appFilePath);
 
         var starts = new List<BundleStart>();
+        var linked = new List<AppBundle>();
         var refs = new List<(IReadOnlyList<string> Path, string Name, SourceSpan Span)>();
-        if (appUnit is not null) { Collect(appUnit, symbols, appFilePath); CollectEventRefs(appUnit, refs); }
+        if (appUnit is not null)
+        {
+            Collect(appUnit, symbols, appFilePath);
+            CollectEventRefs(appUnit, refs);
+
+            // This file's OWN bundles belong in the linked list too — a manifest may declare one
+            // inline, and `veinc symbols <bundle>.vein` comes through here with no manifest at all.
+            // Without them that case reports a program made of no bundles.
+            foreach (var b in appUnit.Bundles)
+                linked.Add(new AppBundle(appUnit, b, null, appFilePath, Needed: false));
+        }
 
         var baseDir = Path.GetDirectoryName(Path.GetFullPath(appFilePath)) ?? ".";
         if (app is not null && appUnit is not null)
@@ -44,6 +131,7 @@ public static class ProjectLoader
             // The manifest's own inline bundles are in `appUnit` and were collected above, so they are
             // skipped here rather than counted twice.
             var resolved = AppResolver.Resolve(app, appUnit, appFilePath, diag);
+            linked.AddRange(resolved);
             var seenUnits = new HashSet<CompilationUnit>(ReferenceEqualityComparer.Instance) { appUnit };
             var withStartByLoad = new Dictionary<AppLoad, List<(BundleDecl B, StartDecl S, List<Sig.Field> Fields)>>();
 
@@ -81,7 +169,7 @@ public static class ProjectLoader
             if (!loaded.Contains((s.Author, s.Bundle)))
                 symbols.Add(s);
 
-        var model = new ProjectModel { AppName = appName, Symbols = symbols, Starts = starts };
+        var model = new ProjectModel { AppName = appName, Symbols = symbols, Starts = starts, Bundles = linked };
 
         // Validate every `*`-qualified event reference (emit/hear/start) against the app's events, so an
         // origin/type mismatch is caught: unknown → error; matches >1 owner → ambiguous.
