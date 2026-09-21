@@ -1393,8 +1393,15 @@ public partial class MainWindow : Window
         // produce two views of one file that then disagree about its contents.
         _tabs.Open(path, await File.ReadAllTextAsync(path));
         SaveSession();   // survives a kill, not only a clean close
+
+        // ONLY WHEN THE ROOT IS NEW. Opening a file cannot change what is in the folder, and rebuilding
+        // the tree for it tore down every node and built it again — collapsing each folder you had
+        // opened and scrolling you back to the top, on the single most common action there is.
+        string? was = _rootFolder;
         _rootFolder ??= Path.GetDirectoryName(path);
-        if (_rootFolder is not null) PopulateProjectTree(_rootFolder);
+        if (_rootFolder is not null && !string.Equals(was, _rootFolder, StringComparison.OrdinalIgnoreCase))
+            PopulateProjectTree(_rootFolder);
+
         Build();
     }
 
@@ -1536,7 +1543,11 @@ public partial class MainWindow : Window
         {
             await File.WriteAllTextAsync(doc.Path, doc.Document.Text);
             _tabs.MarkSaved(doc);
-            if (_rootFolder is not null) PopulateProjectTree(_rootFolder);
+
+            // NOT the tree. Writing a file that already exists cannot change what the folder holds,
+            // and this rebuilt it on every Ctrl+S — and on every F5, since running force-saves first.
+            // `Save As` is the one that can create a file, and it still repopulates.
+
             if (ReferenceEquals(doc, _tabs.Active)) Build();
 
             // Live reload. `veinc serve` reads the file once at boot and the runtime has no reload path
@@ -1580,8 +1591,20 @@ public partial class MainWindow : Window
     // A selectable bundle node in the semantic explorer (drives the bundle inspector).
     private sealed record BundleRef(string MainFile, string Name, bool IsPrincipal);
 
+    /// <summary>Rebuild the tree, keeping the folders you had open and the row you had selected.</summary>
+    /// <remarks>
+    /// A REBUILD IS A TEARDOWN, so anything the tree knows that the filesystem does not — which
+    /// folders are expanded, where you were — is lost unless it is carried across. That was survivable
+    /// while this ran only when a folder's contents changed, and it had quietly come to run on every
+    /// open and every save, which is how it became "the explorer keeps refreshing".
+    ///
+    /// Remembered by PATH rather than by node, because the nodes are new objects afterwards.
+    /// </remarks>
     private void PopulateProjectTree(string root)
     {
+        var expanded = ExpandedFolders();
+        string? selected = Selected()?.Path;
+
         _projectTree.ItemsSource = null;
         _projectTree.Items.Clear();
         var dir = new DirectoryInfo(root);
@@ -1600,6 +1623,51 @@ public partial class MainWindow : Window
         }
 
         AddStdlibNode();
+        RestoreTreeState(expanded, selected);
+    }
+
+    /// <summary>The full paths of every folder node currently open.</summary>
+    private HashSet<string> ExpandedFolders()
+    {
+        var open = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Walk(ItemsControl parent)
+        {
+            foreach (var child in parent.Items.OfType<TreeViewItem>())
+            {
+                if (child.IsExpanded && child.Tag is FolderRef f) open.Add(f.Path);
+                Walk(child);
+            }
+        }
+
+        Walk(_projectTree);
+        return open;
+    }
+
+    /// <summary>Reopen those folders and reselect that row, where they still exist.</summary>
+    /// <remarks>
+    /// A folder that has been deleted or renamed simply does not come back open, which is the right
+    /// answer — restoring state is not the same as insisting on it.
+    /// </remarks>
+    private void RestoreTreeState(HashSet<string> expanded, string? selected)
+    {
+        void Walk(ItemsControl parent)
+        {
+            foreach (var child in parent.Items.OfType<TreeViewItem>())
+            {
+                // A folder can be both reopened and reselected, so these are two tests and not a
+                // switch — a `case` on the first would swallow a folder that was also the selection.
+                string? path = child.Tag switch { FolderRef f => f.Path, string p => p, _ => null };
+
+                if (child.Tag is FolderRef && path is not null && expanded.Contains(path)) child.IsExpanded = true;
+                if (path is not null && selected is not null &&
+                    string.Equals(path, selected, StringComparison.OrdinalIgnoreCase)) child.IsSelected = true;
+
+                Walk(child);
+            }
+        }
+
+        Walk(_projectTree);
     }
 
     /// The stdlib, as a collapsed branch at the bottom of the tree.
@@ -1732,9 +1800,7 @@ public partial class MainWindow : Window
         return item;
     }
 
-    /// <summary>
-    /// Files the Project Explorer shows: the program, and the files that CONFIGURE the program.
-    /// </summary>
+    /// <summary>What the Project Explorer shows.</summary>
     /// <remarks>
     /// <para>
     /// <b>IT WAS `*.vein` ALONE, AND THAT HID THINGS A PERSON HAS TO EDIT.</b> `vein.discovery` decides
@@ -1743,20 +1809,24 @@ public partial class MainWindow : Window
     /// `.veinproj` was hidden the same way.
     /// </para>
     /// <para>
-    /// Deliberately a SHORT list rather than "every file". A project folder holds art, audio and
-    /// binaries that an editor for a text language has nothing to do with, and a tree that shows a
-    /// thousand PNGs is a tree nobody scrolls.
+    /// <b>THEN IT WAS THOSE THREE KINDS AND NOTHING ELSE</b>, which hid the rest of the project: a
+    /// README, a `.json`, a shader or an asset beside your code did not exist as far as the tree was
+    /// concerned, and there was no way to open one without leaving the app. A project is a folder, not
+    /// a set of extensions.
     /// </para>
-    /// </remarks>
-    /// <summary>What the Project Explorer shows.</summary>
-    /// <remarks>
-    /// IT USED TO BE THREE KINDS AND NOTHING ELSE — `.vein`, `.veinproj`, `vein.discovery` — so a
-    /// README, a `.json`, a shader or an asset sitting beside your code did not exist as far as the
-    /// tree was concerned, and there was no way to open one without leaving the app. A project is a
-    /// folder, not a set of extensions.
-    ///
-    /// Still hidden: what an editor should not invite you to open by accident — build output, version
-    /// control internals, and the settings folders of other editors. Everything else is yours.
+    /// <para>
+    /// The argument this replaced was a real one and is worth keeping in view: <i>a tree that shows a
+    /// thousand PNGs is a tree nobody scrolls.</i> Two things answer it rather than dismiss it —
+    /// <see cref="Decorate"/> marks what is not a program, so the eye separates code from cargo
+    /// without reading; and a binary is listed but refused on open, so showing it costs a row and
+    /// never a mangled buffer. What is NOT answered is sheer volume: if an asset folder ever makes
+    /// this unusable, the fix is a per-project ignore list, not a return to guessing which three
+    /// extensions matter.
+    /// </para>
+    /// <para>
+    /// Dotfiles stay hidden — version control internals and other editors' settings, which this editor
+    /// should not invite you to open by accident. Build output is excluded a level up, by folder.
+    /// </para>
     /// </remarks>
     private static bool IsProjectFile(FileInfo f) => !f.Name.StartsWith('.');
 
