@@ -370,8 +370,28 @@ an alias names a bundle, and a publicator that happens to share its spelling is 
 the order shards run in, so a shard declared last in the main file still runs last — and a fragment
 therefore cannot close a phase.
 
-**20. Events unify by name across a linked app.** One queue, one `_self`: an `emit` in one bundle reaches
-a `hear` in another, and a capability bundle can bind the socket the whole app answers on.
+**20. An event is `Author.Bundle.Name`; a SHAPE is just its name.** One queue, one `_self` — an `emit` in
+one bundle reaches a `hear` in another, and a capability bundle can bind the socket the whole app answers
+on — but which event it reaches is decided by who declared it, not by the word alone.
+
+So `acme.Radio`'s `@Dispatch` and `zenith.Courier`'s are two events that share a word, with different
+payloads, both deliverable. **Events used to unify by bare name**, which meant two vendors who had never
+met could not both use the obvious word: matching payloads merged silently and differing ones were VS0332,
+so the app refused to link. That is a workable rule inside one team and no rule at all across a package
+ecosystem. `samples/bundle_collisions` is the worked example.
+
+**Shapes are the deliberate exception, and it is not an oversight.** Components unify by bare name because
+that is precisely how a capability bundle reads the principal's `$Position` without either knowing the
+other exists — take it away and the language loses its point. Two bundles disagreeing about a `$Shape` is
+still **VS0332**, still an error, still "rename one or make them match".
+
+**Two things keep their bare names**, because there is genuinely one of each: anything the standard library
+declares, and anything the runtime raises itself (`@Request`, `@Ticked`, `@DiagnosticRaised`, `@Print` —
+`Interp.RuntimeEvents` and `Interp.HostEvents` are the lists). There is one console to write to.
+
+**Naming stays a separate question from identity.** With two bundles in scope a bare `@Dispatch` still
+cannot say which it means — that is **VS0216**, a warning about that one reference, answered by qualifying
+it or by aliasing one bundle (rule 18b).
 
 ---
 

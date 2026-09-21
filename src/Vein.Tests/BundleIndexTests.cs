@@ -108,7 +108,8 @@ public class BundleIndexTests : IDisposable
             "bundle Demo by me { event @Resized { *acme.Lib.Api.$Size } }", ProjectDir: dir));
 
         Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
-        var t = r.Modules[0].Types.First(x => x.Name == "Resized");
+        // Owner-qualified: an event is `Author.Bundle.Name` so two vendors' events never merge.
+        var t = r.Modules[0].Types.First(x => x.Name == "me.Demo.Resized");
         Assert.Equal(new[] { "w", "h" }, t.Fields.Select(f => f.Name).Take(2));
     }
 

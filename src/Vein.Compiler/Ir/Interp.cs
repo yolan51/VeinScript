@@ -1212,7 +1212,7 @@ public sealed class Interp
                     continue;
                 }
                 var locals = new Dictionary<string, object?> { [h.BindName] = payload };
-                RunGuarded(h.Body, h.Owner, locals, "hear @" + name,
+                RunGuarded(h.Body, h.Owner, locals, "hear @" + EventName(name),
                            canRaise: name != "DiagnosticRaised");
             }
 
@@ -1636,6 +1636,39 @@ public sealed class Interp
     public static readonly IReadOnlySet<string> HostEvents =
         new HashSet<string>(StringComparer.Ordinal)
         { "Response", "Print", "Console", "Send", "Listen", "Link", "Fetch", "ReadFile", "WriteFile", "PlaySound" };
+
+    /// <summary>The readable half of an event key: `me.T.Go` → `Go`.</summary>
+    /// <remarks>
+    /// KEYS ARE INTERNAL. An event is identified by `Author.Bundle.Name` so that two vendors' own
+    /// `@Dispatch` are not silently one event — and none of that belongs in a sentence a person
+    /// reads. A fault in a handler reported "Handler (hear @me.T.Go)" where the author had written
+    /// `hear @Go`, which is the machine's bookkeeping leaking into their error message.
+    /// </remarks>
+    public static string EventName(string key)
+    {
+        int dot = key.LastIndexOf('.');
+        return dot < 0 ? key : key[(dot + 1)..];
+    }
+
+    /// Every event the RUNTIME itself puts on the queue, under a bare name.
+    ///
+    /// WHY `Lower` NEEDS IT. An event is otherwise identified by `Author.Bundle.Name`, so that two
+    /// vendors both calling something `@Dispatch` are not silently one event. These are the exception,
+    /// and not a grudging one: the runtime raises them, so there is exactly one of each no matter who
+    /// declares it. `@Request` is the sharpest case — a program declares its own, and `FireBoot`
+    /// fires it by name, so qualifying it means the boot event is delivered to nobody.
+    ///
+    /// KEEP THIS IN STEP with the `Emit("…")` calls below and with `HostEvents` above, for the same
+    /// reason `PrebuiltNames` says so: a name raised here and missing from this set becomes an event
+    /// the program declares and the runtime can never deliver.
+    public static readonly IReadOnlySet<string> RuntimeEvents =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Request", "Response", "DiagnosticRaised", "Failed", "Fetched",
+            "FileLoaded", "FileMissing", "FileWritten", "Input", "Message", "Undelivered",
+            "KeyDown", "KeyUp", "TextInput", "MouseDown", "MouseUp", "MouseMove",
+            "Ticked", "SoundEnded",
+        };
 
     /// The names `Prebuilt` below answers to. Declared as a set because `Lower` needs the same list: a
     /// built-in already resolves, so a `use`d bundle exporting the same name must not capture it (VS0217).

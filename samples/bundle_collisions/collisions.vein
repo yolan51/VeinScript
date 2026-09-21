@@ -3,61 +3,62 @@
 //   veinc run samples/bundle_collisions/bundle_collisions.app.vein --ticks 1
 //
 // A COLLISION IS NOT A MISTAKE. `acme.Radio` broadcasts to a channel, `zenith.Courier` delivers to
-// one recipient, and `Dispatch` is the right word for both. Neither author could have avoided it.
-// The standard library has six of its own for the same reason — `@Send`, `@Message`,
-// `@Undelivered`, `send`, `get`, `post` — and ships anyway.
+// one recipient, and `Dispatch` is the right word for both. Neither author could have avoided it,
+// and neither has to give it up: they are two events that share a word, not one event with an
+// argument about its fields.
 //
-// THERE ARE TWO DIFFERENT PROBLEMS UNDER THE ONE WORD, and only the second is about naming.
+// THAT IS RECENT, AND IT IS THE POINT OF THIS SAMPLE. Events used to be identified by their bare
+// name, so these two were ONE event in one queue. Matching payloads merged silently; differing ones
+// — which is what these two have — were VS0332 and the app would not link at all. "One of you must
+// rename" is a workable rule inside one team and no rule at all across a package ecosystem. An event
+// is now `Author.Bundle.Name`, so both of these are deliverable and neither is confused for the
+// other. Look at the two payloads in bundles/: three fields against two, nothing in common.
 //
-//   1. VS0332, an ERROR, about the DECLARATIONS. Events unify by name across a linked app
-//      (RULES 20) — that is how a capability bundle hears the principal's events — so two
-//      `@Dispatch` declarations are ONE event in one queue. If they disagree about their fields,
-//      one bundle's shards would read fields the payload does not have, and the app refuses to
-//      link. Qualifying does not help: rename one, or make the payloads match. Both kits declare
-//      `{ to: Mark, text: string }` for exactly that reason — change one and the app stops linking.
+// SHAPES STILL UNIFY BY NAME, and deliberately. A capability bundle reads the principal's
+// `$Position` precisely because components match on the bare name — that is the mechanism the
+// language is built on, not an oversight — so two bundles disagreeing about a `$Shape` is still
+// VS0332. Events were the half where unification bought nothing and cost a name.
 //
-//   2. VS0216, a WARNING, about a REFERENCE. With both bundles in scope a bare `@Dispatch` cannot
-//      say which declaration it is checked against, so it resolves to nothing rather than guessing.
-//      THIS is the naming problem, and it is the one qualifying answers.
+// WHAT IS LEFT IS THE NAMING PROBLEM, and it is smaller than it looks: with both bundles in scope a
+// BARE `@Dispatch` cannot say which of the two it means. That is VS0216, a warning, and it is about
+// this one reference rather than about the bundles.
 //
-// TO SEE IT: uncomment the `emit @Dispatch` in `Loud` below and build —
+// TO SEE IT: uncomment the `emit @Dispatch` in `Loud` and build —
 //
 //     VS0216: '@Dispatch' is ambiguous across the bundles in scope — *zenith.Courier.Post.Dispatch
 //     and *acme.Radio.Wire.Dispatch. Qualify the reference to choose one.
-//
-// The Workbench's Symbols tab says the same thing as one line naming both candidates. Comment it
-// back and it goes: the ambiguity was never in the bundles, only in that one reference.
 
 bundle Collisions by you {
 
     // BOTH NEEDED PLAINLY, which is what puts both bare names in scope and makes the ambiguity
-    // possible at all. It is also the only arrangement in which you can see it — see the note at
-    // the bottom about `as`, which removes the ambiguity by removing one of the bare names.
+    // possible at all. See the note at the bottom about `as`, which removes it by removing a name.
     need "acme.Radio"
     need "zenith.Courier"
 
     shard Loud {
         run once {
-            // ── UNCOMMENT FOR THE COLLISION ──────────────────────────────────────────────────
-            // Both bundles are in scope and both export `@Dispatch`. Which declaration is this?
+            // ── UNCOMMENT FOR THE AMBIGUITY ─────────────────────────────────────────────────
+            // Both bundles are in scope and both export `@Dispatch`. Which one is this?
             //
-            // emit @Dispatch { to: #Main, text: "which one am I?" }
-            // ─────────────────────────────────────────────────────────────────────────────────
+            // emit @Dispatch { text: "which one am I?" }
+            // ────────────────────────────────────────────────────────────────────────────────
 
-            // THE FIX: say which one you mean. Unambiguous anywhere, and the right choice at a use
-            // site you read once.
-            emit *acme.Radio.Wire.@Dispatch { to: #Main, text: "broadcast to the channel" }
-            emit *zenith.Courier.Post.@Dispatch { to: #Main, text: "delivered to one person" }
+            // SAY WHICH ONE, and each takes its own payload — `channel` exists on one of these and
+            // `urgent` on the other, and neither bundle had to know the other existed.
+            emit *acme.Radio.Wire.@Dispatch { channel: "news", text: "broadcast to the channel" }
+            emit *zenith.Courier.Post.@Dispatch { to: #Main, text: "delivered to one person", urgent: true }
         }
     }
 
-    // WHAT UNIFICATION ACTUALLY MEANS. This hears ONE of the two declarations and prints TWICE,
-    // because both emits above put their payload on the same queue under the same name. Qualifying
-    // chose which declaration the compiler checked the payload against; it did not choose a
-    // different event, because after linking there is only one.
+    // TWO HANDLERS, TWO EVENTS. Under the old rule one `hear` caught both emits, because there was
+    // only one event after linking; now each hears its own and reads fields the other does not have.
     shard Listen {
         hear *acme.Radio.Wire.@Dispatch as d {
-            emit *Vein.Console.Io.@Print { text: "heard: " + d.text }
+            emit *Vein.Console.Io.@Print { text: "[radio]   " + d.channel + ": " + d.text }
+        }
+
+        hear *zenith.Courier.Post.@Dispatch as d {
+            emit *Vein.Console.Io.@Print { text: "[courier] " + d.text + "  urgent=" + d.urgent }
         }
     }
 }
@@ -68,14 +69,12 @@ bundle Collisions by you {
 //
 //     need "zenith.Courier" as C
 //
-// and then write `*C.Post.@Dispatch` instead of the full path. Two things change, and the second is
-// the point:
+// and write `*C.Post.@Dispatch`. Two things change, and the second is the point:
 //
 //   * the reference gets shorter — `C` names the head of a `*` path, with author and bundle folded
 //     into one segment, which is worth it for a bundle you reach for often;
 //
-//   * THE AMBIGUITY DISAPPEARS ENTIRELY. An alias imports qualified and widens NOTHING, so bare
-//     `@Dispatch` no longer means Courier's — only Radio's contributes a bare name now, and the
-//     commented `emit @Dispatch` above stops warning. That is precisely why `as` answers VS0216
-//     rather than restating it: if an alias also widened, aliasing both would leave the bare name
-//     just as ambiguous and would have solved nothing.
+//   * THE AMBIGUITY DISAPPEARS. An alias imports qualified and widens NOTHING, so bare `@Dispatch`
+//     no longer means Courier's — only Radio's contributes a bare name, and the commented `emit`
+//     above stops warning. That is why `as` answers VS0216 rather than restating it: if an alias
+//     also widened, aliasing both would leave the bare name just as ambiguous and solve nothing.

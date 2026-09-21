@@ -144,31 +144,44 @@ public class AppLinkTests : IDisposable
     // ---- merge hazards -------------------------------------------------------------------------
 
     [Fact]
-    public void Two_bundles_declaring_one_event_differently_is_reported()
+    public void Two_bundles_declaring_one_SHAPE_differently_is_still_reported()
     {
-        // Unifying by name is the FEATURE — it is how a capability hears the principal. Unifying two
-        // different declarations is the hazard hiding inside it.
+        // VS0332 WAS NOT DELETED, it was narrowed to the half where unification is the feature.
+        //
+        // Events are now identified by `Author.Bundle.Name`, so two authors' `@Ping` are two events
+        // and there is nothing to report. A SHAPE is different: components unify by bare name on
+        // purpose, because that is exactly how a capability bundle reads the principal's `$Position`
+        // without either knowing about the other. Take that away and the language loses its point.
+        //
+        // So the hazard survives for shapes — one component, two disagreeing declarations, and one
+        // bundle's shards reading fields the component does not have — and so does the error.
         Write("A.vein",
-            "bundle A by me {\n  publicator S { shared(\"d\") event @Ping { text: string } }\n" +
-            "  shard X { run once { emit @Ping { text: \"hi\" } } }\n}");
+            "bundle A by me {\n  publicator S { shared(\"d\") shape $Thing { text: string } }\n" +
+            "  shard X { run once { let e = spawn()  attach $Thing to e { text: \"hi\" } } }\n}");
         Write("B.vein",
-            "bundle B by me {\n  publicator S { shared(\"d\") event @Ping { count: int } }\n}");
+            "bundle B by me {\n  publicator S { shared(\"d\") shape $Thing { count: int } }\n" +
+            "  shard Y { run once { let e = spawn()  attach $Thing to e { count: 1 } } }\n}");
         var app = Write("T.app.vein", "app T {\n load \"A.vein\"\n load \"B.vein\"\n}");
 
         var (_, diag) = Run(app);
-        Assert.Contains(diag.Items, d => d.Code == "VS0332" && d.Message.Contains("Ping"));
+
+        Assert.Contains(diag.Items, d => d.Code == "VS0332" && d.Message.Contains("Thing"));
     }
 
     [Fact]
     public void Two_bundles_declaring_one_event_differently_STOPS_the_link()
     {
-        // AN ERROR, NOT A WARNING, and this is the assertion that matters at scale.
+        // IT NO LONGER STOPS IT, and that is the whole reason event identity changed.
         //
-        // It used to warn and link `seen.Owner`'s version — so one bundle silently won, decided by
-        // module order, and the other bundle's handlers were bound to a payload whose fields they do
-        // not have. Survivable to notice in a program with a hundred primitives; invisible in one with
-        // ten thousand, where warnings scroll past. Nothing about it is recoverable at runtime, so the
-        // app does not link.
+        // The old rule: events unify by NAME, so these two `@Ping` declarations were one event with
+        // two incompatible payloads, and the only safe answer was to refuse the app — VS0332, an
+        // error. That was correct given the rule and intolerable given where this language is going.
+        // Two vendors who have never met both calling something `@Ping` is not a mistake either made,
+        // and "one of you must rename" does not scale to a package ecosystem.
+        //
+        // The new rule makes them what they always were: `me.A.Ping` and `me.B.Ping`, two events, both
+        // deliverable, neither confused with the other. Shapes still unify by name — that is how a
+        // capability bundle sees the principal's data — so VS0332 remains for those.
         Write("A.vein",
             "bundle A by me {\n  publicator S { shared(\"d\") event @Ping { text: string } }\n" +
             "  shard X { run once { emit @Ping { text: \"hi\" } } }\n}");
@@ -178,9 +191,8 @@ public class AppLinkTests : IDisposable
 
         var (_, diag) = Run(app);
 
-        var clash = Assert.Single(diag.Items, d => d.Code == "VS0332");
-        Assert.Equal(Severity.Error, clash.Severity);
-        Assert.True(diag.HasErrors, "a divergent unification must fail the build, not merely report");
+        Assert.DoesNotContain(diag.Items, d => d.Code == "VS0332");
+        Assert.False(diag.HasErrors, "two authors using one word is not an error any more");
     }
 
     [Fact]
@@ -252,7 +264,16 @@ public class AppLinkTests : IDisposable
     [Fact]
     public void An_identical_event_declared_in_two_bundles_is_not_reported()
     {
-        // The shared-vocabulary case must stay quiet, or the warning becomes noise people learn to skip.
+        // TWO DECLARATIONS ARE TWO EVENTS NOW, even when they match to the character.
+        //
+        // This test used to assert the opposite — that B's bare `hear @Ping` caught A's emit, because
+        // events unified by NAME. That is what made `@Dispatch` from two unrelated vendors one event,
+        // silently merging when their payloads happened to agree and refusing to link when they did
+        // not. An event is identified by `Author.Bundle.Name`, so B declaring its own `@Ping` means B
+        // has an event of its own, and A's is A's.
+        //
+        // The cost is real and is the point: a bundle that means somebody else's event now has to say
+        // so. `An_emit_in_the_principal_reaches_a_hear_in_another_bundle` is that, spelled correctly.
         Write("A.vein",
             "bundle A by me {\n  publicator S { shared(\"d\") event @Ping { text: string } }\n" +
             "  shard X { run once { emit @Ping { text: \"hi\" } } }\n}");
@@ -262,7 +283,25 @@ public class AppLinkTests : IDisposable
         var app = Write("T.app.vein", "app T {\n load \"A.vein\"\n load \"B.vein\"\n}");
 
         var (output, diag) = Run(app);
+
         Assert.DoesNotContain(diag.Items, d => d.Code == "VS0332");
+        Assert.DoesNotContain("b-saw:hi", output);
+    }
+
+    [Fact]
+    public void Naming_the_other_bundle_s_event_is_how_you_hear_it()
+    {
+        // The other half of the test above: the same two bundles, with B saying whose `@Ping` it means.
+        Write("A.vein",
+            "bundle A by me {\n  publicator S { shared(\"d\") event @Ping { text: string } }\n" +
+            "  shard X { run once { emit @Ping { text: \"hi\" } } }\n}");
+        Write("B.vein",
+            "bundle B by me {\n" +
+            "  shard Y { hear *me.A.S.@Ping as p { " + P("\"b-saw:\" + p.text") + " } }\n}");
+        var app = Write("T.app.vein", "app T {\n load \"A.vein\"\n load \"B.vein\"\n}");
+
+        var (output, _) = Run(app);
+
         Assert.Contains("b-saw:hi", output);
     }
 

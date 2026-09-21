@@ -223,8 +223,12 @@ public class CSharpBackendTests
             "  event @Ping { text: string }\n" +
             "  shard S { hear @Ping as p { emit *Vein.Console.Io.@Print { text: p.text } } }");
 
-        Assert.Contains("private void hear_Ping(Events.Ping p)", code);
-        Assert.Contains("World.On(\"Ping\", p => hear_Ping((Events.Ping)p));", code);
+        // Owner-qualified, and the SAME key the interpreter routes on — `Ident` maps the dots to
+        // underscores for the payload TYPE; the handler method keeps the readable name, and the string
+        // handed to `World.On` is the routing key itself.
+        // The two runtimes agreeing on it is the whole point; check-backend.sh catches them drifting.
+        Assert.Contains("private void hear_Ping(Events.me_T_Ping p)", code);
+        Assert.Contains("World.On(\"me.T.Ping\", p => hear_Ping((Events.me_T_Ping)p));", code);
         Assert.DoesNotContain(notes, n => n.Contains("hear"));
     }
 
@@ -259,7 +263,7 @@ public class CSharpBackendTests
         // NESTED in `Events`, because VeinScript separates `@Ping` from `Ping` by sigil and C# does not
         // — `event @Show` beside `shard Show` is ordinary source (samples/entities_tree.vein).
         Assert.Contains("public static class Events", code);
-        Assert.Contains("public sealed class Ping", code);
+        Assert.Contains("public sealed class me_T_Ping", code);
 
         // Initialised, not bare: an `emit` may omit a field, and the interpreter reads a missing one as
         // empty rather than null. A bare `string` would be null here and "" there.

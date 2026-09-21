@@ -495,7 +495,8 @@ public class ServiceTests
     {
         var r = Compile("bundle B { start @Boot { n: 1 } event @Boot { n: int } }");
         Assert.True(r.Success);
-        Assert.Equal("Boot", r.Modules[0].Start!.Event);
+        // The boot event carries its owner like any other: `Author.Bundle.Name`.
+        Assert.Equal("local.B.Boot", r.Modules[0].Start!.Event);
     }
 
     [Fact]

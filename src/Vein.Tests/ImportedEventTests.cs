@@ -86,17 +86,22 @@ public class ImportedEventTests : IDisposable
         var (app, _) = Link(KitAndGame());
 
         var collected = Assert.Single(app!.Module.Types,
-            t => t.Name == "Collected" && t.Kind == IrTypeKind.Message);
+            t => t.Name == "kit.Kit.Collected" && t.Kind == IrTypeKind.Message);
 
         foreach (var f in new[] { "prize", "value", "origin", "source", "from" })
             Assert.Contains(collected.Fields, x => x.Name == f);
     }
 
     [Fact]
-    public void Two_bundles_really_declaring_one_event_differently_still_fails()
+    public void Two_bundles_really_declaring_one_event_differently_are_two_events()
     {
-        // The guard on the exemption above: preferring a real declaration over a stand-in must not turn
-        // into "never report a clash". Neither of these is imported — both wrote the event.
+        // This used to be the guard on the exemption above: preferring a real declaration over a
+        // stand-in must not turn into "never report a clash".
+        //
+        // There is no clash left to report. Events are identified by `Author.Bundle.Name`, so Alpha's
+        // `@Ping` and Beta's are `me.Alpha.Ping` and `me.Beta.Ping` — two events with two payloads,
+        // both deliverable. The exemption this guarded is about a STAND-IN versus a real declaration
+        // of the SAME event, which is still one event and still needs the real one to win.
         Write("A.vein",
             "bundle Alpha by me {\n  publicator P { shared(\"d\") event @Ping { a: int } }\n" +
             "  shard S { run once { emit @Ping { a: 1 } } }\n}");
@@ -107,6 +112,6 @@ public class ImportedEventTests : IDisposable
 
         var (_, diag) = Link(appFile);
 
-        Assert.Contains(diag.Items, d => d.Code == "VS0332" && d.Message.Contains("Ping"));
+        Assert.DoesNotContain(diag.Items, d => d.Code == "VS0332" && d.Message.Contains("Ping"));
     }
 }

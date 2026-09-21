@@ -69,6 +69,19 @@ public sealed class Lower
     private static readonly HashSet<string> TypeNames = new(StringComparer.Ordinal)
         { "int", "float", "string", "bool", "Entity", "Mark", "list", "map" };
 
+    /// `Author.Bundle` of the bundle being lowered — the first two segments of every event key it owns.
+    ///
+    /// AN EVENT IS IDENTIFIED BY WHERE IT COMES FROM, not by its name alone. Two authors both calling
+    /// an event `@Dispatch` is not a mistake either of them made, and a queue keyed on the bare name
+    /// makes them one event: matching payloads silently merge, differing ones are VS0332 and the app
+    /// refuses to link at all. Neither is tolerable once a program is built from bundles written by
+    /// people who have never met — which is the direction this language is going.
+    ///
+    /// So the routing key is `Author.Bundle.Name`. The publicator is deliberately NOT in it: it is a
+    /// grouping inside a bundle, a bundle cannot declare one event name twice (VS0320), and leaving it
+    /// out is what makes the local spelling and the imported `*A.B.P.@Name` spelling agree on one key.
+    private string _ownerKey = "local";
+
     /// `Author.Bundle` for each un-aliased `need`, in declaration order. A bare name that resolves
     /// nowhere locally is looked for in these — the widening half of what a `need` buys.
     ///
@@ -143,6 +156,7 @@ public sealed class Lower
                 "Its state is per-bundle.");
         _lowered = true;
         _loweredName = bundle.Name;
+        _ownerKey = (bundle.Author ?? "local") + "." + bundle.Name;
 
         var types = new List<IrType>();
         var funcs = new List<IrFunction>();
@@ -228,7 +242,7 @@ public sealed class Lower
         // is what types `r.path` inside the handler that hears it.
         if (startDecl is not null) RegisterImportedEvent(startDecl.EventPath, startDecl.Event);
         var start = startDecl is null ? null : new IrStart(
-            startDecl.Event,
+            EventKey(startDecl.EventPath, startDecl.Event),
             startDecl.Fields.Select(f => (f.Name, LowerExpr(f.Value))).ToList(),
             startDecl.FillRest);
 
@@ -1258,6 +1272,78 @@ public sealed class Lower
         return (used?.Key, used?.Value);
     }
 
+    /// <summary>The routing identity of an event: `Author.Bundle.Name`.</summary>
+    /// <remarks>
+    /// <para>
+    /// THE ONE PLACE THE OWNER IS KEPT. `ResolveEventOwned` has always computed it and the caller
+    /// threw it away one line later, so `@Dispatch` from two authors became one event in one queue.
+    /// Everything downstream keys on the string this returns — `Interp._handlers`, `Interp._events`,
+    /// the payload type the C# backend generates — so they all gain the distinction together, which
+    /// is the only way the two runtimes stay in step.
+    /// </para>
+    /// <para>
+    /// <b>THE STANDARD LIBRARY KEEPS BARE NAMES.</b> Not as an exception grudgingly carved out, but
+    /// because it is the half of the problem that does not exist there: the stdlib is the vocabulary
+    /// every program already agrees on, and the runtime IS its implementation. There is one console
+    /// to write to, one clock, one keyboard. `Interp` fires `@Message`, `@Input`, `@Ticked`,
+    /// `@KeyDown` and the rest itself, by name, and `Drain` dispatches `@Print` and `@Send` by
+    /// comparing the name — qualify those and the runtime stops recognising its own events.
+    ///
+    /// Third-party bundles are where the problem is real, because their authors cannot coordinate.
+    /// So `Vein.*` is bare and everything else is owned, which is also the boundary a reader already
+    /// has in their head.
+    /// </para>
+    /// </remarks>
+    private string EventKey(IReadOnlyList<string> path, string name)
+    {
+        if (Interp.HostEvents.Contains(name) || Interp.RuntimeEvents.Contains(name)) return name;
+
+        // A WRITTEN PATH IS THE ANSWER, whether or not the index can resolve it. Asking
+        // `ResolveEventOwned` first and falling back to "mine" made the key depend on the bundle
+        // index being populated: in a project the two sides agreed, and in a bare temp directory the
+        // emitter said `me.Alpha.Ready` while the hearer said `me.Beta.Ready` and the event vanished.
+        // The owner is written right there in `*me.Alpha.Signals.@Ready`; nothing needs looking up.
+        if (path.Count > 0)
+        {
+            // An alias is the head of the path, not an author — `need "zenith.Courier" as C` makes
+            // `*C.Post.@Dispatch` mean Courier's, and the key has to be the bundle's, not `C`'s.
+            string owner = _aliases.TryGetValue(path[0], out var aliased) ? aliased
+                         : path.Count >= 2 ? path[0] + "." + path[1]
+                         : path[0];
+            return owner.StartsWith("Vein.", StringComparison.Ordinal) ? name : owner + "." + name;
+        }
+
+        // Bare: mine if I declare it, else whatever a `need` widened it to (RULES 18).
+        //
+        // THE STDLIB TEST APPLIES TO MY OWN EVENTS TOO. `stdlib/Diagnostics.vein` emits its own
+        // `@DiagnosticRaised`, and `Interp` raises that event itself when a shard faults — qualify
+        // the library's own emit and the language's `catch` stops catching.
+        if (_events.ContainsKey(name)) return Mine(name);
+
+        var (key, _) = ResolveEventOwned(path, name);
+
+        // UNKNOWN OWNER MEANS BARE, not "mine". An event this bundle neither declares nor can resolve
+        // is one the RUNTIME raises — `@DiagnosticRaised` when a shard faults, `@Ticked`, `@Spawned`,
+        // an event a builder implies — and those arrive under their plain names. Guessing that an
+        // unresolved name belongs to the bundle that mentioned it made the whole diagnostics
+        // subsystem stop catching, because `hear @DiagnosticRaised` became a private event of the
+        // hearer. Qualify only where the owner is actually known; everywhere else behave as before.
+        if (key is null) return name;
+
+        return key.StartsWith("Vein.", StringComparison.Ordinal) ? name : Owned(key);
+    }
+
+    /// <summary>An event this bundle declares: bare inside the standard library, owned everywhere else.</summary>
+    private string Mine(string name) =>
+        _ownerKey.StartsWith("Vein.", StringComparison.Ordinal) ? name : _ownerKey + "." + name;
+
+    /// <summary>`a.B.Pub.Name` from the bundle index, reduced to the `a.B.Name` used as the key.</summary>
+    private static string Owned(string indexKey)
+    {
+        var parts = indexKey.Split('.');
+        return parts.Length < 3 ? indexKey : parts[0] + "." + parts[1] + "." + parts[^1];
+    }
+
     private static string RefText(ShapeInclude si) =>
         si.Path.Count > 0 ? "*" + string.Join(".", si.Path) + ".$" + si.Shape : "$" + si.Shape;
 
@@ -1288,7 +1374,7 @@ public sealed class Lower
             .Select(m => new IrField(m.Name, Ty(m.Type), null, LowerDefault(m.Default))).ToList();
         // Every event carries its emitter's identity and its provenance — see AddPayloadTail.
         AddPayloadTail(fields);
-        return new IrType(e.Name, IrTypeKind.Message, fields, Array.Empty<IrEnumCase>(), e.Doc,
+        return new IrType(EventKey(Array.Empty<string>(), e.Name), IrTypeKind.Message, fields, Array.Empty<IrEnumCase>(), e.Doc,
             new[] { IrAttr.Of("message"), IrAttr.Of("origin", "auto") });
     }
 
@@ -1421,7 +1507,7 @@ public sealed class Lower
         // The OWNER goes with the members, for the same reason the builder branch below passes one.
         if (ResolveEventOwned(path, name) is { Decl: { } decl } owned)
         {
-            _importedEvents[name] = ImportedEvent(name, ExpandMembers(decl.Members, owned.Key), decl.Doc);
+            _importedEvents[name] = ImportedEvent(EventKey(path, name), ExpandMembers(decl.Members, owned.Key), decl.Doc);
             return;
         }
 
@@ -1435,7 +1521,7 @@ public sealed class Lower
         {
             // `owner` is load-bearing: the builder's `$Shape` includes belong to the bundle that
             // DECLARED it, and expanding them against this one silently produced an empty payload.
-            _importedEvents[name] = ImportedEvent(name, ExpandMembers(b.Members, owner), b.Doc);
+            _importedEvents[name] = ImportedEvent(EventKey(path, name), ExpandMembers(b.Members, owner), b.Doc);
         }
     }
 
@@ -1471,7 +1557,7 @@ public sealed class Lower
     private IrFunction LowerHear(HearBlock hb)
     {
         RegisterImportedEvent(hb.EventPath, hb.Event);
-        var attrs = new List<IrAttr> { IrAttr.Of("hear", hb.Event) };
+        var attrs = new List<IrAttr> { IrAttr.Of("hear", EventKey(hb.EventPath, hb.Event)) };
         // An `audience #Mark` barrier names a mark too, and it is where a typo costs most: a misspelt
         // audience admits nobody, which reads exactly like a barrier doing its job.
         foreach (var am in hb.AudienceMarks) UseMark(am, hb.Span);
@@ -1479,7 +1565,7 @@ public sealed class Lower
             attrs.Add(IrAttr.Of("audience", hb.AudienceShapes, hb.AudienceMarks));
         return new IrFunction(
             $"hear_{hb.Event}",
-            new[] { new IrParam(hb.Bind, IrTypeRef.Of(hb.Event)) },
+            new[] { new IrParam(hb.Bind, IrTypeRef.Of(EventKey(hb.EventPath, hb.Event))) },
             IrTypeRef.Of("void"), LowerBlock(hb.Body), false, null, attrs);
     }
 
@@ -1613,7 +1699,7 @@ public sealed class Lower
                 CheckEmitPayload(em);
                 RegisterImportedEvent(em.EventPath, em.Event);
                 return new IrExprStmt(new IrRuntimeCall("Emit",
-                    new IrExpr[] { new IrStructInit(em.Event, em.Fields.Select(LowerFieldInit).ToList(), em.FillRest) }));
+                    new IrExpr[] { new IrStructInit(EventKey(em.EventPath, em.Event), em.Fields.Select(LowerFieldInit).ToList(), em.FillRest) }));
             case DestroyStmt d:
                 return new IrExprStmt(new IrRuntimeCall("DestroyEntity", new[] { LowerExpr(d.Target) }));
             case AttachStmt at:

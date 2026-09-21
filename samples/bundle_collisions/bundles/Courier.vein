@@ -1,14 +1,18 @@
 // samples/bundle_collisions/bundles/Courier.vein — the other one.
 //
-// A different author, a different publicator, the same member name, and — necessarily — the same
-// payload. See the note in Radio.vein: rename `text` to `body` here and the whole app stops linking
-// with VS0332, because these two are ONE event once they are in one runtime.
+// A different author, a different publicator, the same member name, and a DIFFERENT payload — three
+// fields where Radio has two, and not one of them shared. That is the case that matters: two vendors
+// who have never met, both reaching for the obvious word, disagreeing about what it carries.
+//
+// A SHAPE would still have to agree. Components unify by bare name on purpose, because that is how a
+// capability bundle reads the principal's `$Position` without either knowing about the other — so
+// `$Postbox` here and a `$Postbox` elsewhere are one component, and VS0332 still says so.
 
 bundle Courier by zenith {
 
     publicator Post {
-        shared("Deliver a line to one recipient — same payload as Radio's, on purpose.")
-        event @Dispatch { to: Mark, text: string }
+        shared("Deliver a line to one recipient, urgently or not.")
+        event @Dispatch { to: Mark, text: string, urgent: bool }
 
         shared("A recipient's postbox.")
         shape $Postbox { unread: int }
