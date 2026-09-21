@@ -14,11 +14,13 @@ namespace Vein.Tests;
 // of these pin one syntactic form each.
 public class SymbolUsageTests : IDisposable
 {
+    private readonly Xunit.Abstractions.ITestOutputHelper _out;
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "vein-usage-" + Guid.NewGuid().ToString("N"));
     private readonly string _bundles;
 
-    public SymbolUsageTests()
+    public SymbolUsageTests(Xunit.Abstractions.ITestOutputHelper output)
     {
+        _out = output;
         _bundles = Path.Combine(_dir, "bundles");
         Directory.CreateDirectory(_bundles);
     }
@@ -145,6 +147,35 @@ public class SymbolUsageTests : IDisposable
 
         // And the kit is therefore not among the bundles nothing names.
         Assert.DoesNotContain("kit.Movement", u.UnusedBundles);
+    }
+
+    [Theory]
+    [InlineData("kitdemo", "kitdemo.app.vein")]
+    [InlineData("app_capabilities", "shop.app.vein")]
+    [InlineData("app_net", "hub.app.vein")]
+    public void Every_shipped_app_sample_reports_a_summary(string folder, string manifest)
+    {
+        // WHAT THE SYMBOLS TAB'S HEADER SHOWS, for each app this repo ships — printed so the numbers
+        // in the docs can be checked against the samples rather than remembered, and asserted only
+        // where a zero would mean the analysis had quietly stopped working.
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "samples"))) dir = dir.Parent;
+        Assert.NotNull(dir);
+
+        string app = Path.Combine(dir!.FullName, "samples", folder, manifest);
+        Assert.True(File.Exists(app), app + " is missing");
+
+        var model = ProjectLoader.Load(app, new DiagnosticBag());
+        var usage = UsageMap.For(model);
+        int bundles = model.Symbols.Select(s => s.Author + "." + s.Bundle).Distinct(StringComparer.Ordinal).Count();
+
+        _out.WriteLine($"{folder}: {bundles} bundles · {model.Symbols.Count} symbols · " +
+                       $"{model.Collisions.Count} collisions · {usage.UnusedBundles.Count} named by nobody");
+        foreach (var c in model.Collisions) _out.WriteLine($"   collision: {c}");
+        foreach (var b in usage.UnusedBundles) _out.WriteLine($"   named by nobody: {b}");
+
+        Assert.NotEmpty(model.Symbols);
+        Assert.True(bundles > 1, "an app sample links more than one bundle");
     }
 
     [Fact]
