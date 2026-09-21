@@ -179,6 +179,95 @@ public class SymbolUsageTests : IDisposable
     }
 
     [Fact]
+    public void A_bare_name_two_needed_bundles_export_is_a_live_collision()
+    {
+        // The one that can actually bite, and the one `Lower` reports as VS0216: two bundles in
+        // scope, the name written bare, and the reference resolving to nothing rather than guessing.
+        Kit();
+        File.WriteAllText(Path.Combine(_bundles, "Rival.vein"),
+            "bundle Rival by other {\n" +
+            "  publicator Api {\n" +
+            "    shared(\"the same name\") shape $Mover { n: int }\n" +
+            "  }\n" +
+            "}");
+
+        File.WriteAllText(Path.Combine(_dir, "Game.vein"),
+            "bundle Game by you {\n  need \"kit.Movement\"\n  need \"other.Rival\"\n" +
+            "  shard S { each tick { target $Mover as m { } } }\n}");
+        string app = Path.Combine(_dir, "Game.app.vein");
+        File.WriteAllText(app, "app Game {\n  load \"Game.vein\"\n}");
+        ProjectLoader.InvalidateAll();
+
+        var u = UsageMap.For(ProjectLoader.Load(app, new DiagnosticBag()));
+        var clash = Assert.Single(u.LiveCollisions);
+
+        Assert.Equal("you.Game", clash.Bundle);
+        Assert.Equal("$Mover", clash.SigilName);
+        Assert.Equal(new[] { "*kit.Movement.Drive.$Mover", "*other.Rival.Api.$Mover" }, clash.Candidates);
+    }
+
+    [Fact]
+    public void Needing_only_one_of_them_is_not_a_collision()
+    {
+        // WHY THE TABLE-WIDE COUNT WAS USELESS. Two bundles exporting one name is not a problem
+        // until somebody has both in scope — `ProjectModel.Collisions` reports it anyway, which is
+        // why every app in this repo showed the identical six standard-library names.
+        Kit();
+        File.WriteAllText(Path.Combine(_bundles, "Rival.vein"),
+            "bundle Rival by other {\n  publicator Api {\n" +
+            "    shared(\"the same name\") shape $Mover { n: int }\n  }\n}");
+
+        var u = Usage("  shard S { each tick { target $Mover as m { } } }");
+
+        Assert.Empty(u.LiveCollisions);
+    }
+
+    [Fact]
+    public void Qualifying_it_resolves_the_ambiguity()
+    {
+        // The answer the diagnostic gives, and the one RULES 18b's `need … as` produces a shorter
+        // spelling of: a qualified reference says which one it means, so there is nothing ambiguous.
+        Kit();
+        File.WriteAllText(Path.Combine(_bundles, "Rival.vein"),
+            "bundle Rival by other {\n  publicator Api {\n" +
+            "    shared(\"the same name\") shape $Mover { n: int }\n  }\n}");
+
+        File.WriteAllText(Path.Combine(_dir, "Game.vein"),
+            "bundle Game by you {\n  need \"kit.Movement\"\n  need \"other.Rival\"\n" +
+            "  builder B { *kit.Movement.Drive.$Mover }\n}");
+        string app = Path.Combine(_dir, "Game.app.vein");
+        File.WriteAllText(app, "app Game {\n  load \"Game.vein\"\n}");
+        ProjectLoader.InvalidateAll();
+
+        var u = UsageMap.For(ProjectLoader.Load(app, new DiagnosticBag()));
+
+        Assert.Empty(u.LiveCollisions);
+        Assert.Equal(new[] { "you.Game" }, u.UsersOf("*kit.Movement.Drive.$Mover"));
+    }
+
+    [Fact]
+    public void No_shipped_sample_has_one()
+    {
+        // The claim the new chip rests on: all three apps report six table-wide collisions and not
+        // one of them can bite, because no bundle needs two owners of any of those names. If this
+        // ever fails, a sample has acquired a real ambiguity and should be fixed rather than the test.
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "samples"))) dir = dir.Parent;
+        Assert.NotNull(dir);
+
+        foreach (var (folder, manifest) in new[]
+                 { ("kitdemo", "kitdemo.app.vein"), ("app_capabilities", "shop.app.vein"), ("app_net", "hub.app.vein") })
+        {
+            string app = Path.Combine(dir!.FullName, "samples", folder, manifest);
+            var model = ProjectLoader.Load(app, new DiagnosticBag());
+            var u = UsageMap.For(model);
+
+            Assert.NotEmpty(model.Collisions);                  // the table-wide six
+            Assert.Empty(u.LiveCollisions);                     // none of which reaches this program
+        }
+    }
+
+    [Fact]
     public void The_inverted_loop_agrees_with_the_naive_one()
     {
         // The map indexes the symbol table once and walks each bundle against it, rather than building

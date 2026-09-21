@@ -11,6 +11,11 @@ namespace Vein.Compiler.Tooling;
 /// </param>
 public sealed record Reference(SymbolKind Kind, string Name, IReadOnlyList<string> Path);
 
+/// <summary>A bare name one bundle writes that two of the bundles it `need`s both export.</summary>
+/// <param name="Bundle">`Author.Bundle` of the bundle whose source has to change.</param>
+/// <param name="Candidates">The full `*A.B.P.name` paths it could mean — one of them is the fix.</param>
+public sealed record LiveCollision(string Bundle, string SigilName, IReadOnlyList<string> Candidates);
+
 /// <summary>Which bundles name which shared symbols, across a linked app.</summary>
 /// <remarks>
 /// <para>
@@ -50,6 +55,22 @@ public sealed class UsageMap
     /// </remarks>
     public IReadOnlyList<string> UnusedBundles { get; private set; } = Array.Empty<string>();
 
+    /// <summary>Ambiguities that can actually bite: a bare name with two owners `need`ed at once.</summary>
+    /// <remarks>
+    /// THE DIFFERENCE BETWEEN THIS AND `ProjectModel.Collisions` IS THE WHOLE POINT. That one lists
+    /// every name reachable under two owner paths anywhere in the table — which for any project is
+    /// the same six standard-library names (`@Send`, `@Message`, `@Undelivered`, `send`, `get`,
+    /// `post`), because `Vein.Console.Io` and `Vein.Net.Peer` both picked the right word. It is a
+    /// property of the standard library, identical for every program, and therefore says nothing
+    /// about yours.
+    ///
+    /// This one is per consuming bundle and matches what the compiler actually reports: `Lower`
+    /// raises VS0216 only when a bundle `need`s two owners of a name AND writes it bare, and it then
+    /// resolves the reference to nothing rather than guessing. Usually empty, and when it is not, it
+    /// names a line somebody has to change.
+    /// </remarks>
+    public IReadOnlyList<LiveCollision> LiveCollisions { get; private set; } = Array.Empty<LiveCollision>();
+
     public static UsageMap For(ProjectModel model)
     {
         var map = new UsageMap();
@@ -66,6 +87,11 @@ public sealed class UsageMap
 
         var named = new HashSet<string>(StringComparer.Ordinal);
 
+        // Keyed on (bundle, name) rather than held in a set of the record: a record compares its
+        // `Candidates` list by reference, so the same ambiguity written on ten lines would be ten
+        // entries. One per bundle per name is the thing worth reporting.
+        var live = new Dictionary<(string, string), LiveCollision>();
+
         foreach (var b in model.Bundles)
         {
             string consumer = (b.Bundle.Author ?? "local") + "." + b.Bundle.Name;
@@ -76,32 +102,51 @@ public sealed class UsageMap
             {
                 if (!byName.TryGetValue((r.Kind, r.Name), out var candidates)) continue;
 
-                foreach (var s in candidates)
+                List<QualifiedSymbol> reached;
+                if (r.Path.Count > 0)
                 {
-                    string owner = s.Author + "." + s.Bundle;
-                    if (owner == consumer) continue;              // its own; not a user of itself
+                    // Qualified: it says which one it means, and `need` is not required for it.
+                    reached = candidates.Where(s => s.Author + "." + s.Bundle != consumer && Matches(r.Path, s)).ToList();
+                }
+                else
+                {
+                    // Bare: shadowed by a local declaration of the same name (local wins), and
+                    // otherwise reaches only the bundles this one actually `need`s.
+                    if (locals.Contains((r.Kind, r.Name))) continue;
+                    reached = candidates
+                        .Where(s => s.Author + "." + s.Bundle != consumer)
+                        .Where(s => needs.Contains(s.Author + "." + s.Bundle))
+                        .ToList();
 
-                    if (r.Path.Count > 0)
+                    // THE COLLISION THAT ACTUALLY BITES. Two bundles exporting one name is only a
+                    // problem where somebody writes it BARE with both in scope — that is exactly when
+                    // `Lower` raises VS0216 and resolves the reference to nothing. Reported per
+                    // consuming bundle, because it is a fact about that bundle's `need` list and not
+                    // about the standard library.
+                    if (reached.Count > 1)
                     {
-                        // Qualified: it says which one it means, and `need` is not required for it.
-                        if (!Matches(r.Path, s)) continue;
+                        string sigilName = reached[0].Sigil + r.Name;
+                        live[(consumer, sigilName)] = new LiveCollision(
+                            consumer, sigilName,
+                            reached.Select(s => s.QualifiedName).OrderBy(x => x, StringComparer.Ordinal).ToList());
                     }
-                    else
-                    {
-                        // Bare: shadowed by a local declaration of the same name, and otherwise only
-                        // reaches a bundle this one actually needs.
-                        if (locals.Contains((r.Kind, r.Name))) continue;
-                        if (!needs.Contains(owner)) continue;
-                    }
+                }
 
+                foreach (var s in reached)
+                {
                     string q = s.QualifiedName;
                     (map._users.TryGetValue(q, out var set)
                         ? set
                         : map._users[q] = new SortedSet<string>(StringComparer.Ordinal)).Add(consumer);
-                    named.Add(owner);
+                    named.Add(s.Author + "." + s.Bundle);
                 }
             }
         }
+
+        map.LiveCollisions = live.Values
+            .OrderBy(c => c.Bundle, StringComparer.Ordinal)
+            .ThenBy(c => c.SigilName, StringComparer.Ordinal)
+            .ToList();
 
         map.UnusedBundles = model.Bundles
             .Select(b => (b.Bundle.Author ?? "local") + "." + b.Bundle.Name)

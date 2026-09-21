@@ -37,6 +37,12 @@ internal sealed class SymbolsPanel : UserControl
     private ProjectModel? _model;
     private UsageMap? _usage;
     private IReadOnlyList<string> _collisions = Array.Empty<string>();
+
+    /// `$Mover` → the owner paths that export it, when more than one does.
+    ///
+    /// SO A ROW CAN NAME THE OTHER ONE. "also elsewhere — qualify it" told you a problem existed and
+    /// left you to find where; `also *Vein.Net.Peer` is the answer and the same width.
+    private Dictionary<string, List<string>> _clashOwners = new(StringComparer.Ordinal);
     private IReadOnlyList<(string Bundle, string First, string Second)> _duplicates = Array.Empty<(string, string, string)>();
     private IReadOnlyList<(string Key, string Winner, string Loser)> _shadowed = Array.Empty<(string, string, string)>();
     private string? _source;
@@ -91,6 +97,15 @@ internal sealed class SymbolsPanel : UserControl
                 _model = ProjectLoader.Load(_source, new DiagnosticBag());
                 _collisions = _model.Collisions;
                 _usage = UsageMap.For(_model);
+
+                _clashOwners = _model.Symbols
+                    .Where(s => s.Kind != SymbolKind.Bundle && _collisions.Contains(s.SigilName, StringComparer.Ordinal))
+                    .GroupBy(s => s.SigilName, StringComparer.Ordinal)
+                    .ToDictionary(g => g.Key,
+                                  g => g.Select(s => string.Join(".", s.PathSegments))
+                                        .Distinct(StringComparer.Ordinal)
+                                        .OrderBy(x => x, StringComparer.Ordinal).ToList(),
+                                  StringComparer.Ordinal);
             }
             catch (Exception) { _model = null; }
 
@@ -168,25 +183,45 @@ internal sealed class SymbolsPanel : UserControl
     }
 
     /// <summary>The exception counts, each one a filter. This is the part that scales.</summary>
+    /// <remarks>
+    /// WHAT COUNTS AS AN EXCEPTION IS THE WHOLE DESIGN. The first version put
+    /// `ProjectModel.Collisions` here, which reports every name reachable under two owner paths
+    /// anywhere in the table — and that is the same six standard-library names for every program ever
+    /// compiled, because `Vein.Console.Io` and `Vein.Net.Peer` both picked the right word for `@Send`.
+    /// A number identical in every project is not information about any of them.
+    ///
+    /// So the loud one is `UsageMap.LiveCollisions`: a bare name written where two `need`ed bundles
+    /// both export it, which is precisely when `Lower` raises VS0216. Usually none. The table-wide
+    /// count stays, quietly, because "which names exist twice" is worth being able to look at — it
+    /// just is not a problem.
+    /// </remarks>
     private void Chips()
     {
         int unused = _usage?.UnusedBundles.Count ?? 0;
+        var muted = new SolidColorBrush(Color.FromRgb(0x9A, 0xA2, 0xB2));
 
         Chip("All", Show.All, 0, Brushes.Gainsboro);
-        if (_collisions.Count > 0) Chip("collisions", Show.Collisions, _collisions.Count, Brushes.Goldenrod);
+        if (_collisions.Count > 0) Chip("names used twice", Show.Collisions, _collisions.Count, muted);
         if (_duplicates.Count > 0) Chip("duplicate bundles", Show.Duplicates, _duplicates.Count, Brushes.IndianRed);
-        if (unused > 0) Chip("named by nobody", Show.Unused, unused, new SolidColorBrush(Color.FromRgb(0x9A, 0xA2, 0xB2)));
+        if (unused > 0) Chip("named by nobody", Show.Unused, unused, muted);
 
-        // Shadowing has no rows of its own to filter to — the loser is not in the table, which is what
-        // shadowed MEANS — so it reports itself and names the pair rather than offering a view.
+        // These two have no rows to filter to. A live collision is a fact about one bundle's source,
+        // and a shadowed declaration is not in the table at all — that is what shadowed MEANS — so
+        // both state themselves and name the fix rather than offering a view.
+        foreach (var c in _usage?.LiveCollisions ?? Array.Empty<LiveCollision>())
+            Warn($"⚠ {c.Bundle} writes {c.SigilName} bare, and needs both — use {string.Join("  or  ", c.Candidates)}");
+
         foreach (var (key, winner, loser) in _shadowed.Take(3))
-            _chips.Children.Add(new TextBlock
-            {
-                Text = $"⚠ {key} hidden: {Path.GetFileName(winner)} wins over {Path.GetFileName(loser)}",
-                Foreground = Brushes.IndianRed, FontSize = 11,
-                Margin = new Avalonia.Thickness(0, 4, 10, 0), VerticalAlignment = VerticalAlignment.Center,
-            });
+            Warn($"⚠ {key} hidden: {Path.GetFileName(winner)} wins over {Path.GetFileName(loser)}");
     }
+
+    private void Warn(string text) =>
+        _chips.Children.Add(new TextBlock
+        {
+            Text = text,
+            Foreground = Brushes.Goldenrod, FontSize = 11,
+            Margin = new Avalonia.Thickness(0, 4, 10, 0), VerticalAlignment = VerticalAlignment.Center,
+        });
 
     private void Chip(string label, Show mode, int count, IBrush colour)
     {
@@ -252,23 +287,39 @@ internal sealed class SymbolsPanel : UserControl
     }
 
     /// One member. Carries its location so a double-click can open it.
+    /// <remarks>
+    /// ONLY WHAT IS TRUE OF THIS ROW IN PARTICULAR. Both of the first version's annotations failed
+    /// that: `← unused` appeared on about a hundred and ninety of a hundred and ninety-six rows, and
+    /// `⚠ also elsewhere — qualify it` fired on every name the standard library happens to use twice
+    /// whether or not this program could ever be confused by it. An annotation on almost every row is
+    /// decoration, and a warning that is never actionable teaches people to skip warnings.
+    ///
+    /// So: usage is shown when there IS some, the twin is NAMED rather than alluded to, and gold is
+    /// spent only where the compiler would actually report VS0216.
+    /// </remarks>
     private TreeViewItem Row(QualifiedSymbol s)
     {
-        // A COLLISION IS THE ROW'S MOST IMPORTANT FACT, because it is the one that changes what you
-        // have to type: the bare name is ambiguous and the reference must be qualified (RULES 18).
-        bool clashes = _collisions.Contains(s.SigilName, StringComparer.Ordinal);
         var users = _usage?.UsersOf(s.QualifiedName) ?? Array.Empty<string>();
+        string own = string.Join(".", s.PathSegments);
+
+        var others = _clashOwners.TryGetValue(s.SigilName, out var owners)
+            ? owners.Where(o => !string.Equals(o, own, StringComparison.Ordinal)).ToList()
+            : new List<string>();
+
+        // Gold only when some bundle actually writes this name bare with two owners in scope.
+        bool live = _usage?.LiveCollisions.Any(c => string.Equals(c.SigilName, s.SigilName, StringComparison.Ordinal))
+                    ?? false;
 
         var text = $"{s.SigilName}   ({s.Kind})";
-        if (clashes) text += "   ⚠ also elsewhere — qualify it";
-        text += users.Count > 0 ? "   ← " + string.Join(", ", users) : "   ← unused";
+        if (users.Count > 0) text += "   ← " + string.Join(", ", users);
+        if (others.Count > 0) text += "   · also " + string.Join(", ", others.Select(o => "*" + o));
         if (s.Doc is { Length: > 0 }) text += "   " + s.Doc;
 
         return new TreeViewItem
         {
             Header = text,
             Tag = s.At,
-            Foreground = clashes ? Brushes.Goldenrod : Brushes.Gainsboro,
+            Foreground = live ? Brushes.Goldenrod : Brushes.Gainsboro,
         };
     }
 }
