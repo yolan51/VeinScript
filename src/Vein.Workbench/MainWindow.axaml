@@ -117,6 +117,7 @@
         </MenuItem>
       </MenuItem>
       <MenuItem Header="_Help">
+        <MenuItem Header="_Browse Samples" Click="OnBrowseSamples" />
         <MenuItem Header="_Keyboard Shortcuts" Click="OnShortcuts" />
         <Separator />
         <MenuItem Header="_About VeinScript Workbench" Click="OnAbout" />

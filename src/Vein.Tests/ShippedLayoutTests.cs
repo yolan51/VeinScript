@@ -119,4 +119,34 @@ public class ShippedLayoutTests
 
         Assert.Contains("Name=\"ChecksMenu\"", xaml);
     }
+
+    [Fact]
+    public void The_samples_can_be_found_the_way_the_menu_finds_them()
+    {
+        // Help ▸ Browse Samples resolves the folder with `BundleIndex.LocateNamed` — the same walk
+        // that finds `stdlib`, so an install and a source checkout behave identically and there is no
+        // "installed" special case anywhere.
+        //
+        // Worth a test because the failure is invisible from a developer's copy: the walk succeeds
+        // here by climbing out of `bin/` into the real repository, and would succeed on an install
+        // only because the csproj copies the samples beside the executable. Break that copy and this
+        // still passes locally while the shipped app's menu item finds nothing.
+        string? found = BundleIndex.LocateNamed(AppContext.BaseDirectory, "samples");
+
+        Assert.NotNull(found);
+        Assert.Equal("samples", Path.GetFileName(found));
+        Assert.True(File.Exists(Path.Combine(found!, "console.vein")),
+                    "LandingFile prefers console.vein, so the first click opens a program rather than a tree");
+    }
+
+    [Fact]
+    public void Browse_samples_is_in_the_Help_menu()
+    {
+        // The samples shipped and were reachable exactly once: a first launch lands on them, and
+        // after somebody opens a folder of their own there was no route back — New Project's "open
+        // the repository" row is gated on `VeinScript.sln`, which no install has.
+        string xaml = File.ReadAllText(Path.Combine(RepoRoot(), "src", "Vein.Workbench", "MainWindow.axaml"));
+
+        Assert.Contains("Click=\"OnBrowseSamples\"", xaml);
+    }
 }

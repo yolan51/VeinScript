@@ -398,6 +398,7 @@ is next", it is "what does this identity look like now, and what changed it".
 | F7 | ✅ **Font size** (`Ctrl+±`) | Read it comfortably on a laptop — remembered between sessions |
 | F8 | ✅ **Shortcut map** | See every binding in one place, including the ones no menu shows |
 | F9 | ✅ **Recent folders** | Reopen last week's project in two clicks |
+| F10 | ✅ **Browse Samples** (Help) | Get back to the shipped samples after opening a project of your own — the first launch lands on them, and nothing else did |
 
 ## Suggested order
 
@@ -418,7 +419,7 @@ font size, shortcut map, recent folders).
 
 **Tracks A and D are complete.**
 
-**63 of the 64 items are done.** One remains, and it is a decision rather than work:
+**64 of the 65 items are done.** One remains, and it is a decision rather than work:
 
 **C1b — an embedded rendered view.** Avalonia ships no WebView, so this needs a third-party dependency,
 and the two realistic options trade differently:

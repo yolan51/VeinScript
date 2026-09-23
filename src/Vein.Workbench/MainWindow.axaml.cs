@@ -938,6 +938,47 @@ public partial class MainWindow : Window
     private void OnAbout(object? sender, RoutedEventArgs e) => new AboutWindow().ShowDialog(this);
     private void OnShortcuts(object? sender, RoutedEventArgs e) => new ShortcutsWindow().ShowDialog(this);
 
+    /// <summary>Help ▸ Browse Samples — open the shipped sample programs.</summary>
+    /// <remarks>
+    /// <para>
+    /// THE SAMPLES SHIP AND WERE REACHABLE EXACTLY ONCE. `Vein.Workbench.csproj` copies them beside
+    /// the executable, and a first launch lands on `samples/console.vein` because `FindProjectRoot`
+    /// finds the install directory. Open your own folder after that and there is no way back: the
+    /// one menu row that offers them — New Project's "Open the repository" — is gated on
+    /// `VeinScript.sln`, which exists in a checkout and never in an install.
+    /// </para>
+    /// <para>
+    /// So the audience it was shipped for — somebody trying the language, who then tries something
+    /// of their own — was the audience that could not get back to it.
+    /// </para>
+    /// <para>
+    /// Under Help rather than File because it answers "show me how", not "open my work", and it
+    /// creates nothing. `BundleIndex.LocateNamed` is the same walk the standard library is found by,
+    /// so an install and a source checkout resolve it identically with no special case here.
+    /// </para>
+    /// </remarks>
+    private void OnBrowseSamples(object? sender, RoutedEventArgs e) => _ = BrowseSamplesAsync();
+
+    private async Task BrowseSamplesAsync()
+    {
+        string? samples;
+        try { samples = BundleIndex.LocateNamed(AppContext.BaseDirectory, "samples"); }
+        catch (Exception) { samples = null; }
+
+        if (samples is null)
+        {
+            SetStatus("No samples folder found beside this installation.");
+            return;
+        }
+
+        // And nothing after this. `OpenProjectFolderAsync` lands on a runnable file — `LandingFile`
+        // prefers `console.vein`, which is why a first click opens a program rather than a tree —
+        // and then sets a status that promises ▶ only when the file really declares a run line. A
+        // cheerful "press ▶" written over the top of that would be the careless version of a message
+        // somebody already thought about.
+        await OpenProjectFolderAsync(samples);
+    }
+
     // ---- the cloud ------------------------------------------------------------------------------
     //
     // Read from disk once at startup, so a signed-in session survives a restart. Null is the ordinary
