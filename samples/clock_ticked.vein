@@ -27,7 +27,8 @@ bundle ClockTicked by you {
 
     builder Odometer { $Odometer   mark #Odometer }
 
-    shard Boot { run once { bring Odometer(0, 0.0) } }
+    shard Boot { run once { bring Odometer(0, 0.0) 
+} }
 
     // Driven by the event, not by `each tick`. The delta is the runtime's, so the accumulated time is
     // the frame count times the step and a test can assert it exactly.

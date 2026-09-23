@@ -27,7 +27,7 @@ bundle ChatClient by you {
 
     // The one place the address lives. A `fn` because the language has no constant — and one place
     // beats two, since the address appears both where we connect and where we report failing to.
-    fn ServerAddress() -> string { return "144.217.220.127:9700" }
+    fn ServerAddress() -> string { return "999.999.999.999:9700" }
 
     shard Session {
         var joined: bool

@@ -32,12 +32,21 @@ bundle KitDemo by you {
         mark #Player   mark #Moving
     }
 
-    shard Boot { run once { bring Player(0.0, 0.0, 0.0,   1.0, 0.5,   0) } }
+    shard Boot { run once { 
+        *Vein.Console.Io.print("TEST")
+        bring Player(0.0, 0.0, 0.0,   1.0, 0.5,   0) 
+    } }
 
     shard Watch {
+        
+        
+        
         settled {
+              
             target $Position $Score #Player as p {
-                p.Score.points = p.Score.points + 1
+                p.Score.points = p.Score.points + 1 
+             
+                
                 emit *Vein.Console.Io.@Print {
                     text: "at " + p.Position.x + "," + p.Position.y + " after " + p.Score.points
                 }
