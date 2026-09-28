@@ -3633,6 +3633,7 @@ public partial class MainWindow : Window
         if (picks.Count == 0) return;
 
         _completion = new CompletionWindow(_editor.TextArea);
+        SizeCompletion(_completion);
         _completion.CompletionList.IsFiltering = true;
         foreach (var (label, insert) in picks)
             _completion.CompletionList.CompletionData.Add(new VeinCompletion(label, "field", insert));
@@ -3889,7 +3890,7 @@ public partial class MainWindow : Window
 
         // A ROW THAT CARRIES ITS OWN `shared("…")` LINE IS TALLER, so the window has to be, or the
         // list shows three entries and a scrollbar. Sized only when there is a doc to show.
-        if (items.Any(i => i.Doc is { Length: > 0 })) _completion.MaxHeight = 420;
+        SizeCompletion(_completion);
 
         foreach (var (label, insert, describe, doc) in items)
             _completion.CompletionList.CompletionData.Add(new VeinCompletion(label, kind, insert, describe, doc,
@@ -3905,6 +3906,17 @@ public partial class MainWindow : Window
         _completion.Show();
         if (startOffset is { } from && from < _editor.CaretOffset)
             _completion.CompletionList.SelectItem(_editor.Document.GetText(from, _editor.CaretOffset - from));
+    }
+
+    /// About three times the stock size — AvaloniaEdit's is 175px wide and a few rows tall, which cut a
+    /// qualified path like `*Vein.Diagnostics.Report.warn` mid-name and its `shared("…")` line after a
+    /// few words. Wide enough for a full path plus its description, tall enough for a screenful of
+    /// rows, and never more than most of the window it opens in.
+    private void SizeCompletion(CompletionWindow w)
+    {
+        w.Width = Math.Min(560, Math.Max(300, Bounds.Width * 0.6));
+        w.MaxHeight = Math.Min(900, Math.Max(300, Bounds.Height * 0.7));
+        w.CompletionList.ListBox.MaxHeight = w.MaxHeight;
     }
 
     /// <summary>Write the `need` for whichever entry the completion list just inserted, if it wants one.</summary>

@@ -85,7 +85,7 @@ public sealed class VeinCompletion : ICompletionData
     private static string Shorten(string doc)
     {
         string line = doc.ReplaceLineEndings(" ").Trim();
-        return line.Length <= 80 ? line : line[..79] + "…";
+        return line.Length <= 200 ? line : line[..199] + "…";
     }
 
     public object Description => _describe ?? $"{_kind} {Text}";
