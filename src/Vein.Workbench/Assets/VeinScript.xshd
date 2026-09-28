@@ -17,6 +17,16 @@
   <Color name="Builder" foreground="#E09B5A" />              <!-- & amber  — an identity template -->
   <Color name="Sigil"   foreground="#4EC9B0" />
 
+  <!-- PAINTED BY SemanticColorizer, not by a rule below: each needs the tokens around a name, which a
+       line-at-a-time regex cannot see (Vein.Compiler/Tooling/SemanticPaint.cs says why for each). Named
+       here so the whole theme is one file. -->
+  <Color name="Fn"         foreground="#9CDCFE" />                    <!-- fn  sky   — pure, returns a value -->
+  <Color name="SF"         foreground="#F47067" />                    <!-- SF  coral — runs inline, has effects -->
+  <Color name="Schedule"   foreground="#B392F0" fontWeight="bold" />  <!-- run once · each tick · every N · settled -->
+  <Color name="Author"     foreground="#E6A1C9" fontStyle="italic" /> <!-- *Author   rose -->
+  <Color name="Bundle"     foreground="#B8DB7A" fontStyle="italic" /> <!-- .Bundle   lime -->
+  <Color name="Publicator" foreground="#D7BA7D" fontStyle="italic" /> <!-- .Pub      tan  -->
+
   <RuleSet ignoreCase="false">
     <Span color="Comment" begin="//" />
     <Span color="Comment" multiline="true" begin="/\*" end="\*/" />

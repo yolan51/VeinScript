@@ -410,6 +410,10 @@ internal sealed class AssistantPanel : UserControl
             MaxHeight = 320
         };
 
+        // The same fn/SF, schedule and `*path` colours as the editor, or a suggestion reads as a
+        // different language from the file it is about.
+        view.TextArea.TextView.LineTransformers.Add(new SemanticColorizer());
+
         // No caret line, no wrapping: this is something to read, not to edit in place.
         view.Options.HighlightCurrentLine = false;
         view.Options.EnableHyperlinks = false;

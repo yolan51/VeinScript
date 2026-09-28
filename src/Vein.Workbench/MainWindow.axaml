@@ -28,6 +28,7 @@
         <Separator />
         <MenuItem Header="_Save" Click="OnSave" InputGesture="Ctrl+S" />
         <MenuItem Header="Save _As…" Click="OnSaveAs" InputGesture="Ctrl+Shift+S" />
+        <MenuItem Header="Save A_ll" Click="OnSaveAll" InputGesture="Ctrl+Alt+S" />
         <Separator />
         <MenuItem Header="E_xit" Click="OnExit" />
       </MenuItem>
@@ -160,7 +161,7 @@
       <Grid Grid.Row="0" Name="TopCols" ColumnDefinitions="230,4,*,4,390">
         <DockPanel Grid.Column="0" Name="ExplorerPanel">
           <TextBlock DockPanel.Dock="Top" Text="Project Explorer" Margin="8,6" FontWeight="Bold" />
-          <TreeView Name="ProjectTree" DoubleTapped="OnProjectItemActivated" />
+          <TreeView Name="ProjectTree" Tapped="OnProjectItemActivated" />
         </DockPanel>
         <GridSplitter Grid.Column="1" Width="4" Background="{DynamicResource Line}" />
 

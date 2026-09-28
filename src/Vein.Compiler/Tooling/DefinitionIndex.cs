@@ -58,6 +58,15 @@ public sealed class DefinitionIndex
     {
         var sites = new List<SymbolSite>();
         foreach (var bundle in unit.Bundles) Collect(bundle.Members, bundle.Name, sites);
+
+        // A call is collected as Fn because `name(` does not say which it is; the declaration does. Re-filed
+        // here so Find References on an SF finds its calls.
+        var sfs = sites.Where(s => s.IsDefinition && s.Kind == SymbolKind.SF).Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
+        var fns = sites.Where(s => s.IsDefinition && s.Kind == SymbolKind.Fn).Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
+        for (int i = 0; i < sites.Count; i++)
+            if (!sites[i].IsDefinition && sites[i].Kind == SymbolKind.Fn && sfs.Contains(sites[i].Name) && !fns.Contains(sites[i].Name))
+                sites[i] = sites[i] with { Kind = SymbolKind.SF };
+
         return new DefinitionIndex { Sites = sites };
     }
 
@@ -81,7 +90,9 @@ public sealed class DefinitionIndex
                 case ShardDecl d: Def(d.Name, SymbolKind.Shard, d.Span); Uses(d.Members, d.Name, sites); break;
                 case ViewDecl d: Def(d.Name, SymbolKind.ShardView, d.Span); Uses(d.Members, d.Name, sites); break;
                 case BridgeDecl d: Def(d.Name, SymbolKind.Bridge, d.Span); Uses(d.Members, d.Name, sites); break;
-                case FuncDecl d: Def(d.Name, d.IsPure ? SymbolKind.Fn : SymbolKind.SF, d.Span); Uses(new Node[] { d }, owner, sites); break;
+                // `IsPure` is the parser's `isSf` — true for SF. This read it the other way round, which filed
+                // every SF under "Functions" in the Outline and every `fn` under "Shard functions".
+                case FuncDecl d: Def(d.Name, d.IsPure ? SymbolKind.SF : SymbolKind.Fn, d.Span); Uses(new Node[] { d }, owner, sites); break;
             }
 
         void Def(string name, SymbolKind kind, SourceSpan span) =>

@@ -11,6 +11,7 @@ using Avalonia.Markup.Xaml;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using AvaloniaEdit;
 using AvaloniaEdit.CodeCompletion;
 using AvaloniaEdit.Highlighting;
@@ -31,6 +32,7 @@ public partial class MainWindow : Window
     private readonly VeinCompilerService _service = new();
     private readonly DiagnosticRenderer _marker = new();
     private readonly BracketRenderer _brackets = new();
+    private readonly SemanticColorizer _semantic = new();
     private IReadOnlyList<Diagnostic> _diags = Array.Empty<Diagnostic>();
     private string? _rootFolder;
 
@@ -227,6 +229,8 @@ public partial class MainWindow : Window
         Closing += OnClosing;
 
         LoadHighlighting();
+        // After the theme, which AvaloniaEdit inserts first — this paints over it.
+        _editor.TextArea.TextView.LineTransformers.Add(_semantic);
 
         // AvaloniaEdit ships find & replace (Ctrl+F / Ctrl+H); installing it is one call, and writing
         // a second search over the same document would be work spent to end up behind.
@@ -579,6 +583,7 @@ public partial class MainWindow : Window
             case Key.N: OnNew(sender, e); e.Handled = true; break;
             case Key.B when shift: OnBuildInspect(sender, e); e.Handled = true; break;
             case Key.B: Build(); e.Handled = true; break;
+            case Key.S when e.KeyModifiers.HasFlag(KeyModifiers.Alt): _ = SaveAllAsync(); e.Handled = true; break;
             case Key.S when shift: _ = SaveAsAsync(); e.Handled = true; break;
             case Key.S: _ = SaveAsync(); e.Handled = true; break;
             case Key.O: _ = OpenAsync(); e.Handled = true; break;
@@ -778,8 +783,11 @@ public partial class MainWindow : Window
     private bool _syncingRunArgs;
 
     /// Run the selected configuration in its own terminal session.
-    private void OnRun(object? sender, RoutedEventArgs e)
+    private async void OnRun(object? sender, RoutedEventArgs e)
     {
+        // Save first: the compile below reads sibling files from disk, and so does the run.
+        await SaveAllForRunAsync();
+
         var result = _service.Compile(new CompileRequest(
             _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath),
             _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath));
@@ -795,10 +803,6 @@ public partial class MainWindow : Window
             SetStatus("Nothing to run — this file declares no run line (a fragment is loaded by an app).");
             return;
         }
-
-        // Run what is on screen, and mark the tab saved — writing the file while leaving the dot
-        // showing would claim there is still something unsaved.
-        if (_tabs.Active is { Path: not null } active) { File.WriteAllText(active.Path, active.Document.Text); _tabs.MarkSaved(active); }
 
         var cfg = _configs[Math.Max(0, Math.Min(_runConfigs.SelectedIndex, _configs.Count - 1))];
 
@@ -827,6 +831,8 @@ public partial class MainWindow : Window
     {
         if (_configs.Count < 2) { OnRun(sender, e); return; }
 
+        await SaveAllForRunAsync();
+
         var result = _service.Compile(new CompileRequest(
             _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath),
             _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath));
@@ -836,8 +842,6 @@ public partial class MainWindow : Window
             SetStatus($"Run All: fix {result.Diagnostics.Count} error(s) first.");
             return;
         }
-
-        if (_tabs.Active is { Path: not null } doc) { File.WriteAllText(doc.Path, doc.Document.Text); _tabs.MarkSaved(doc); }
 
         ShowBottomTab(TabTerminal);
 
@@ -856,10 +860,10 @@ public partial class MainWindow : Window
     ///
     /// A session per port: starting Serve twice would bind the same port twice and the second would
     /// fail, so an existing serve session is reused rather than stacked.
-    private void OnServe(object? sender, RoutedEventArgs e)
+    private async void OnServe(object? sender, RoutedEventArgs e)
     {
         if (_currentPath is null) { SetStatus("Save the file first — serve serves a file, not a buffer."); return; }
-        if (_tabs.Active is { } doc) { File.WriteAllText(_currentPath, doc.Document.Text); _tabs.MarkSaved(doc); }
+        await SaveAllForRunAsync();
 
         ShowBottomTab(TabTerminal);
         _terminal.Run(new LaunchSpec(LaunchKind.Cli, "serve",
@@ -872,10 +876,10 @@ public partial class MainWindow : Window
 
     /// `veinc build` — publish a standalone executable. Runs in a terminal session like everything else,
     /// so the CLI's own account of where it landed is what you read, rather than a summary of it.
-    private void OnPublish(object? sender, RoutedEventArgs e)
+    private async void OnPublish(object? sender, RoutedEventArgs e)
     {
         if (_currentPath is null) { SetStatus("Save the file first — build publishes a file, not a buffer."); return; }
-        if (_tabs.Active is { } doc) { File.WriteAllText(_currentPath, doc.Document.Text); _tabs.MarkSaved(doc); }
+        await SaveAllForRunAsync();
 
         ShowBottomTab(TabTerminal);
         _terminal.Run(new LaunchSpec(LaunchKind.Cli, "build", new[] { _currentPath }, new Dictionary<string, string>()), "build");
@@ -1275,6 +1279,8 @@ public partial class MainWindow : Window
     // multi-console sample; the in-panel sessions are for inspecting one without leaving the IDE.
     private async void OnRunExternal(object? sender, RoutedEventArgs e)
     {
+        await SaveAllForRunAsync();
+
         string name = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
         var result = _service.Compile(new CompileRequest(name, _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath));
         if (!result.Success)
@@ -1289,8 +1295,6 @@ public partial class MainWindow : Window
         {
             try
             {
-                if (_tabs.Active is { Path: not null } cur) { await File.WriteAllTextAsync(cur.Path, cur.Document.Text); _tabs.MarkSaved(cur); }
-
                 // The selected configuration, not a bare `run` — an external window that ignored
                 // `--ticks` or VEIN_CONSOLE would disagree with what ▶ next to it just did.
                 var cfg = _configs.Count > 0
@@ -1583,6 +1587,39 @@ public partial class MainWindow : Window
     private async Task SaveAsync()
     {
         if (_tabs.Active is { } doc) await SaveDocAsync(doc);
+    }
+
+    private void OnSaveAll(object? sender, RoutedEventArgs e) => _ = SaveAllAsync();
+
+    /// File ▸ Save All: every tab with unsaved edits, background ones included. An untitled tab asks for
+    /// a name, the same as Ctrl+S on it would.
+    private async Task SaveAllAsync()
+    {
+        var dirty = _tabs.DirtyDocs.ToList();
+        if (dirty.Count == 0) { SetStatus("Nothing to save — every tab is saved."); return; }
+
+        foreach (var doc in dirty) await SaveDocAsync(doc);
+
+        int left = dirty.Count(d => d.Dirty);
+        SetStatus(left == 0 ? $"Saved {dirty.Count} file(s)" : $"Saved {dirty.Count - left} of {dirty.Count} file(s) — {left} still unsaved");
+    }
+
+    /// Before ▶ and the other run commands: write every NAMED tab with unsaved edits, then run.
+    ///
+    /// All of them, not just the one on screen. A run compiles from disk as well as from the buffer —
+    /// fragments merge in, `use`d bundles are read — so an unsaved edit in a sibling tab ran as the old
+    /// version while the tab showed the new one. Untitled tabs are skipped: naming one takes a dialog,
+    /// and nothing on disk can refer to a file that has no name yet.
+    ///
+    /// Quiet: no rebuild per file and no serve restart, which a plain Save does. The run that follows is
+    /// the rebuild, and restarting a server because you pressed ▶ on something else would be a surprise.
+    private async Task SaveAllForRunAsync()
+    {
+        foreach (var doc in _tabs.DirtyDocs.Where(d => d.Path is not null).ToList())
+        {
+            try { await File.WriteAllTextAsync(doc.Path!, doc.Document.Text); _tabs.MarkSaved(doc); }
+            catch (Exception ex) { SetStatus($"Could not save {doc.Name}: {ex.Message}"); }
+        }
     }
 
     /// Write one document, whichever tab it is in. Taking the doc rather than reading the editor is what
@@ -1907,9 +1944,17 @@ public partial class MainWindow : Window
         catch { return false; }
     }
 
+    /// ONE click opens a file, or brings its tab forward if it is already open. It took a double-click,
+    /// which read as "clicking a file does nothing" — most of all on a file opened before, where the
+    /// tab you wanted was one click away and the tree would not give it to you.
+    ///
+    /// The item is the one under the pointer, not the tree's selection: clicking the row that is
+    /// ALREADY selected changes no selection, and clicking empty space below the last row would
+    /// otherwise reopen whatever was selected last.
     private async void OnProjectItemActivated(object? sender, TappedEventArgs e)
     {
-        switch (_projectTree.SelectedItem)
+        var clicked = e.Source is Visual v ? v.FindAncestorOfType<TreeViewItem>(includeSelf: true) : null;
+        switch (clicked)
         {
             case TreeViewItem { Tag: BundleRef bundle }:
                 ShowBundleInspector(bundle);
@@ -2436,6 +2481,7 @@ public partial class MainWindow : Window
         _runtime.Update(result.Entry);
         _definitions = result.Ast is null ? DefinitionIndex.Empty : DefinitionIndex.Analyze(result.Ast);
         _outline.Update(_definitions);
+        UpdateSemanticColours();
         _eventGraph.Update(_definitions);
         if (result.Ast is not null)
         {
@@ -3797,6 +3843,30 @@ public partial class MainWindow : Window
     // Shared with the assistant's code cards, so the same source cannot look like two languages
     // depending on which pane you read it in.
     private void LoadHighlighting() => _editor.SyntaxHighlighting = VeinHighlighting.Definition;
+
+    private string _semanticKey = "";
+
+    /// Tell the colorizer what the build knows that the open text does not: functions a merged fragment
+    /// declares, and every `fn`/`SF` in the stdlib and installed bundles, for `*A.B.P.name(` calls.
+    /// Re-painted only when that changes — a redraw on every auto-build would flicker for nothing.
+    private void UpdateSemanticColours()
+    {
+        var bare = new Dictionary<string, bool>(StringComparer.Ordinal);
+        foreach (var d in _definitions.Definitions)
+            if (d.Kind is SymbolKind.Fn or SymbolKind.SF) bare[d.Name] = d.Kind == SymbolKind.SF;
+
+        IReadOnlyDictionary<string, bool> qualified;
+        try { qualified = StdlibIndex.Functions(ProjectDir).ToDictionary(kv => kv.Key, kv => kv.Value.IsPure, StringComparer.Ordinal); }
+        catch { qualified = new Dictionary<string, bool>(); }
+
+        string key = string.Join(",", bare.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => kv.Key + kv.Value))
+                   + "|" + string.Join(",", qualified.Keys.OrderBy(k => k, StringComparer.Ordinal));
+        if (key == _semanticKey) return;
+        _semanticKey = key;
+
+        _semantic.SetKnown(bare, qualified);
+        _editor.TextArea.TextView.Redraw();
+    }
 
     private const string Sample =
         "bundle Demo {\n" +

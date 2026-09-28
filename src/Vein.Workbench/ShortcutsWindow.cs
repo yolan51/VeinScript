@@ -21,6 +21,7 @@ internal sealed class ShortcutsWindow : Window
         ("File",       "Ctrl+W",         "Close tab"),
         ("File",       "Ctrl+S",         "Save"),
         ("File",       "Ctrl+Shift+S",   "Save as"),
+        ("File",       "Ctrl+Alt+S",     "Save all"),
 
         ("Edit",       "Ctrl+Z / Ctrl+Y", "Undo / redo — per file, not shared between tabs"),
         ("Edit",       "Ctrl+F",         "Find and replace — in this file"),

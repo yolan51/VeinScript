@@ -143,4 +143,21 @@ public class DefinitionIndexTests
         while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "stdlib"))) dir = dir.Parent;
         return dir?.FullName ?? throw new DirectoryNotFoundException("repo root with stdlib/ not found");
     }
+
+    [Fact]
+    public void An_fn_is_filed_as_Fn_and_an_SF_as_SF_with_their_calls()
+    {
+        // `FuncDecl.IsPure` is the parser's `isSf`, and this index read it the other way round: the
+        // Outline listed every SF under "Functions" and every `fn` under "Shard functions", and Find
+        // References on an SF found no calls, because calls are filed by the declaration's kind.
+        var ix = Index(
+            "    fn twice(n: int) -> int { return n * 2 }\n" +
+            "    SF shout(n: int) { }\n" +
+            "    shard S { run once { shout(twice(1)) } }");
+
+        Assert.NotNull(ix.Define("twice", SymbolKind.Fn));
+        Assert.NotNull(ix.Define("shout", SymbolKind.SF));
+        Assert.Equal(2, ix.All("twice", SymbolKind.Fn).Count);
+        Assert.Equal(2, ix.All("shout", SymbolKind.SF).Count);
+    }
 }
