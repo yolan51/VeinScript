@@ -144,7 +144,7 @@ public class NeedLinkTests : IDisposable
         // own `$Counter` beside `Vein.Core.Quantity.$Counter` becomes a VS0332 that used to be a warning.
         Root("Game.vein",
             "bundle Game by you {\n  need \"Vein.Console\"\n" +
-            "  shard S { run once { print(\"via stdlib\") } }\n}");
+            "  shard S { run once { do print(\"via stdlib\") } }\n}");
         string app = Root("G.app.vein", "app G { load \"Game.vein\" }");
 
         var (linked, diag) = Link(app);

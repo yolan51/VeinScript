@@ -355,7 +355,7 @@ public class IdentityRuntimeTests
     {
         const string report =
             "  shard Report { settled { target $Health #Enemy as self {\n" +
-            "      *Vein.Console.Io.print(\"e\" + Entity + \" hp=\" + self.Health.hp + \" sp=\" + self.Shield.sp) } } }";
+            "      do *Vein.Console.Io.print(\"e\" + Entity + \" hp=\" + self.Health.hp + \" sp=\" + self.Shield.sp) } } }";
         const string shapes = "  shape $Shield { sp: int folds sum }\n";
 
         string byHand = Bundle(shapes +
@@ -383,8 +383,8 @@ public class IdentityRuntimeTests
             "  builder Mob  { $Health           mark #Enemy }\n" +
             "  shard Seed { run once { bring 2 Unit(4, 2)\n      bring Mob(9) } }\n" +
             "  shard Report { settled {\n" +
-            "      target $Health $Shield #Enemy as self { *Vein.Console.Io.print(\"both e\" + Entity) }\n" +
-            "      target $Health #Enemy as self { *Vein.Console.Io.print(\"health e\" + Entity) } } }")).Out;
+            "      target $Health $Shield #Enemy as self { do *Vein.Console.Io.print(\"both e\" + Entity) }\n" +
+            "      target $Health #Enemy as self { do *Vein.Console.Io.print(\"health e\" + Entity) } } }")).Out;
 
         Assert.Equal("both e1\nboth e2\nhealth e1\nhealth e2\nhealth e3", output.Trim().ReplaceLineEndings("\n"));
     }
@@ -409,8 +409,8 @@ public class IdentityRuntimeTests
         var output = Run(Bundle(
             "  builder Unit { $Health }\n" +
             "  shard S { run once { bring Unit(7) } }\n" +
-            "  shard W { hear @Unit as u { *Vein.Console.Io.print(\"event hp=\" + u.hp) } }\n" +
-            "  shard R { settled { target $Health as self { *Vein.Console.Io.print(\"entity!\") } } }")).Out;
+            "  shard W { hear @Unit as u { do *Vein.Console.Io.print(\"event hp=\" + u.hp) } }\n" +
+            "  shard R { settled { target $Health as self { do *Vein.Console.Io.print(\"entity!\") } } }")).Out;
 
         Assert.Equal("event hp=7", output.Trim());   // an event, and no entity was built
     }

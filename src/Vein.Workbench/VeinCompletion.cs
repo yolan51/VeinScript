@@ -16,6 +16,7 @@ public sealed class VeinCompletion : ICompletionData
     private readonly string _insert;
     private readonly string? _doc;
     private readonly string? _describe;
+    private readonly bool _needsDo;
 
     /// <summary>A row in the completion list.</summary>
     /// <param name="name">What the row reads — `$Mover   kit.Movement.Drive`.</param>
@@ -36,9 +37,11 @@ public sealed class VeinCompletion : ICompletionData
     /// names in the list from ten bundles, the sentence is what you are choosing BY.
     /// </para>
     /// </param>
+    /// <param name="needsDo">An SF: picking it also writes `do ` in front of the call (D13), when the call starts its statement.</param>
     public VeinCompletion(string name, string kind, string? insert = null, string? describe = null,
-                          string? doc = null)
+                          string? doc = null, bool needsDo = false)
     {
+        _needsDo = needsDo;
         Text = name;
         _kind = kind;
         _insert = insert ?? name;
@@ -88,6 +91,28 @@ public sealed class VeinCompletion : ICompletionData
     public object Description => _describe ?? $"{_kind} {Text}";
     public double Priority => 0;
 
-    public void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs) =>
-        textArea.Document.Replace(completionSegment, _insert);
+    public void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs)
+    {
+        var doc = textArea.Document;
+        int start = completionSegment.Offset;
+        doc.Replace(completionSegment, _insert);
+        if (_needsDo) AddDo(doc, start);
+    }
+
+    /// <summary>`do ` in front of the SF call just completed — so choosing an SF is all it takes to spell it right.</summary>
+    /// <remarks>
+    /// The call starts where the name does, or at the `*` of a qualified path. Only when that is the start of
+    /// a statement (first on its line, or after a `{`) and `do` is not already there: an SF inside an
+    /// expression is a mistake the compiler explains better than a silent edit would.
+    /// </remarks>
+    internal static void AddDo(TextDocument doc, int nameStart)
+    {
+        int call = nameStart;
+        if (call > 0 && doc.GetCharAt(call - 1) == '*') call--;
+
+        var line = doc.GetLineByOffset(call);
+        string before = doc.GetText(line.Offset, call - line.Offset).TrimEnd();
+        if (before.EndsWith("do", StringComparison.Ordinal)) return;
+        if (before.Length == 0 || before.EndsWith('{')) doc.Insert(call, "do ");
+    }
 }

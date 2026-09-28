@@ -399,9 +399,14 @@ it or by aliasing one bundle (rule 18b).
 
 **20b. An SF runs INLINE; a shard hearing an event does not.** That is the difference between a helper
 whose `bring`s land where you called it and one whose fragments arrive after everything already queued.
-`navBar(r.path)` in `samples/web_app` is an SF for exactly this reason — plus a shard on `hear @Request`
+`do navBar(r.path)` in `samples/web_app` is an SF for exactly this reason — plus a shard on `hear @Request`
 would emit for EVERY path, and an unrouted path emitting no `@Html` is how the view tells a 404 from a
 page. A builder cannot hold statements at all, so it can never run a query.
+
+**20c. An SF is called `do name(…)`; an fn is called bare.** `do attack()` changes the world, `roll(1, 6)`
+cannot, and the call says which (SYNTAX-DECISIONS D15). Qualified, the `do` goes in front of the whole
+path: `do *Vein.Console.Io.print("hi")`. Forget it and **VS0341** names the fix, which the Workbench
+applies in one click; typing `do ` at the start of a line lists every SF you can call.
 
 **21. `bring` and `emit` QUEUE — they do not write.** The queue drains only after every handler of the
 current event has finished. So a view that answered on `@Request` would always see an empty page, and an
@@ -453,6 +458,8 @@ fire before the program runs, and the Workbench shows them because they are ordi
 | `bring B(…)` too few | **VS0228** | warning — the missing params read empty |
 | `emit @E { typo: … }` | **VS0227** | warning — names what @E does take |
 | `fn`/`SF` call, wrong count | **VS0229** | warning — local and `*A.B.P.` alike |
+| SF call without `do`, or fn call with it | **VS0341** | error — names the right spelling (D15) |
+| `do` on a built-in / not on a call | **VS0342** / **VS0112** | error |
 | literal of the wrong kind | **VS0230** | warning — `bring Row(42, "words")` |
 
 `?` (FillRest) and a parameter with a **default** are the two ways to say "fewer on purpose", and

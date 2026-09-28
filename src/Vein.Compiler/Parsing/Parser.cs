@@ -698,6 +698,7 @@ public sealed class Parser
             case TokenKind.KwVar: { var v = ParseVar(mutable: true); return new LocalVarStmt(v, v.Span); }
             case TokenKind.KwIf: return ParseIf();
             case TokenKind.KwWhile: return ParseWhile();
+            case TokenKind.KwDo: return ParseDo();
             case TokenKind.KwTarget: return ParseTargetOrQuery();
             // `ordered by k { … }` — contextual, like `run once` and `every N`, so `ordered` stays a
             // name a program may use. Recognised only when `by` follows it at statement position.
@@ -1049,6 +1050,22 @@ public sealed class Parser
         string? bind = Match(TokenKind.KwAs) ? ExpectName("a name after 'as'").Text : null;
 
         return new BringStmt(count, name, args, fill, s) { BuilderPath = path, Bind = bind };
+    }
+
+    /// `do name(…)` / `do *A.B.P.name(…)` — an SF call (D13). A statement, never an expression: an SF
+    /// returns nothing, so there is no value for `do` to stand in. Whether `name` really is an SF is
+    /// the lowerer's question (VS0341), since only the declaration knows.
+    private Stmt ParseDo()
+    {
+        var s = Here;
+        Advance();
+        var e = ParsePostfix();
+        if (e is not CallExpr call)
+        {
+            _diag.Error("VS0112", "`do` calls an SF: write `do name(…)`. What follows it here is not a call.", s);
+            return new ExprStmt(e, s);
+        }
+        return new ExprStmt(call with { ViaDo = true }, s);
     }
 
     private Stmt ParseAssignOrExpr()

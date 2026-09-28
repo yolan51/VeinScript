@@ -298,7 +298,12 @@ public sealed record EventRefExpr(string Name, SourceSpan Span) : Expr(Span);   
 public sealed record MarkRefExpr(string Name, SourceSpan Span) : Expr(Span);            // #Enemy
 public sealed record MemberExpr(Expr Receiver, string Name, SourceSpan Span) : Expr(Span);
 public sealed record IndexExpr(Expr Receiver, Expr Index, SourceSpan Span) : Expr(Span);
-public sealed record CallExpr(Expr Callee, IReadOnlyList<Expr> Args, SourceSpan Span) : Expr(Span);
+/// A call. `ViaDo` is true for `do name(…)` — the spelling an SF call must use (D13); a bare call is an
+/// fn or a built-in.
+public sealed record CallExpr(Expr Callee, IReadOnlyList<Expr> Args, SourceSpan Span) : Expr(Span)
+{
+    public bool ViaDo { get; init; }
+}
 
 public enum BinOp { Or, And, Eq, Ne, Lt, Gt, Le, Ge, Add, Sub, Mul, Div, Mod }
 public sealed record BinaryExpr(BinOp Op, Expr Left, Expr Right, SourceSpan Span) : Expr(Span);

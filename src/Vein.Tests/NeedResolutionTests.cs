@@ -43,7 +43,7 @@ public class NeedResolutionTests
         var output = Run(
             "bundle T by me {\n" +
             "  need \"Vein.Console\"\n" +
-            "  shard S { run once { print(\"hi\") } }\n}");
+            "  shard S { run once { do print(\"hi\") } }\n}");
 
         Assert.Equal("hi", output.Trim());
     }
@@ -56,7 +56,7 @@ public class NeedResolutionTests
             "bundle T by me {\n" +
             "  need \"Vein.Web\"\n" +
             "  shard S { run once { bring Button(\"Go\") } }\n" +
-            "  shard L { hear @Html as h { *Vein.Console.Io.print(h.markup) } }\n}");
+            "  shard L { hear @Html as h { do *Vein.Console.Io.print(h.markup) } }\n}");
 
         // `$Button` carries id/class/onclick as well as the label, so a one-argument call fills the
         // label and leaves the rest empty. `label` is FIRST in the shape precisely so that this call
@@ -72,7 +72,7 @@ public class NeedResolutionTests
             "  need \"Vein.Math\"\n" +
             "  event @Where { $Vec2, tag: string }\n" +
             "  shard S { run once { emit @Where { x: 1.0, y: 2.0, tag: \"t\" } } }\n" +
-            "  shard L { hear @Where as w { *Vein.Console.Io.print(\"at \" + w.x + \",\" + w.y + \" \" + w.tag) } }\n}");
+            "  shard L { hear @Where as w { do *Vein.Console.Io.print(\"at \" + w.x + \",\" + w.y + \" \" + w.tag) } }\n}");
 
         Assert.Contains("at 1,2 t", output);
     }
@@ -90,7 +90,7 @@ public class NeedResolutionTests
         // resolving looked identical to `print` resolving and printing nothing.
         Assert.Contains(Compile(
             "bundle T by me {\n" +
-            "  shard S { run once { print(\"hi\") } }\n}").Diagnostics,
+            "  shard S { run once { do print(\"hi\") } }\n}").Diagnostics,
             d => d.Code == "VS0234");
     }
 
@@ -112,7 +112,7 @@ public class NeedResolutionTests
             "bundle T by me {\n" +
             "  need \"Vein.Console\"\n" +
             "  SF print(text: string) { emit *Vein.Console.Io.@Print { text: \"local:\" + text } }\n" +
-            "  shard S { run once { print(\"hi\") } }\n}");
+            "  shard S { run once { do print(\"hi\") } }\n}");
 
         Assert.Equal("local:hi", output.Trim());
     }
@@ -135,7 +135,7 @@ public class NeedResolutionTests
             "  shard S {\n" +
             "    run once { let e = spawn()\n" +
             "               attach $Tag to e { n: 7 } }\n" +
-            "    settled { target $Tag as self { *Vein.Console.Io.print(\"found \" + self.Tag.n) } }\n" +
+            "    settled { target $Tag as self { do *Vein.Console.Io.print(\"found \" + self.Tag.n) } }\n" +
             "  }\n}";
 
         Assert.Equal("found 7", Run(src, ticks: 1).Trim());
@@ -200,7 +200,7 @@ public class NeedResolutionTests
         Assert.Contains(Compile(
             "bundle T by me {\n" +
             "  need \"Vein.Math\"\n" +
-            "  shard S { run once { print(\"hi\") } }\n}").Diagnostics,
+            "  shard S { run once { do print(\"hi\") } }\n}").Diagnostics,
             d => d.Code == "VS0234");
     }
 

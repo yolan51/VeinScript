@@ -75,7 +75,7 @@
       <Word>not</Word>      <Word>true</Word>      <Word>false</Word>      <Word>map</Word>
       <Word>Entity</Word>   <Word>app</Word>       <Word>by</Word>         <Word>transform</Word>
       <Word>mute</Word>     <Word>unmute</Word>    <Word>on</Word>         <Word>base</Word>
-      <Word>Index</Word>
+      <Word>Index</Word>   <Word>do</Word>
     </Keywords>
 
     <Rule color="Number">\b\d+(\.\d+)?%?\b</Rule>

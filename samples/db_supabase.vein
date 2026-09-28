@@ -134,7 +134,7 @@ bundle DbSupabase by you {
         // is what woke you up.
         hear *Vein.Rest.Db.@Connect as c {
             emit *Vein.Console.Io.@Print { text: "GET " + c.base + selectPath() }
-            *Vein.Rest.Db.get(c.base, c.key, selectPath())
+            do *Vein.Rest.Db.get(c.base, c.key, selectPath())
         }
     }
 
@@ -219,7 +219,7 @@ bundle DbSupabase by you {
             target $Draft #Draft as d {
                 let payload = "[" + toJson(d.Draft) + "]"
                 emit *Vein.Console.Io.@Print { text: "POST " + l.base + tablePath() + " " + payload }
-                *Vein.Rest.Db.post(l.base, l.key, tablePath(), payload)
+                do *Vein.Rest.Db.post(l.base, l.key, tablePath(), payload)
             }
         }
     }

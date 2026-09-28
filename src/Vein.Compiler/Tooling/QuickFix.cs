@@ -31,6 +31,7 @@ public static class QuickFixes
             "VS0228" => FillRest(diagnostic, source),
             "VS0218" => DeclareMark(diagnostic, source),
             "VS0338" or "VS0339" => NameTheAuthor(diagnostic, source, projectDir),
+            "VS0341" => DoOrNot(diagnostic, source),
             _ => Array.Empty<QuickFix>()
         };
     }
@@ -86,6 +87,35 @@ public static class QuickFixes
 
         string? alias = parts.Length >= 4 && parts[2] == "as" ? parts[3].Trim('"') : null;
         return (bundle, alias, indent);
+    }
+
+    /// VS0341 (D13) — an SF called without `do`, or an fn called with one. Certain either way: the
+    /// diagnostic sits on the call, and the only edit is the two letters in front of it.
+    ///
+    /// Adding `do` is offered only when the call starts its statement — first on its line, or right
+    /// after a `{`. An SF call inside an expression (`let x = say()`) has no value to give, and `do` there
+    /// would not parse; that one needs a person, not a button.
+    private static IReadOnlyList<QuickFix> DoOrNot(Diagnostic d, string source)
+    {
+        int at = OffsetOf(source, d.Span.Line, d.Span.Col);
+        if (at < 0) return Array.Empty<QuickFix>();
+
+        int lineStart = source.LastIndexOf('\n', Math.Max(0, at - 1)) + 1;
+        string before = source[lineStart..at];
+        string trimmed = before.TrimEnd();
+
+        // `do name(` on an fn: remove `do` and the space after it.
+        if (trimmed.EndsWith("do", StringComparison.Ordinal)
+            && (trimmed.Length == 2 || !char.IsLetterOrDigit(trimmed[^3]) && trimmed[^3] != '_'))
+        {
+            int doAt = lineStart + trimmed.Length - 2;
+            return new[] { new QuickFix("Remove `do` — this is an fn", new TextEdit(doAt, at - doAt, "")) };
+        }
+
+        if (trimmed.Length == 0 || trimmed.EndsWith('{'))
+            return new[] { new QuickFix("Add `do` — this is an SF", new TextEdit(at, 0, "do ")) };
+
+        return Array.Empty<QuickFix>();
     }
 
     /// VS0228 — `bring B(a)` needs more arguments. Insert `?` before the closing bracket, which is the

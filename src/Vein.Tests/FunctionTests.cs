@@ -89,7 +89,7 @@ public class FunctionTests
         Assert.Contains("hi from an SF", Run(
             "bundle T by me { start @Boot { } event @Boot { } " +
             "SF shout(text: string) { emit *Vein.Console.Io.@Print { text: text } } " +
-            "shard M { hear @Boot as b { shout(\"hi from an SF\") } } }"));
+            "shard M { hear @Boot as b { do shout(\"hi from an SF\") } } }"));
     }
 
     [Fact]
@@ -130,7 +130,7 @@ public class FunctionTests
     {
         Assert.Contains("via qualified SF", Run(
             "bundle T by me { start @Boot { } event @Boot { } " +
-            "shard M { hear @Boot as b { *Vein.Console.Io.print(\"via qualified SF\") } } }"));
+            "shard M { hear @Boot as b { do *Vein.Console.Io.print(\"via qualified SF\") } } }"));
     }
 
     [Fact]

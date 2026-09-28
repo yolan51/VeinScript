@@ -1083,6 +1083,7 @@ public sealed class Lower
     /// interpreter answered with null, so it built an .exe, ran, and printed nothing. A misspelt
     /// built-in did the same: `isNumbre(x)` was empty, and an empty value is falsy, so a guard written
     /// with a typo in it let everything through. Nothing anywhere said the name was unknown.
+
     private void CheckBareCall(NameExpr n, IReadOnlyList<Expr> args, SourceSpan span)
     {
         if (PrebuiltArity.TryGetValue(n.Name, out var arity))
@@ -1106,6 +1107,21 @@ public sealed class Lower
         _diag.Error("VS0234",
             $"Unknown function '{n.Name}'.{hint} It is not built in and no `fn` or `SF` declares it, " +
             "so the call answers nothing — which reads as empty text, zero, and false.", span);
+    }
+
+    /// D13: an SF is called `do name(…)`, an fn bare — so a line that changes things says so where it is
+    /// written, not only where the function is declared. Checked against the declaration, so the error
+    /// names the right spelling either way.
+    private void CheckCallMarker(CallExpr c, string name, FuncDecl decl)
+    {
+        bool isSf = decl.IsPure;   // the parser's `isSf`
+        if (c.ViaDo == isSf) return;
+
+        string call = c.Callee is StarRefExpr star ? "*" + string.Join(".", star.Path) + "." + name : name;
+        var at = c.Callee is NameExpr n ? n.Span : c.Span;
+        _diag.Error("VS0341", isSf
+            ? $"'{name}' is an SF, and an SF call says so — write `do {call}(…)`. `do` marks a line that changes things."
+            : $"'{name}' is an fn, which changes nothing — call it bare: `{call}(…)`. `do` is only for an SF.", at);
     }
 
     /// The closest known name within two edits, so a typo names its own fix. Two rather than three
@@ -2225,7 +2241,10 @@ public sealed class Lower
             {
                 string? imported = ImportExternalFunction(star.Path, star.Member, c.Span);
                 if (ResolveExternalFunc(star.Path, star.Member) is { } xdecl)
+                {
                     CheckCallArity(xdecl, star.Member, c.Args, c.Span);
+                    CheckCallMarker(c, star.Member, xdecl);
+                }
                 var args = c.Args.Select(LowerExpr).ToList();
                 return imported is null
                     ? new IrCall(new IrScopeRef(string.Join(".", star.Path), star.Member), args)
@@ -2246,7 +2265,10 @@ public sealed class Lower
                 // a two-parameter console launcher — so `let e = spawn()` built no entity, reported
                 // nothing, and every `target` in the program then matched an empty world. The symptom
                 // appeared nowhere near the cause, which is why this warns rather than quietly winning.
-                if (Interp.PrebuiltNames.Contains(n.Name))
+                // A `do` call is not asking for the built-in — built-ins are called bare — so `do spawn(…)`
+                // reaches the used bundle's SF `spawn` and the shadowing below does not apply. The `do` is
+                // the disambiguation VS0217 used to have to send you to a qualified path for.
+                if (Interp.PrebuiltNames.Contains(n.Name) && !c.ViaDo)
                 {
                     // WARNED ONLY WHEN THE CALL LOOKS LIKE IT MEANT THE OTHER ONE. The built-in wins and
                     // that is the documented rule (local → built-in → `need`), so a call whose arity
@@ -2270,6 +2292,7 @@ public sealed class Lower
                     return new IrCall(LowerExpr(c.Callee), c.Args.Select(LowerExpr).ToList());
                 }
 
+                CheckCallMarker(c, n.Name, found.Value);
                 var path = found.Key.Split('.')[..^1];
                 string? imported = ImportExternalFunction(path, n.Name, c.Span);
                 var args = c.Args.Select(LowerExpr).ToList();
@@ -2278,12 +2301,20 @@ public sealed class Lower
             }
             case CallExpr { Callee: NameExpr ln } c when _funcDecls.TryGetValue(ln.Name, out var ldecl):
                 CheckCallArity(ldecl, ln.Name, c.Args, c.Span);
+                CheckCallMarker(c, ln.Name, ldecl);
                 return new IrCall(LowerExpr(c.Callee), c.Args.Select(LowerExpr).ToList());
 
             // THE LAST CALL CASE, so everything the branches above recognise has already gone. What is
             // left is a built-in, or a bare name that resolves to nothing at all.
             case CallExpr c:
-                if (c.Callee is NameExpr bare) CheckBareCall(bare, c.Args, c.Span);
+                if (c.Callee is NameExpr bare)
+                {
+                    CheckBareCall(bare, c.Args, c.Span);
+                    if (c.ViaDo && Interp.PrebuiltNames.Contains(bare.Name))
+                        _diag.Error("VS0342",
+                            $"'{bare.Name}' is built in, and built-ins are called bare: `{bare.Name}(…)` without `do`. " +
+                            "`do` is only for an SF that your code or a bundle declares.", bare.Span);
+                }
                 return new IrCall(LowerExpr(c.Callee), c.Args.Select(LowerExpr).ToList());
             case BinaryExpr b: return new IrBinary(MapBin(b.Op), LowerExpr(b.Left), LowerExpr(b.Right));
             case UnaryExpr u: return new IrUnary(u.Op == UnOp.Neg ? IrUnOp.Neg : IrUnOp.Not, LowerExpr(u.Operand));

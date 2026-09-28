@@ -236,7 +236,7 @@ bundle WebApp by you {
     shard Home {
         hear @Request as r {
             if r.path == "/" {
-                navBar(r.path)
+                do navBar(r.path)
                 bring Hero("VeinScript", "A website assembled entirely from events.")
                 bring Open("main")
                     bring OpenAs("div", "grid")
@@ -284,7 +284,7 @@ bundle WebApp by you {
     shard CounterPage {
         hear @Request as r {
             if r.path == "/counter" {
-                navBar(r.path)
+                do navBar(r.path)
                 bring Hero("Counter", "The page reacts in the browser, not on the server.")
                 bring Open("main")
                     // Every element is a `$Element` rather than a shape per kind, because `target` binds
@@ -359,7 +359,7 @@ bundle WebApp by you {
     shard Greet {
         hear @Request as r {
             if r.path == "/greet" {
-                navBar(r.path)
+                do navBar(r.path)
 
                 if r.method == "GET" {
                     bring Hero("Greet", "A form, posted back to the same path.")

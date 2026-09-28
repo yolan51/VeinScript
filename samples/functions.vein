@@ -44,18 +44,18 @@ bundle Functions by you {
     shard Scoreboard {
         hear @Boot as b {
             // 1. Call a local SF. It emits; it does not return, so it stands alone as a statement.
-            announce("streak 3 bonus", bonus(3))
-            announce("streak 99 bonus", bonus(99))
+            do announce("streak 3 bonus", bonus(3))
+            do announce("streak 99 bonus", bonus(99))
 
             // 2. Call a local fn in expression position — including recursively.
-            announce("fib(10)", fib(10))
+            do announce("fib(10)", fib(10))
 
             // 3. Call a SHARED fn from another bundle. Resolved and imported at compile time, so this
             //    needs no link step: `clamp` is Vein.Math's, not ours.
             emit *Vein.Console.Io.@Print { text: "clamp(99, 0, 10) = " + *Vein.Math.Scalars.clamp(99.0, 0.0, 10.0) }
 
             // 4. Call a SHARED SF from another bundle. Same rule, but it emits instead of returning.
-            *Vein.Console.Io.print("— all of the above came from four function calls")
+            do *Vein.Console.Io.print("— all of the above came from four function calls")
         }
     }
 }

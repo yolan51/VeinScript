@@ -68,9 +68,9 @@ bundle DiagnosticsDemo by you {
 
             // Nothing here FAILED. The program decided these rows are wrong, which is a judgement no
             // runtime can make for you — and exactly what the SFs are for.
-            *Vein.Diagnostics.Report.info("2 rows to check")
-            *Vein.Diagnostics.Report.warn("a row has an empty title")
-            *Vein.Diagnostics.Report.error("a row has rank -1, which is not a rank")
+            do *Vein.Diagnostics.Report.info("2 rows to check")
+            do *Vein.Diagnostics.Report.warn("a row has an empty title")
+            do *Vein.Diagnostics.Report.error("a row has rank -1, which is not a rank")
         }
     }
 
@@ -120,7 +120,7 @@ bundle DiagnosticsDemo by you {
 
     shard Unreachable {
         hear *Vein.Net.Http.@Failed as f {
-            *Vein.Diagnostics.Report.error("no answer from " + f.url + ": " + f.reason)
+            do *Vein.Diagnostics.Report.error("no answer from " + f.url + ": " + f.reason)
         }
     }
 }

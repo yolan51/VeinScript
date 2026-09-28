@@ -33,7 +33,7 @@ bundle KitDemo by you {
     }
 
     shard Boot { run once { 
-        *Vein.Console.Io.print("TEST")
+        do *Vein.Console.Io.print("TEST")
         bring Player(0.0, 0.0, 0.0,   1.0, 0.5,   0) 
     } }
 

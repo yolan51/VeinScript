@@ -3251,6 +3251,7 @@ public partial class MainWindow : Window
         if (e.Text == ".") { ShowMemberCompletion(); return; }
         if (e.Text == "*") { ShowStarCompletion(); return; }   // qualified stdlib refs: *Vein.Console.Io.@Print
         if (e.Text == "&") { ShowBuilderCompletion(); return; }  // &Elements — the Vein.Web builders and any local one
+        if (e.Text == " " && JustTypedDo()) { ShowSfCompletion(); return; }   // `do ` — which SF? (D13)
         if (e.Text is not ("$" or "#" or "@")) return;
 
         (SymbolKind kind, string label) = e.Text switch
@@ -3757,12 +3758,53 @@ public partial class MainWindow : Window
         string? dir = _currentPath is not null ? Path.GetDirectoryName(_currentPath) : _rootFolder;
         // Discovery policy (vein.discovery) filters what `*` enumerates; `shared` still governs consumption.
         var policy = DiscoveryPolicy.Load(dir);
-        var names = policy.Filter(StdlibIndex.Symbols(dir))
-            .Select(s => string.Join(".", s.PathSegments) + "." + s.Sigil + s.Name)
+        var symbols = policy.Filter(StdlibIndex.Symbols(dir)).ToList();
+        string PathOf(QualifiedSymbol s) => string.Join(".", s.PathSegments) + "." + s.Sigil + s.Name;
+        var names = symbols.Select(PathOf)
             .Distinct(StringComparer.Ordinal)
             .OrderBy(x => x, StringComparer.Ordinal)
+            .Select(n => (n, n, (string?)null, (string?)null))
             .ToList();
-        ShowCompletion(names, "stdlib");
+
+        // An SF picked here gets its `do` too (D13) — you should not have to know the kind to spell the call.
+        var sfs = symbols.Where(s => s.Kind == SymbolKind.SF).Select(PathOf).ToHashSet(StringComparer.Ordinal);
+        ShowCompletion(names, "stdlib", sfs);
+    }
+
+    /// Typing `do ` at the start of a statement lists every SF that can be called there — this file's own,
+    /// then each bundle's by its qualified path, with its `shared("…")` line. `do` is the one word that
+    /// says "I want to change something", so it is the natural place to ask "with what?" — and it is how
+    /// an SF in someone else's bundle gets found without knowing it exists.
+    private void ShowSfCompletion()
+    {
+        var items = new List<(string Label, string Insert, string? Describe, string? Doc)>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var d in _definitions.Definitions.Where(d => d.Kind == SymbolKind.SF).OrderBy(d => d.Name, StringComparer.Ordinal))
+            if (seen.Add(d.Name)) items.Add((d.Name + "   SF, this file", d.Name, null, null));
+
+        string? dir = _currentPath is not null ? Path.GetDirectoryName(_currentPath) : _rootFolder;
+        try
+        {
+            foreach (var s in DiscoveryPolicy.Load(dir).Filter(StdlibIndex.Symbols(dir))
+                         .Where(s => s.Kind == SymbolKind.SF)
+                         .OrderBy(s => s.QualifiedName, StringComparer.Ordinal))
+                if (seen.Add(s.QualifiedName)) items.Add((s.QualifiedName, s.QualifiedName, null, s.Doc));
+        }
+        catch { /* no search path: this file's SFs are still worth offering */ }
+
+        ShowCompletion(items, "SF");
+    }
+
+    /// True when the caret sits just after `do ` that starts a statement.
+    private bool JustTypedDo()
+    {
+        int caret = _editor.CaretOffset;
+        var line = _editor.Document.GetLineByOffset(caret);
+        string before = _editor.Document.GetText(line.Offset, caret - line.Offset);
+        if (!before.EndsWith("do ", StringComparison.Ordinal)) return false;
+        string rest = before[..^3].TrimEnd();
+        return rest.Length == 0 || rest.EndsWith('{');
     }
 
     private void ShowMemberCompletion()
@@ -3788,7 +3830,8 @@ public partial class MainWindow : Window
         ShowCompletion(items.Select(i => (i.Label, i.Insert, (string?)null, (string?)null)).ToList(), kind);
 
     private void ShowCompletion(
-        IReadOnlyList<(string Label, string Insert, string? Describe, string? Doc)> items, string kind)
+        IReadOnlyList<(string Label, string Insert, string? Describe, string? Doc)> items, string kind,
+        IReadOnlySet<string>? sfInserts = null)
     {
         if (items.Count == 0) return;
         _completion = new CompletionWindow(_editor.TextArea);
@@ -3799,7 +3842,8 @@ public partial class MainWindow : Window
         if (items.Any(i => i.Doc is { Length: > 0 })) _completion.MaxHeight = 420;
 
         foreach (var (label, insert, describe, doc) in items)
-            _completion.CompletionList.CompletionData.Add(new VeinCompletion(label, kind, insert, describe, doc));
+            _completion.CompletionList.CompletionData.Add(new VeinCompletion(label, kind, insert, describe, doc,
+                needsDo: sfInserts?.Contains(insert) == true));
 
         // PICKING A NAME CAN ALSO WRITE ITS IMPORT. A bare `$Shape` from a bundle this file does not
         // `need` resolves to nothing, and at a use site the qualified form is not available instead

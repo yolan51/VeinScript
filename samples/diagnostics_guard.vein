@@ -97,12 +97,12 @@ bundle DiagnosticsGuard by you {
             // A missing string arrives EMPTY, not null, so this one test covers both "sent nothing" and
             // "sent an empty title" — which are the same thing from here, and both unusable.
             if r.title == "" {
-                *Vein.Diagnostics.Report.error("row rejected: a row with no title cannot be shown")
+                do *Vein.Diagnostics.Report.error("row rejected: a row with no title cannot be shown")
             } else {
                 // Kept, but flagged. A rank of 0 is what a MISSING rank looks like — including the
                 // `rnk:` typo above — so this one warning catches both the honest zero and the typo.
                 if r.rank < 1 {
-                    *Vein.Diagnostics.Report.warn(
+                    do *Vein.Diagnostics.Report.warn(
                         "row \"" + r.title + "\" has rank [" + r.rank +
                         "] — sent as 0, or the field name was misspelled and never arrived at all")
                 }
@@ -124,7 +124,7 @@ bundle DiagnosticsGuard by you {
 
     shard Report {
         settled {
-            *Vein.Diagnostics.Report.info("4 rows arrived, and these are the ones that were kept")
+            do *Vein.Diagnostics.Report.info("4 rows arrived, and these are the ones that were kept")
 
             target $Row #Row by Row.rank as r {
                 emit *Vein.Console.Io.@Print {

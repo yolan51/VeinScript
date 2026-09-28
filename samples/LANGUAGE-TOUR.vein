@@ -722,7 +722,7 @@ bundle UseDemo by you {
 
     shard Demo {
         run once {
-            print("bare call, resolved through `use Console`")     // *Vein.Console.Io.print
+            do print("bare call, resolved through `use Console`")     // *Vein.Console.Io.print
             bring Button("Go")                                     // *Vein.Web.Elements.&Button
             emit @Placed { x: 1.0, y: 2.0, label: "origin" }
         }
@@ -731,7 +731,7 @@ bundle UseDemo by you {
     shard Watch {
         hear @Placed as p {
             // The qualified form, side by side with the bare one above. Same function, same result.
-            *Vein.Console.Io.print(p.label + " at " + p.x + "," + p.y)
+            do *Vein.Console.Io.print(p.label + " at " + p.x + "," + p.y)
         }
     }
 }

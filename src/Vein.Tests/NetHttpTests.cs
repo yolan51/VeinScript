@@ -102,7 +102,7 @@ public class NetHttpTests : IDisposable
         var seen = new List<string>();
         NetHttp.Hook = (url, method, body, headers) => { seen.Add(method + " " + body); return new NetHttp.Result(200, "", null); };
 
-        Run("  shard S { run once { *Vein.Net.Http.post(\"https://x.test/p\", \"payload\") } }");
+        Run("  shard S { run once { do *Vein.Net.Http.post(\"https://x.test/p\", \"payload\") } }");
 
         Assert.Equal(new[] { "POST payload" }, seen);
     }
@@ -120,7 +120,7 @@ public class NetHttpTests : IDisposable
         string seen = "";
         NetHttp.Hook = (url, method, body, headers) => { seen = headers; return new NetHttp.Result(200, "", null); };
 
-        Run("  shard S { run once { *Vein.Net.Http.getWith(\"https://x.test/rows\", \"apikey: abc\\nAuthorization: Bearer abc\") } }");
+        Run("  shard S { run once { do *Vein.Net.Http.getWith(\"https://x.test/rows\", \"apikey: abc\\nAuthorization: Bearer abc\") } }");
 
         Assert.Equal("apikey: abc\nAuthorization: Bearer abc", seen);
     }
@@ -149,7 +149,7 @@ public class NetHttpTests : IDisposable
 
         Run("  shard S { run once {\n" +
             "    let h = *Vein.Rest.Headers.also(*Vein.Rest.Auth.apiKey(\"apikey\", \"k\"), \"Prefer\", \"return=representation\")\n" +
-            "    *Vein.Net.Http.getWith(\"https://x.test/rows\", *Vein.Rest.Headers.also(h, \"Authorization\", \"Bearer k\")) } }");
+            "    do *Vein.Net.Http.getWith(\"https://x.test/rows\", *Vein.Rest.Headers.also(h, \"Authorization\", \"Bearer k\")) } }");
 
         Assert.Equal("apikey: k\nPrefer: return=representation\nAuthorization: Bearer k", seen);
     }
@@ -160,7 +160,7 @@ public class NetHttpTests : IDisposable
         NetHttp.Hook = (url, method, body, headers) => new NetHttp.Result(401, "{\"message\":\"No API key found\"}", null);
 
         var output = Run(
-            "  shard S { run once { *Vein.Net.Http.get(\"https://x.test/rows\") } }\n" +
+            "  shard S { run once { do *Vein.Net.Http.get(\"https://x.test/rows\") } }\n" +
             "  shard R { hear *Vein.Net.Http.@Fetched as f {\n" +
             "    if *Vein.Rest.Status.ok(f.status) { " + P("\"rows\"") + " }\n" +
             "    if *Vein.Rest.Status.clientError(f.status) { " + P("\"rejected: \" + f.body") + " } } }");

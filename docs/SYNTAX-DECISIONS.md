@@ -347,6 +347,43 @@ file rather than taking it from the runtime, so the ordering travels with the co
 Used on an identity template it bakes the order into the entity ids, so later queries need no `by` at
 all — `samples/entities_bring_order.vein` for the literal block, `samples/entities_bring_rows.vein` for
 the loop, and `samples/json_roundtrip.vein` for a payload arriving unsorted.
+
+---
+
+## D15 — An SF call says so: `do name(…)`; an fn call stays bare {#do}
+
+> **Reported as `VS0341`**, both ways round: an SF called without `do` ("write `do say(…)`"), and an fn
+> called with it ("call it bare"). The Workbench's Quick Fix adds or removes the word. `do` in front of a
+> built-in is **`VS0342`**; `do` followed by something that is not a call is **`VS0112`**.
+
+**DECIDED.** An `SF` is called with `do` in front of the call; an `fn` and a built-in are called bare:
+
+```
+do attack()                          // SF — this line changes the world
+let hit = roll(1, 6)                 // fn — computes, changes nothing
+do *Vein.Console.Io.print("hi")      // a qualified SF: `do` goes in front of the whole path
+let r = random()                     // built-in — bare
+```
+
+*The problem.* `attack()` and `roll(1, 6)` were spelled the same, so whether a line emitted, brought or
+marked anything (RULES 20b: an SF runs inline) was only knowable by finding the declaration — in
+another file, or another bundle. The Workbench colours the two apart, but a diff, a terminal and a chat
+message do not.
+
+*Why a word.* Logic is words here (D12), and so are the other statement heads (`emit`, `bring`, `mark`).
+An SF returns nothing, so its call is always a statement — `do` only ever begins a line, and "a line that
+starts with `do` changes things" is the whole rule. The alternatives were weighed and turned down:
+`!name(` / `!!name(` for fn / SF (one character apart, and the glyph D12 dropped for being misread), a
+prefix sigil like `^name(` (nothing about `^` says "effects"), and marking fn calls too (twice the noise
+for the calls that are harmless).
+
+*Discovery.* The worry was an SF in someone else's bundle: how would you know it needs `do`? You do not
+have to. Picking an SF from completion writes the `do` for you; typing `do ` at the start of a line lists
+every SF in scope, with its `shared("…")` line; and a bare call to one is `VS0341` with a one-click fix.
+
+`do` is a keyword inside the range that may still be spelled as a field name (`shape $Task { do: string }`),
+like `from`, `count` and `to`.
+
 ---
 
 ## Reserved-word disposition
@@ -392,7 +429,7 @@ sed -n '/Keywords = new/,/^    };/p' src/Vein.Compiler/Lexing/Lexer.cs | grep -o
 ```
 
 Still pending: tokens `LBracket`/`RBracket` if D9(a). **Never keywords:** `class`, `for`, `in`, `loop`
-(D3, D5); `!` (D12). **Cut:** `push` (D4).
+(D3, D5); `!` (D12). **Added:** `do` (D15). **Cut:** `push` (D4).
 
 ---
 

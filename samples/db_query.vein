@@ -100,12 +100,12 @@ bundle DbQuery by you {
         hear *Vein.Rest.Db.@Connect as c {
             // Six requests, all in flight at once. They complete in whatever order the service answers,
             // which is why every reply carries the url that caused it — see below.
-            *Vein.Rest.Db.get(c.base, c.key, qBasic())
-            *Vein.Rest.Db.get(c.base, c.key, qFilter())
-            *Vein.Rest.Db.get(c.base, c.key, qInSet())
-            *Vein.Rest.Db.get(c.base, c.key, qOr())
-            *Vein.Rest.Db.get(c.base, c.key, qPage())
-            *Vein.Rest.Db.get(c.base, c.key, qEmbed())
+            do *Vein.Rest.Db.get(c.base, c.key, qBasic())
+            do *Vein.Rest.Db.get(c.base, c.key, qFilter())
+            do *Vein.Rest.Db.get(c.base, c.key, qInSet())
+            do *Vein.Rest.Db.get(c.base, c.key, qOr())
+            do *Vein.Rest.Db.get(c.base, c.key, qPage())
+            do *Vein.Rest.Db.get(c.base, c.key, qEmbed())
         }
     }
 

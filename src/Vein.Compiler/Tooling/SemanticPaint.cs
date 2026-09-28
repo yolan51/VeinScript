@@ -75,6 +75,11 @@ public static class SemanticPaint
                     Add(t, FnRole(sf));
                     break;
 
+                // `do` is what makes a line an SF call (D13), so it wears the SF colour rather than the keyword one.
+                case TokenKind.KwDo:
+                    Add(t, Role.SF);
+                    break;
+
                 case TokenKind.Ident when t.Text == "run" && next is { Kind: TokenKind.Ident, Text: "once" }:
                     Add(t, Role.Schedule); Add(next.Value, Role.Schedule); i++;
                     break;

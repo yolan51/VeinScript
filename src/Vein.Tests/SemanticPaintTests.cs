@@ -25,17 +25,17 @@ public class SemanticPaintTests
             bundle B {
                 fn twice(n: int) -> int { return n * 2 }
                 SF hurt(n: int) { emit @Hit { n: twice(n) } }
-                shard S { run once { hurt(twice(1)) } }
+                shard S { run once { do hurt(twice(1)) } }
             }
             """);
 
-        Assert.Equal(new[] { "twice:Fn", "hurt:SF", "twice:Fn", "run:Schedule", "once:Schedule", "hurt:SF", "twice:Fn" }, got);
+        Assert.Equal(new[] { "twice:Fn", "hurt:SF", "twice:Fn", "run:Schedule", "once:Schedule", "do:SF", "hurt:SF", "twice:Fn" }, got);
     }
 
     [Fact]
     public void A_call_can_come_before_its_declaration()
     {
-        Assert.Contains("helper:SF", Painted("bundle B {\n shard S { each tick { helper() } }\n SF helper() { }\n}"));
+        Assert.Contains("helper:SF", Painted("bundle B {\n shard S { each tick { do helper() } }\n SF helper() { }\n}"));
     }
 
     [Fact]
@@ -82,10 +82,10 @@ public class SemanticPaintTests
     public void A_qualified_call_is_an_fn_or_SF_by_what_the_bundle_declares()
     {
         var qualified = new Dictionary<string, bool> { ["A.B.P.log"] = true, ["A.B.P.sum"] = false };
-        var got = Painted("bundle X { shard S { run once { *A.B.P.log(*A.B.P.sum(1)) } } }", qualified)
+        var got = Painted("bundle X { shard S { run once { do *A.B.P.log(*A.B.P.sum(1)) } } }", qualified)
             .Where(p => !p.EndsWith(":Schedule")).ToList();
 
-        Assert.Equal(new[] { "*:Author", "A:Author", "B:Bundle", "P:Publicator", "log:SF",
+        Assert.Equal(new[] { "do:SF", "*:Author", "A:Author", "B:Bundle", "P:Publicator", "log:SF",
                              "*:Author", "A:Author", "B:Bundle", "P:Publicator", "sum:Fn" }, got);
     }
 

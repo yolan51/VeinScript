@@ -27,6 +27,9 @@ public enum TokenKind
     // keywords added in Milestone 2 (see docs/SYNTAX-DECISIONS.md, docs/KEYWORDS.md §2)
     KwFn, KwType, KwEnum, KwIf, KwWhile, KwRepeat, KwBreak, KwContinue, KwMatch,
 
+    // D13: `do name(…)` — the only way to call an SF; a bare call is an fn or a built-in.
+    KwDo,
+
     // `base` as a `bring` argument means "use this parameter's declared default". Placed INSIDE the
     // IsKeyword range on purpose: that range is what lets a keyword still be spelled as a field or
     // member name (`from`, `count`, `to` all are), so `shape S { base: string }` and `c.S.base` keep

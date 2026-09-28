@@ -52,6 +52,9 @@ public sealed class Lexer
         ["match"] = TokenKind.KwMatch,         ["ShardView"] = TokenKind.KwShardView,
         ["Entity"] = TokenKind.KwEntity,       ["app"] = TokenKind.KwApp,
         ["Index"] = TokenKind.KwIndex,   ["base"] = TokenKind.KwBase,
+
+        // D13: `do name(…)` calls an SF — a statement that changes things says so where it is written.
+        ["do"] = TokenKind.KwDo,
     };
 
     private readonly string _src;

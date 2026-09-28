@@ -89,7 +89,7 @@ public class DiagnosticsTests
         // The bug this closes. `*Vein.Diagnostics.Report.warn(…)` emitted @DiagnosticRaised into a queue
         // nobody read, so in any program without a collector shard it printed NOTHING — a diagnostics
         // library silently losing its own diagnostic, which is the one thing it must never do.
-        var output = Run("  shard S { run once { *Vein.Diagnostics.Report.warn(\"look at this\") } }");
+        var output = Run("  shard S { run once { do *Vein.Diagnostics.Report.warn(\"look at this\") } }");
 
         Assert.Contains("warning", output);
         Assert.Contains("look at this", output);
@@ -100,9 +100,9 @@ public class DiagnosticsTests
     {
         var output = Run(
             "  shard S { run once {\n" +
-            "    *Vein.Diagnostics.Report.info(\"eye\")\n" +
-            "    *Vein.Diagnostics.Report.warn(\"ear\")\n" +
-            "    *Vein.Diagnostics.Report.error(\"nose\") } }");
+            "    do *Vein.Diagnostics.Report.info(\"eye\")\n" +
+            "    do *Vein.Diagnostics.Report.warn(\"ear\")\n" +
+            "    do *Vein.Diagnostics.Report.error(\"nose\") } }");
 
         Assert.Contains("(info: eye)", output);
         Assert.Contains("(warning: ear)", output);
@@ -115,7 +115,7 @@ public class DiagnosticsTests
         // The console is a FALLBACK, not a default. A program that collects diagnostics has said where
         // it wants them, and printing as well would be the library overriding that.
         var output = Run(
-            "  shard S { run once { *Vein.Diagnostics.Report.warn(\"once only\") } }\n" +
+            "  shard S { run once { do *Vein.Diagnostics.Report.warn(\"once only\") } }\n" +
             "  shard C { hear *Vein.Diagnostics.Report.@DiagnosticRaised as d {\n" +
             "    " + P("\"mine: \" + d.message") + " } }");
 
@@ -129,7 +129,7 @@ public class DiagnosticsTests
         // A @DiagnosticRaised handler that throws cannot raise another @DiagnosticRaised — that is a
         // cycle the queue guard would only end after 10,000 iterations, with the original cause buried.
         var output = Run(
-            "  shard S { run once { *Vein.Diagnostics.Report.warn(\"first\") } }\n" +
+            "  shard S { run once { do *Vein.Diagnostics.Report.warn(\"first\") } }\n" +
             "  shard C { hear *Vein.Diagnostics.Report.@DiagnosticRaised as d { " + P(Throws) + " } }");
 
         Assert.Contains("while reporting", output);

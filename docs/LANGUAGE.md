@@ -484,15 +484,20 @@ Params are `name: Type`. An `fn` declares its result after `->` and uses `return
 behaviour is expressed by emitting, so an SF is a *named emit sequence*, while an `fn` is reusable
 computation you can call inside a condition, a field value, or a `target` loop.
 
+**Calling them.** An `fn` is called bare, `clamp(hp, 0, 100)`; an SF is called with `do` in front,
+`do hurt(e, 5)` (SYNTAX-DECISIONS D15). Since an SF returns nothing its call is always a statement, so
+`do` only ever starts a line, and a line that starts with `do` is one that changes things. Getting it
+wrong either way is `VS0341`, which names the right spelling.
+
 Both may be declared at bundle level, inside a `publicator`, or inside a shard/view. Both are callable
-across bundles when `shared` — `*Vein.Math.Scalars.clamp(99.0, 0.0, 10.0)` resolves against the shared
+across bundles when `shared` — `*Vein.Math.Scalars.clamp(99.0, 0.0, 10.0)` (or `do *Vein.Console.Io.print("hi")` for an SF) resolves against the shared
 API and is imported at compile time, so no linking step is required. An unresolved qualified call is
 `VS0213` rather than a silent no-op.
 
 ### 5.2 Conditionals — `if` / `else`
 
 ```
-if hp <= 0 { mark self #Dead } else if hp < 10 { warn() } else { }
+if hp <= 0 { mark self #Dead } else if hp < 10 { do warn() } else { }
 ```
 
 ### 5.3 Iteration — `target`, `repeat`, `while`
