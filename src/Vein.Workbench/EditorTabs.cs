@@ -47,13 +47,31 @@ internal sealed class EditorTabs : UserControl
     public IReadOnlyList<Doc> Docs => _docs;
     public IEnumerable<Doc> DirtyDocs => _docs.Where(d => d.Dirty);
 
+    /// The path of the tab under the pointer, or null when it leaves — the window shows it in the status
+    /// bar. It was a tooltip, and a tooltip wide enough for a full path sat on top of the neighbouring
+    /// tabs: scrolling the strip with the pointer resting on it kept one open over the very tabs you
+    /// were scrolling to.
+    public event Action<string?>? Hovered;
+
+    private readonly ScrollViewer _scroller;
+
     public EditorTabs()
     {
-        Content = new ScrollViewer
+        Content = _scroller = new ScrollViewer
         {
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
             VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
             Content = _strip
+        };
+
+        // The wheel scrolls the strip sideways. A horizontal-only viewer ignores an ordinary wheel, so
+        // with more tabs than fit, the only way along was the thin scrollbar.
+        _scroller.PointerWheelChanged += (_, e) =>
+        {
+            double delta = Math.Abs(e.Delta.X) > Math.Abs(e.Delta.Y) ? e.Delta.X : e.Delta.Y;
+            if (delta == 0) return;
+            _scroller.Offset = _scroller.Offset.WithX(Math.Max(0, _scroller.Offset.X - delta * 60));
+            e.Handled = true;
         };
     }
 
@@ -175,7 +193,8 @@ internal sealed class EditorTabs : UserControl
                     Children = { label, close }
                 }
             };
-            ToolTip.SetTip(tab, doc.Path ?? "not saved yet");
+            tab.PointerEntered += (_, _) => Hovered?.Invoke(doc.Path ?? "not saved yet");
+            tab.PointerExited += (_, _) => Hovered?.Invoke(null);
             tab.Click += (_, _) => Activate(doc);
 
             _strip.Children.Add(tab);

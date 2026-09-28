@@ -225,6 +225,13 @@ public partial class MainWindow : Window
         SetUpCloudPanels();
 
         _tabs.Activated += OnTabActivated;
+        // A tab's full path, in the status bar while the pointer is on it; what was there comes back after.
+        string? statusBeforeHover = null;
+        _tabs.Hovered += path =>
+        {
+            if (path is not null) { statusBeforeHover ??= _statusBar.Text; _statusBar.Text = path; }
+            else if (statusBeforeHover is not null) { _statusBar.Text = statusBeforeHover; statusBeforeHover = null; }
+        };
         _tabs.ConfirmClose = ConfirmDiscardAsync;
         Closing += OnClosing;
 
