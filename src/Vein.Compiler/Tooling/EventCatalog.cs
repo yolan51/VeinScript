@@ -181,6 +181,29 @@ public static class EventCatalog
         return list;
     }
 
+    /// One event by its qualified path — `*A.B.P.@Name` or a suffix of it — whether or not this unit
+    /// `need`s its bundle, which is what makes `emit *A.B.P.@Name ?` expand when the catalog above, which
+    /// holds only local and needed events, does not have it.
+    public static EventEntry? Qualified(CompilationUnit unit, string path, string name, string? projectDir)
+    {
+        BundleIndex index;
+        try { index = BundleIndex.For(projectDir); } catch (Exception) { return null; }
+
+        string suffix = path + "." + name;
+        var hit = index.Events.Where(kv => kv.Key == suffix || kv.Key.EndsWith("." + suffix, StringComparison.Ordinal))
+                              .OrderBy(kv => kv.Key, StringComparer.Ordinal).FirstOrDefault();
+        if (hit.Value is null) return null;
+
+        var parts = hit.Key.Split('.');
+        var uses = Uses(unit);
+        uses.Add(parts[0] + "." + parts[1]);   // its own bundle's shapes, for the includes
+        var shapes = ShapesInScope(unit, index, uses);
+        return new EventEntry(name, true, Sig.Expand(hit.Value.Members, shapes)
+            .Where(f => !Auto.Contains(f.Name))
+            .Select(f => new EventField(f.Name, f.Type, f.Required, f.Default, f.OriginShape))
+            .ToList());
+    }
+
     /// Human listing: every event, `[shared]` when exported, each field required or defaulted.
     public static string Render(IReadOnlyList<EventEntry> events)
     {

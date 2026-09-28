@@ -3281,7 +3281,15 @@ public partial class MainWindow : Window
 
     private void OnTextEntered(object? sender, Avalonia.Input.TextInputEventArgs e)
     {
-        if (_completion is not null) return;                   // a completion is open → let it filter (search)
+        // A completion is open: a name character filters it. Anything else — a space, a `?`, a sigil — ends
+        // the name being typed, so the list closes and the character does its own job. It used to be
+        // swallowed, which is how `emit ` opening the event list stopped `emit @Hit ?` expanding.
+        if (_completion is not null)
+        {
+            if (e.Text is not { Length: 1 } t || char.IsLetterOrDigit(t[0]) || t[0] is '_' or '.') return;
+            _completion.Close();
+            _completion = null;
+        }
         if (e.Text == "?") { TryExpandOnQuestion(); return; }
         if (e.Text == ".") { ShowMemberCompletion(); return; }
         if (e.Text == "*") { ShowStarCompletion(); return; }   // qualified stdlib refs: *Vein.Console.Io.@Print
@@ -3610,7 +3618,8 @@ public partial class MainWindow : Window
         // an edit on top of an edit.
         if (TryCompactOnSecondQuestion(q)) return;
 
-        var emit = Regex.Match(before, @"emit\s+@(\w+)\s*$");
+        // `emit @Hit ?` or `emit *A.B.P.@Hit ?` — group 1 is the path when qualified, group 2 the name.
+        var emit = Regex.Match(before, @"emit\s+(?:\*([\w.]+)\.)?@(\w+)\s*$");
         var start = Regex.Match(before, @"start\s+@(\w+)\s*$");   // a bundle's entry-point payload
         var bring = Regex.Match(before, BringHead + @"\s*$");
         if (!emit.Success && !start.Success && !bring.Success) { ShowFieldPicks(before); return; }
@@ -3618,7 +3627,7 @@ public partial class MainWindow : Window
         var ast = _service.Compile(new CompileRequest("untitled.vein", _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
         if (ast is null) return;
 
-        string? body = emit.Success ? EmitBody(ast, emit.Groups[1].Value)
+        string? body = emit.Success ? EmitBody(ast, emit.Groups[2].Value, emit.Groups[1].Success ? emit.Groups[1].Value : null)
                      : start.Success ? EmitBody(ast, start.Groups[1].Value)   // start payload = the event's fields
                      : BringBody(ast, bring.Groups[1].Value);
         // `?` is documented for emit / start / bring — the sites that CONSTRUCT a payload. `hear` binds
@@ -3725,8 +3734,9 @@ public partial class MainWindow : Window
         return true;
     }
 
-    private string? EmitBody(CompilationUnit ast, string eventName) =>
-        EventCatalog.Catalog(ast, ProjectDir).FirstOrDefault(e => e.Name == eventName) is { } ev
+    private string? EmitBody(CompilationUnit ast, string eventName, string? path = null) =>
+        ((path is not null ? EventCatalog.Qualified(ast, path, eventName, ProjectDir) : null)
+            ?? EventCatalog.Catalog(ast, ProjectDir).FirstOrDefault(e => e.Name == eventName)) is { } ev
             ? EventCatalog.Body(ev) : null;
 
     private string? BringBody(CompilationUnit ast, string builderName, bool compact = false) =>
