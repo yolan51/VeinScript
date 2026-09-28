@@ -1,0 +1,74 @@
+// samples/sf_emit_hear.vein — an SF that emits, called from one shard and heard by another.
+//     veinc run samples/sf_emit_hear.vein
+//
+// What this checks:
+//
+//   1. An `emit` inside an SF reaches every shard that `hear`s the event — the SF is called with
+//      `do`, and its events are real events, not something local to the caller.
+//   2. Those emits are QUEUED like every emit (RULES 21) — the SF does not run its hearers there and
+//      then. So "2. after the SF" prints before Log reports the slime hit: Log's own print lands behind
+//      it in the queue. Expected output:
+//
+//          1. before the SF
+//          2. after the SF
+//             Log heard @Hit: slime takes 5
+//             Log heard @Hit: goblin takes 3
+//             Log heard @Hit: goblin takes 6
+//             Log heard @Healed: goblin +2
+//
+//   3. An SF can call another SF, and an event it emits can make a hearer call an SF in turn.
+//
+// What an SF cannot do is `hear`. A hear is a shard member — it waits for an event — and an SF has
+// nothing to wait with: it runs when called and is done. Writing one inside an SF is VS0113, which says
+// to put the `hear` in a shard and call the SF from there. That is what `Medic` does below.
+
+bundle SfEmitHear by you {
+
+    start @Boot { }
+    event @Boot { }
+    event @Hit { who: string, amount: int }
+    event @Healed { who: string, amount: int }
+
+    fn doubled(n: int) -> int { return n * 2 }
+
+    // An SF that emits. `do` at every call site is what says "this line changes things".
+    SF strike(who: string, amount: int) {
+        emit @Hit { who: who, amount: amount }
+    }
+
+    // An SF calling another SF, and an fn, in one body.
+    SF combo(who: string) {
+        do strike(who, 3)
+        do strike(who, doubled(3))
+    }
+
+    SF heal(who: string, amount: int) {
+        emit @Healed { who: who, amount: amount }
+    }
+
+    shard Fight {
+        hear @Boot as b {
+            do *Vein.Console.Io.print("1. before the SF")
+            do strike("slime", 5)
+            do *Vein.Console.Io.print("2. after the SF")
+            do combo("goblin")
+        }
+    }
+
+    // Another shard hears what the SF emitted — nothing about the emit being inside an SF changes that.
+    shard Log {
+        hear @Hit as h {
+            do *Vein.Console.Io.print("   Log heard @Hit: " + h.who + " takes " + h.amount)
+        }
+        hear @Healed as h {
+            do *Vein.Console.Io.print("   Log heard @Healed: " + h.who + " +" + h.amount)
+        }
+    }
+
+    // A hearer that calls an SF in turn: the chain an SF would need a `hear` for, written the legal way.
+    shard Medic {
+        hear @Hit as h {
+            if h.amount >= 6 { do heal(h.who, 2) }
+        }
+    }
+}

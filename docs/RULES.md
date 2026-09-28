@@ -460,6 +460,7 @@ fire before the program runs, and the Workbench shows them because they are ordi
 | `fn`/`SF` call, wrong count | **VS0229** | warning — local and `*A.B.P.` alike |
 | SF call without `do`, or fn call with it | **VS0341** | error — names the right spelling (D15) |
 | `do` on a built-in / not on a call | **VS0342** / **VS0112** | error |
+| `hear` inside an SF or a block | **VS0113** | error — a hear is a shard member; call the SF from it (`samples/sf_emit_hear.vein`) |
 | literal of the wrong kind | **VS0230** | warning — `bring Row(42, "words")` |
 
 `?` (FillRest) and a parameter with a **default** are the two ways to say "fewer on purpose", and

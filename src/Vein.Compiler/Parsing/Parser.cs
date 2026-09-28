@@ -699,6 +699,20 @@ public sealed class Parser
             case TokenKind.KwIf: return ParseIf();
             case TokenKind.KwWhile: return ParseWhile();
             case TokenKind.KwDo: return ParseDo();
+            // `hear` is a shard member, not a statement — an SF, an `if` or a `run once` body cannot hold
+            // one. It used to fall through to the expression parser: "Unexpected 'hear' in expression",
+            // then a cascade of "Expected 'bundle'" down the rest of the file. Parsed and dropped, so the
+            // one error is the only error.
+            case TokenKind.KwHear:
+            {
+                var s = Here;
+                ParseHear();
+                _diag.Error("VS0113",
+                    "`hear` belongs directly inside a shard, not inside a function or a block. An SF runs " +
+                    "inline, when it is called, so it has nothing to wait on — put the `hear` in a shard " +
+                    "and call the SF from its body with `do`.", s);
+                return new ExprStmt(new LiteralExpr(null, LiteralKind.Int, s), s);
+            }
             case TokenKind.KwTarget: return ParseTargetOrQuery();
             // `ordered by k { … }` — contextual, like `run once` and `every N`, so `ordered` stays a
             // name a program may use. Recognised only when `by` follows it at statement position.
