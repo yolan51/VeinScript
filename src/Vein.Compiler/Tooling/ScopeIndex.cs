@@ -178,6 +178,8 @@ public static class ScopeIndex
                 {
                     case BundleDecl b: Walk(b.Members); continue;
                     case PublicatorDecl p: Walk(p.Members); continue;
+                    // A shard-level fn or SF is callable inside that shard, which is where you are typing.
+                    case ShardDecl sh: Walk(sh.Members.OfType<FuncDecl>()); continue;
                 }
 
                 (string Name, string? Fields)? hit = (kind, d) switch
@@ -186,6 +188,7 @@ public static class ScopeIndex
                     (SymbolKind.Mark, MarkDecl m) => (m.Name, null),
                     (SymbolKind.Event, EventDecl e) => (e.Name, FieldList(e.Members)),
                     (SymbolKind.Builder, BuilderDecl bl) => (bl.Name, FieldList(bl.Members)),
+                    (SymbolKind.Fn or SymbolKind.SF, FuncDecl f) when f.IsPure == (kind == SymbolKind.SF) => (f.Name, Params(f)),
                     _ => null,
                 };
 
@@ -213,9 +216,15 @@ public static class ScopeIndex
             SymbolKind.Shape => index.Shapes.TryGetValue(key, out var sh) ? FieldList(sh.Members) : null,
             SymbolKind.Event => index.Events.TryGetValue(key, out var ev) ? FieldList(ev.Members) : null,
             SymbolKind.Builder => index.Builders.TryGetValue(key, out var bl) ? FieldList(bl.Members) : null,
+            SymbolKind.Fn or SymbolKind.SF => index.Functions.TryGetValue(key, out var fn) ? Params(fn) : null,
             _ => null,   // a mark holds nothing
         };
     }
+
+    /// <summary>`(n: int) -> int` — what a function takes and gives, for its row's tooltip.</summary>
+    private static string Params(FuncDecl f) =>
+        "(" + string.Join(", ", f.Params.Select(p => p.Name + ": " + Sig.TypeStr(p.Type))) + ")" +
+        (f.Return is null ? "" : " -> " + Sig.TypeStr(f.Return));
 
     /// <summary>`x: float, y: float` — the fields of a body, in declaration order.</summary>
     private static string? FieldList(IEnumerable<Node> members)
@@ -242,6 +251,7 @@ public static class ScopeIndex
             SymbolKind.Shape => s.Shapes,
             SymbolKind.Mark => s.Marks,
             SymbolKind.Event => s.Events,
+            SymbolKind.Fn or SymbolKind.SF => LocalDetail(unit, kind).Keys.OrderBy(k => k, StringComparer.Ordinal).ToList(),
             // `SymbolIndex` has no builder arm, and a local builder is reached by its bare name with no
             // sigil at the `bring`, so the cross-bundle half carries this kind on its own.
             _ => Array.Empty<string>(),

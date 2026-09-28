@@ -3251,7 +3251,8 @@ public partial class MainWindow : Window
         if (e.Text == ".") { ShowMemberCompletion(); return; }
         if (e.Text == "*") { ShowStarCompletion(); return; }   // qualified stdlib refs: *Vein.Console.Io.@Print
         if (e.Text == "&") { ShowBuilderCompletion(); return; }  // &Elements — the Vein.Web builders and any local one
-        if (e.Text == " " && JustTypedDo()) { ShowSfCompletion(); return; }   // `do ` — which SF? (D13)
+        if (e.Text == " " && JustTypedDo()) { ShowSfCompletion(); return; }   // `do ` — which SF? (D15)
+        if (e.Text == " " && (JustTyped("emit") || JustTyped("hear"))) { ShowEventCompletionAfterKeyword(); return; }
         if (e.Text is not ("$" or "#" or "@")) return;
 
         (SymbolKind kind, string label) = e.Text switch
@@ -3270,10 +3271,8 @@ public partial class MainWindow : Window
     /// it again was to delete the sigil and type it afresh, mid-word, which loses what you had typed.
     ///
     /// It reopens rather than guesses: it reads back over the partial word to the sigil that started
-    /// it, and offers that sigil's list. With no sigil behind the caret there is no honest answer —
-    /// VeinScript has no "everything in scope" list, because `$Name` and `#Name` are different things
-    /// (RULES 14e) and a merged one would be a list of names that cannot all be inserted here — so it
-    /// says which characters open which list instead of opening an arbitrary one.
+    /// it, and offers that sigil's list. A plain word with no sigil behind it is a function being
+    /// typed — the one kind of name written bare — so it opens the fn / SF list (D15).
     /// </remarks>
     private void OnInvokeCompletion()
     {
@@ -3284,7 +3283,8 @@ public partial class MainWindow : Window
 
         int start = at;
         while (start > 0 && (char.IsLetterOrDigit(doc.GetCharAt(start - 1)) || doc.GetCharAt(start - 1) == '_')) start--;
-        if (start == 0) { SetStatus("Completion: type $ shape, # mark, @ event, & builder, * qualified, or . member."); return; }
+        // No sigil behind the word: a plain word is a function name being typed.
+        if (start == 0) { ShowFunctionCompletion(start); return; }
 
         switch (doc.GetCharAt(start - 1))
         {
@@ -3294,7 +3294,7 @@ public partial class MainWindow : Window
             case '&': ShowBuilderCompletion(); break;
             case '*': ShowStarCompletion(); break;
             case '.': ShowMemberCompletion(); break;
-            default: SetStatus("Completion: type $ shape, # mark, @ event, & builder, * qualified, or . member."); break;
+            default: ShowFunctionCompletion(start); break;
         }
     }
 
@@ -3797,14 +3797,62 @@ public partial class MainWindow : Window
     }
 
     /// True when the caret sits just after `do ` that starts a statement.
-    private bool JustTypedDo()
+    private bool JustTypedDo() => JustTyped("do");
+
+    /// True when the caret sits just after `<word> ` at the start of a statement — first on its line,
+    /// or after a `{` — so `emit ` and `hear ` open the event list and `demit ` does not.
+    private bool JustTyped(string word)
     {
         int caret = _editor.CaretOffset;
         var line = _editor.Document.GetLineByOffset(caret);
         string before = _editor.Document.GetText(line.Offset, caret - line.Offset);
-        if (!before.EndsWith("do ", StringComparison.Ordinal)) return false;
-        string rest = before[..^3].TrimEnd();
+        if (!before.EndsWith(word + " ", StringComparison.Ordinal)) return false;
+        string rest = before[..^(word.Length + 1)].TrimEnd();
         return rest.Length == 0 || rest.EndsWith('{');
+    }
+
+    /// `emit ` or `hear ` — the events you can use there, this file's own first, then every shared one
+    /// by its qualified path, each with its fields and its `shared("…")` line. The `@` list already
+    /// did this once you typed `@`; this is the same list one keystroke sooner, at the moment you know
+    /// you want an event and do not yet know which, or that the one you want is in someone else's bundle.
+    private void ShowEventCompletionAfterKeyword()
+    {
+        using var _ = BundleSearch.Scope(ProjectDir);
+        string name = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
+        var ast = _service.Compile(new CompileRequest(name, _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
+        if (ast is null) return;
+
+        var items = ScopeIndex.For(ast, SymbolKind.Event, ProjectDir)
+            .Select(e => (e.Label, e.Local || e.Needed ? e.SigilName : e.Qualified, (string?)e.Describe("event"), e.Doc))
+            .ToList();
+        ShowCompletion(items, "event");
+    }
+
+    /// Ctrl+Space on a plain word: the functions you can call — fns and SFs, this file's first, then
+    /// every shared one by its qualified path. An SF row writes its `do` when picked (D15), so the list is
+    /// also how you find out which kind a name is: the row says `SF` or `fn` before you choose it.
+    private void ShowFunctionCompletion(int wordStart)
+    {
+        using var _ = BundleSearch.Scope(ProjectDir);
+        string name = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
+        var ast = _service.Compile(new CompileRequest(name, _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
+        if (ast is null) return;
+
+        var items = new List<(string Label, string Insert, string? Describe, string? Doc)>();
+        var sfs = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (kind, tag) in new[] { (SymbolKind.Fn, "fn"), (SymbolKind.SF, "SF") })
+            foreach (var e in ScopeIndex.For(ast, kind, ProjectDir))
+            {
+                // A bare name reaches this bundle's own functions and a `need`ed bundle's; anything else
+                // is written by its path, which also works without a `need`.
+                string insert = e.Local || e.Needed ? e.Name : e.Qualified;
+                items.Add((tag + "  " + e.Label, insert, tag + " " + e.Name + (e.Fields ?? "") +
+                           (e.Origin is null ? "" : "   " + e.Origin) + (e.Doc is { Length: > 0 } ? "\n" + e.Doc : ""), e.Doc));
+                if (kind == SymbolKind.SF) sfs.Add(insert);
+            }
+
+        // Local first (ScopeIndex's order within a kind), fns before SFs within the same tier.
+        ShowCompletion(items, "function", sfs, wordStart);
     }
 
     private void ShowMemberCompletion()
@@ -3831,10 +3879,12 @@ public partial class MainWindow : Window
 
     private void ShowCompletion(
         IReadOnlyList<(string Label, string Insert, string? Describe, string? Doc)> items, string kind,
-        IReadOnlySet<string>? sfInserts = null)
+        IReadOnlySet<string>? sfInserts = null, int? startOffset = null)
     {
         if (items.Count == 0) return;
         _completion = new CompletionWindow(_editor.TextArea);
+        // A list opened over a half-typed word replaces that word, and filters by it from the start.
+        if (startOffset is { } so) _completion.StartOffset = so;
         _completion.CompletionList.IsFiltering = true;   // search-first: typing any segment narrows the list
 
         // A ROW THAT CARRIES ITS OWN `shared("…")` LINE IS TALLER, so the window has to be, or the
@@ -3853,6 +3903,8 @@ public partial class MainWindow : Window
 
         _completion.Closed += (_, _) => { _completion = null; _pendingNeed = null; };
         _completion.Show();
+        if (startOffset is { } from && from < _editor.CaretOffset)
+            _completion.CompletionList.SelectItem(_editor.Document.GetText(from, _editor.CaretOffset - from));
     }
 
     /// <summary>Write the `need` for whichever entry the completion list just inserted, if it wants one.</summary>
