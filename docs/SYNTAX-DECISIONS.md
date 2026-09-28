@@ -317,7 +317,7 @@ ordering people actually need is over *data*: rows from JSON or a database arriv
 block to literal brings meant `ordered by` could sort a menu you wrote and nothing you fetched.
 
 ```
-ordered by rank {
+ordered by &Row.rank {
     bring Row("literal", 0)
     target doc.rows as row {
         if row.rank > 0 { bring Row(row.title, row.rank) }
@@ -327,6 +327,11 @@ ordered by rank {
 
 So VS0223 now admits `bring` and `target` at the top of the block, and refuses everything else. Inside a
 loop anything goes — but only `bring` is reordered; an `emit` there runs where it stands.
+
+**Spell the key `&Builder.param` (VS0343).** The bare `ordered by rank` read as if `rank` were in scope, which
+it is not — it is a parameter of the builder being brought. Over a block of ONE builder the bare form is now
+a warning whose Quick Fix writes `&Row.rank`; it stays silent for a block of several builders, the case it
+exists for. A qualified builder path in the key (`*A.B.P.&Row.rank`) is a possible later step.
 
 *Why a deferral and not a pre-sort of the list:* the key is one of the **bring's own arguments**, not a
 field of the source row. `bring Card(title, rank * 2)` orders by the computed value, and a list sorted

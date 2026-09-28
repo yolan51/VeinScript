@@ -29,7 +29,7 @@ bundle EntitiesBringRows by you {
             // Standing in for a result set: the source's own order, which is nobody's display order.
             let ranks = [4, 1, -2, 3, 1]
 
-            ordered by rank {
+            ordered by &Row.rank {
                 // A literal bring and a loop in ONE block, sorted together. They are the same kind of
                 // thing — a bring with a key — so nothing makes them separate.
                 bring Row("literal", 0)

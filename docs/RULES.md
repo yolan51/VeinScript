@@ -258,7 +258,7 @@ brings only sorts what you typed out. Rows from JSON or a database arrive as a *
 `bring` inside a loop becomes N of them — a count nothing knows until the list is in hand.
 
 ```
-ordered by rank {
+ordered by &Row.rank {
     bring Row("literal", 0)              // literals and loops mix; they are the same kind of thing
     target doc.rows as row {
         if row.rank > 0 {                // filtering is why they are collected, not counted ahead
@@ -270,6 +270,11 @@ ordered by rank {
 
 Only `bring` is reordered. An `emit` or a `let` inside the loop runs where it stands, in the order the
 loop reaches it — the brings are set aside with their keys and replayed once the loop has finished.
+
+**Write the key `&Builder.param`.** `ordered by rank` reads as if `rank` were a variable in scope; it is
+Row's parameter, the value each `bring Row(…)` passes. When the block brings only one builder the bare
+form is **VS0343** (a warning), and the Workbench's Quick Fix writes `&Row.rank`. Bare stays legal, and
+silent, for the one thing only it can do: a block that brings more than one builder, each with a `rank`.
 
 `Index` inside a deferred bring is the SOURCE position, not the sorted one, and it survives the wait:
 the body runs after the loop has ended, so the counter, the `target` binding and the current entity are
@@ -461,6 +466,7 @@ fire before the program runs, and the Workbench shows them because they are ordi
 | SF call without `do`, or fn call with it | **VS0341** | error — names the right spelling (D15) |
 | `do` on a built-in / not on a call | **VS0342** / **VS0112** | error |
 | `hear` inside an SF or a block | **VS0113** | error — a hear is a shard member; call the SF from it (`samples/sf_emit_hear.vein`) |
+| `ordered by key` over one builder | **VS0343** | warning — write `ordered by &Builder.key` (14e) |
 | literal of the wrong kind | **VS0230** | warning — `bring Row(42, "words")` |
 
 `?` (FillRest) and a parameter with a **default** are the two ways to say "fewer on purpose", and

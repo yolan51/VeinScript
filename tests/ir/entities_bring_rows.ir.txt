@@ -16,7 +16,7 @@ Bundle EntitiesBringRows  author=you
 |         |    |    `--- Int 2
 |         |    |--- Int 3
 |         |    `--- Int 1
-|         `--- Ordered by rank
+|         `--- Ordered by &Row.rank
 |              |--- Bring Row
 |              |    |--- Arg = Str "literal"
 |              |    `--- Arg = Int 0

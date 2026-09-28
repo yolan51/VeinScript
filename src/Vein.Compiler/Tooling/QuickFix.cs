@@ -32,6 +32,7 @@ public static class QuickFixes
             "VS0218" => DeclareMark(diagnostic, source),
             "VS0338" or "VS0339" => NameTheAuthor(diagnostic, source, projectDir),
             "VS0341" => DoOrNot(diagnostic, source),
+            "VS0343" => QualifyOrderKey(diagnostic, source),
             _ => Array.Empty<QuickFix>()
         };
     }
@@ -87,6 +88,23 @@ public static class QuickFixes
 
         string? alias = parts.Length >= 4 && parts[2] == "as" ? parts[3].Trim('"') : null;
         return (bundle, alias, indent);
+    }
+
+    /// VS0343 — `ordered by rank` over a block that brings one builder. Writes `&Builder.rank` in place of the
+    /// key. The builder is read from the diagnostic's own suggestion: Lower is the only place that walked
+    /// the block for it, and the message names exactly one.
+    private static IReadOnlyList<QuickFix> QualifyOrderKey(Diagnostic d, string source)
+    {
+        var want = System.Text.RegularExpressions.Regex.Match(d.Message, @"write `ordered by (&\w+)\.(\w+)`");
+        if (!want.Success) return Array.Empty<QuickFix>();
+
+        int at = OffsetOf(source, d.Span.Line, d.Span.Col);
+        if (at < 0) return Array.Empty<QuickFix>();
+        var key = new System.Text.RegularExpressions.Regex(@"\Gordered\s+by\s+(" + want.Groups[2].Value + @")\b").Match(source, at);
+        if (!key.Success) return Array.Empty<QuickFix>();
+
+        string text = want.Groups[1].Value + "." + want.Groups[2].Value;
+        return new[] { new QuickFix($"Write `{text}`", new TextEdit(key.Groups[1].Index, key.Groups[1].Length, text)) };
     }
 
     /// VS0341 (D13) — an SF called without `do`, or an fn called with one. Certain either way: the

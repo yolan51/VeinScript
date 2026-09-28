@@ -71,7 +71,7 @@ bundle JsonRoundtrip by you {
             //
             // Optional, always: drop it and the loop still runs, untyped, which is what you want while
             // exploring a payload whose shape you do not know yet.
-            ordered by rank {
+            ordered by &Row.rank {
                 target doc.rows as row: $Row {
                     bring Row(row.title, row.rank, row.done)
                 }

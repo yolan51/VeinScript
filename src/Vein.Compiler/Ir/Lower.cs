@@ -1767,6 +1767,16 @@ public sealed class Lower
                 // what turns every `bring` reached along the way into an IrOrderedBring, however deep it
                 // sits, so `target … { if … { bring … } }` orders the brings it actually performs. Doing
                 // it any other way would mean re-implementing statement lowering here.
+                // A bare key over ONE builder: say whose parameter it is. `ordered by rank` reads as if
+                // `rank` were a variable in scope; `ordered by &Task.rank` says it is Task's parameter,
+                // the value each `bring Task(…)` passes. The bare form stays for what only it can do —
+                // a block that brings more than one builder.
+                if (os.Builder is null && BuildersBrought(os.Body).Distinct(StringComparer.Ordinal).ToList() is [var only])
+                    _diag.Warning("VS0343",
+                        $"`ordered by {os.Key}` — write `ordered by &{only}.{os.Key}`, which says the key is " +
+                        $"{only}'s parameter '{os.Key}'. The bare form is for a block that brings more than one builder.",
+                        os.Span);
+
                 var prevOrder = _ordering;
                 _ordering = os;
                 try
@@ -1954,6 +1964,29 @@ public sealed class Lower
         var body = new IrBlock(stmts, Transparent: br.Bind is not null);
         return br.Count is null ? body
              : new IrLoop(IrLoopKind.Repeat, null, null, null, null, LowerExpr(br.Count), body);
+    }
+
+    /// Every builder a block brings, however deep the `bring` sits — the set `ordered by` reorders.
+    private static IEnumerable<string> BuildersBrought(IEnumerable<Stmt> body)
+    {
+        foreach (var s in body)
+        {
+            IEnumerable<string> inner = s switch
+            {
+                BringStmt b => new[] { b.Builder },
+                Block bl => BuildersBrought(bl.Statements),
+                IfStmt i => BuildersBrought(i.Then.Statements).Concat(i.Else is Stmt e ? BuildersBrought(new[] { e }) : Array.Empty<string>()),
+                TargetStmt t => BuildersBrought(t.Body.Statements),
+                QueryStmt q => BuildersBrought(q.Body.Statements),
+                RepeatStmt r => BuildersBrought(r.Body.Statements),
+                WhileStmt w => BuildersBrought(w.Body.Statements),
+                ChanceStmt c => BuildersBrought(c.Body.Statements),
+                MatchStmt m => m.Arms.SelectMany(a => BuildersBrought(a.Body.Statements))
+                                .Concat(m.Else is null ? Array.Empty<string>() : BuildersBrought(m.Else.Statements)),
+                _ => Array.Empty<string>(),
+            };
+            foreach (var n in inner) yield return n;
+        }
     }
 
     /// Nesting depth of identity templates being lowered, so two in one scope get distinct entity locals.
