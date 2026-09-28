@@ -42,3 +42,30 @@ public class FunctionScopeTests
         Assert.DoesNotContain(Scope(SymbolKind.Fn), e => e.Name == "print");
     }
 }
+
+public class FunctionSignatureHelpTests
+{
+    [Theory]
+    [InlineData("let x = clamp(1, ", "clamp", null, 1)]
+    [InlineData("do *Vein.Net.Http.get(", "get", "Vein.Net.Http", 0)]
+    [InlineData("let y = twice(clamp(1, 2, 3), ", "twice", null, 1)]
+    [InlineData("do say(\"a, b\", ", "say", null, 1)]   // a comma inside a string is not a separator
+    public void The_call_and_the_argument_being_typed_are_found(string text, string name, string? path, int slot)
+    {
+        var call = Assert.IsType<FunctionCall>(SignatureHelp.FunctionAt(text, text.Length));
+        Assert.Equal(name, call.Name);
+        Assert.Equal(path, call.Path is null ? null : string.Join(".", call.Path));
+        Assert.Equal(slot, call.ActiveSlot);
+    }
+
+    [Theory]
+    [InlineData("if (x")]              // a keyword before the bracket is not a call
+    [InlineData("bring Panel(1, ")]    // a builder — the signature strip's, not this
+    [InlineData("emit @Hit(")]         // a sigil
+    [InlineData("let a = e.len(")]     // a member
+    [InlineData("shard S { run once { x }")]
+    public void Things_that_are_not_function_calls_are_not(string text)
+    {
+        Assert.Null(SignatureHelp.FunctionAt(text, text.Length));
+    }
+}

@@ -3,6 +3,9 @@ namespace Vein.Compiler.Tooling;
 /// The call the caret is inside: what is being called, and which slot is being typed.
 public sealed record CallContext(string Name, bool IsEvent, int ActiveSlot);
 
+/// The fn / SF call the caret is inside: `*Path.Name(` or `Name(`, and which argument is being typed.
+public sealed record FunctionCall(IReadOnlyList<string>? Path, string Name, int ActiveSlot, int Open = -1);
+
 // WHY: `bring Panel(?, ?, ?, ?)` tells you nothing about which `?` is which. An include flattens
 // someone else's shape into the parameter list, so the names are not even in this file — and the
 // binding is positional, so the slot carries no name of its own. That is the case signature help
@@ -40,6 +43,57 @@ public static class SignatureHelp
             else if (c == ';') return null;
         }
         return null;
+    }
+
+    /// The fn / SF call the caret sits inside — `name(` or `*A.B.P.name(` — or null. `Path` is null for a
+    /// bare name. A `bring X(` is a builder and belongs to <see cref="At"/>; `if (`, `not (` and the other
+    /// keywords that can precede a bracket are not calls at all.
+    public static FunctionCall? FunctionAt(string source, int caret)
+    {
+        if (caret < 0 || caret > source.Length) return null;
+
+        int depth = 0;
+        for (int i = Math.Min(caret, source.Length) - 1; i >= 0; i--)
+        {
+            if (InString(source, i)) continue;
+            char c = source[i];
+            if (c is ')' or ']') depth++;
+            else if (c is '[') { if (depth > 0) depth--; }
+            else if (c == '(')
+            {
+                if (depth > 0) { depth--; continue; }
+                return CalleeBefore(source, i) is { } callee
+                    ? new FunctionCall(callee.Path, callee.Name, Slot(source, i, caret, ','), i)
+                    : null;
+            }
+            else if (c is '{' or '}') return null;   // a call does not span a block
+        }
+        return null;
+    }
+
+    private static (IReadOnlyList<string>? Path, string Name)? CalleeBefore(string source, int open)
+    {
+        int end = open;
+        int i = open - 1;
+        while (i >= 0 && (char.IsLetterOrDigit(source[i]) || source[i] is '_' or '.' or '*')) i--;
+        string token = source[(i + 1)..end];
+        if (token.Length == 0 || token.EndsWith('.')) return null;
+        if (i >= 0 && source[i] is '@' or '$' or '#' or '&') return null;   // a sigil: emit or bring
+
+        // `bring Panel(` is a builder.
+        int k = i;
+        while (k >= 0 && char.IsWhiteSpace(source[k])) k--;
+        int kwEnd = k + 1;
+        while (k >= 0 && char.IsLetter(source[k])) k--;
+        if (source[(k + 1)..kwEnd] == "bring") return null;
+
+        if (token.StartsWith('*'))
+        {
+            var segs = token[1..].Split('.');
+            return segs.Length < 2 ? null : (segs[..^1], segs[^1]);
+        }
+        if (token.Contains('.') || Lexing.Lexer.KeywordNames.Contains(token)) return null;   // a member, or `if (`
+        return (null, token);
     }
 
     /// Render the signature, marking the slot being typed. Positional binding means the marker is the

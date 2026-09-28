@@ -33,6 +33,8 @@ public partial class MainWindow : Window
     private readonly DiagnosticRenderer _marker = new();
     private readonly BracketRenderer _brackets = new();
     private readonly SemanticColorizer _semantic = new();
+    private SignaturePopup _sigPopup = null!;
+    private CompilationUnit? _lastAst;
     private IReadOnlyList<Diagnostic> _diags = Array.Empty<Diagnostic>();
     private string? _rootFolder;
 
@@ -238,6 +240,16 @@ public partial class MainWindow : Window
         LoadHighlighting();
         // After the theme, which AvaloniaEdit inserts first — this paints over it.
         _editor.TextArea.TextView.LineTransformers.Add(_semantic);
+
+        // Parameter hints for fn / SF calls. Hosted in the editor's DockPanel, docked Top at zero height, so it
+        // is in the visual tree a Popup needs without taking the fill slot from the editor.
+        _sigPopup = new SignaturePopup(_editor);
+        if (_editor.Parent is DockPanel host) { DockPanel.SetDock(_sigPopup.Control, Dock.Top); host.Children.Insert(0, _sigPopup.Control); }
+        _editor.AddHandler(KeyDownEvent, (_, e) =>
+        {
+            if (e.Key == Key.Escape && _sigPopup.IsOpen && SignatureHelp.FunctionAt(_editor.Text, _editor.CaretOffset) is { } fc)
+                _sigPopup.Dismiss(fc.Open);
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
 
         // AvaloniaEdit ships find & replace (Ctrl+F / Ctrl+H); installing it is one call, and writing
         // a second search over the same document would be work spent to end up behind.
@@ -608,6 +620,7 @@ public partial class MainWindow : Window
             // Ctrl+/ — the key reports as OemQuestion on a US layout and Oem2 on several others.
             case Key.OemQuestion or Key.Oem2: EditorCommands.ToggleComment(_editor); e.Handled = true; break;
             case Key.K: _ = OpenFolderAsync(); e.Handled = true; break;
+            case Key.Space when shift: _sigPopup.Undismiss(); ShowSignature(); e.Handled = true; break;
             case Key.Space: OnInvokeCompletion(); e.Handled = true; break;
         }
     }
@@ -1415,8 +1428,29 @@ public partial class MainWindow : Window
     ///
     /// Its own strip rather than the status bar: the status bar is where build results and run messages
     /// land, and a signature that came and went with those would flicker away exactly while being read.
+    /// The fn / SF call the caret is inside, in the popup above it. Found from the last build's tree for a
+    /// bare name — declarations change far less often than the line being typed — and from the bundle
+    /// index for a qualified one. A name neither knows gets no popup: describing a different function
+    /// that happens to share it would be worse than saying nothing.
+    private void ShowFunctionSignature()
+    {
+        if (SignatureHelp.FunctionAt(_editor.Text, _editor.CaretOffset) is not { } call) { _sigPopup.Hide(); return; }
+
+        var (fn, owner) = call.Path is null
+            ? FuncIndex.Find(_lastAst, call.Name, ProjectDir)
+            : FuncIndex.FindQualified(call.Path, call.Name, ProjectDir);
+        if (fn is null) { _sigPopup.Hide(); return; }
+
+        // Find's owner for a needed bundle's function is its full key, name included.
+        if (call.Path is null && owner is not null && owner.EndsWith("." + fn.Name, StringComparison.Ordinal))
+            owner = owner[..^(fn.Name.Length + 1)];
+        _sigPopup.Show(fn, owner, call.ActiveSlot, call.Open);
+    }
+
     private void ShowSignature()
     {
+        ShowFunctionSignature();
+
         var call = SignatureHelp.At(_editor.Text, _editor.CaretOffset);
         if (call is null) { _signature.Text = ""; _signature.IsVisible = false; return; }
 
@@ -2487,6 +2521,7 @@ public partial class MainWindow : Window
         _live.Expect(result.Ast is null ? null : ConsoleGraph.Analyze(result.Ast), ServePort);
         _runtime.Update(result.Entry);
         _definitions = result.Ast is null ? DefinitionIndex.Empty : DefinitionIndex.Analyze(result.Ast);
+        if (result.Ast is not null) _lastAst = result.Ast;
         _outline.Update(_definitions);
         UpdateSemanticColours();
         _eventGraph.Update(_definitions);
@@ -3916,7 +3951,11 @@ public partial class MainWindow : Window
     {
         w.Width = Math.Min(560, Math.Max(300, Bounds.Width * 0.6));
         w.MaxHeight = Math.Min(900, Math.Max(300, Bounds.Height * 0.7));
-        w.CompletionList.ListBox.MaxHeight = w.MaxHeight;
+        // The list box exists only once the template is applied — touching it before `Show` threw, and every
+        // completion list stopped opening. Applied when it appears instead.
+        double tall = w.MaxHeight;
+        if (w.CompletionList.ListBox is { } now) now.MaxHeight = tall;
+        else w.CompletionList.TemplateApplied += (_, _) => { if (w.CompletionList.ListBox is { } lb) lb.MaxHeight = tall; };
     }
 
     /// <summary>Write the `need` for whichever entry the completion list just inserted, if it wants one.</summary>

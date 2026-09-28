@@ -29,6 +29,7 @@ public static class FuncIndex
                     case FuncDecl f when f.Name == name: return f;
                     case BundleDecl b when Search(b.Members) is { } r: return r;
                     case PublicatorDecl p when Search(p.Members) is { } r: return r;
+                    case ShardDecl sh when Search(sh.Members.OfType<Decl>()) is { } r: return r;
                 }
             return null;
         }
@@ -56,6 +57,21 @@ public static class FuncIndex
             if (parts.Length >= 3 && parts[^1] == name && uses.Contains(parts[0] + "." + parts[1], StringComparer.Ordinal))
                 return (kv.Value, kv.Key);
         }
+        return (null, null);
+    }
+
+    /// A function by qualified path — `*A.B.P.name` or any suffix of it, as Lower resolves one — and the
+    /// `Author.Bundle.Pub` it came from.
+    public static (FuncDecl? Fn, string? Owner) FindQualified(IReadOnlyList<string> path, string name, string? projectDir)
+    {
+        string suffix = string.Join(".", path) + "." + name;
+        try
+        {
+            foreach (var kv in BundleIndex.For(projectDir).Functions.OrderBy(k => k.Key, StringComparer.Ordinal))
+                if (kv.Key == suffix || kv.Key.EndsWith("." + suffix, StringComparison.Ordinal))
+                    return (kv.Value, kv.Key[..^(name.Length + 1)]);
+        }
+        catch (Exception) { /* no search path */ }
         return (null, null);
     }
 
