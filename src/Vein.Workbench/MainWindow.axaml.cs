@@ -435,6 +435,8 @@ public partial class MainWindow : Window
         try
         {
             _editor.Document = doc.Document;
+            doc.Document.Changed -= OnDocChanged;   // once per document, however often it is activated
+            doc.Document.Changed += OnDocChanged;
             _editor.CaretOffset = Math.Clamp(doc.Caret, 0, doc.Document.TextLength);
             _bundleInspector.IsVisible = false;   // editing a file → the IR inspector, not the bundle card
         }
@@ -3247,17 +3249,31 @@ public partial class MainWindow : Window
         return sb.ToString();
     }
 
+    /// Squiggles follow the text between builds — see DiagnosticRenderer.OnDocumentChanged.
+    private void OnDocChanged(object? sender, AvaloniaEdit.Document.DocumentChangeEventArgs e)
+    {
+        if (ReferenceEquals(sender, _editor.Document)) _marker.OnDocumentChanged(e);
+    }
+
     private void UpdateMarks()
     {
         var doc = _editor.Document;
-        _marker.Marks = _diags.Select(d =>
-        {
-            int line = Math.Clamp(d.Span.Line, 1, Math.Max(1, doc.LineCount));
-            int col = Math.Max(1, d.Span.Col);
-            int offset;
-            try { offset = doc.GetOffset(line, col); } catch { offset = -1; }
-            return (offset, Math.Max(1, d.Span.Length));
-        }).ToList();
+        string here = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
+
+        // Only THIS file's diagnostics are drawn on it. A bundle compiles with its fragments merged in, so
+        // the list can hold another file's line 12 — drawn here, it underlined whatever this file happens
+        // to have on line 12. Those stay in the Diagnostics panel, which names their file.
+        _marker.Marks = _diags
+            .Where(d => string.IsNullOrEmpty(d.Span.File)
+                        || string.Equals(Path.GetFileName(d.Span.File), here, StringComparison.OrdinalIgnoreCase))
+            .Select(d =>
+            {
+                int line = Math.Clamp(d.Span.Line, 1, Math.Max(1, doc.LineCount));
+                int col = Math.Max(1, d.Span.Col);
+                int offset;
+                try { offset = doc.GetOffset(line, col); } catch { offset = -1; }
+                return (offset, Math.Max(1, d.Span.Length), d.Severity == Severity.Error);
+            }).ToList();
         _editor.TextArea.TextView.InvalidateVisual();
     }
 
