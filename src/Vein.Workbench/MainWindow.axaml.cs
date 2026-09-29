@@ -247,8 +247,9 @@ public partial class MainWindow : Window
         if (_editor.Parent is DockPanel host) { DockPanel.SetDock(_sigPopup.Control, Dock.Top); host.Children.Insert(0, _sigPopup.Control); }
         _editor.AddHandler(KeyDownEvent, (_, e) =>
         {
-            if (e.Key == Key.Escape && _sigPopup.IsOpen && SignatureHelp.FunctionAt(_editor.Text, _editor.CaretOffset) is { } fc)
-                _sigPopup.Dismiss(fc.Open);
+            if (e.Key == Key.Escape && _sigPopup.IsOpen)
+                _sigPopup.Dismiss(SignatureHelp.FunctionAt(_editor.Text, _editor.CaretOffset)?.Open
+                                  ?? SignatureHelp.At(_editor.Text, _editor.CaretOffset)?.Open ?? -1);
         }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
 
         // AvaloniaEdit ships find & replace (Ctrl+F / Ctrl+H); installing it is one call, and writing
@@ -1434,7 +1435,20 @@ public partial class MainWindow : Window
     /// that happens to share it would be worse than saying nothing.
     private void ShowFunctionSignature()
     {
-        if (SignatureHelp.FunctionAt(_editor.Text, _editor.CaretOffset) is not { } call) { _sigPopup.Hide(); return; }
+        if (SignatureHelp.FunctionAt(_editor.Text, _editor.CaretOffset) is not { } call)
+        {
+            // `bring Unit(` and `emit @Hit {` get the same popup: a builder's parameters are flattened from
+            // shapes that are usually in another file, so they are the signature most worth seeing here.
+            if (SignatureHelp.At(_editor.Text, _editor.CaretOffset) is { } bc)
+            {
+                if (!bc.IsEvent && _catalogBuilders.FirstOrDefault(x => x.Name == bc.Name) is { } b)
+                { _sigPopup.ShowBuilder(b, bc.ActiveSlot, bc.Open); return; }
+                if (bc.IsEvent && _catalogEvents.FirstOrDefault(x => x.Name == bc.Name) is { } ev)
+                { _sigPopup.ShowEvent(ev, bc.ActiveSlot, bc.Open); return; }
+            }
+            _sigPopup.Hide();
+            return;
+        }
 
         var (fn, owner) = call.Path is null
             ? FuncIndex.Find(_lastAst, call.Name, ProjectDir)
@@ -3633,6 +3647,13 @@ public partial class MainWindow : Window
         // `?` is documented for emit / start / bring — the sites that CONSTRUCT a payload. `hear` binds
         // one instead, so there is nothing to fill; its fields surface through `<binding>.` completion.
         if (body is null) return;
+
+        // Line the expansion up under the statement it belongs to. It was written flush left, so inside a
+        // shard the fields and the closing bracket landed at column 0.
+        var line = _editor.Document.GetLineByOffset(q);
+        string lineText = _editor.Document.GetText(line.Offset, line.Length);
+        string indent = lineText[..(lineText.Length - lineText.TrimStart().Length)];
+        if (indent.Length > 0) body = body.Replace("\n", "\n" + indent);
 
         _editor.Document.Replace(q, 1, body);          // replace the '?' with the expansion
         int hole = body.IndexOf('?');                  // caret at the first required hole

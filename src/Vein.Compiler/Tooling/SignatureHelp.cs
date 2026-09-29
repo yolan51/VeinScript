@@ -1,7 +1,7 @@
 namespace Vein.Compiler.Tooling;
 
 /// The call the caret is inside: what is being called, and which slot is being typed.
-public sealed record CallContext(string Name, bool IsEvent, int ActiveSlot);
+public sealed record CallContext(string Name, bool IsEvent, int ActiveSlot, int Open = -1);
 
 /// The fn / SF call the caret is inside: `*Path.Name(` or `Name(`, and which argument is being typed.
 public sealed record FunctionCall(IReadOnlyList<string>? Path, string Name, int ActiveSlot, int Open = -1);
@@ -37,8 +37,8 @@ public static class SignatureHelp
                 // a block rather than a payload simply has no `emit` before it, so Preceding returns
                 // null and no help is offered.
                 return c == '('
-                    ? Preceding(source, i, "bring") is { } b ? new CallContext(b, false, Slot(source, i, caret, ',')) : null
-                    : Preceding(source, i, "emit") is { } e ? new CallContext(e, true, Slot(source, i, caret, ',')) : null;
+                    ? Preceding(source, i, "bring") is { } b ? new CallContext(b, false, Slot(source, i, caret, ','), i) : null
+                    : Preceding(source, i, "emit") is { } e ? new CallContext(e, true, Slot(source, i, caret, ','), i) : null;
             }
             else if (c == ';') return null;
         }

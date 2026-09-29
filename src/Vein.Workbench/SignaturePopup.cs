@@ -77,30 +77,53 @@ internal sealed class SignaturePopup
     /// Show `fn`'s signature above the caret with parameter `active` highlighted.
     public void Show(FuncDecl fn, string? owner, int active, int callStart)
     {
+        string kind = fn.IsPure ? "SF — runs inline and changes things; called with `do`" : "fn — computes a value, changes nothing";
+        ShowParams((fn.IsPure ? "do " : "") + (owner is null ? "" : "*" + owner + "."), fn.Name,
+            fn.Params.Select(p => p.Name + ": " + (p.Type?.Name ?? "?")).ToList(),
+            ("(", ")" + (fn.Return is null ? "" : " -> " + fn.Return.Name)),
+            active, callStart, fn.Doc is { Length: > 0 } d ? d + "\n" + kind : kind,
+            fn.IsPure ? "#F47067" : "#9CDCFE");   // SF coral / fn sky
+    }
+
+    /// `bring Unit(` — the builder's parameters in the order a `bring` binds them, each with the `$Shape`
+    /// it was flattened from, since that is where the name came from and it is not in this file.
+    public void ShowBuilder(BuilderEntry b, int active, int callStart) =>
+        ShowParams("bring ", b.Name, b.Fields.Select(Param).ToList(), ("(", ")"), active, callStart,
+            b.Fields.Count == 0 ? "builder — takes nothing" : "builder — arguments bind in this order; `?` after the name fills them all in",
+            "#E09B5A");   // the Builder colour
+
+    /// `emit @Hit {` — the event's fields. Named, not positional, so the highlight follows the comma count
+    /// only as a guide; the list is what matters.
+    public void ShowEvent(EventEntry e, int active, int callStart) =>
+        ShowParams("emit @", e.Name, e.Fields.Select(Param).ToList(), (" { ", " }"), active, callStart,
+            e.Fields.Count == 0 ? "event — carries nothing" : "event — `?` after the name fills in every field",
+            "#DCDCAA");   // the Event colour
+
+    private static string Param(EventField f) =>
+        f.Name + ": " + f.Type + (f.Required ? "" : " = " + (f.Default ?? "default")) +
+        (f.OriginShape is { Length: > 0 } s ? "  $" + s : "");
+
+    private void ShowParams(string prefix, string name, IReadOnlyList<string> ps, (string Open, string Close) brackets,
+                            int active, int callStart, string doc, string accentHex)
+    {
         if (callStart == _dismissedAt) { Hide(); return; }
         _dismissedAt = -1;
 
-        var accent = new SolidColorBrush(Color.Parse(fn.IsPure ? "#F47067" : "#9CDCFE"));   // SF coral / fn sky
         _signature.Inlines!.Clear();
-        _signature.Inlines.Add(new Run((fn.IsPure ? "do " : "") + (owner is null ? "" : "*" + owner + "."))
-            { Foreground = Brushes.Gray });
-        _signature.Inlines.Add(new Run(fn.Name) { Foreground = accent, FontWeight = FontWeight.SemiBold });
-        _signature.Inlines.Add(new Run("("));
-        for (int i = 0; i < fn.Params.Count; i++)
+        _signature.Inlines.Add(new Run(prefix) { Foreground = Brushes.Gray });
+        _signature.Inlines.Add(new Run(name) { Foreground = new SolidColorBrush(Color.Parse(accentHex)), FontWeight = FontWeight.SemiBold });
+        _signature.Inlines.Add(new Run(brackets.Open));
+        for (int i = 0; i < ps.Count; i++)
         {
             if (i > 0) _signature.Inlines.Add(new Run(", "));
-            var p = fn.Params[i];
-            string text = p.Name + ": " + (p.Type?.Name ?? "?");
             _signature.Inlines.Add(i == active
-                ? new Run(text) { FontWeight = FontWeight.Bold, Foreground = Brushes.White, TextDecorations = TextDecorations.Underline }
-                : new Run(text));
+                ? new Run(ps[i]) { FontWeight = FontWeight.Bold, Foreground = Brushes.White, TextDecorations = TextDecorations.Underline }
+                : new Run(ps[i]));
         }
-        _signature.Inlines.Add(new Run(")" + (fn.Return is null ? "" : " -> " + fn.Return.Name)));
-        if (active >= fn.Params.Count && fn.Params.Count > 0)
-            _signature.Inlines.Add(new Run($"   ← {fn.Name} takes {fn.Params.Count}") { Foreground = new SolidColorBrush(Color.Parse("#E0575B")) });
-
-        string kind = fn.IsPure ? "SF — runs inline and changes things; called with `do`" : "fn — computes a value, changes nothing";
-        _doc.Text = fn.Doc is { Length: > 0 } d ? d + "\n" + kind : kind;
+        _signature.Inlines.Add(new Run(brackets.Close));
+        if (active >= ps.Count && ps.Count > 0)
+            _signature.Inlines.Add(new Run($"   ← {name} takes {ps.Count}") { Foreground = new SolidColorBrush(Color.Parse("#E0575B")) });
+        _doc.Text = doc;
 
         // Anchor on the caret's line, so the popup sits just above what is being typed.
         var view = _editor.TextArea.TextView;
