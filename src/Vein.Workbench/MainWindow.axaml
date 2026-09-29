@@ -127,6 +127,11 @@
 
     <!-- Toolbar: the run configuration this file declares in its own header, and the controls for it. -->
     <Border DockPanel.Dock="Top" Background="{DynamicResource Header}" BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" Padding="10,6">
+      <DockPanel>
+      <!-- The ENTRY POINT: which file ▶ runs, whatever tab is on screen. Right-aligned so it reads as a
+           setting of the project rather than of the file being edited. -->
+      <Button Name="EntryButton" DockPanel.Dock="Right" Click="OnEntryMenu" Padding="10,2" VerticalAlignment="Center"
+              ToolTip.Tip="The file ▶ runs. Click to set it to the file you are looking at, or to go back to running the active tab.">Entry: active tab ▾</Button>
       <StackPanel Orientation="Horizontal" Spacing="6">
         <Image Source="avares://VeinScript-Workbench/Assets/VSLOGO.png" Height="24" Width="26"
                Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,6,0" />
@@ -144,6 +149,7 @@
         <Button Name="BottomToggle" Click="OnToggleBottom" Padding="10,2"
                 ToolTip.Tip="Hide or show the bottom panel (Ctrl+J)">▾</Button>
       </StackPanel>
+      </DockPanel>
     </Border>
 
     <Border DockPanel.Dock="Bottom" Background="{DynamicResource Header}" Padding="12,4">

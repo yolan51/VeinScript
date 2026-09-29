@@ -33,7 +33,9 @@ internal sealed class EditorTabs : UserControl
         public string Name => Path is null ? "untitled.vein" : System.IO.Path.GetFileName(Path);
     }
 
-    private readonly StackPanel _strip = new() { Orientation = Orientation.Horizontal, Spacing = 2 };
+    // The bottom margin is the scrollbar's lane. Avalonia draws a ScrollViewer's bar OVER its content, so
+    // with more tabs than fit it sat across the tab names and hid them; the margin gives it a row of its own.
+    private readonly StackPanel _strip = new() { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Avalonia.Thickness(0, 0, 0, 12) };
     private readonly List<Doc> _docs = new();
 
     /// A different tab became current. The window swaps the editor's document.
@@ -61,6 +63,7 @@ internal sealed class EditorTabs : UserControl
         {
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
             VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            AllowAutoHide = false,   // a bar that swells on hover grew back over the tabs
             Content = _strip
         };
 

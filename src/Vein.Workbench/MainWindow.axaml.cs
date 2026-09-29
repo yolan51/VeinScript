@@ -746,13 +746,90 @@ public partial class MainWindow : Window
     // a VEIN_CONSOLE could not be started from the IDE at all — the header said how, and Run ignored it.
 
     /// Reread the open file's header and repopulate the toolbar dropdown.
+    // ---- the entry point ----------------------------------------------------------------------------
+    //
+    // WHICH FILE ▶ RUNS. It was always the tab on screen, so running a bundle meant first switching to its
+    // main file — press ▶ while editing shards/Boot.vein and it said "no run line in this file's header".
+    // Kept in `.veinproj` as `principal` (the same field that picks the file a folder opens on), so it is
+    // per project and survives a restart. Null means "the active tab", which is how it always worked.
+
+    private string? _entryPath;
+
+    /// The file ▶, Run All and external Run use: the entry point when one is set, else the active tab.
+    private string? RunPath => _entryPath ?? _currentPath;
+
+    /// Its text — the open tab's buffer when it is open (which ▶ has just saved anyway), else the disk.
+    private string RunText
+    {
+        get
+        {
+            if (_entryPath is null) return _editor.Text;
+            var open = _tabs.Docs.FirstOrDefault(d => d.Path is not null &&
+                string.Equals(Path.GetFullPath(d.Path), Path.GetFullPath(_entryPath), StringComparison.OrdinalIgnoreCase));
+            if (open is not null) return open.Document.Text;
+            try { return File.ReadAllText(_entryPath); } catch { return ""; }
+        }
+    }
+
+    private void SetEntry(string? path)
+    {
+        _entryPath = path is not null && File.Exists(path) ? Path.GetFullPath(path) : null;
+
+        if (_rootFolder is not null)
+        {
+            _project ??= new VeinProject();
+            _project.Principal = _entryPath is null ? null : Path.GetRelativePath(_rootFolder, _entryPath);
+            try { _project.Save(_rootFolder); } catch (Exception ex) { SetStatus($"Could not save the entry point: {ex.Message}"); }
+        }
+
+        UpdateEntryButton();
+        RefreshRunConfigs();
+        SetStatus(_entryPath is null ? "▶ runs the active tab." : $"▶ runs {Path.GetFileName(_entryPath)}, whatever tab is open.");
+    }
+
+    private void UpdateEntryButton()
+    {
+        var button = this.FindControl<Button>("EntryButton");
+        if (button is null) return;
+        button.Content = _entryPath is null ? "Entry: active tab ▾" : "Entry: " + Path.GetFileName(_entryPath) + " ▾";
+        ToolTip.SetTip(button, _entryPath is null
+            ? "▶ runs whichever tab is open. Click to pin the file you are looking at."
+            : "▶ runs " + _entryPath + ", whatever tab is open. Click to change it.");
+    }
+
+    private void OnEntryMenu(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Control anchor) return;
+        var menu = new ContextMenu();
+
+        if (_currentPath is { } here && IsVeinSource(here) &&
+            !string.Equals(here, _entryPath, StringComparison.OrdinalIgnoreCase))
+        {
+            var pin = new MenuItem { Header = "Set to " + Path.GetFileName(here) + " (this tab)" };
+            pin.Click += (_, _) => SetEntry(here);
+            menu.Items.Add(pin);
+        }
+        if (_entryPath is not null)
+        {
+            var open = new MenuItem { Header = "Open " + Path.GetFileName(_entryPath) };
+            open.Click += (_, _) => _ = OpenPathAsync(_entryPath);
+            menu.Items.Add(open);
+            var clear = new MenuItem { Header = "Clear — run the active tab" };
+            clear.Click += (_, _) => SetEntry(null);
+            menu.Items.Add(clear);
+        }
+        if (menu.Items.Count == 0) menu.Items.Add(new MenuItem { Header = "Open a .vein file to set it as the entry point", IsEnabled = false });
+
+        menu.Open(anchor);
+    }
+
     private void RefreshRunConfigs()
     {
         var previous = _runConfigs.SelectedItem as string;
 
         // The file's own header first, then anything saved in .veinproj. Both, in that order: a saved
         // config that has gone stale must not hide what the file itself says about how to run it.
-        var configs = RunConfig.From(_editor.Text, _currentPath ?? "untitled.vein").ToList();
+        var configs = RunConfig.From(RunText, RunPath ?? "untitled.vein").ToList();
         if (_project is not null)
             configs.AddRange(_project.Runs.Select(r =>
                 new RunConfig(r.Label, r.Command, r.Args, r.Env)));
@@ -810,8 +887,8 @@ public partial class MainWindow : Window
         await SaveAllForRunAsync();
 
         var result = _service.Compile(new CompileRequest(
-            _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath),
-            _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath));
+            Path.GetFileName(RunPath ?? "untitled.vein"),
+            RunText, ProjectDir: ProjectDir, SourcePath: RunPath));
         if (!result.Success)
         {
             ShowBottomTab(TabDiagnostics);
@@ -855,8 +932,8 @@ public partial class MainWindow : Window
         await SaveAllForRunAsync();
 
         var result = _service.Compile(new CompileRequest(
-            _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath),
-            _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath));
+            Path.GetFileName(RunPath ?? "untitled.vein"),
+            RunText, ProjectDir: ProjectDir, SourcePath: RunPath));
         if (!result.Success)
         {
             ShowBottomTab(TabDiagnostics);
@@ -921,6 +998,8 @@ public partial class MainWindow : Window
     private void LoadProject()
     {
         _project = _rootFolder is null ? null : VeinProject.Load(_rootFolder);
+        _entryPath = _project?.PrincipalPath is { } pp ? Path.GetFullPath(pp) : null;
+        UpdateEntryButton();
         if (_project?.PrincipalPath is { } principal && _tabs.Docs.Count == 0)
             _ = OpenPathAsync(principal);
     }
@@ -1302,8 +1381,8 @@ public partial class MainWindow : Window
     {
         await SaveAllForRunAsync();
 
-        string name = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
-        var result = _service.Compile(new CompileRequest(name, _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath));
+        string name = Path.GetFileName(RunPath ?? "untitled.vein");
+        var result = _service.Compile(new CompileRequest(name, RunText, ProjectDir: ProjectDir, SourcePath: RunPath));
         if (!result.Success)
         {
             ShowBottomTab(TabDiagnostics);
@@ -1312,7 +1391,7 @@ public partial class MainWindow : Window
         }
 
         string? veinc = FindRepoTool("veinc.cmd");
-        if (_currentPath is not null && veinc is not null)
+        if (RunPath is not null && veinc is not null)
         {
             try
             {
@@ -1320,7 +1399,7 @@ public partial class MainWindow : Window
                 // `--ticks` or VEIN_CONSOLE would disagree with what ▶ next to it just did.
                 var cfg = _configs.Count > 0
                     ? _configs[Math.Max(0, Math.Min(_runConfigs.SelectedIndex, _configs.Count - 1))]
-                    : new RunConfig("run", "run", new[] { _currentPath }, new Dictionary<string, string>());
+                    : new RunConfig("run", "run", new[] { RunPath! }, new Dictionary<string, string>());
 
                 var psi = new ProcessStartInfo(veinc, string.Join(" ", cfg.CommandLine.Select(Quote)))
                 {
@@ -2077,12 +2156,13 @@ public partial class MainWindow : Window
         var rename = Item("Rename…", () => _ = RenameEntryAsync());
         var delete = Item("Delete…", () => _ = DeleteEntryAsync());
         var reveal = Item("Reveal in File Explorer", RevealSelected);
+        var entry = Item("Set as Entry Point (▶ runs it)", () => { if (Selected() is (var p, false)) SetEntry(p); });
 
         var menu = new ContextMenu
         {
             ItemsSource = new object[]
             {
-                newFile, newFolder, new Separator(), rename, delete, new Separator(), reveal
+                newFile, newFolder, new Separator(), rename, delete, new Separator(), entry, reveal
             }
         };
 
@@ -2099,6 +2179,7 @@ public partial class MainWindow : Window
             rename.IsEnabled = editable;
             delete.IsEnabled = editable;
             reveal.IsEnabled = has;
+            entry.IsEnabled = sel is (var ep, false) && IsVeinSource(ep);
 
             // Naming the thing beats a generic verb: "Delete…" over a folder full of work should say
             // so before it is clicked, not only in the prompt afterwards.
