@@ -895,6 +895,7 @@ public partial class MainWindow : Window
         {
             ShowBottomTab(TabDiagnostics);
             SetStatus($"Run: fix {result.Diagnostics.Count} error(s) first.");
+            ShowRunDiagnostics(result.Diagnostics);
             return;
         }
 
@@ -940,6 +941,7 @@ public partial class MainWindow : Window
         {
             ShowBottomTab(TabDiagnostics);
             SetStatus($"Run All: fix {result.Diagnostics.Count} error(s) first.");
+            ShowRunDiagnostics(result.Diagnostics);
             return;
         }
 
@@ -1389,6 +1391,7 @@ public partial class MainWindow : Window
         {
             ShowBottomTab(TabDiagnostics);
             SetStatus($"Run: fix {result.Diagnostics.Count} error(s) first.");
+            ShowRunDiagnostics(result.Diagnostics);
             return;
         }
 
@@ -3385,7 +3388,47 @@ public partial class MainWindow : Window
         }
 
         if (i >= _shownDiags.Count) return;
-        GoTo(_shownDiags[i].Span.Line, Math.Max(1, _shownDiags[i].Span.Col));
+        var span = _shownDiags[i].Span;
+
+        // A diagnostic can belong to another file — the entry point ▶ compiled, or a fragment of the bundle.
+        // Jumping to its line in the file on screen would land on something unrelated.
+        if (DiagnosticFile(span.File) is { } other)
+        {
+            if (!GoTo(other, span.Line, Math.Max(1, span.Col))) SetStatus($"{Path.GetFileName(other)} cannot be opened.");
+            return;
+        }
+        GoTo(span.Line, Math.Max(1, span.Col));
+    }
+
+    /// The run's errors, when ▶ refuses to start. ▶ compiles the ENTRY file, which need not be the tab on
+    /// screen — so "Run: fix 1 error(s) first" came with a Diagnostics panel listing the active tab's
+    /// build, which was clean: an error counted and nowhere shown.
+    private void ShowRunDiagnostics(IReadOnlyList<Diagnostic> diagnostics)
+    {
+        _diags = diagnostics;
+        ApplyDiagnosticFilter();
+        UpdateMarks();
+    }
+
+    /// The full path of a diagnostic's file when it is not the one on screen, else null. Diagnostics carry a
+    /// file NAME; it is found among the open tabs first, then under the project folder.
+    private string? DiagnosticFile(string? name)
+    {
+        if (string.IsNullOrEmpty(name)) return null;
+        string here = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
+        if (string.Equals(Path.GetFileName(name), here, StringComparison.OrdinalIgnoreCase)) return null;
+        if (Path.IsPathRooted(name) && File.Exists(name)) return name;
+
+        if (_tabs.Docs.FirstOrDefault(d => d.Path is not null &&
+                string.Equals(Path.GetFileName(d.Path), name, StringComparison.OrdinalIgnoreCase))?.Path is { } open)
+            return open;
+        if (RunPath is { } run && string.Equals(Path.GetFileName(run), name, StringComparison.OrdinalIgnoreCase)) return run;
+        try
+        {
+            return _rootFolder is null ? null
+                : Directory.EnumerateFiles(_rootFolder, name, SearchOption.AllDirectories).FirstOrDefault();
+        }
+        catch { return null; }
     }
 
     // ---- sigil completion ($ shapes, # marks, @ events) -----------------
