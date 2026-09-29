@@ -45,6 +45,13 @@ echo "── publishing the Workbench ──────────────
 dotnet publish src/Vein.Workbench "${PUBLISH[@]}" -o out/standalone
 
 cp out/cli/veinc.exe out/standalone/veinc.exe
+
+# `veinc build` compiles a small host project that REFERENCES Vein.Compiler.dll, and looks for it next
+# to veinc. A single-file veinc.exe has it baked in, not beside it, so from out/standalone `build`
+# failed with "Vein.Compiler.dll not found next to the CLI" while `run` worked. Ship the plain assembly.
+echo "── shipping Vein.Compiler.dll for veinc build ──────────────────"
+dotnet build src/Vein.Compiler -c Release --nologo -v q -o out/compiler
+cp out/compiler/Vein.Compiler.dll out/standalone/Vein.Compiler.dll
 echo "standalone: $(du -sh out/standalone | cut -f1) in out/standalone"
 
 # The check that matters, and the one a developer's copy cannot fail: run the shipped CLI from the

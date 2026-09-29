@@ -793,11 +793,16 @@ public partial class MainWindow : Window
     {
         var button = this.FindControl<Button>("EntryButton");
         if (button is null) return;
-        button.Content = _entryPath is null ? "Entry: active tab ▾" : "Entry: " + Path.GetFileName(_entryPath) + " ▾";
+        // A TextBlock, not a string: a string Content is AccessText, which reads `_` as a mnemonic marker and
+        // ate it — `console_roles.vein` showed as `consoleroles.vein`.
+        button.Content = new TextBlock { Text = _entryPath is null ? "Entry: active tab ▾" : "Entry: " + Path.GetFileName(_entryPath) + " ▾" };
         ToolTip.SetTip(button, _entryPath is null
             ? "▶ runs whichever tab is open. Click to pin the file you are looking at."
             : "▶ runs " + _entryPath + ", whatever tab is open. Click to change it.");
     }
+
+    /// A menu header treats `_` as its access-key marker; doubled, it shows as itself.
+    private static string NoMnemonic(string s) => s.Replace("_", "__");
 
     private void OnEntryMenu(object? sender, RoutedEventArgs e)
     {
@@ -807,13 +812,13 @@ public partial class MainWindow : Window
         if (_currentPath is { } here && IsVeinSource(here) &&
             !string.Equals(here, _entryPath, StringComparison.OrdinalIgnoreCase))
         {
-            var pin = new MenuItem { Header = "Set to " + Path.GetFileName(here) + " (this tab)" };
+            var pin = new MenuItem { Header = "Set to " + NoMnemonic(Path.GetFileName(here)) + " (this tab)" };
             pin.Click += (_, _) => SetEntry(here);
             menu.Items.Add(pin);
         }
         if (_entryPath is not null)
         {
-            var open = new MenuItem { Header = "Open " + Path.GetFileName(_entryPath) };
+            var open = new MenuItem { Header = "Open " + NoMnemonic(Path.GetFileName(_entryPath)) };
             open.Click += (_, _) => _ = OpenPathAsync(_entryPath);
             menu.Items.Add(open);
             var clear = new MenuItem { Header = "Clear — run the active tab" };
@@ -2189,8 +2194,8 @@ public partial class MainWindow : Window
             // Naming the thing beats a generic verb: "Delete…" over a folder full of work should say
             // so before it is clicked, not only in the prompt afterwards.
             string what = has ? Path.GetFileName(sel!.Value.Path.TrimEnd(Path.DirectorySeparatorChar)) : "";
-            rename.Header = has ? $"Rename '{what}'…" : "Rename…";
-            delete.Header = has ? $"Delete '{what}'…" : "Delete…";
+            rename.Header = has ? $"Rename '{NoMnemonic(what)}'…" : "Rename…";
+            delete.Header = has ? $"Delete '{NoMnemonic(what)}'…" : "Delete…";
         };
 
         _projectTree.ContextMenu = menu;
