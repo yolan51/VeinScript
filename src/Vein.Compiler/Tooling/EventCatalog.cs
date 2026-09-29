@@ -450,13 +450,18 @@ public static class EventCatalog
         for (int i = 0; i < b.Fields.Count; i++)
         {
             var f = b.Fields[i];
-            sb.Append("    base").Append(i < b.Fields.Count - 1 ? "," : " ").Append("     // ").Append(f.Name)
+            // THE `)` CLOSES THE LAST SLOT'S LINE, never a line of its own. A newline ends a statement unless
+            // the line ends in something that cannot (RULES 1). `base` is a keyword and cannot, so `base` then
+            // `)` on the next line worked — until `base` was replaced with the value it asks for: `50` ends a
+            // statement, and the `)` below it was an error. Written this way the slot can be overwritten.
+            bool last = i == b.Fields.Count - 1;
+            sb.Append("    base").Append(last ? ")" : ",").Append("     // ").Append(f.Name)
               .Append(": ").Append(f.Type)
               .Append(f.OriginShape is null ? "" : "   from $" + f.OriginShape)
-              .Append(f.Required ? "   REQUIRED — give it a value" : "   optional — default " + f.Default)
-              .Append('\n');
+              .Append(f.Required ? "   REQUIRED — give it a value" : "   optional — default " + f.Default);
+            if (!last) sb.Append('\n');
         }
-        return sb.Append(')').ToString();
+        return sb.ToString();
     }
 
     /// One line per field for a completion popup: `name: type   from $Shape`. The popup is shown when

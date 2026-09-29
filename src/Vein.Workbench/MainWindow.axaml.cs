@@ -3738,7 +3738,11 @@ public partial class MainWindow : Window
 
         _editor.Document.Replace(q, 1, body);          // replace the '?' with the expansion
         int hole = body.IndexOf('?');                  // caret at the first required hole
-        _editor.CaretOffset = q + (hole >= 0 ? hole : body.Length);
+        // No hole: land just after the closing bracket — which for a `bring` now sits mid-line, before the last
+        // slot's comment — so a second `?` there compacts it, as it did when the `)` ended the text.
+        int closeAt = body.LastIndexOf("base)", StringComparison.Ordinal);
+        int close = bring.Success && !emit.Success && !start.Success && closeAt >= 0 ? closeAt + 5 : body.Length;
+        _editor.CaretOffset = q + (hole >= 0 ? hole : close);
     }
 
     // Both go through EventCatalog with the project dir, so `?` sees what the COMPILER sees — including

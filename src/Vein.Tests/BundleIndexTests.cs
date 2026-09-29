@@ -476,7 +476,7 @@ public class BundleIndexTests : IDisposable
         string args = EventCatalog.Args(Assert.Single(EventCatalog.Builders(unit), b => b.Name == "Box"));
 
         Assert.Contains("base,     // label: string   from $Box", args);
-        Assert.Contains("base      // width: int   from $Box", args);   // last slot, no comma
+        Assert.Contains("base)     // width: int   from $Box", args);   // last slot closes the call on its own line
     }
 
     [Fact]

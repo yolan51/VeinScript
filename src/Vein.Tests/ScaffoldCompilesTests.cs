@@ -123,6 +123,17 @@ public class ScaffoldCompilesTests
     }
 
     [Fact]
+    public void Filling_every_slot_with_a_real_value_still_compiles()
+    {
+        // The point of the expansion is to be overwritten. With the `)` on a line of its own it compiled
+        // only while it still said `base`: `50` ends a statement (RULES 1), so `50` then `)` was VS0100.
+        string args = EventCatalog.Args(EventCatalog.Builders(Unit()).Single(b => b.Name == "Required"));
+        string filled = System.Text.RegularExpressions.Regex.Replace(args, @"\bbase\b", "7");
+
+        Assert.DoesNotContain(Compile("bring Required" + filled), d => d.Severity == Severity.Error);
+    }
+
+    [Fact]
     public void A_slot_with_no_default_still_takes_base_and_says_so()
     {
         // `base` on a parameter with no default is VS0231, and the warning is the useful part: it names
