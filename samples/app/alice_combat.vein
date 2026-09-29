@@ -1,3 +1,5 @@
+//   NOT RUN ON ITS OWN — it is one bundle of samples/app/app.vein. Run that (open it and press ▶), or set it as the
+//   Entry with the button at the top right, and ▶ runs the app from here.
 // alice's Combat bundle — same bundle NAME and same @Request event name as yolan's, by a different
 // author. Qualified as *alice.Combat.@Request. This is the collision the discovery tool flags.
 

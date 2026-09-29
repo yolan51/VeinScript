@@ -1,4 +1,5 @@
 // ============================================================================================
+//     veinc run samples/LANGUAGE-TOUR.vein --ticks 2
 //  VeinScript — LANGUAGE TOUR
 //  A single-file digest of every sample in samples/, concatenated for reading/discussion.
 //  (Each bundle is independent — this file is a reference, not one compiled program.)

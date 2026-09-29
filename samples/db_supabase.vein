@@ -1,4 +1,5 @@
 // db_supabase.vein — a database read and write, against a real Supabase project.
+//     veinc run samples/db_supabase.vein     (paste your Supabase URL and anon key first; stays open for the reply — Ctrl+Z, Enter to stop)
 //
 // Supabase's REST API is PostgREST: every table is a URL, a row is a JSON object, and a filter is a
 // query parameter. Nothing here is Supabase-shaped except the two auth headers and the `?select=` —

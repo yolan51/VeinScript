@@ -1,3 +1,4 @@
+//     veinc run samples/app/RPGConsole.vein     (type 1-4 and Enter to play)
 bundle RpgMenu by you {
 
   // A menu item as an identity: `key` is what you type, `order` is the line it prints on. Both are

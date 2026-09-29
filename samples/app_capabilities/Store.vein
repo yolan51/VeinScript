@@ -1,3 +1,5 @@
+//   NOT RUN ON ITS OWN — it is one bundle of samples/app_capabilities/shop.app.vein. Run that (open it and press ▶), or set it as the
+//   Entry with the button at the top right, and ▶ runs the app from here.
 // The PRINCIPAL bundle — the one the app lists first. Its `start` is the app's single boot event, and
 // everything else in the app reacts to what it emits. This is the only bundle that begins anything.
 

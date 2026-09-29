@@ -1,4 +1,5 @@
 // db_query.vein — the PostgREST query format, which is how you ask Supabase for a subset.
+//     veinc run samples/db_query.vein     (paste your Supabase URL and anon key below first)
 //
 // samples/db_supabase.vein reads a whole table and inserts a row. This one is about the URL: filtering,
 // set membership, OR across columns, paging, and pulling a related table in with the parent. In

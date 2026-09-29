@@ -1,3 +1,5 @@
+//   NOT RUN ON ITS OWN — it is one bundle of samples/kitdemo/kitdemo.app.vein. Run that (open it and press ▶), or set it as the
+//   Entry with the button at the top right, and ▶ runs the app from here.
 // samples/kitdemo/bundles/Movement.vein — an INSTALLED KIT, as a dev would receive one.
 //
 // It lives under `bundles/`, which is where `BundleIndex.SearchRoots` looks after the standard

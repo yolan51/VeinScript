@@ -1,4 +1,5 @@
 // handles.vein — HTML / JS / CSS cross-linked by HANDLES (id, class, function).
+//     veinc render samples/handles.vein /
 // A handle is a shape carrying a name (and, for a function, a body). Declare each ONCE, then hand
 // the SAME handle value to the element, the script, and the style. The name can't drift, because it
 // lives in one place.  Run:  veinc render samples/handles.vein /

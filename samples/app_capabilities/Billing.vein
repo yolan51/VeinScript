@@ -1,3 +1,5 @@
+//   NOT RUN ON ITS OWN — it is one bundle of samples/app_capabilities/shop.app.vein. Run that (open it and press ▶), or set it as the
+//   Entry with the button at the top right, and ▶ runs the app from here.
 // A CAPABILITY bundle. It declares no `start` and begins nothing — it only reacts. Adding it to the app
 // adds invoicing; removing the `load` line removes invoicing, and no other bundle changes either way.
 

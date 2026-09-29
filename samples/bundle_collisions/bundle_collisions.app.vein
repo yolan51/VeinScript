@@ -1,3 +1,4 @@
+//     veinc run samples/bundle_collisions/bundle_collisions.app.vein
 app BundleCollisions {
     load "collisions.vein"
 }

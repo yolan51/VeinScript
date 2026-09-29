@@ -1,4 +1,7 @@
 // demo.vein — an Identity Oriented Programming sample. Exercises the hard lexer cases
+//     veinc ir samples/demo.vein
+//     (▶ shows the lowered IR — this sample is the one docs/EXAMPLE-PIPELINE.md traces. It brings no
+//     identities, so running it has nothing to act on and prints nothing: that is not a failure.)
 // ($ @ # sigils, 30% percent, virtual newline terminators) and the IOP core:
 // shape/shard/target/each tick/settled/emit/mark, folds, and if/else.
 // Traced end-to-end in docs/EXAMPLE-PIPELINE.md.

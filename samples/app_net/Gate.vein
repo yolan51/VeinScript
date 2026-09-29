@@ -1,3 +1,5 @@
+//   NOT RUN ON ITS OWN — it is one bundle of samples/app_net/hub.app.vein. Run that (open it and press ▶), or set it as the
+//   Entry with the button at the top right, and ▶ runs the app from here.
 // The PRINCIPAL. It owns the boot event and the port number as a decision — and nothing else. There is
 // no `@Listen` here and no mention of Vein.Net: whether this app is reachable is a capability someone
 // else supplies, which is the point of the split.

@@ -1,3 +1,5 @@
+//   NOT RUN ON ITS OWN — it is one bundle of samples/app_capabilities/shop.app.vein. Run that (open it and press ▶), or set it as the
+//   Entry with the button at the top right, and ▶ runs the app from here.
 // A second capability, listening to BOTH of the others. It knows nothing about how they are wired: it
 // names the events it cares about, and linking puts them all on one queue.
 

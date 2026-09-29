@@ -1,3 +1,5 @@
+//   NOT RUN ON ITS OWN — it is one bundle of samples/bundle_collisions/bundle_collisions.app.vein. Run that (open it and press ▶), or set it as the
+//   Entry with the button at the top right, and ▶ runs the app from here.
 // samples/bundle_collisions/bundles/Radio.vein — one of two kits that chose the same word.
 //
 // Nothing is wrong with this file. `@Dispatch` is the right name for what it does, and the author

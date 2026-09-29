@@ -1,4 +1,5 @@
 // One line. The game is the root; the kit it needs is linked from there.
+//     veinc run samples/kitdemo/kitdemo.app.vein --ticks 3
 app KitDemo {
     load "game.vein"
 }

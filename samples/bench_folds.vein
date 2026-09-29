@@ -1,4 +1,5 @@
 // bench_folds.vein — the measurement program behind tools/check-perf.sh. Not a teaching sample.
+//     veinc run samples/bench_folds.vein --ticks 3     (prints nothing on purpose — tools/check-perf.sh times it)
 //
 // It exists to make ONE number reproducible: the cost of an ACTIVATION — one identity's pass through one
 // `target` body in one frame. That is the axis a compiled backend exists to make cheap, and the axis the

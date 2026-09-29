@@ -1,3 +1,5 @@
+//   NOT RUN ON ITS OWN — it is one bundle of samples/bundle_collisions/bundle_collisions.app.vein. Run that (open it and press ▶), or set it as the
+//   Entry with the button at the top right, and ▶ runs the app from here.
 // samples/bundle_collisions/bundles/Courier.vein — the other one.
 //
 // A different author, a different publicator, the same member name, and a DIFFERENT payload — three
