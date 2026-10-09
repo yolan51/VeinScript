@@ -60,7 +60,7 @@ public class ShippedLayoutTests
 
         Assert.NotEmpty(samples);
         Assert.All(samples, i => Assert.True(
-            i.EndsWith("*.vein") || i.EndsWith("vein.discovery"),
+            i.EndsWith("*.vein") || i.EndsWith("vein.discovery") || i.EndsWith("vein.lock"),
             $"'{i}' ships samples by pattern rather than by extension — build output would go with it"));
     }
 

@@ -8,6 +8,9 @@
 //   * `need "kit.Movement"` — one line that both RESOLVES the kit's bare names and LINKS its shards,
 //     so `Drift` below runs without the manifest naming it.
 //   * a one-line manifest, because everything else arrives transitively.
+//   * `vein.lock` — the kit's `$Mover` as this game was written against it. `bring Player(…)` below
+//     passes `dx, dy` BY POSITION, so if the kit ever swaps them that bring is VS0344, not a game whose
+//     units quietly drift sideways (RULES 20a).
 //
 // AND IT IS THE FIXTURE FOR EDITOR COMPLETION. Open this file in the Workbench and type `$`: the list
 // shows this bundle's own shapes first, then `$Mover   kit.Movement.Drive`, then everything else

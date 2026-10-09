@@ -1,0 +1,13 @@
+# vein.lock — the signatures this project was written against, for every member it uses from bundles/.
+#
+# A builder, fn or SF takes its arguments BY POSITION. If a bundle swaps two parameters of the same type,
+# every call still compiles and now means something else. The compiler compares each use with the line
+# below: a parameter that MOVED is VS0344 (an error, at the call); any other change is VS0345 (a warning).
+# Events are matched by field NAME, so their order is never reported.
+#
+# Lines are added by the first `veinc run` / `build` / `serve` / `render` that uses something not listed.
+# A line that CHANGED is never rewritten for you: read what the bundle changed, fix the calls, then run
+# `veinc lock <app-or-file>`. Compiling never writes this file. Commit it. In a merge conflict, keep
+# either side and run `veinc lock`. The standard library is not recorded: it ships with the compiler.
+
+shape kit.Movement.Drive.Mover (dx: float, dy: float)

@@ -71,5 +71,6 @@
   <ItemGroup>
     <Content Include="..\..\samples\**\*.vein" LinkBase="samples" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\samples\**\vein.discovery" LinkBase="samples" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\samples\**\vein.lock" LinkBase="samples" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

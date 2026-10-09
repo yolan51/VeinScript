@@ -64,9 +64,10 @@ public sealed class ProjectPackage
     public static readonly string[] Extensions = { ".vein", ".md", ".txt" };
 
     /// Exact filenames that travel although they have no extension we would otherwise take.
-    /// `.veinproj` names the entry and the saved runs; `vein.discovery` is the wildcard policy. Both
-    /// change how the project behaves when it is restored.
-    public static readonly string[] Filenames = { VeinProject.FileName, "vein.discovery" };
+    /// `.veinproj` names the entry and the saved runs; `vein.discovery` is the wildcard policy; `vein.lock`
+    /// is the record of what the project built against. All three change how the project behaves when
+    /// it is restored — a restored project without its lock has silently stopped checking.
+    public static readonly string[] Filenames = { VeinProject.FileName, "vein.discovery", SignatureLock.FileName };
 
     /// Folders never descended into. `bin`/`obj`/`out` are build output — `out/` is where the file
     /// samples write — and the rest is tooling that has no business in a source package.
