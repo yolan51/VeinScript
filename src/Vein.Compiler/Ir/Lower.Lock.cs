@@ -1,3 +1,4 @@
+using Vein.Compiler.Diagnostics;
 using Vein.Compiler.Lexing;
 using Vein.Compiler.Parsing;
 using Vein.Compiler.Project;
@@ -142,9 +143,9 @@ public sealed partial class Lower
                 $"Arguments bind by position, so this call now passes its values to different parameters " +
                 $"({verdict.Detail}). Fix the arguments, then accept the new order with `veinc lock`.", site);
         else
-            _diag.Warning("VS0345",
-                $"'{builder}' includes a shape that changed since vein.lock recorded it — {which} " +
-                $"({verdict.Detail}). Check this call still means what you wrote, then accept it with `veinc lock`.", site);
+            Changed($"'{builder}' includes a shape that changed since vein.lock recorded it — {which} " +
+                    $"({verdict.Detail}). Check this call still means what you wrote, then accept it with `veinc lock`.",
+                    site, locked, drifted);
     }
 
     // ---- events --------------------------------------------------------------------------------------
@@ -203,12 +204,23 @@ public sealed partial class Lower
         if (!_lockReported.Add((h.Live.Id + "." + me.Name, me.Span))) return;
 
         bool gone = what == "is gone";
-        _diag.Warning("VS0345",
-            $"'{h.Bind}.{me.Name}' reads a field of {h.Live.Reference} that {(gone ? "it no longer has" : "changed type")} " +
-            $"since vein.lock recorded it — '{me.Name}' {what} (was {h.Locked.Signature}; now {h.Live.Signature})" +
-            (gone ? ", so it reads as empty" : "") +
-            ". Update the handler, then accept it with `veinc lock`.", me.Span);
+        Changed($"'{h.Bind}.{me.Name}' reads a field of {h.Live.Reference} that {(gone ? "it no longer has" : "changed type")} " +
+                $"since vein.lock recorded it — '{me.Name}' {what} (was {h.Locked.Signature}; now {h.Live.Signature})" +
+                (gone ? ", so it reads as empty" : "") +
+                ". Update the handler, then accept it with `veinc lock`.",
+                me.Span, Lock!, new[] { h.Live });
     }
+
+    /// VS0345, carrying what its Quick Fix needs: the lock, and the line(s) that accepting writes.
+    private void Changed(string message, SourceSpan site, SignatureLock locked, IEnumerable<LockEntry> accept) =>
+        _diag.Add(new Diagnostic(Severity.Warning, "VS0345", message, site)
+        {
+            Data = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["lock"] = locked.Path,
+                ["lines"] = string.Join("\n", accept.Select(e => e.Line)),
+            },
+        });
 
     // ---- the comparison ------------------------------------------------------------------------------
 
@@ -227,8 +239,8 @@ public sealed partial class Lower
                 $"{live.Signature}. Arguments bind by position, so this call now passes its values to different " +
                 $"parameters ({verdict.Detail}). Fix the arguments, then accept the new order with `veinc lock`.", site);
         else
-            _diag.Warning("VS0345",
-                $"{live.Reference} has changed since vein.lock recorded it: {locked.Signature} → {live.Signature} " +
-                $"({verdict.Detail}). Check this call still means what you wrote, then accept it with `veinc lock`.", site);
+            Changed($"{live.Reference} has changed since vein.lock recorded it: {locked.Signature} → {live.Signature} " +
+                    $"({verdict.Detail}). Check this call still means what you wrote, then accept it with `veinc lock`.",
+                    site, Lock!, new[] { live });
     }
 }

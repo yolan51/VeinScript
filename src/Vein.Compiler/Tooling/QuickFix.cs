@@ -7,7 +7,12 @@ namespace Vein.Compiler.Tooling;
 public sealed record TextEdit(int Offset, int Length, string Text);
 
 /// A fix offered for a diagnostic. `Title` is what the button says.
-public sealed record QuickFix(string Title, TextEdit Edit);
+public sealed record QuickFix(string Title, TextEdit Edit)
+{
+    /// The file the edit applies to when it is NOT the one open in the editor — VS0345's fix edits
+    /// vein.lock. Null for every fix that edits the source the diagnostic is in.
+    public string? File { get; init; }
+}
 
 // WHY: some diagnostics name their own fix in the message and then make you type it. VS0228 ends "Add
 // the value, or write `?` to fill the rest with typed zeros on purpose" — the `?` is a single character
@@ -33,8 +38,59 @@ public static class QuickFixes
             "VS0338" or "VS0339" => NameTheAuthor(diagnostic, source, projectDir),
             "VS0341" => DoOrNot(diagnostic, source),
             "VS0343" => QualifyOrderKey(diagnostic, source),
+            "VS0345" => AcceptSignature(diagnostic),
             _ => Array.Empty<QuickFix>()
         };
+    }
+
+    /// VS0345 — an installed member changed WITHOUT moving a parameter, so the call still passes each
+    /// value where it did. Accepting is then the whole remedy, and certain: one line of vein.lock becomes
+    /// what the bundle says now.
+    ///
+    /// VS0344 is deliberately NOT offered one. A moved parameter means the CALLS are wrong, and one
+    /// accepted line would silence every one of them while fixing none — the "accept it without reading,
+    /// and the bug moves" this class refuses above. Its remedy stays: fix the calls, then `veinc lock`.
+    private static IReadOnlyList<QuickFix> AcceptSignature(Diagnostic d)
+    {
+        if (d.Data is null || !d.Data.TryGetValue("lock", out var path) || !d.Data.TryGetValue("lines", out var lines))
+            return Array.Empty<QuickFix>();
+
+        string text;
+        try { text = System.IO.File.ReadAllText(path); }
+        catch (Exception) { return Array.Empty<QuickFix>(); }
+
+        string accepted = Project.SignatureLock.Accepting(text, Project.SignatureLock.Parse(lines.Split('\n')));
+        if (accepted == text) return Array.Empty<QuickFix>();
+
+        return new[] { new QuickFix("Accept the new signature in vein.lock", new TextEdit(0, text.Length, accepted)) { File = path } };
+    }
+
+    /// Apply a fix whose `File` is set. Such an edit runs from `Offset` to the END of the file as it was
+    /// read, so a file whose length moved since is refused rather than half-patched — the same refusal
+    /// the editor's own fixes give a stale offset.
+    public static bool ApplyToFile(QuickFix fix, out string? problem)
+    {
+        problem = null;
+        if (fix.File is not { } path) { problem = "That fix edits the open file, not another one."; return false; }
+
+        try
+        {
+            string text = System.IO.File.ReadAllText(path);
+            var e = fix.Edit;
+            if (e.Offset < 0 || e.Offset + e.Length != text.Length)
+            {
+                problem = $"{System.IO.Path.GetFileName(path)} changed since — build and try again.";
+                return false;
+            }
+            System.IO.File.WriteAllText(path, text[..e.Offset] + e.Text, new System.Text.UTF8Encoding(false));
+            Project.SignatureLock.Invalidate(path);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            problem = ex.Message;
+            return false;
+        }
     }
 
     /// VS0338 (`use N`) and VS0339 (`need "N"`) — a bundle named without its author.

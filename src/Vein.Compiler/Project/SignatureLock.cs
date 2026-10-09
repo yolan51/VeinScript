@@ -220,6 +220,15 @@ public sealed class SignatureLock
 
     public static void Invalidate(string path) => _cache.TryRemove(path, out _);
 
+    /// `currentText` with each of `accepted` replacing the line of the same Id (or added), rendered the
+    /// way every writer renders — the text VS0345's Quick Fix puts in the file.
+    public static string Accepting(string currentText, IEnumerable<LockEntry> accepted)
+    {
+        var entries = ById(Parse(currentText.Split('\n')));
+        foreach (var e in accepted) entries[e.Id] = e;
+        return Render(entries.Values, currentText.Contains("\r\n") ? "\r\n" : "\n");
+    }
+
     private static SignatureLock FromText(string path, string text) => new(path, ById(Parse(text.Split('\n'))));
 
     /// First line wins when an Id repeats — a hand edit or a merge that kept both sides.

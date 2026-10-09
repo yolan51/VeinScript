@@ -434,6 +434,35 @@ public class SignatureLockTests : IDisposable
         Assert.Null(SignatureLock.PathFor(BundleIndex.For(_dir), elsewhere));
     }
 
+    // ---- the Workbench's Quick Fix ---------------------------------------------------------------------
+
+    [Fact]
+    public void A_changed_signature_offers_one_fix_that_accepts_it()
+    {
+        string game = Game();
+        var r = AfterChange(() => Kit(clamp: "fn clamp(value: float, lo: float, hi: float) -> float { return value }"));
+        var d = Lock(r).First(x => x.Code == "VS0345");
+
+        var fix = Assert.Single(Vein.Compiler.Tooling.QuickFixes.For(d, File.ReadAllText(game), _dir));
+        Assert.Equal(LockPath, fix.File);
+        Assert.True(Vein.Compiler.Tooling.QuickFixes.ApplyToFile(fix, out var problem), problem);
+
+        Assert.Contains("fn kit.Geo.Calc.clamp (value: float, lo: float, hi: float) -> float", File.ReadAllText(LockPath));
+        Assert.Empty(Lock(Compile(game)));
+    }
+
+    [Fact]
+    public void A_moved_parameter_offers_no_fix()
+    {
+        // Accepting the new order would silence every call while fixing none of them — the calls are
+        // what is wrong. So there is no button; the remedy is fixing them, then `veinc lock`.
+        string game = Game();
+        var r = AfterChange(() => Kit(clamp: "fn clamp(lo: float, hi: float, v: float) -> float { return v }"));
+        var d = Lock(r).First(x => x.Code == "VS0344");
+
+        Assert.Empty(Vein.Compiler.Tooling.QuickFixes.For(d, File.ReadAllText(game), _dir));
+    }
+
     // ---- the file format and the comparison, on their own --------------------------------------------
 
     [Fact]

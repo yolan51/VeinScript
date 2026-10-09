@@ -3361,6 +3361,15 @@ public partial class MainWindow : Window
     {
         if (_pendingFix is not { } fix) return;
 
+        // A fix for ANOTHER file — VS0345 accepts a line of vein.lock. Not an editor edit, so not one
+        // Ctrl+Z undoes; the file is plain text in the project, and `veinc lock` rewrites it either way.
+        if (fix.File is not null)
+        {
+            SetStatus(QuickFixes.ApplyToFile(fix, out var problem) ? $"Applied: {fix.Title}" : problem ?? "That fix could not be applied.");
+            Build();
+            return;
+        }
+
         var edit = fix.Edit;
         if (edit.Offset < 0 || edit.Offset + edit.Length > _editor.Document.TextLength)
         {
