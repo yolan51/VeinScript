@@ -401,6 +401,20 @@ public class DiagnosticsTests
     }
 
     [Fact]
+    public void A_bare_call_that_need_widened_is_checked_like_the_qualified_one()
+    {
+        // `need` makes bare `print` mean `*Vein.Console.Io.print`, and that path skipped both checks —
+        // so the same mistake was a warning or nothing depending only on how the call was spelled.
+        var count = Diagnose("  need \"Vein.Console\"\n  shard S { run once { do print(\"a\", \"b\", \"c\") } }");
+        var kind = Diagnose("  need \"Vein.Console\"\n  shard S { run once { do print(42) } }");
+        var fine = Diagnose("  need \"Vein.Console\"\n  shard S { run once { do print(\"ok\") } }");
+
+        Assert.Contains(count, x => x.Code == "VS0229");
+        Assert.Contains(kind, x => x.Code == "VS0230");
+        Assert.DoesNotContain(fine, x => x.Code is "VS0229" or "VS0230");
+    }
+
+    [Fact]
     public void A_missing_int_field_arrives_empty_and_not_zero()
     {
         // Worth pinning separately, because "missing means 0" is the assumption everyone brings and it

@@ -80,6 +80,9 @@ public static class DiagnosticGuide
         new("VS0228", "Positional binding means only a TRAILING run of parameters can be optional, so a short call leaves the last ones empty rather than the ones you skipped.",
             "docs/RULES.md §352"),
 
+        new("VS0229", "A `fn`/`SF` parameter cannot carry a default, so the count is exact both ways — and the language is total, so a missing argument reads as empty instead of failing. Checked the same for a local call, a `*A.B.P.` path and a bare name a `need` widened.",
+            "docs/RULES.md — rule 26"),
+
         new("VS0230", "Checked against the parameter's declared type — `bring Row(42, \"words\")` with those the other way round is the case this catches.",
             "docs/RULES.md §355"),
 

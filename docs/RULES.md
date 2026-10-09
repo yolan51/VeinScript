@@ -462,7 +462,7 @@ fire before the program runs, and the Workbench shows them because they are ordi
 | `bring B(…)` too many args | **VS0204** | error |
 | `bring B(…)` too few | **VS0228** | warning — the missing params read empty |
 | `emit @E { typo: … }` | **VS0227** | warning — names what @E does take |
-| `fn`/`SF` call, wrong count | **VS0229** | warning — local and `*A.B.P.` alike |
+| `fn`/`SF` call, wrong count | **VS0229** | warning — local, `*A.B.P.` and `need`-widened alike |
 | SF call without `do`, or fn call with it | **VS0341** | error — names the right spelling (D15) |
 | `do` on a built-in / not on a call | **VS0342** / **VS0112** | error |
 | `hear` inside an SF or a block | **VS0113** | error — a hear is a shard member; call the SF from it (`samples/sf_emit_hear.vein`) |

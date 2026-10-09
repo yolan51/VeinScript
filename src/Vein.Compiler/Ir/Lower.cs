@@ -2325,6 +2325,10 @@ public sealed class Lower
                     return new IrCall(LowerExpr(c.Callee), c.Args.Select(LowerExpr).ToList());
                 }
 
+                // The same two checks the qualified and the local paths make. This path skipped them, so
+                // `do print("a", "b", "c")` through `need "Vein.Console"` was silent while the identical
+                // call spelled `*Vein.Console.Io.print(…)` was VS0229 — the spelling decided the safety.
+                CheckCallArity(found.Value, n.Name, c.Args, c.Span);
                 CheckCallMarker(c, n.Name, found.Value);
                 var path = found.Key.Split('.')[..^1];
                 string? imported = ImportExternalFunction(path, n.Name, c.Span);
