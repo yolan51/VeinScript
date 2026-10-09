@@ -398,6 +398,44 @@ declares, and anything the runtime raises itself (`@Request`, `@Ticked`, `@Diagn
 cannot say which it means — that is **VS0216**, a warning about that one reference, answered by qualifying
 it or by aliasing one bundle (rule 18b).
 
+**20a. `vein.lock` remembers what you built against — because a builder, fn or SF binds BY POSITION.**
+An installed bundle is re-read from source on every compile, so nothing stale ever runs. That is also
+the trap. A kit changes `fn clamp(v: float, lo: float, hi: float)` into `clamp(lo: float, hi: float,
+v: float)`, and every `clamp(speed, 0.0, 1.0)` in the game still compiles, still passes the count check
+(VS0229), still passes the literal check (VS0230) — and now clamps `0.0` between `1.0` and `speed`. Same
+for a builder whose includes swap, or a `$Shape` it includes whose fields do: the bring binds the new
+order without a word.
+
+`vein.lock` sits beside `bundles/` and holds one line per member the project uses from there, in the
+order its arguments bind:
+
+```
+builder kit.Coins.Pickups.Coin (x: float, y: float, value: int)
+fn kit.Geo.Calc.clamp (v: float, lo: float, hi: float) -> float
+shape kit.Movement.Drive.Mover (dx: float, dy: float)
+event kit.Coins.Pickups.Collected { by: Entity, value: int }
+```
+
+| what changed since the line | | |
+|---|---|---|
+| a parameter **moved** — swapped, or shifted by one inserted or removed before it | **VS0344** | error, at every call |
+| renamed, retyped, a different count, a different return | **VS0345** | warning, at every call |
+| trailing parameters that all have defaults; an event gaining a field; event fields reordered | — | no call can feel it (rule 26) |
+
+- **A builder is recorded flattened** — includes expanded, a variant's fixed parameters removed (7c) —
+  because that list is what the arguments bind to. It is taken from the very list binding walks, so the
+  two cannot disagree. A LOCAL builder that includes an installed `$Shape` records the shape, and is
+  checked by rebuilding its slot list with the shape as locked: kitdemo's `{ $Position $Mover $Score }`
+  catches `$Mover` gaining a field, which shifts `$Score`'s argument though `$Mover` itself only grew.
+- **An event is matched by field NAME**, so its order is never reported. A field it lost is VS0345 at
+  the `hear` READ — `m.dy` now reads empty, and that line is the fix. The emit naming it is already VS0227.
+- **Written by the commands that RUN** (`run`, `render`, `serve`, `build`; ▶ is `veinc run`), after a clean
+  compile, adding new lines only. **Compiling never writes it**, and a changed line is never rewritten
+  for you: `veinc lock <app-or-file>` prints was/now and accepts. VS0345 also has a Workbench Quick Fix;
+  VS0344 deliberately has none — one accepted line would silence every call and fix none of them.
+- **The standard library is not recorded**: it ships with the compiler. **Commit the file.** In a merge
+  conflict keep either side and run `veinc lock`. `samples/kitdemo` carries one.
+
 ---
 
 ## 5. Running, and measuring
@@ -468,6 +506,8 @@ fire before the program runs, and the Workbench shows them because they are ordi
 | `hear` inside an SF or a block | **VS0113** | error — a hear is a shard member; call the SF from it (`samples/sf_emit_hear.vein`) |
 | `ordered by key` over one builder | **VS0343** | warning — write `ordered by &Builder.key` (14e) |
 | literal of the wrong kind | **VS0230** | warning — `bring Row(42, "words")` |
+| a `bundles/` member's parameters moved since `vein.lock` | **VS0344** | error — fix the call, then `veinc lock` (20a) |
+| a `bundles/` member otherwise changed since `vein.lock` | **VS0345** | warning (20a) |
 
 `?` (FillRest) and a parameter with a **default** are the two ways to say "fewer on purpose", and
 neither is reported. An `int` where a `float` is declared is widening, not a mismatch.

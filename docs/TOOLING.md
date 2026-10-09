@@ -195,6 +195,29 @@ This is **discovery + resolution only** (surface + tooling): references and over
 and checked. Linking the loaded bundles into one running program and actually firing the (overridden)
 starts (`veinc render app.vein`) is a follow-on.
 
+## `veinc lock <app-or-file>` — accept what `bundles/` looks like now
+
+`vein.lock` (RULES 20a) records, for every member a project uses from `bundles/`, the order its arguments
+bind. `run`, `render`, `serve` and `build` add lines for members not yet recorded; nothing else writes
+the file, and nothing but this command rewrites a line that changed.
+
+```
+$ veinc lock samples/kitdemo/kitdemo.app.vein
+~ shape kit.Movement.Drive.Mover
+    was shape kit.Movement.Drive.Mover (dx: float, dy: float)
+    now shape kit.Movement.Drive.Mover (dy: float, dx: float)
+vein.lock: 1 changed, 0 added, 0 removed — …/samples/kitdemo/vein.lock
+```
+
+- **Fix the calls first.** A VS0344 means arguments now bind to different parameters; accepting the new
+  order records it, and fixes none of them. This command refuses on any error other than VS0344.
+- **Pruning.** On an app manifest — the whole program — a line nothing uses any more is removed. On a
+  single file, which may be one bundle of several, unused lines are kept. A line whose member is gone
+  from `bundles/` is removed either way.
+- **Merge conflicts.** The file is regenerated, not hand-merged: keep either side, then run
+  `veinc lock` on the app.
+- **No `bundles/`, no lock.** The standard library is never recorded — it ships with the compiler.
+
 ## `veinc exec <file.vein> [--json] [--ascii]` — the derived execution model
 
 A `.vein` file says **what** a shard does. It never says when it runs, what identity state it touches, or

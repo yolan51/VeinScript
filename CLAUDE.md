@@ -36,6 +36,7 @@ ask the user first.** Losing a useful file is far worse than leaving a temp fold
 - **JIT tests:** `dotnet test src/Vein.Jit.Tests` — a second suite because it is **net9** and
   `Vein.Tests` is net8, which cannot reference it. Only `Vein.Jit` needs running there.
 - **CLI (`veinc`):** `src/Vein.Cli` — run via `dotnet run --project src/Vein.Cli -- <cmd>` or the wrapper
-  `.\veinc.cmd <cmd>`. Commands: `new tokens ast ir render serve run build emit graph events scaffold symbols exec`.
+  `.\veinc.cmd <cmd>`. Commands: `new check lock tokens ast ir render serve run build emit graph events scaffold symbols exec`.
+  `run`/`render`/`serve`/`build` also add lines to a project's `vein.lock` (RULES 20a); `lock` accepts a change.
 - **Commits:** work on `master` (the session's established flow); end commit messages with the
   `Co-Authored-By: Claude Opus 4.8` trailer.
