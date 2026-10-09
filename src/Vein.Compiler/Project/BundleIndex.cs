@@ -64,6 +64,19 @@ public sealed class BundleIndex
     /// coexist, because `*Author.Bundle` carries no version and would silently resolve to one of them.
     public required IReadOnlyList<(string Bundle, string First, string Second)> Duplicates { get; init; }
 
+    /// `Author.Bundle` for every bundle that came from a root OTHER than the standard library — what a
+    /// project installed. These are the members `vein.lock` records: the stdlib ships with the compiler,
+    /// so its signatures change only with a release, and recording them would churn on every upgrade.
+    public IReadOnlySet<string> Installed { get; init; } = new HashSet<string>();
+
+    /// The first root that is not the standard library — a project's `bundles/`. Null when there is none.
+    public string? InstalledRoot { get; init; }
+
+    /// The standard library is found by its folder NAME (`SearchRoots` asks `LocateNamed(…, "stdlib")`),
+    /// so that is how it is recognised here too — including the copy `veinc build` unpacks beside an exe.
+    public static bool IsStdlibRoot(string root) =>
+        string.Equals(Path.GetFileName(root.TrimEnd('\\', '/')), "stdlib", StringComparison.OrdinalIgnoreCase);
+
     public static BundleIndex For(string? startDir) => For(SearchRoots(startDir));
 
     public static BundleIndex For(IReadOnlyList<string> roots)
@@ -80,6 +93,8 @@ public sealed class BundleIndex
         var owners = new Dictionary<string, string>(StringComparer.Ordinal);
         var shadowed = new List<(string, string, string)>();
         var duplicates = new List<(string, string, string)>();
+        var installed = new HashSet<string>(StringComparer.Ordinal);
+        string? installedRoot = null;
 
         foreach (var root in roots)
         {
@@ -99,15 +114,22 @@ public sealed class BundleIndex
             Merge(folder.Functions, functions);
             symbols.AddRange(folder.Symbols);
 
+            bool stdlib = IsStdlibRoot(root);
+            if (!stdlib) installedRoot ??= root;
             foreach (var (bundle, file) in folder.Owners)
                 if (owners.TryGetValue(bundle, out var first)) duplicates.Add((bundle, first, file));
-                else owners[bundle] = file;
+                else
+                {
+                    owners[bundle] = file;
+                    if (!stdlib) installed.Add(bundle);
+                }
         }
 
         var index = new BundleIndex
         {
             Roots = roots, Symbols = symbols, Builders = builders, Shapes = shapes, Marks = marks, Events = events, Functions = functions,
-            Owners = owners, Shadowed = shadowed, Duplicates = duplicates
+            Owners = owners, Shadowed = shadowed, Duplicates = duplicates,
+            Installed = installed, InstalledRoot = installedRoot,
         };
         _composites[key] = index;
         return index;

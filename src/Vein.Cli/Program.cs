@@ -9,7 +9,7 @@ using Vein.Compiler.Tooling;
 
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("usage: veinc <new|check|tokens|ast|ir|render|serve|run|build|emit|graph|events|scaffold|symbols|exec> <file.vein> [arg]");
+    Console.Error.WriteLine("usage: veinc <new|check|lock|tokens|ast|ir|render|serve|run|build|emit|graph|events|scaffold|symbols|exec> <file.vein> [arg]");
     return 2;
 }
 
@@ -101,6 +101,11 @@ switch (command)
         return errors == 0 ? 0 : 1;
     }
 
+    // `veinc lock` — accept what the bundles in `bundles/` look like NOW. The one command that rewrites a
+    // vein.lock line that changed; everything that runs a program only ever adds lines.
+    case "lock":
+        return LockCommand.Run(path, source, projectDir);
+
     case "ir":
     {
         bool legacy = args.Contains("--ir=legacy");
@@ -155,16 +160,28 @@ switch (command)
             // An app is ONE module, so it renders once; a plain file still renders each bundle it holds.
             // A load-site `start { … }` override is laid down first, so an explicit --set still wins.
             var modules = new List<IrModule>();
+            var uses = new List<LockEntry>();
             if (linkedApp is { } la)
             {
                 foreach (var kv in la.BootOverrides) inputs.TryAdd(kv.Key, kv.Value);
                 modules.Add(la.Module);
+                uses.AddRange(la.OutsideUses);
             }
             else
             {
                 foreach (var bundle in unit!.Bundles)
-                    modules.Add(new Lower(diagnostics, projectDir).LowerBundle(bundle));
+                {
+                    var lower = new Lower(diagnostics, projectDir);
+                    modules.Add(lower.LowerBundle(bundle));
+                    uses.AddRange(lower.OutsideUses);
+                }
             }
+
+            // A LOWERING error stops the render, as it already stops ▶ and an app. Only parse errors
+            // used to, so a VS0344 — a call whose arguments now bind to different parameters — rendered
+            // anyway, which is the one outcome the error exists to prevent.
+            if (diagnostics.HasErrors) break;
+            LockCommand.Record(projectDir, uses);
 
             foreach (var module in modules)
             {
@@ -207,6 +224,7 @@ switch (command)
 
             if (linkedRun is { } la)
             {
+                LockCommand.Record(projectDir, la.OutsideUses);
                 // ONE interpreter for the whole app — one handler table and one event queue, which is
                 // exactly what lets a `hear` in a capability bundle see an `emit` from the principal.
                 // A relative `@WriteFile` path means the PROGRAM's folder, not the shell's — run the same
@@ -217,9 +235,22 @@ switch (command)
             }
             else
             {
+                // Lower EVERY bundle before running any, and stop on a lowering error — as ▶ and an app
+                // already do. Lowering and running were interleaved, so only a parse error stopped the
+                // run, and a VS0344 (arguments now binding to different parameters) ran regardless.
+                var lowered = new List<IrModule>();
+                var uses = new List<LockEntry>();
                 foreach (var bundle in unit!.Bundles)
-                    new Interp { Ticks = ticks, BaseDirectory = projectDir }.Run(new Lower(diagnostics, projectDir).LowerBundle(bundle),
-                                                     Console.In, Console.Out, messaging: true);
+                {
+                    var lower = new Lower(diagnostics, projectDir);
+                    lowered.Add(lower.LowerBundle(bundle));
+                    uses.AddRange(lower.OutsideUses);
+                }
+                if (diagnostics.HasErrors) break;
+                LockCommand.Record(projectDir, uses);
+
+                foreach (var module in lowered)
+                    new Interp { Ticks = ticks, BaseDirectory = projectDir }.Run(module, Console.In, Console.Out, messaging: true);
             }
         }
         break;

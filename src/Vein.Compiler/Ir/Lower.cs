@@ -11,7 +11,7 @@ namespace Vein.Compiler.Ir;
 ///
 /// This is the "source → IR" transform. Name/type *resolution* is a later pass; here we produce a
 /// structurally complete IR.
-public sealed class Lower
+public sealed partial class Lower
 {
     private readonly DiagnosticBag _diag;
     private readonly SortedSet<string> _tags = new(StringComparer.Ordinal);
@@ -240,7 +240,11 @@ public sealed class Lower
         var startDecl = startDecls.FirstOrDefault();
         // `start @Request { … }` names an event too, and usually one from another bundle. Registering it
         // is what types `r.path` inside the handler that hears it.
-        if (startDecl is not null) RegisterImportedEvent(startDecl.EventPath, startDecl.Event);
+        if (startDecl is not null)
+        {
+            RegisterImportedEvent(startDecl.EventPath, startDecl.Event);
+            NoteEventUse(startDecl.EventPath, startDecl.Event);
+        }
         var start = startDecl is null ? null : new IrStart(
             EventKey(startDecl.EventPath, startDecl.Event),
             startDecl.Fields.Select(f => (f.Name, LowerExpr(f.Value))).ToList(),
@@ -831,37 +835,67 @@ public sealed class Lower
     /// because two includes may each contribute a field of the same NAME — `builder Both { $A $B }` with
     /// `rank` in both gives two parameters called `rank` — and picking the first silently would be a
     /// wrong answer no output would reveal.
+    ///
+    /// `report: false` is for a lookup made only to RECORD a signature (vein.lock): the same body has
+    /// already been expanded once with its warnings, and a second VS0210 for one include is noise.
+    /// `slots`, when given, receives one entry per returned parameter saying which include it came from.
     private List<(string Name, TypeRef? Type, Expr? Default, string? From)> ExpandMembers(
-        IEnumerable<Node> members, string? ownerKey = null)
+        IEnumerable<Node> members, string? ownerKey = null, bool report = true, List<Slot>? slots = null)
     {
         var list = new List<(string, TypeRef?, Expr?, string?)>();
+        int member = 0;
         foreach (var m in members)
         {
-            if (m is FieldDecl f) list.Add((f.Name, f.Type, f.Default, null));
+            member++;
+            if (m is FieldDecl f)
+            {
+                list.Add((f.Name, f.Type, f.Default, null));
+                slots?.Add(new Slot(f.Name, f.Type, f.Default is not null, null, false, null, member));
+            }
             else if (m is ShapeInclude si)
             {
-                // A qualified include reaches another bundle's SHARED shapes. A bare one resolves beside
-                // its own declaration: the owner's bundle when this body was imported, otherwise local
-                // first and then whatever this bundle `use`s.
-                var fs = si.Path.Count > 0 ? ResolveExternalShape(si.Path, si.Shape)
-                       : ownerKey is not null ? ResolveOwnedShape(ownerKey, si.Shape)
-                       : _shapeFields.TryGetValue(si.Shape, out var local) ? local
-                       : ResolveUsed(Index.Shapes, "$", si.Shape, si.Span)?.Value.Members.OfType<FieldDecl>().ToList();
+                var (key, fs) = IncludeFields(si, ownerKey, report);
 
                 if (fs is not null)
                 {
                     if (si.Field is not null)
                     {
                         var one = fs.FirstOrDefault(x => x.Name == si.Field);
-                        if (one is not null) list.Add((one.Name, one.Type, si.Default ?? one.Default, si.Shape));
-                        else _diag.Warning("VS0211", $"Shape '{RefText(si)}' has no field '{si.Field}'.", si.Span);
+                        if (one is not null)
+                        {
+                            list.Add((one.Name, one.Type, si.Default ?? one.Default, si.Shape));
+                            slots?.Add(new Slot(one.Name, one.Type, (si.Default ?? one.Default) is not null, key, false, fs, member));
+                        }
+                        else if (report) _diag.Warning("VS0211", $"Shape '{RefText(si)}' has no field '{si.Field}'.", si.Span);
                     }
-                    else foreach (var sf in fs) list.Add((sf.Name, sf.Type, sf.Default, si.Shape));
+                    else
+                        foreach (var sf in fs)
+                        {
+                            list.Add((sf.Name, sf.Type, sf.Default, si.Shape));
+                            slots?.Add(new Slot(sf.Name, sf.Type, sf.Default is not null, key, true, fs, member));
+                        }
                 }
-                else _diag.Warning("VS0210", $"Unknown shape '{RefText(si)}' in include.", si.Span);
+                else if (report) _diag.Warning("VS0210", $"Unknown shape '{RefText(si)}' in include.", si.Span);
             }
         }
         return list;
+    }
+
+    /// The fields a `$Shape` include brings, and the index key of the shape when it came from the bundle
+    /// index (null for a shape declared here). THE ONE RESOLVER: the identity walk binds through this and
+    /// `ExpandMembers` lists through it, so the two cannot disagree about which shape an include means.
+    ///
+    /// A qualified include reaches another bundle's SHARED shapes. A bare one resolves beside its own
+    /// declaration: the owner's bundle when this body was imported, otherwise local first and then
+    /// whatever this bundle `need`s.
+    private (string? Key, List<FieldDecl>? Fields) IncludeFields(ShapeInclude si, string? ownerKey, bool report = true)
+    {
+        if (si.Path.Count > 0) return FindExternalShape(si.Path, si.Shape) ?? (null, null);
+        if (ownerKey is not null) return FindOwnedShape(ownerKey, si.Shape) ?? (null, null);
+        if (_shapeFields.TryGetValue(si.Shape, out var local)) return (null, local);
+        return ResolveUsed(Index.Shapes, "$", si.Shape, si.Span, report) is { } used
+            ? (used.Key, used.Value.Members.OfType<FieldDecl>().ToList())
+            : (null, null);
     }
 
     /// The index key a `*Path.member` reference is looking for, with any alias expanded.
@@ -896,7 +930,7 @@ public sealed class Lower
     /// Returns the index KEY as well as the value: a `fn`/`SF` is not used directly but re-resolved by
     /// path through ImportExternalFunction, which needs the key to build one.
     private (string Key, T Value)? ResolveUsed<T>(
-        IReadOnlyDictionary<string, T> index, string sigil, string name, SourceSpan span)
+        IReadOnlyDictionary<string, T> index, string sigil, string name, SourceSpan span, bool report = true)
         where T : class
     {
         if (_needed.Count == 0) return null;
@@ -915,20 +949,25 @@ public sealed class Lower
         if (hits.Count == 0) return null;
         if (hits.Count == 1) return hits[0];
 
-        _diag.Warning("VS0216",
-            $"'{sigil}{name}' is ambiguous across the bundles in scope — {string.Join(" and ", hits.Select(h => "*" + h.Key))}. "
-            + "Qualify the reference to choose one.", span);
+        if (report)
+            _diag.Warning("VS0216",
+                $"'{sigil}{name}' is ambiguous across the bundles in scope — {string.Join(" and ", hits.Select(h => "*" + h.Key))}. "
+                + "Qualify the reference to choose one.", span);
         return null;
     }
 
     /// A qualified include's target: the stdlib's SHARED shapes, matched on a path suffix so you qualify
     /// only as far as you need to be unique — the same rule as `bring *Author.Bundle.&Builder(…)`.
-    private List<FieldDecl>? ResolveExternalShape(IReadOnlyList<string> path, string name)
+    private List<FieldDecl>? ResolveExternalShape(IReadOnlyList<string> path, string name) =>
+        FindExternalShape(path, name)?.Fields;
+
+    /// …with the index key, which `vein.lock` needs to say WHOSE shape an include brought in.
+    private (string Key, List<FieldDecl> Fields)? FindExternalShape(IReadOnlyList<string> path, string name)
     {
         string refKey = RefKey(path, name);
         foreach (var kv in Index.Shapes)
             if (kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal))
-                return kv.Value.Members.OfType<FieldDecl>().ToList();
+                return (kv.Key, kv.Value.Members.OfType<FieldDecl>().ToList());
         return null;
     }
 
@@ -950,7 +989,12 @@ public sealed class Lower
         if (_imported.ContainsKey(mangled)) return mangled;
 
         _imported[mangled] = null!;                       // reserve first: the body may recurse into itself
-        var lowered = LowerFunc(hit.Value) with { Name = mangled };
+        // The body is the OTHER bundle's code. What it calls is that bundle's business, not a use this
+        // program made, so nothing inside it is recorded in or checked against vein.lock.
+        IrFunction lowered;
+        _importDepth++;
+        try { lowered = LowerFunc(hit.Value) with { Name = mangled }; }
+        finally { _importDepth--; }
         // Tagged with WHERE IT CAME FROM. Every bundle that calls `print` imports its own copy under
         // this same mangled name, and the app linker then saw the name twice and warned (VS0333) that
         // two bundles had "declared" it — advising a rename of a function neither of them wrote. The
@@ -1164,11 +1208,12 @@ public sealed class Lower
 
     /// The `fn`/`SF` a qualified `*A.B.P.name` refers to. Same suffix match ImportExternalFunction uses,
     /// kept separate because that one has the side effect of importing the body.
-    private FuncDecl? ResolveExternalFunc(IReadOnlyList<string> path, string name)
+    private (string Key, FuncDecl Decl)? ResolveExternalFunc(IReadOnlyList<string> path, string name)
     {
         string refKey = RefKey(path, name);
-        return Index.Functions.FirstOrDefault(kv =>
-            kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal)).Value;
+        var hit = Index.Functions.FirstOrDefault(kv =>
+            kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal));
+        return hit.Value is null ? null : (hit.Key, hit.Value);
     }
 
     /// `bring Builder(…)` with fewer arguments than the builder has required parameters.
@@ -1272,7 +1317,7 @@ public sealed class Lower
     ///
     /// Null key for a local event, which needs no owner: `ExpandMembers` then resolves against this
     /// bundle, which is where the shape is.
-    private (string? Key, EventDecl? Decl) ResolveEventOwned(IReadOnlyList<string> path, string name)
+    private (string? Key, EventDecl? Decl) ResolveEventOwned(IReadOnlyList<string> path, string name, bool report = true)
     {
         if (path.Count > 0)
         {
@@ -1284,7 +1329,7 @@ public sealed class Lower
 
         if (_events.TryGetValue(name, out var local)) return (null, local);
 
-        var used = ResolveUsed(Index.Events, "@", name, default);
+        var used = ResolveUsed(Index.Events, "@", name, default, report);
         return (used?.Key, used?.Value);
     }
 
@@ -1579,10 +1624,16 @@ public sealed class Lower
         foreach (var am in hb.AudienceMarks) UseMark(am, hb.Span);
         if (hb.AudienceShapes.Count > 0 || hb.AudienceMarks.Count > 0)
             attrs.Add(IrAttr.Of("audience", hb.AudienceShapes, hb.AudienceMarks));
+
+        // A field the event no longer has reads as EMPTY, and the read is where the fix goes — so the
+        // body is lowered knowing which fields vein.lock says drifted (CheckHearRead).
+        IrBlock body;
+        using (HearReads(hb))
+            body = LowerBlock(hb.Body);
         return new IrFunction(
             $"hear_{hb.Event}",
             new[] { new IrParam(hb.Bind, IrTypeRef.Of(EventKey(hb.EventPath, hb.Event))) },
-            IrTypeRef.Of("void"), LowerBlock(hb.Body), false, null, attrs);
+            IrTypeRef.Of("void"), body, false, null, attrs);
     }
 
     // ---- statements -----------------------------------------------------
@@ -1714,6 +1765,7 @@ public sealed class Lower
             case EmitStmt em:
                 CheckEmitPayload(em);
                 RegisterImportedEvent(em.EventPath, em.Event);
+                NoteEventUse(em.EventPath, em.Event);
                 return new IrExprStmt(new IrRuntimeCall("Emit",
                     new IrExpr[] { new IrStructInit(EventKey(em.EventPath, em.Event), em.Fields.Select(LowerFieldInit).ToList(), em.FillRest) }));
             case DestroyStmt d:
@@ -1821,7 +1873,10 @@ public sealed class Lower
     /// `ownerKey` is `Author.Bundle.Publicator.Member`. The shape may sit in any publicator of that
     /// bundle, so the search is on the `Author.Bundle.` prefix — the same "a bundle's publicators are one
     /// vocabulary" rule `use` follows.
-    private List<FieldDecl>? ResolveOwnedShape(string? ownerKey, string name)
+    private List<FieldDecl>? ResolveOwnedShape(string? ownerKey, string name) =>
+        FindOwnedShape(ownerKey, name)?.Fields;
+
+    private (string Key, List<FieldDecl> Fields)? FindOwnedShape(string? ownerKey, string name)
     {
         if (ownerKey is null) return null;
 
@@ -1833,7 +1888,7 @@ public sealed class Lower
         foreach (var kv in Index.Shapes)
             if (kv.Key.StartsWith(bundlePrefix, StringComparison.Ordinal) &&
                 kv.Key.EndsWith("." + name, StringComparison.Ordinal))
-                return kv.Value.Members.OfType<FieldDecl>().ToList();
+                return (kv.Key, kv.Value.Members.OfType<FieldDecl>().ToList());
         return null;
     }
 
@@ -1848,7 +1903,7 @@ public sealed class Lower
     /// `$Shield` takes sp — which is the same rule that flattens includes into a fragment builder's
     /// parameter list, just grouped back into one `attach` per shape.
     private IrStmt LowerIdentityBring(BringStmt br, BuilderDecl b, string? ownerKey,
-                                      IReadOnlyDictionary<string, Expr>? fixedArgs = null)
+                                      IReadOnlyDictionary<string, Expr>? fixedArgs = null, string? outsideKey = null)
     {
         var stmts = new List<IrStmt>();
 
@@ -1878,16 +1933,16 @@ public sealed class Lower
         stmts.Add(new IrLet(ent, null, new IrCall(new IrLocalRef("spawn"), Array.Empty<IrExpr>()), false));
 
         int arg = 0;
+        int member = 0;
+        var slots = new List<Slot>();   // every field the walk visits, in the order it binds them — vein.lock's record
         foreach (var m in b.Members)
         {
+            member++;
             switch (m)
             {
                 case ShapeInclude si:
                 {
-                    var fields = si.Path.Count > 0 ? ResolveExternalShape(si.Path, si.Shape)
-                               : ownerKey is not null ? ResolveOwnedShape(ownerKey, si.Shape)
-                               : _shapeFields.TryGetValue(si.Shape, out var local) ? local
-                               : ResolveUsed(Index.Shapes, "$", si.Shape, si.Span)?.Value.Members.OfType<FieldDecl>().ToList();
+                    var (shapeKey, fields) = IncludeFields(si, ownerKey);
                     if (fields is null)
                     {
                         _diag.Warning("VS0210", $"Unknown shape '${si.Shape}' in include.", si.Span);
@@ -1905,6 +1960,7 @@ public sealed class Lower
                     var init = new List<(string, IrExpr)>();
                     foreach (var f in take)
                     {
+                        slots.Add(new Slot(f.Name, f.Type, f.Default is not null, shapeKey, si.Field is null, fields, member));
                         // A FIXED parameter takes the variant's value and consumes NO argument slot —
                         // which is what makes `bring BigCoin(x, y, z)` pass the base's remaining slots
                         // positionally rather than shifting every one of them by however many the variant
@@ -1958,6 +2014,8 @@ public sealed class Lower
 
         if (arg < br.Args.Count && !br.FillRest)
             _diag.Error("VS0204", $"Builder '{b.Name}' takes {arg} param(s), got {br.Args.Count}.", br.Span);
+
+        NoteBuilderUse(outsideKey, b.Name, slots, fixedArgs, br.Span);
 
         if (generated) _identityDepth--;
         // Transparent when it binds a name: the C# backend braces a block, and `out` must outlive it.
@@ -2103,6 +2161,10 @@ public sealed class Lower
         // effectively is before anything else looks at it, so every rule below applies to a variant
         // exactly as it does to a builder written out by hand. That is the point: a variant that took a
         // different code path would drift from the thing it varies.
+        // Which bundle's builder this IS, kept before flattening forgets it: vein.lock records an
+        // installed variant under its own name, as the call site spells it.
+        string? outsideKey = ownerKey;
+
         IReadOnlyDictionary<string, Expr>? fixedArgs = null;
         if (b.Base is not null)
         {
@@ -2114,7 +2176,7 @@ public sealed class Lower
             ownerKey = null;
         }
 
-        if (BuildsIdentity(b, ownerKey)) return LowerIdentityBring(br, b, ownerKey, fixedArgs);
+        if (BuildsIdentity(b, ownerKey)) return LowerIdentityBring(br, b, ownerKey, fixedArgs, outsideKey);
 
         // Not an identity template. If it is also a builder whose event has nowhere to go, say so —
         // otherwise this line runs, does nothing, and reports nothing.
@@ -2140,7 +2202,10 @@ public sealed class Lower
         }
 
         // Parameters = every member except the (optional) output channel field, with $Shape includes expanded.
-        var prms = ExpandMembers(b.Members.Where(m => !ReferenceEquals(m, output)), ownerKey);
+        var slots = new List<Slot>();
+        var prms = ExpandMembers(b.Members.Where(m => !ReferenceEquals(m, output)), ownerKey, slots: slots);
+        // Recorded from the SAME list the loop below binds from, so the lock cannot disagree with it.
+        NoteBuilderUse(outsideKey, b.Name, slots, fixedArgs, br.Span);
 
         // A FIXED parameter is not a slot the caller fills, here as on the identity path — a variant of a
         // fragment builder (`builder Warning from Card { note = "careful" }`) is as ordinary as a variant
@@ -2264,7 +2329,9 @@ public sealed class Lower
                 return new IrLiteral(mex.Name, IrLiteralKind.String);
             }
 
-            case MemberExpr me: return new IrFieldAccess(LowerExpr(me.Receiver), me.Name);
+            case MemberExpr me:
+                CheckHearRead(me);
+                return new IrFieldAccess(LowerExpr(me.Receiver), me.Name);
             case IndexExpr ix: return new IrIndex(LowerExpr(ix.Receiver), LowerExpr(ix.Index));
             // `*Author.Bundle.Publicator.name(…)` — a cross-bundle call. The callee resolves to a shared
             // `fn`/`SF`, which is IMPORTED into this module under a mangled name so the runtime can find
@@ -2273,10 +2340,11 @@ public sealed class Lower
             case CallExpr { Callee: StarRefExpr star } c when star.Sigil == MemberSigil.None:
             {
                 string? imported = ImportExternalFunction(star.Path, star.Member, c.Span);
-                if (ResolveExternalFunc(star.Path, star.Member) is { } xdecl)
+                if (ResolveExternalFunc(star.Path, star.Member) is { } xf)
                 {
-                    CheckCallArity(xdecl, star.Member, c.Args, c.Span);
-                    CheckCallMarker(c, star.Member, xdecl);
+                    CheckCallArity(xf.Decl, star.Member, c.Args, c.Span);
+                    CheckCallMarker(c, star.Member, xf.Decl);
+                    NoteFunction(xf.Key, xf.Decl, c.Span);
                 }
                 var args = c.Args.Select(LowerExpr).ToList();
                 return imported is null
@@ -2330,6 +2398,7 @@ public sealed class Lower
                 // call spelled `*Vein.Console.Io.print(…)` was VS0229 — the spelling decided the safety.
                 CheckCallArity(found.Value, n.Name, c.Args, c.Span);
                 CheckCallMarker(c, n.Name, found.Value);
+                NoteFunction(found.Key, found.Value, c.Span);
                 var path = found.Key.Split('.')[..^1];
                 string? imported = ImportExternalFunction(path, n.Name, c.Span);
                 var args = c.Args.Select(LowerExpr).ToList();

@@ -109,6 +109,12 @@ public static class DiagnosticGuide
 
         new("VS0008", "`not` takes a unary operand, so `not x == y` is `(not x) == y`. For a number the two readings agree by accident; for a string `not name == \"\"` is false for every input. The parentheses are the whole difference.",
             "docs/SYNTAX-DECISIONS.md — D12"),
+
+        new("VS0344", "A builder, fn or SF binds BY POSITION, so a bundle swapping two parameters of the same type passes the count check and the literal check and changes what the call means. vein.lock is the only record of the order this call was written against. Accepting the new order fixes nothing by itself — fix the arguments first.",
+            "docs/RULES.md — rule 20a"),
+
+        new("VS0345", "Nothing moved, so the call still passes each value where it did — but a name, a type or the count changed under it. Read what the bundle changed, then accept it; until then the lock keeps saying so.",
+            "docs/RULES.md — rule 20a"),
     };
 
     private static readonly Dictionary<string, DiagnosticNote> ByCode =

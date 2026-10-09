@@ -30,6 +30,10 @@ public sealed record CompilationResult(
     IReadOnlyList<IrModule> Modules,// the lowered HIR, one per bundle
     long ElapsedMs)
 {
+    /// Every member the compiled bundles used from `bundles/`, as `vein.lock` lines — what a command that
+    /// RUNS the program hands to `SignatureLock.Baseline`. Compiling itself never writes the file.
+    public IReadOnlyList<LockEntry> OutsideUses { get; init; } = Array.Empty<LockEntry>();
+
     /// The module a host should RUN — the program, as opposed to a library declared beside it.
     ///
     /// `Modules` is one per bundle in declaration order and says nothing about which is which, so a
@@ -88,6 +92,7 @@ public sealed class VeinCompilerService
         IReadOnlyList<IrNode> tree = Array.Empty<IrNode>();
         string irText = "";
         var modules = new List<IrModule>();
+        var uses = new List<LockEntry>();
 
         // Only build IR when the front end is clean — matches the CLI's `!HasErrors` gate.
         if (!diag.HasErrors)
@@ -99,10 +104,17 @@ public sealed class VeinCompilerService
             // One Lower per bundle — its `use` list and imports are per-bundle state, and a shared
             // instance leaked them from each bundle into the next (see AppLinker for the full account).
             foreach (var bundle in unit.Bundles)
-                modules.Add(new Lower(diag, request.ProjectDir).LowerBundle(bundle));
+            {
+                var lower = new Lower(diag, request.ProjectDir);
+                modules.Add(lower.LowerBundle(bundle));
+                uses.AddRange(lower.OutsideUses);
+            }
         }
 
         sw.Stop();
-        return new CompilationResult(!diag.HasErrors, diag.Items, unit, tree, irText, modules, sw.ElapsedMilliseconds);
+        return new CompilationResult(!diag.HasErrors, diag.Items, unit, tree, irText, modules, sw.ElapsedMilliseconds)
+        {
+            OutsideUses = uses,
+        };
     }
 }

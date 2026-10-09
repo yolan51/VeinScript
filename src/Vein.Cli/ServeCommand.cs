@@ -50,6 +50,7 @@ internal static class ServeCommand
             foreach (var d in diagnostics.Items) Console.Error.WriteLine(d);
             return 1;
         }
+        LockCommand.Record(projectDir, lower.OutsideUses);
 
         using var listener = new HttpListener();
         listener.Prefixes.Add($"http://{host}:{port}/");

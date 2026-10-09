@@ -36,6 +36,10 @@ public static class AppLinker
         /// The subset of `Bundles` that arrived through a `need` rather than a `load` line — so the
         /// linker's report can say which kits a manifest never had to mention.
         public IReadOnlyList<string> Needed { get; init; } = Array.Empty<string>();
+
+        /// What the app's own bundles used from `bundles/`, as `vein.lock` lines — one lock per project.
+        /// A kit linked from `bundles/` contributes nothing: its calls into another kit are its own.
+        public IReadOnlyList<LockEntry> OutsideUses { get; init; } = Array.Empty<LockEntry>();
     }
 
     /// Link `appFilePath` if it is an app manifest. Returns null when the file declares no `app`, so the
@@ -74,8 +78,13 @@ public static class AppLinker
         // about a function neither declared. Whether a program is valid cannot depend on what was
         // loaded before it. The index behind a Lower is cached, so a fresh one costs nothing.
         var modules = new List<(string Name, IrModule Module, AppLoad? Load)>();
+        var uses = new List<LockEntry>();
         foreach (var r in resolved)
-            modules.Add((r.Bundle.Name, new Lower(diag, baseDir).LowerBundle(r.Bundle), r.Load));
+        {
+            var lower = new Lower(diag, baseDir);
+            modules.Add((r.Bundle.Name, lower.LowerBundle(r.Bundle), r.Load));
+            uses.AddRange(lower.OutsideUses);
+        }
 
         var principal = modules[0];
         var merged = Merge(app.Name, modules, principal.Name, diag, span);
@@ -85,6 +94,7 @@ public static class AppLinker
                              modules.Select(m => m.Name).ToList(), overrides)
         {
             Needed = resolved.Where(r => r.Needed).Select(r => r.Bundle.Name).ToList(),
+            OutsideUses = uses,
         };
     }
 

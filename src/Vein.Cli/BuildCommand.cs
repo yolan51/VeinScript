@@ -26,6 +26,14 @@ internal static class BuildCommand
             return 1;
         }
 
+        // vein.lock records what the program uses from bundles/ when it is built, as when it is run. The
+        // build itself compiles inside the published exe, so this compile exists only to take that record,
+        // and only from a program that compiles.
+        string sourceDir = Path.GetDirectoryName(Path.GetFullPath(sourcePath)) ?? ".";
+        var compiled = new Vein.Compiler.Service.VeinCompilerService().Compile(new Vein.Compiler.Service.CompileRequest(
+            Path.GetFileName(sourcePath), source, ProjectDir: sourceDir, SourcePath: sourcePath));
+        if (compiled.Success) LockCommand.Record(sourceDir, compiled.OutsideUses);
+
         string name = Sanitize(Path.GetFileNameWithoutExtension(sourcePath));
         rid ??= RuntimeInformation.RuntimeIdentifier;
 
