@@ -18,6 +18,9 @@ public sealed partial class Lower
     private readonly Dictionary<string, BuilderDecl> _builders = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<FieldDecl>> _shapeFields = new(StringComparer.Ordinal);
 
+    /// The declarations behind `_shapeFields`, for tooling that shows a shape's doc as well as its fields.
+    private readonly Dictionary<string, ShapeDecl> _shapeDecls = new(StringComparer.Ordinal);
+
     /// The marks a shape brings with it — `shape $GameCamera { zoom: float, #CameraFollow }`.
     ///
     /// Held for shapes DECLARED here and for ones resolved through `use`, because the desugar below runs
@@ -141,6 +144,50 @@ public sealed partial class Lower
     private bool _lowered;
     private string? _loweredName;
 
+    // First pass: collect builders (for `bring`), shape fields (for `$Shape` include expansion), the
+    // `need` list and local function names (both for bare-name resolution) — including inside
+    // publicators. All of it has to exist before any body is lowered, because a bare reference may
+    // appear above the declaration it resolves to.
+    //
+    // A method rather than a local of LowerBundle so the tooling scope (Lower.Signatures.cs) runs the
+    // SAME pass — what `?` and hover resolve against is what binding resolves against.
+    private void CollectDecls(IEnumerable<Decl> ms)
+    {
+        foreach (var m in ms)
+            switch (m)
+            {
+                case BuilderDecl bd: _builders[bd.Name] = bd; break;
+                case ShapeDecl s:
+                    _shapeFields[s.Name] = s.Members.OfType<FieldDecl>().ToList();
+                    _shapeDecls[s.Name] = s;
+                    if (ShapeMarksOf(s) is { Count: > 0 } sm) _shapeMarks[s.Name] = sm;
+                    // An enum nested in a shape is written `State.Kickoff` at the use site, not
+                    // `Match.State.Kickoff` — the shape scopes the TYPE name, not the spelling.
+                    foreach (var en in s.Members.OfType<EnumDecl>()) _enums[en.Name] = en.Cases;
+                    break;
+                case EventDecl ed: _events[ed.Name] = ed; break;
+                case FuncDecl fd: _localFuncs.Add(fd.Name); _funcDecls[fd.Name] = fd; break;
+                case EnumDecl ed2: _enums[ed2.Name] = ed2.Cases; break;
+                case MarkDecl md: _declaredMarks.Add(md.Name); break;
+                // `need "a.B"` widens bare names; `need "a.B" as C` does not — it binds the alias for
+                // `*C.…` paths instead. One or the other, never both.
+                case NeedDecl nd:
+                    if (!CheckNeed(nd)) break;
+                    if (nd.Alias is { } alias) _aliases[alias] = nd.Key;
+                    else if (!_needed.Contains(nd.Key, StringComparer.Ordinal)) _needed.Add(nd.Key);
+                    break;
+                case PublicatorDecl pub: CollectDecls(pub.Members); break;
+
+                // Every event this compilation HEARS, for VS0237.
+                case ShardDecl sh:
+                    foreach (var hb in sh.Members.OfType<HearBlock>()) _heardEvents.Add(hb.Event);
+                    break;
+                case ViewDecl vw:
+                    foreach (var hb in vw.Members.OfType<HearBlock>()) _heardEvents.Add(hb.Event);
+                    break;
+            }
+    }
+
     public IrModule LowerBundle(BundleDecl bundle)
     {
         // ONE BUNDLE PER INSTANCE. Everything this class holds — `_needed`, `_aliases`, `_imported`, the
@@ -166,48 +213,7 @@ public sealed partial class Lower
         var funcs = new List<IrFunction>();
         var shards = new List<IrShard>();
 
-        // First pass: collect builders (for `bring`), shape fields (for `$Shape` include expansion), the
-        // `use` list and local function names (both for bare-name resolution) — including inside
-        // publicators. All of it has to exist before any body is lowered, because a bare reference may
-        // appear above the declaration it resolves to.
-        void Collect(IEnumerable<Decl> ms)
-        {
-            foreach (var m in ms)
-                switch (m)
-                {
-                    case BuilderDecl bd: _builders[bd.Name] = bd; break;
-                    case ShapeDecl s:
-                        _shapeFields[s.Name] = s.Members.OfType<FieldDecl>().ToList();
-                        if (ShapeMarksOf(s) is { Count: > 0 } sm) _shapeMarks[s.Name] = sm;
-                        // An enum nested in a shape is written `State.Kickoff` at the use site, not
-                        // `Match.State.Kickoff` — the shape scopes the TYPE name, not the spelling.
-                        foreach (var en in s.Members.OfType<EnumDecl>()) _enums[en.Name] = en.Cases;
-                        break;
-                    case EventDecl ed: _events[ed.Name] = ed; break;
-                    case FuncDecl fd: _localFuncs.Add(fd.Name); _funcDecls[fd.Name] = fd; break;
-                    case EnumDecl ed2: _enums[ed2.Name] = ed2.Cases; break;
-                    case MarkDecl md: _declaredMarks.Add(md.Name); break;
-                    // `use X` widens bare names; `use X as Y` does not — it binds the alias for `*Y.…`
-                    // paths instead. One or the other, never both.
-                    // `need "a.B"` widens bare names; `need "a.B" as C` does not — it binds the alias for
-                    // `*C.…` paths instead. One or the other, never both.
-                    case NeedDecl nd:
-                        if (!CheckNeed(nd)) break;
-                        if (nd.Alias is { } alias) _aliases[alias] = nd.Key;
-                        else if (!_needed.Contains(nd.Key, StringComparer.Ordinal)) _needed.Add(nd.Key);
-                        break;
-                    case PublicatorDecl pub: Collect(pub.Members); break;
-
-                    // Every event this compilation HEARS, for VS0237 below.
-                    case ShardDecl sh:
-                        foreach (var hb in sh.Members.OfType<HearBlock>()) _heardEvents.Add(hb.Event);
-                        break;
-                    case ViewDecl vw:
-                        foreach (var hb in vw.Members.OfType<HearBlock>()) _heardEvents.Add(hb.Event);
-                        break;
-                }
-        }
-        Collect(bundle.Members);
+        CollectDecls(bundle.Members);
 
         // `publicator` is flattened here (its members are already Exported) — HIR is identical whether
         // or not the AST retained the grouping.
@@ -658,7 +664,7 @@ public sealed partial class Lower
     /// moment the base gained a shape — which is exactly the failure of writing a second builder, brought
     /// back in a new spelling. A fixed parameter is then not a parameter at all: it consumes no argument,
     /// so `bring BigCoin(x, y, z)` passes the base's REMAINING slots positionally.
-    private (List<Node> Members, Dictionary<string, Expr> Fixed) FlattenVariant(
+    private (List<Node> Members, Dictionary<string, Expr> Fixed, string? Root) FlattenVariant(
         BuilderDecl b, string? ownerKey, SourceSpan span)
     {
         var members = new List<Node>();
@@ -727,7 +733,9 @@ public sealed partial class Lower
                 _diag.Warning("VS0240",
                     $"`{b.Name}` fixes '{name}', which is not a parameter of '{b.Base}'.", span);
 
-        return (kept, fixedArgs);
+        // The base the chain ENDS at — `GoldCoin from BigCoin from Coin` is a Coin, which is the sentence
+        // a palette or a hover wants to write.
+        return (kept, fixedArgs, chain.Count > 1 ? chain[0].Decl.Name : null);
     }
 
     /// A bare `$Shape` include rewritten to name the bundle it belongs to, so the flattened variant no
@@ -868,7 +876,7 @@ public sealed partial class Lower
                         if (one is not null)
                         {
                             list.Add((one.Name, one.Type, si.Default ?? one.Default, si.Shape));
-                            slots?.Add(new Slot(one.Name, one.Type, (si.Default ?? one.Default) is not null, key, false, fs, member));
+                            slots?.Add(new Slot(one.Name, one.Type, (si.Default ?? one.Default) is not null, key, false, fs, member, si.Path.Count > 0));
                         }
                         else if (report) _diag.Warning("VS0211", $"Shape '{RefText(si)}' has no field '{si.Field}'.", si.Span);
                     }
@@ -876,7 +884,7 @@ public sealed partial class Lower
                         foreach (var sf in fs)
                         {
                             list.Add((sf.Name, sf.Type, sf.Default, si.Shape));
-                            slots?.Add(new Slot(sf.Name, sf.Type, sf.Default is not null, key, true, fs, member));
+                            slots?.Add(new Slot(sf.Name, sf.Type, sf.Default is not null, key, true, fs, member, si.Path.Count > 0));
                         }
                 }
                 else if (report) _diag.Warning("VS0210", $"Unknown shape '{RefText(si)}' in include.", si.Span);
@@ -937,9 +945,23 @@ public sealed partial class Lower
         IReadOnlyDictionary<string, T> index, string sigil, string name, SourceSpan span, bool report = true)
         where T : class
     {
-        if (_needed.Count == 0) return null;
+        var hits = UsedHits(index, name);
+        if (hits.Count == 0) return null;
+        if (hits.Count == 1) return hits[0];
 
+        if (report)
+            _diag.Warning("VS0216",
+                $"'{sigil}{name}' is ambiguous across the bundles in scope — {string.Join(" and ", hits.Select(h => "*" + h.Key))}. "
+                + "Qualify the reference to choose one.", span);
+        return null;
+    }
+
+    /// Every needed bundle's member called `name` — what `ResolveUsed` chooses from. Separate so tooling
+    /// can NAME the candidates of an ambiguity instead of only learning there was one.
+    private List<(string Key, T Value)> UsedHits<T>(IReadOnlyDictionary<string, T> index, string name)
+    {
         var hits = new List<(string Key, T Value)>();
+        if (_needed.Count == 0) return hits;
         foreach (var kv in index)
         {
             var parts = kv.Key.Split('.');
@@ -949,15 +971,7 @@ public sealed partial class Lower
             // warning then resolved the reference to nothing.
             if (_needed.Contains(parts[0] + "." + parts[1], StringComparer.Ordinal)) hits.Add((kv.Key, kv.Value));
         }
-
-        if (hits.Count == 0) return null;
-        if (hits.Count == 1) return hits[0];
-
-        if (report)
-            _diag.Warning("VS0216",
-                $"'{sigil}{name}' is ambiguous across the bundles in scope — {string.Join(" and ", hits.Select(h => "*" + h.Key))}. "
-                + "Qualify the reference to choose one.", span);
-        return null;
+        return hits;
     }
 
     /// A qualified include's target: the stdlib's SHARED shapes, matched on a path suffix so you qualify
@@ -2125,6 +2139,59 @@ public sealed partial class Lower
         finally { _ordering = prev; }
     }
 
+    /// What a `bring` of `path.name` reaches, after variant flattening. `OwnerKey` is the index key the
+    /// builder's own includes resolve against (null for one declared here, and for a flattened variant,
+    /// whose includes are already qualified); `OutsideKey` is the key of the builder AS WRITTEN — vein.lock
+    /// records an installed variant under its own name. `Root` is the base a variant chain ends at.
+    private sealed record BringTarget(
+        BuilderDecl Decl, string? OwnerKey, string? OutsideKey,
+        IReadOnlyDictionary<string, Expr>? Fixed, string? Root);
+
+    /// THE lookup `bring` does — LowerBring and the tooling scope both call it, so what `?` expands is the
+    /// builder that binds. Null when nothing resolves (VS0203 at the bring).
+    ///
+    /// Qualified `bring *Author.Bundle.Publicator.&Builder(…)` resolves against the index; a bare one
+    /// against this bundle, then the bundles it needs. A VARIANT — `builder BigCoin from Coin { value = 5 }`
+    /// — is flattened into the builder it effectively is before anything else looks at it, so every rule
+    /// applies to a variant exactly as to a builder written out by hand.
+    private BringTarget? ResolveBringTarget(IReadOnlyList<string> path, string name, SourceSpan span)
+    {
+        BuilderDecl? b;
+        string? ownerKey = null;
+        if (path.Count > 0)
+        {
+            var hit = ResolveExternalBuilder(path, name);
+            (ownerKey, b) = (hit?.Key, hit?.Value);
+        }
+        else if (!_builders.TryGetValue(name, out b))
+        {
+            var hit = ResolveUsed(Index.Builders, "&", name, span);    // local first, then `need`
+            (ownerKey, b) = (hit?.Key, hit?.Value);
+        }
+        if (b is null) return null;
+
+        string? outsideKey = ownerKey;
+        if (b.Base is null) return new BringTarget(b, ownerKey, outsideKey, null, null);
+
+        var (members, pinned, root) = FlattenVariant(b, ownerKey, span);
+        // The flattened body carries the base's includes already qualified, so it lowers against THIS
+        // bundle regardless of where the base came from.
+        return new BringTarget(b with { Members = members, Base = null }, null, outsideKey, pinned, root);
+    }
+
+    /// The parameters a bring of `t` binds, in binding order, fixed ones included (the caller skips
+    /// those). An identity template binds its `$Shape` includes, field by field — exactly the walk in
+    /// LowerIdentityBring; a fragment builder binds every member but its output channel.
+    private (bool Identity, FieldDecl? Output, List<(string Name, TypeRef? Type, Expr? Default, string? From)> Params)
+        BringParams(BringTarget t, List<Slot>? slots = null)
+    {
+        if (BuildsIdentity(t.Decl, t.OwnerKey))
+            return (true, null, ExpandMembers(t.Decl.Members.Where(m => m is ShapeInclude), t.OwnerKey, slots: slots));
+
+        var output = t.Decl.Members.OfType<FieldDecl>().FirstOrDefault(f => OutputFields.Contains(f.Name));
+        return (false, output, ExpandMembers(t.Decl.Members.Where(m => !ReferenceEquals(m, output)), t.OwnerKey, slots: slots));
+    }
+
     private IrStmt LowerBring(BringStmt br)
     {
         // Qualified `bring *Author.Bundle.Publicator.&Builder(…)` resolves against the stdlib's builders;
@@ -2133,25 +2200,13 @@ public sealed partial class Lower
         // `ownerKey` stays null for a builder declared HERE and is the index key for one that came from
         // another bundle — by qualified path or by `use`. Both are imports, and both need it, or the
         // builder's own `$Shape` includes are resolved against the wrong bundle.
-        BuilderDecl? b;
-        string? ownerKey = null;
-        if (br.BuilderPath.Count > 0)
-        {
-            var hit = ResolveExternalBuilder(br.BuilderPath, br.Builder);
-            (ownerKey, b) = (hit?.Key, hit?.Value);
-        }
-        else if (!_builders.TryGetValue(br.Builder, out b))
-        {
-            var hit = ResolveUsed(Index.Builders, "&", br.Builder, br.Span);    // local first, then `use`
-            (ownerKey, b) = (hit?.Key, hit?.Value);
-        }
-
-        if (b is null)
+        if (ResolveBringTarget(br.BuilderPath, br.Builder, br.Span) is not { } target)
         {
             string reff = br.BuilderPath.Count > 0 ? "*" + string.Join(".", br.BuilderPath) + ".&" + br.Builder : br.Builder;
             _diag.Error("VS0203", $"Unknown builder '{reff}'.", br.Span);
             return new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
         }
+        var (b, ownerKey, outsideKey, fixedArgs) = (target.Decl, target.OwnerKey, target.OutsideKey, target.Fixed);
 
         // An IDENTITY template: a `mark` member says this builder constructs an identity rather than
         // emitting anything, because only an identity can be marked. `bring Unit(10, 6)` then means
@@ -2161,25 +2216,6 @@ public sealed partial class Lower
         //     attach $Health to e { hp: 10 }
         //     attach $Shield to e { sp: 6 }
         //     mark e #Unit
-        // A VARIANT — `builder BigCoin from Coin { value = 5 }` — is flattened into the builder it
-        // effectively is before anything else looks at it, so every rule below applies to a variant
-        // exactly as it does to a builder written out by hand. That is the point: a variant that took a
-        // different code path would drift from the thing it varies.
-        // Which bundle's builder this IS, kept before flattening forgets it: vein.lock records an
-        // installed variant under its own name, as the call site spells it.
-        string? outsideKey = ownerKey;
-
-        IReadOnlyDictionary<string, Expr>? fixedArgs = null;
-        if (b.Base is not null)
-        {
-            var (members, pinned) = FlattenVariant(b, ownerKey, br.Span);
-            b = b with { Members = members, Base = null };
-            fixedArgs = pinned;
-            // The flattened body carries the base's includes already qualified, so it lowers against
-            // THIS bundle regardless of where the base came from.
-            ownerKey = null;
-        }
-
         if (BuildsIdentity(b, ownerKey)) return LowerIdentityBring(br, b, ownerKey, fixedArgs, outsideKey);
 
         // Not an identity template. If it is also a builder whose event has nowhere to go, say so —
@@ -2207,7 +2243,7 @@ public sealed partial class Lower
 
         // Parameters = every member except the (optional) output channel field, with $Shape includes expanded.
         var slots = new List<Slot>();
-        var prms = ExpandMembers(b.Members.Where(m => !ReferenceEquals(m, output)), ownerKey, slots: slots);
+        var prms = BringParams(target, slots).Params;
         // Recorded from the SAME list the loop below binds from, so the lock cannot disagree with it.
         NoteBuilderUse(outsideKey, b.Name, slots, fixedArgs, br.Span);
 
@@ -2238,7 +2274,7 @@ public sealed partial class Lower
 
         (string ev, (string, IrExpr)[] fields) = output is null
             ? (b.Name, prms.Select(p => (p.Name, (IrExpr)new IrLocalRef(p.Name))).ToArray())   // construct @<Builder> from params
-            : (output.Name switch { "code" => "Script", "css" => "Style", "line" => "Print", _ => "Html" },
+            : (ChannelEvent(output.Name),
                new[] { (output.Name switch { "code" => "code", "css" => "css", "line" => "text", _ => "markup" }, LowerExpr(output.Default!)) });
         stmts.Add(new IrExprStmt(new IrRuntimeCall("Emit", new IrExpr[] { new IrStructInit(ev, fields) })));
         var body = new IrBlock(stmts);

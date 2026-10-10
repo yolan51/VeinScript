@@ -27,6 +27,40 @@ public class SignatureHelpTests
         Assert.Equal(0, call.ActiveSlot);
     }
 
+    [Theory]
+    [InlineData("bring &Panel(|", "Panel", "")]
+    [InlineData("bring *Vein.Console.Io.&Console(|", "Console", "Vein.Console.Io")]
+    [InlineData("bring *alice.Ui.Api.Panel(|", "Panel", "alice.Ui.Api")]
+    [InlineData("bring 8 Panel(|", "Panel", "")]
+    [InlineData("bring n &Panel(|", "Panel", "")]
+    public void Every_form_of_bring_gets_help_with_its_qualifier(string marked, string name, string path)
+    {
+        // `bring *Vein.Console.Io.&Console(` is how the samples themselves write it, and the help used to
+        // read back from the bracket, stop at the `&`, and find no keyword — so it offered nothing at all.
+        // The path is kept: two bundles may export one name, and only the path says which.
+        var call = At(marked);
+        Assert.NotNull(call);
+        Assert.Equal((name, SignatureKind.Builder), (call!.Name, call.Kind));
+        Assert.Equal(path, string.Join(".", call.Path));
+    }
+
+    [Fact]
+    public void A_qualified_emit_keeps_its_path()
+    {
+        var call = At("emit *zenith.Courier.Post.@Dispatch { |");
+        Assert.Equal(("Dispatch", "zenith.Courier.Post"), (call!.Name, string.Join(".", call.Path)));
+        Assert.True(call.IsEvent);
+    }
+
+    [Fact]
+    public void A_counted_bring_is_not_mistaken_for_a_function_call()
+    {
+        // The word before `Panel(` is the count, not `bring`, so the function-call reader took `Panel` for
+        // an fn and looked it up as one.
+        Assert.Null(SignatureHelp.FunctionAt("bring 8 Panel(", "bring 8 Panel(".Length));
+        Assert.Null(SignatureHelp.FunctionAt("bring n Panel(", "bring n Panel(".Length));
+    }
+
     [Fact]
     public void The_slot_follows_the_commas()
     {

@@ -20,7 +20,7 @@ public sealed partial class Lower
     /// `Member` numbers the builder member it came from so a list can be regrouped by include.
     private sealed record Slot(
         string Name, TypeRef? Type, bool Optional, string? ShapeKey, bool Whole,
-        IReadOnlyList<FieldDecl>? ShapeFields, int Member);
+        IReadOnlyList<FieldDecl>? ShapeFields, int Member, bool Qualified = false);
 
     /// Nonzero while lowering the body of an IMPORTED fn. That body is another bundle's code — what it
     /// calls is not a use this program made, and a drift inside it is not this program's to fix.

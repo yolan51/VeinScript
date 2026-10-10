@@ -1,15 +1,25 @@
 using System.Text;
 using Vein.Compiler.Parsing;
-using Vein.Compiler.Project;
 
 namespace Vein.Compiler.Tooling;
 
-// Read-only event tooling: discover the events a file declares (with required-vs-defaulted payload
-// fields) and scaffold a ready-to-fill `emit` body. Grammar is unchanged — this only *reads* the AST.
-// Feeds `veinc events` / `veinc scaffold`, and (via --json) a future editor's `@` completion.
+// Read-only event and builder tooling: discover what a file can emit and bring (with required-vs-defaulted
+// fields) and scaffold a ready-to-fill `emit` / `bring`. Feeds `veinc events` / `veinc scaffold` and the
+// Workbench's `?`. Grammar is unchanged — this only READS.
+//
+// WHAT EACH THING TAKES comes from `Signatures`, which asks the compiler's own resolution. This file used
+// to work that out itself — its own `need` widening, include expansion and variant flattening — and the
+// copy had drifted: a kit builder's includes resolved in the consumer's scope, aliased needs widened bare
+// names, and two same-named events from different bundles collapsed into whichever came first. What is
+// left here is presentation.
 
 public sealed record EventField(string Name, string Type, bool Required, string? Default, string? OriginShape = null);
-public sealed record EventEntry(string Name, bool Shared, IReadOnlyList<EventField> Fields);
+
+public sealed record EventEntry(string Name, bool Shared, IReadOnlyList<EventField> Fields)
+{
+    /// `Author.Bundle.Publicator` for an event from another bundle; null for one declared here.
+    public string? Owner { get; init; }
+}
 
 /// A builder as the tooling sees it: its parameters with `$Shape` includes flattened (the list `bring`
 /// binds positionally and `?` fills), the marks it applies, and what bringing it produces.
@@ -30,13 +40,13 @@ public sealed record BuilderEntry(
     /// These are exactly the parameters ABSENT from `Fields`, which is the other half of the sentence.
     public IReadOnlyDictionary<string, string> Fixed { get; init; } =
         new Dictionary<string, string>(StringComparer.Ordinal);
+
+    /// `Author.Bundle.Publicator` for a builder from another bundle; null for one declared here.
+    public string? Owner { get; init; }
 }
 
 public static class EventCatalog
 {
-    // origin/source are added by the runtime at emit; never scaffolded.
-    private static readonly HashSet<string> Auto = new(StringComparer.Ordinal) { "origin", "source" };
-
     /// The provenance envelope the runtime auto-attaches to EVERY event — in every bundle and every app,
     /// always present, never declared. Always readable on a `hear` binding (`d.from.kind`, `d.cause`, …).
     /// See docs/LANGUAGE.md §3.8.
@@ -51,160 +61,31 @@ public static class EventCatalog
         ("trail", "id[] — the full causation chain that led here"),
     };
 
-    /// The bundles this unit `need`s, as `Author.Bundle`. A shared member of one is reachable by its
-    /// bare name — and the tooling has to see exactly what the compiler sees, or `bring Button ?` expands
-    /// to nothing for the very builders a project consumes most.
-    private static List<string> Uses(CompilationUnit unit)
-    {
-        var names = new List<string>();
-        void Walk(IEnumerable<Decl> ds)
-        {
-            foreach (var d in ds)
-                switch (d)
-                {
-                    case NeedDecl n when !names.Contains(n.Key, StringComparer.Ordinal): names.Add(n.Key); break;
-                    case BundleDecl b: Walk(b.Members); break;
-                    case PublicatorDecl p: Walk(p.Members); break;
-                }
-        }
-        Walk(unit.Bundles);
-        return names;
-    }
+    /// Every event the unit declares, then — given a project — the shared events of the bundles it `need`s.
+    /// Two needed bundles exporting one name both appear, each with its `Owner`: listing one would be the
+    /// silent pick the compiler refuses (VS0216).
+    public static List<EventEntry> Catalog(CompilationUnit unit, string? projectDir = null) =>
+        Signatures.For(unit, projectDir).InScope(SignatureKind.Event, includeNeeded: projectDir is not null)
+                  .Select(Entry).ToList();
 
-    /// Index entries belonging to a bundle this unit needs. Keys are `Author.Bundle[.Pub].Name`, matched
-    /// on AUTHOR AND BUNDLE — the same rule Lower.ResolveUsed applies, so the tooling offers exactly what
-    /// the compiler will resolve rather than another author's bundle of the same name.
-    private static IEnumerable<KeyValuePair<string, T>> FromUsed<T>(
-        IReadOnlyDictionary<string, T> index, IReadOnlyList<string> uses)
-    {
-        if (uses.Count == 0) yield break;
-        foreach (var kv in index)
-        {
-            var parts = kv.Key.Split('.');
-            if (parts.Length >= 3 && uses.Contains(parts[0] + "." + parts[1], StringComparer.Ordinal)) yield return kv;
-        }
-    }
-
-    /// Local shapes, plus the shared shapes of needed bundles under their bare names. A local
-    /// declaration wins, which is `need` precedence — it only ever WIDENS what a bare name may mean.
-    private static Dictionary<string, List<FieldDecl>> ShapesInScope(
-        CompilationUnit unit, BundleIndex? index, IReadOnlyList<string> uses)
-    {
-        var shapes = Sig.Shapes(unit);
-        if (index is null) return shapes;
-        foreach (var kv in FromUsed(index.Shapes, uses))
-        {
-            string bare = kv.Key[(kv.Key.LastIndexOf('.') + 1)..];
-            if (!shapes.ContainsKey(bare)) shapes[bare] = kv.Value.Members.OfType<FieldDecl>().ToList();
-        }
-        return shapes;
-    }
-
-
-    /// The marks each in-scope shape BRINGS (RULES 15c) — local declarations first, then the shared
-    /// shapes of needed bundles, the same precedence their fields get.
+    /// Every builder the unit declares, then the shared builders of needed bundles — each with its
+    /// `$Shape` includes FLATTENED into the parameter list in the order `bring` binds them, a variant's
+    /// fixed parameters removed.
     ///
-    /// The tooling needs this because a mark can now arrive two ways. `builder Cam { $Actor $GameCamera }`
-    /// applies `#CameraFollow` if `$GameCamera` brings it, and reading only the builder's own `mark`
-    /// lines sees none — so the editor's layer list lost the mark, and worse, the same count decides
-    /// whether bringing it makes an IDENTITY. A builder whose marks all arrive through its shapes was
-    /// classified as emitting an event, and every surface that lists identity builders filtered it out:
-    /// it compiled, ran, and brought a perfectly good identity the editor said did not exist.
-    private static Dictionary<string, List<string>> ShapeMarksInScope(
-        CompilationUnit unit, BundleIndex? index, IReadOnlyList<string> uses)
-    {
-        var map = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+    /// A builder is where discovery matters most: a `shared` one is consumed from another bundle, so the
+    /// declaration is not on the reader's screen and the include hides the field names one level down.
+    public static List<BuilderEntry> Builders(CompilationUnit unit, string? projectDir = null) =>
+        Signatures.For(unit, projectDir).InScope(SignatureKind.Builder, includeNeeded: projectDir is not null)
+                  .Select(BuilderEntryOf).ToList();
 
-        void Walk(IEnumerable<Decl> ms)
-        {
-            foreach (var m in ms)
-                switch (m)
-                {
-                    case ShapeDecl s:
-                        map[s.Name] = s.Members.OfType<MarkMember>().SelectMany(x => x.Marks)
-                                       .Distinct(StringComparer.Ordinal).ToList();
-                        break;
-                    case BundleDecl b: Walk(b.Members); break;
-                    case PublicatorDecl p: Walk(p.Members); break;
-                }
-        }
-        Walk(unit.Bundles);
+    public static EventEntry Entry(Signature s) => new(s.Name, s.Shared, s.Fields) { Owner = s.Origin };
 
-        if (index is not null)
-            foreach (var kv in FromUsed(index.Shapes, uses))
-            {
-                string bare = kv.Key[(kv.Key.LastIndexOf('.') + 1)..];
-                if (map.ContainsKey(bare)) continue;                      // local wins
-                map[bare] = kv.Value.Members.OfType<MarkMember>().SelectMany(x => x.Marks)
-                             .Distinct(StringComparer.Ordinal).ToList();
-            }
+    public static BuilderEntry BuilderEntryOf(Signature s) =>
+        new(s.Name, s.Shared, s.Fields, s.Marks, s.Generates ?? "@" + s.Name)
+        { Base = s.Base, Fixed = s.Fixed, Owner = s.Origin };
 
-        return map;
-    }
-
-    public static List<EventEntry> Catalog(CompilationUnit unit, string? projectDir = null)
-    {
-        var index = projectDir is null ? null : BundleIndex.For(projectDir);
-        var uses = index is null ? new List<string>() : Uses(unit);
-        var shapes = ShapesInScope(unit, index, uses);
-        var list = new List<EventEntry>();
-        void Walk(IEnumerable<Decl> decls)
-        {
-            foreach (var d in decls)
-                switch (d)
-                {
-                    case BundleDecl b: Walk(b.Members); break;
-                    case PublicatorDecl p: Walk(p.Members); break;
-                    case EventDecl e:
-                        var fields = Sig.Expand(e.Members, shapes)
-                            .Where(f => !Auto.Contains(f.Name))
-                            .Select(f => new EventField(f.Name, f.Type, f.Required, f.Default, f.OriginShape))
-                            .ToList();
-                        list.Add(new EventEntry(e.Name, e.Shared, fields));   // [shared] = cross-bundle
-                        break;
-                }
-        }
-        Walk(unit.Bundles);
-
-        // Then the shared events of needed bundles, under their bare names. Local wins, so a name this
-        // unit declares is never displaced by an imported one.
-        if (index is not null)
-            foreach (var kv in FromUsed(index.Events, uses))
-            {
-                string bare = kv.Key[(kv.Key.LastIndexOf('.') + 1)..];
-                if (list.Any(e => e.Name == bare)) continue;
-                list.Add(new EventEntry(bare, true, Sig.Expand(kv.Value.Members, shapes)
-                    .Where(f => !Auto.Contains(f.Name))
-                    .Select(f => new EventField(f.Name, f.Type, f.Required, f.Default, f.OriginShape))
-                    .ToList()));
-            }
-        return list;
-    }
-
-    /// One event by its qualified path — `*A.B.P.@Name` or a suffix of it — whether or not this unit
-    /// `need`s its bundle, which is what makes `emit *A.B.P.@Name ?` expand when the catalog above, which
-    /// holds only local and needed events, does not have it.
-    public static EventEntry? Qualified(CompilationUnit unit, string path, string name, string? projectDir)
-    {
-        BundleIndex index;
-        try { index = BundleIndex.For(projectDir); } catch (Exception) { return null; }
-
-        string suffix = path + "." + name;
-        var hit = index.Events.Where(kv => kv.Key == suffix || kv.Key.EndsWith("." + suffix, StringComparison.Ordinal))
-                              .OrderBy(kv => kv.Key, StringComparer.Ordinal).FirstOrDefault();
-        if (hit.Value is null) return null;
-
-        var parts = hit.Key.Split('.');
-        var uses = Uses(unit);
-        uses.Add(parts[0] + "." + parts[1]);   // its own bundle's shapes, for the includes
-        var shapes = ShapesInScope(unit, index, uses);
-        return new EventEntry(name, true, Sig.Expand(hit.Value.Members, shapes)
-            .Where(f => !Auto.Contains(f.Name))
-            .Select(f => new EventField(f.Name, f.Type, f.Required, f.Default, f.OriginShape))
-            .ToList());
-    }
-
-    /// Human listing: every event, `[shared]` when exported, each field required or defaulted.
+    /// Human listing: every event, `[shared]` when exported, each field required or defaulted. An event
+    /// from another bundle names its owner, which is what tells two same-named ones apart.
     public static string Render(IReadOnlyList<EventEntry> events)
     {
         var sb = new StringBuilder();
@@ -212,6 +93,7 @@ public static class EventCatalog
         {
             sb.Append('@').Append(e.Name);
             if (e.Shared) sb.Append("  [shared]");
+            if (e.Owner is not null) sb.Append("  *").Append(e.Owner);
             sb.Append('\n');
             foreach (var f in e.Fields)
                 sb.Append("    ").Append(f.Name).Append(": ").Append(f.Type)
@@ -231,11 +113,14 @@ public static class EventCatalog
     /// fields first, each labelled with its type and, when it arrived through an include, the `$Shape`
     /// it came from. That provenance is the part an include otherwise hides: the field is real, but its
     /// name appears nowhere in the event's own declaration.
-    public static string Body(EventEntry e)
+    public static string Body(EventEntry e) => Body(e.Fields);
+
+    /// The same body for any field list — an event's payload, or a shape's for `attach`.
+    public static string Body(IReadOnlyList<EventField> fields)
     {
-        if (e.Fields.Count == 0) return "{ }";
+        if (fields.Count == 0) return "{ }";
         var sb = new StringBuilder("{\n");
-        foreach (var f in e.Fields.Where(f => f.Required).Concat(e.Fields.Where(f => !f.Required)))
+        foreach (var f in fields.Where(f => f.Required).Concat(fields.Where(f => !f.Required)))
             sb.Append("    ").Append(f.Name).Append(": ").Append(Placeholder(f)).Append("      // ")
               .Append(f.Required ? "required — " + f.Type : "optional — " + f.Type + " = " + f.Default)
               .Append(f.OriginShape is null ? "" : "   from $" + f.OriginShape)
@@ -252,7 +137,7 @@ public static class EventCatalog
     ///
     /// A typed zero compiles and is editable, which is what a placeholder is for. A declared default is
     /// used when there is one, so the line already says what the field would have been.
-    private static string Placeholder(EventField f)
+    internal static string Placeholder(EventField f)
     {
         if (!f.Required && f.Default is { Length: > 0 } d) return d;
 
@@ -267,149 +152,17 @@ public static class EventCatalog
         };
     }
 
-    /// Every builder the unit declares, with its `$Shape` includes FLATTENED into the parameter list —
-    /// which is what `bring X ?` has to fill, in the order `bring` binds them.
-    ///
-    /// A builder is where discovery matters most: a `shared` one is consumed from another bundle, so the
-    /// declaration is not on the reader's screen and the include hides the field names one level down.
-    public static List<BuilderEntry> Builders(CompilationUnit unit, string? projectDir = null)
-    {
-        var index = projectDir is null ? null : BundleIndex.For(projectDir);
-        var uses = index is null ? new List<string>() : Uses(unit);
-        var shapes = ShapesInScope(unit, index, uses);
-        var shapeMarks = ShapeMarksInScope(unit, index, uses);
-
-        // Every builder reachable by a BARE name, so a variant can find the base it names. `Builders`
-        // walks declarations; a variant needs a lookup, and it needs the needed bundles too because the
-        // interesting variant is a game's local tweak of a kit's prefab.
-        var byName = new Dictionary<string, BuilderDecl>(StringComparer.Ordinal);
-        void Collect(IEnumerable<Decl> ds)
-        {
-            foreach (var d in ds)
-                switch (d)
-                {
-                    case BuilderDecl bd: byName[bd.Name] = bd; break;
-                    case BundleDecl b: Collect(b.Members); break;
-                    case PublicatorDecl p: Collect(p.Members); break;
-                }
-        }
-        Collect(unit.Bundles);
-        if (index is not null)
-            foreach (var kv in FromUsed(index.Builders, uses))
-            {
-                string bare = kv.Key[(kv.Key.LastIndexOf('.') + 1)..];
-                if (!byName.ContainsKey(bare)) byName[bare] = kv.Value;   // local wins
-            }
-
-        /// A variant's effective members and the parameters it fixes — the tooling's copy of
-        /// `Lower.FlattenVariant`, and it has to agree with it: `bring BigCoin ?` scaffolds the
-        /// REMAINING parameters, so a tooling that did not know `value` was fixed would offer a slot the
-        /// compiler does not have and the palette would place a coin with its arguments shifted by one.
-        (List<Node> Members, Dictionary<string, string> Fixed, string? Base) Flatten(BuilderDecl bd)
-        {
-            var chain = new List<BuilderDecl>();
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-            for (var cur = bd; cur is not null && seen.Add(cur.Name);)
-            {
-                chain.Add(cur);
-                cur = cur.Base is { } bn && byName.TryGetValue(bn, out var nx) ? nx : null;
-            }
-            chain.Reverse();
-
-            var all = chain.SelectMany(c => c.Members).ToList();
-            var supplied = Sig.Expand(all, shapes).Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
-            var fixedNames = new Dictionary<string, string>(StringComparer.Ordinal);
-            var kept = new List<Node>();
-            foreach (var m in all)
-            {
-                // Never the output channel — `markup = "…"` is a FieldDecl with a default and no type
-                // too, and eating it stops the builder being an @Html one (see Lower.FlattenVariant).
-                if (m is FieldDecl { Default: not null, Type: null } f
-                    && f.Name is not ("markup" or "code" or "css" or "line") && supplied.Contains(f.Name))
-                { fixedNames[f.Name] = Sig.DefaultText(f.Default) ?? ""; continue; }
-                kept.Add(m);
-            }
-            // The base is the one the chain ENDS at — `GoldCoin from BigCoin from Coin` is a Coin, which is
-            // the sentence a palette wants to write.
-            return (kept, fixedNames, chain.Count > 1 ? chain[0].Name : null);
-        }
-
-        var list = new List<BuilderEntry>();
-        void Walk(IEnumerable<Decl> decls)
-        {
-            foreach (var d in decls)
-                switch (d)
-                {
-                    case BundleDecl b: Walk(b.Members); break;
-                    case PublicatorDecl p: Walk(p.Members); break;
-                    case BuilderDecl bd: list.Add(Entry(bd, bd.Name)); break;
-                }
-        }
-        Walk(unit.Bundles);
-
-        // Then the shared builders of `use`d bundles, under their bare names — which is exactly how
-        // `bring Button(…)` resolves, so `bring Button ?` must see the same one.
-        if (index is not null)
-            foreach (var kv in FromUsed(index.Builders, uses))
-            {
-                string bare = kv.Key[(kv.Key.LastIndexOf('.') + 1)..];
-                if (list.Any(b => b.Name == bare)) continue;   // local wins
-                list.Add(Entry(kv.Value, bare));
-            }
-        return list;
-
-        BuilderEntry Entry(BuilderDecl bd, string name)
-        {
-            // A variant is the builder it effectively is: the base's members, minus what it fixes, plus
-            // its own additions. Flattened here for the same reason `Lower` flattens it — every rule
-            // below should apply to a variant exactly as to a builder written out by hand.
-            var (members, fixedNames, baseName) = Flatten(bd);
-
-            var output = members.OfType<FieldDecl>()
-                .FirstOrDefault(f => f.Name is "markup" or "code" or "css" or "line");
-
-            // The builder's own `mark` lines, THEN the marks its shapes bring (RULES 15c). Both are
-            // applied by `bring`, so both belong here — and the count below decides whether this builds
-            // an identity at all, which is why missing the second kind hid whole builders from the
-            // editor. `Lower.BuildsIdentity` draws the same line for the same reason.
-            var marks = members.OfType<MarkMember>().SelectMany(m => m.Marks).ToList();
-            foreach (var si in members.OfType<ShapeInclude>())
-                if (shapeMarks.TryGetValue(si.Shape, out var brought))
-                    foreach (var mk in brought)
-                        if (!marks.Contains(mk, StringComparer.Ordinal)) marks.Add(mk);
-
-            // A FIXED parameter is not a slot the caller fills, so it is not in the list `?` scaffolds
-            // and not one the palette shows.
-            var fields = Sig.Expand(members.Where(m => !ReferenceEquals(m, output)).ToList(), shapes)
-                .Where(f => !fixedNames.ContainsKey(f.Name))
-                .Select(f => new EventField(f.Name, f.Type, f.Required, f.Default, f.OriginShape))
-                .ToList();
-
-            return new BuilderEntry(name, bd.Shared, fields, marks,
-                marks.Count > 0 ? "an identity" : output?.Name switch
-                {
-                    "code" => "@Script", "css" => "@Style", "line" => "@Print",
-                    "markup" => "@Html", _ => "@" + name
-                })
-            { Base = baseName, Fixed = fixedNames };
-        }
-    }
-
-    /// Everything `bring` accepts before its argument list, capturing the BARE builder name in group 1.
+    /// Everything `bring` accepts before its argument list. Named groups: `path` (the qualifier, when
+    /// written) and `name` (the bare builder name).
     ///
     ///   bring Unit                      bring 8 Unit
     ///   bring &amp;Unit                     bring 8 &amp;Unit
     ///   bring *alice.Combat.Api.&amp;Unit    bring *alice.Combat.Api.Unit
     ///
-    /// The sigil and the qualifier are both optional because `bring` treats them so, and the BARE name
-    /// is the right capture because that is what `Builders` keys on — a `use`d bundle's builders are
-    /// stored under their bare names precisely because that is how `bring Button(…)` resolves.
-    ///
     /// Here rather than in the Workbench so it can be tested: the editor's `?` expansion used `\w+`,
     /// which matches neither `&amp;` nor a dotted path, so `bring &amp;Unit ?` silently expanded to nothing
-    /// while `bring Unit ?` worked. Writing the sigil is the more explicit form and was the one the
-    /// tooling ignored.
-    public const string BringHead = @"bring\s+(?:\d+\s+)?(?:\*[\w.]*\.)?&?(\w+)";
+    /// while `bring Unit ?` worked. One definition now, shared with signature help (FillHeads).
+    public const string BringHead = FillHeads.Bring;
 
     /// A ready-to-fill `bring`, which is what the `?` sigil stands for at a call site.
     public static string Scaffold(BuilderEntry b)
@@ -439,22 +192,24 @@ public static class EventCatalog
     /// has no default, so `base` fills it with a typed zero. Give the field a default in its shape, or
     /// pass a value." That is a better outcome than a silent hole: the compiler names the slots you
     /// still have to think about.
-    public static string Args(BuilderEntry b, bool compact = false)
+    public static string Args(BuilderEntry b, bool compact = false) => Args(b.Fields, compact);
+
+    public static string Args(IReadOnlyList<EventField> fields, bool compact = false)
     {
-        if (b.Fields.Count == 0) return "()";
+        if (fields.Count == 0) return "()";
 
         // The one-line form: you already know the signature and want the slots.
-        if (compact) return "(" + string.Join(", ", b.Fields.Select(_ => "base")) + ")";
+        if (compact) return "(" + string.Join(", ", fields.Select(_ => "base")) + ")";
 
         var sb = new StringBuilder("(\n");
-        for (int i = 0; i < b.Fields.Count; i++)
+        for (int i = 0; i < fields.Count; i++)
         {
-            var f = b.Fields[i];
+            var f = fields[i];
             // THE `)` CLOSES THE LAST SLOT'S LINE, never a line of its own. A newline ends a statement unless
             // the line ends in something that cannot (RULES 1). `base` is a keyword and cannot, so `base` then
             // `)` on the next line worked — until `base` was replaced with the value it asks for: `50` ends a
             // statement, and the `)` below it was an error. Written this way the slot can be overwritten.
-            bool last = i == b.Fields.Count - 1;
+            bool last = i == fields.Count - 1;
             sb.Append("    base").Append(last ? ")" : ",").Append("     // ").Append(f.Name)
               .Append(": ").Append(f.Type)
               .Append(f.OriginShape is null ? "" : "   from $" + f.OriginShape)
@@ -465,23 +220,12 @@ public static class EventCatalog
     }
 
     /// One line per field for a completion popup: `name: type   from $Shape`. The popup is shown when
-    /// `?` is typed INSIDE a payload or an argument list, where `?` is the documented fill-the-rest
-    /// token and must survive being dismissed — so this only ever offers, it never rewrites.
+    /// `?` is typed INSIDE a payload, where `?` is the documented fill-the-rest token and must survive
+    /// being dismissed — so this only ever offers, it never rewrites.
     public static List<(string Label, string Insert)> FieldPicks(IReadOnlyList<EventField> fields) =>
         fields.Select(f => (
             Label: f.Name + ": " + f.Type
                  + (f.OriginShape is null ? "" : "   from $" + f.OriginShape)
                  + (f.Required ? "" : "   = " + f.Default),
             Insert: f.Name + ": ")).ToList();
-
-    private static string TypeStr(TypeRef t) =>
-        t.Name + (t.Args.Count > 0 ? "<" + string.Join(", ", t.Args.Select(TypeStr)) + ">" : "");
-
-    private static string DefaultText(Expr e) => e switch
-    {
-        LiteralExpr { Kind: LiteralKind.String } l => "\"" + (l.Value as string ?? "") + "\"",
-        LiteralExpr l => l.Value?.ToString() ?? "null",
-        NameExpr n => n.Name,
-        _ => "…"   // non-literal default; see `veinc ir` for the full expression
-    };
 }

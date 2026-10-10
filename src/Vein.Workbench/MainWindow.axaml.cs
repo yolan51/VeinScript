@@ -1528,12 +1528,12 @@ public partial class MainWindow : Window
         {
             // `bring Unit(` and `emit @Hit {` get the same popup: a builder's parameters are flattened from
             // shapes that are usually in another file, so they are the signature most worth seeing here.
-            if (SignatureHelp.At(_editor.Text, _editor.CaretOffset) is { } bc)
+            if (SignatureHelp.At(_editor.Text, _editor.CaretOffset) is { } bc && CallSignature(bc) is { } sig)
             {
-                if (!bc.IsEvent && _catalogBuilders.FirstOrDefault(x => x.Name == bc.Name) is { } b)
-                { _sigPopup.ShowBuilder(b, bc.ActiveSlot, bc.Open); return; }
-                if (bc.IsEvent && _catalogEvents.FirstOrDefault(x => x.Name == bc.Name) is { } ev)
-                { _sigPopup.ShowEvent(ev, bc.ActiveSlot, bc.Open); return; }
+                if (sig.Kind == SignatureKind.Builder)
+                { _sigPopup.ShowBuilder(EventCatalog.BuilderEntryOf(sig), bc.ActiveSlot, bc.Open); return; }
+                if (sig.Kind == SignatureKind.Event)
+                { _sigPopup.ShowEvent(EventCatalog.Entry(sig), bc.ActiveSlot, bc.Open); return; }
             }
             _sigPopup.Hide();
             return;
@@ -1557,21 +1557,24 @@ public partial class MainWindow : Window
         var call = SignatureHelp.At(_editor.Text, _editor.CaretOffset);
         if (call is null) { _signature.Text = ""; _signature.IsVisible = false; return; }
 
-        var fields = call.IsEvent
-            ? _catalogEvents.FirstOrDefault(x => x.Name == call.Name)?.Fields
-            : _catalogBuilders.FirstOrDefault(x => x.Name == call.Name)?.Fields;
+        // A name nothing resolves is a typo or a symbol from somewhere not loaded, and an ambiguous one has
+        // no single answer. Saying nothing beats describing a different call that happens to share the name.
+        if (CallSignature(call) is not { } sig) { _signature.Text = ""; _signature.IsVisible = false; return; }
 
-        // A name the catalog does not know is a typo or a symbol from somewhere not loaded. Saying
-        // nothing beats describing a different call that happens to share the name.
-        if (fields is null) { _signature.Text = ""; _signature.IsVisible = false; return; }
-
-        _signature.Text = SignatureHelp.Describe(call, fields) ?? "";
+        _signature.Text = SignatureHelp.Describe(call, sig.Fields) ?? "";
         _signature.IsVisible = _signature.Text.Length > 0;
     }
 
-    // The catalogs signature help reads, refreshed each build. Kept rather than recomputed per keystroke
-    // because they walk the whole unit including the stdlib.
-    private IReadOnlyList<EventEntry> _catalogEvents = Array.Empty<EventEntry>();
+    /// What the `bring`/`emit` the caret is in takes — through the qualifier as written, from the bundle
+    /// the caret is in. Null for an unknown or ambiguous name.
+    private Signature? CallSignature(CallContext call) =>
+        _sigScope?.Find(new SignatureRef(call.Kind, call.Path, call.Name)).Hit;
+
+    // What signature help resolves against, refreshed each build. Kept rather than rebuilt per keystroke:
+    // declarations change far less often than the line being typed.
+    private Signatures? _sigScope;
+
+    // The builders the `&` completion lists, refreshed each build.
     private IReadOnlyList<BuilderEntry> _catalogBuilders = Array.Empty<BuilderEntry>();
 
     private async Task OpenAsync()
@@ -2633,7 +2636,11 @@ public partial class MainWindow : Window
         if (result.Ast is not null)
         {
             _symbols = SymbolIndex.Collect(result.Ast);
-            try { _catalogEvents = EventCatalog.Catalog(result.Ast, ProjectDir); _catalogBuilders = EventCatalog.Builders(result.Ast, ProjectDir); }
+            try
+            {
+                _sigScope = Signatures.For(result.Ast, ProjectDir);
+                _catalogBuilders = EventCatalog.Builders(result.Ast, ProjectDir);
+            }
             catch { /* a half-written unit; keep the last good catalogs */ }
         }
 
@@ -3797,7 +3804,7 @@ public partial class MainWindow : Window
 
         string? body = emit.Success ? EmitBody(ast, emit.Groups[2].Value, emit.Groups[1].Success ? emit.Groups[1].Value : null)
                      : start.Success ? EmitBody(ast, start.Groups[1].Value)   // start payload = the event's fields
-                     : BringBody(ast, bring.Groups[1].Value);
+                     : BringBody(ast, bring.Groups["name"].Value, HeadPath(bring));
         // `?` is documented for emit / start / bring — the sites that CONSTRUCT a payload. `hear` binds
         // one instead, so there is nothing to fill; its fields surface through `<binding>.` completion.
         if (body is null) return;
@@ -3904,23 +3911,26 @@ public partial class MainWindow : Window
             ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
         if (ast is null) return false;
 
-        if (BringBody(ast, open.Groups[1].Value, compact: true) is not { } compact) return false;
+        if (BringBody(ast, open.Groups["name"].Value, HeadPath(open), compact: true) is not { } compact) return false;
 
         // Drop the just-typed `?` along with the block it followed.
         _editor.Document.Replace(lparen, rparen - lparen + 1, compact);
         _editor.CaretOffset = lparen + compact.Length;
-        SetStatus($"bring {open.Groups[1].Value}{compact} — every slot is its declared default; replace the ones you mean.");
+        SetStatus($"bring {open.Groups["name"].Value}{compact} — every slot is its declared default; replace the ones you mean.");
         return true;
     }
 
-    private string? EmitBody(CompilationUnit ast, string eventName, string? path = null) =>
-        ((path is not null ? EventCatalog.Qualified(ast, path, eventName, ProjectDir) : null)
-            ?? EventCatalog.Catalog(ast, ProjectDir).FirstOrDefault(e => e.Name == eventName)) is { } ev
-            ? EventCatalog.Body(ev) : null;
+    private static string[] HeadPath(Match m) => m.Groups["path"].Success ? m.Groups["path"].Value.Split('.') : Array.Empty<string>();
 
-    private string? BringBody(CompilationUnit ast, string builderName, bool compact = false) =>
-        EventCatalog.Builders(ast, ProjectDir).FirstOrDefault(x => x.Name == builderName) is { } b
-            ? EventCatalog.Args(b, compact) : null;
+    // Both resolve through `Signatures` — the compiler's own lookup — so a qualified head reaches a bundle
+    // this file does not `need`, and a name two needed bundles share is not silently one of them.
+    private string? EmitBody(CompilationUnit ast, string eventName, string? path = null) =>
+        Signatures.For(ast, ProjectDir).Event(path is null ? Array.Empty<string>() : path.Split('.'), eventName).Hit is { } ev
+            ? EventCatalog.Body(ev.Fields) : null;
+
+    private string? BringBody(CompilationUnit ast, string builderName, string[] path, bool compact = false) =>
+        Signatures.For(ast, ProjectDir).Builder(path, builderName).Hit is { } b
+            ? EventCatalog.Args(b.Fields, compact) : null;
 
     private static BuilderDecl? FindBuilder(CompilationUnit ast, string name)
     {

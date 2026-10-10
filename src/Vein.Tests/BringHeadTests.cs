@@ -14,8 +14,9 @@ public class BringHeadTests
 {
     private static string? Name(string before)
     {
+        // By NAME: the pattern also captures the qualifier (`path`), which moves the numbered groups.
         var m = Regex.Match(before, EventCatalog.BringHead + @"\s*$");
-        return m.Success ? m.Groups[1].Value : null;
+        return m.Success ? m.Groups["name"].Value : null;
     }
 
     [Theory]

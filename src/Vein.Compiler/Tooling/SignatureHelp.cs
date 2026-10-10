@@ -1,7 +1,13 @@
 namespace Vein.Compiler.Tooling;
 
-/// The call the caret is inside: what is being called, and which slot is being typed.
-public sealed record CallContext(string Name, bool IsEvent, int ActiveSlot, int Open = -1);
+/// The call the caret is inside: what is being called, and which slot is being typed. `Path` is the `*`
+/// qualifier as written (empty when bare) — two bundles may both export the name, and only the path says
+/// which one the help should describe.
+public sealed record CallContext(string Name, bool IsEvent, int ActiveSlot, int Open = -1)
+{
+    public IReadOnlyList<string> Path { get; init; } = Array.Empty<string>();
+    public SignatureKind Kind { get; init; } = IsEvent ? SignatureKind.Event : SignatureKind.Builder;
+}
 
 /// The fn / SF call the caret is inside: `*Path.Name(` or `Name(`, and which argument is being typed.
 public sealed record FunctionCall(IReadOnlyList<string>? Path, string Name, int ActiveSlot, int Open = -1);
@@ -34,11 +40,14 @@ public static class SignatureHelp
                 if (depth > 0) { depth--; continue; }
 
                 // An unclosed opener. `(` is an argument list, `{` an emit payload — and a `{` that is
-                // a block rather than a payload simply has no `emit` before it, so Preceding returns
-                // null and no help is offered.
-                return c == '('
-                    ? Preceding(source, i, "bring") is { } b ? new CallContext(b, false, Slot(source, i, caret, ','), i) : null
-                    : Preceding(source, i, "emit") is { } e ? new CallContext(e, true, Slot(source, i, caret, ','), i) : null;
+                // a block rather than a payload simply has no head before it, so no help is offered.
+                var head = FillHeads.Before(source, i);
+                bool fits = c == '(' ? head is { Kind: SignatureKind.Builder }
+                                     : head is { Kind: SignatureKind.Event, Keyword: "emit" };
+                return fits
+                    ? new CallContext(head!.Name, head.Kind == SignatureKind.Event, Slot(source, i, caret, ','), i)
+                      { Path = head.Path, Kind = head.Kind }
+                    : null;
             }
             else if (c == ';') return null;
         }
@@ -73,6 +82,10 @@ public static class SignatureHelp
 
     private static (IReadOnlyList<string>? Path, string Name)? CalleeBefore(string source, int open)
     {
+        // `bring 8 Panel(` and `bring n Panel(` are builders too; the keyword check below only sees the
+        // word right before the name, which is the count.
+        if (FillHeads.Before(source, open) is { Kind: SignatureKind.Builder }) return null;
+
         int end = open;
         int i = open - 1;
         while (i >= 0 && (char.IsLetterOrDigit(source[i]) || source[i] is '_' or '.' or '*')) i--;
@@ -109,31 +122,6 @@ public static class SignatureHelp
         });
 
         return $"{(call.IsEvent ? "@" : "&")}{call.Name}( {string.Join(", ", parts)} )";
-    }
-
-    /// The identifier immediately before `open`, when the keyword before IT is `keyword`.
-    ///
-    /// Handles `emit *Vein.Console.Io.@Print` as well as a bare `@Print`: the name is the last segment,
-    /// which is exactly how Interp routes events.
-    private static string? Preceding(string source, int open, string keyword)
-    {
-        int i = open - 1;
-        while (i >= 0 && char.IsWhiteSpace(source[i])) i--;
-
-        int end = i + 1;
-        while (i >= 0 && (char.IsLetterOrDigit(source[i]) || source[i] is '_' or '.' or '@' or '*' or '$' or '#')) i--;
-        if (end <= i + 1) return null;
-
-        string token = source[(i + 1)..end];
-        string name = token[(token.LastIndexOfAny(new[] { '.', '@', '*' }) + 1)..].TrimStart('@', '$', '#');
-        if (name.Length == 0) return null;
-
-        // The keyword must be the word before the token, not merely somewhere on the line.
-        while (i >= 0 && char.IsWhiteSpace(source[i])) i--;
-        int kwEnd = i + 1;
-        while (i >= 0 && char.IsLetter(source[i])) i--;
-
-        return source[(i + 1)..kwEnd] == keyword ? name : null;
     }
 
     /// Which slot the caret is in: separators between the opener and the caret, at depth zero.
