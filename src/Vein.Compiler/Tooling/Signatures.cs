@@ -63,6 +63,42 @@ public sealed record SignatureRef(SignatureKind? Kind, IReadOnlyList<string> Pat
     public string Written =>
         (Path.Count > 0 ? "*" + string.Join(".", Path) + "." : "") +
         Kind switch { SignatureKind.Event => "@", SignatureKind.Builder => "&", SignatureKind.Shape => "$", _ => "" } + Name;
+
+    /// The reference under `offset` in source — `@Sold`, `$Price`, `*kit.Shop.Api.&Crate`, a bare `Crate`
+    /// — with its sigil and any `*path.` in front. Null for a mark, a number, or a segment of a path (the
+    /// name at its END is the reference).
+    public static SignatureRef? At(string text, int offset)
+    {
+        if (offset < 0 || offset > text.Length) return null;
+        int i = offset;
+        if (i >= text.Length || !Id(text[i])) { if (i > 0 && Id(text[i - 1])) i--; else return null; }
+        int s = i; while (s > 0 && Id(text[s - 1])) s--;
+        int e = i; while (e < text.Length && Id(text[e])) e++;
+        string name = text[s..e];
+        if (name.Length == 0 || char.IsDigit(name[0]) || (e < text.Length && text[e] == '.')) return null;
+
+        int p = s;
+        SignatureKind? kind = null;
+        if (p > 0 && text[p - 1] is '@' or '&' or '$' or '#')
+        {
+            if (text[p - 1] == '#') return null;
+            kind = text[p - 1] switch { '@' => SignatureKind.Event, '&' => SignatureKind.Builder, _ => SignatureKind.Shape };
+            p--;
+        }
+
+        var path = Array.Empty<string>();
+        if (p > 0 && text[p - 1] == '.')
+        {
+            int t = p - 2;
+            while (t >= 0 && (Id(text[t]) || text[t] == '.')) t--;
+            if (t < 0 || text[t] != '*') return null;               // `s.item` — a member, not a reference
+            path = text[(t + 1)..(p - 1)].Split('.');
+            if (path.Any(x => x.Length == 0)) return null;
+        }
+        return new SignatureRef(kind, path, name);
+
+        static bool Id(char c) => char.IsLetterOrDigit(c) || c == '_';
+    }
 }
 
 /// The answer to a lookup: the signature, or — for a bare name two needed bundles both export — no
@@ -160,6 +196,93 @@ public sealed class Signatures
         }
         return list;
     }
+
+    // ---- hover -------------------------------------------------------------------------------------------
+
+    /// What hovering at `offset` should say, or null when it is not about a signature: a field name inside
+    /// `emit @E { … }` / `attach $S to e { … }`, a slot inside `bring X(…)`, or the reference itself —
+    /// from any bundle, by any path, the same answer `?` would give.
+    public string? DescribeAt(string text, int offset)
+    {
+        if (offset < 0 || offset > text.Length) return null;
+
+        // A field or a slot: the innermost open bracket before the word, and the head in front of it.
+        int open = QuestionFill.Unclosed(text, offset);
+        if (open >= 0 && FillHeads.Before(text, open) is { } head)
+        {
+            bool paren = text[open] == '(';
+            if (paren == (head.Kind == SignatureKind.Builder) && Find(new SignatureRef(head.Kind, head.Path, head.Name)).Hit is { } sig)
+            {
+                if (paren)
+                {
+                    // Any token in an argument — a literal as much as a name — is IN a slot, and positional
+                    // binding means the slot is the one thing it cannot say about itself.
+                    var (commas, _) = QuestionFill.Args(text[(open + 1)..offset]);
+                    if (commas < sig.Fields.Count)
+                        return $"{sig.Name} slot {commas}: {Field(sig.Fields[commas])}";
+                }
+                else if (SignatureRef.At(text, offset) is { Kind: null, Path.Count: 0 } word
+                         && sig.Fields.FirstOrDefault(f => f.Name == word.Name) is { } f && FollowedByColon(text, offset))
+                    return $"{sig.Sigil}{sig.Name}.{Field(f)}";
+            }
+        }
+
+        if (SignatureRef.At(text, offset) is not { } r) return null;
+        var lookup = Find(r);
+        if (lookup.Ambiguous)
+            return $"{r.Written} is ambiguous here — " +
+                   string.Join(" and ", lookup.Candidates.Select(c => "*" + c[..(c.LastIndexOf('.') + 1)] + Sigil(r.Kind) + c[(c.LastIndexOf('.') + 1)..])) +
+                   " (VS0216). Write the path to choose one.";
+        return lookup.Hit is { } hit ? Describe(hit) : null;
+    }
+
+    /// A signature as a hover shows it: the head and where it comes from, one field per line with its type,
+    /// default and origin (slot numbers for a builder, whose arguments bind by position), then the doc.
+    public static string Describe(Signature s)
+    {
+        var lines = new List<string>();
+        string head = s.Kind switch
+        {
+            SignatureKind.Builder => "builder &" + s.Name,
+            SignatureKind.Event => "event @" + s.Name,
+            _ => "shape $" + s.Name,
+        };
+        if (s.Origin is not null) head += "   *" + s.Origin;
+        if (s.Kind == SignatureKind.Builder)
+            head += " — builds " + s.Generates + (s.Marks.Count > 0 ? " " + string.Join(" ", s.Marks.Select(m => "#" + m)) : "");
+        else if (s.Kind == SignatureKind.Shape && s.Marks.Count > 0)
+            head += " — attaching it also marks " + string.Join(" ", s.Marks.Select(m => "#" + m));
+        lines.Add(head);
+        if (s.Base is not null)
+            lines.Add("a variant of &" + s.Base + ", fixing " + string.Join(", ", s.Fixed.Select(kv => kv.Key + " = " + kv.Value)));
+
+        if (s.Fields.Count == 0) lines.Add(s.Kind == SignatureKind.Builder ? "  takes nothing" : "  no fields");
+        int width = s.Fields.Count == 0 ? 0 : s.Fields.Max(f => Bare(f).Length);
+        for (int i = 0; i < s.Fields.Count; i++)
+        {
+            var f = s.Fields[i];
+            string slot = s.Kind == SignatureKind.Builder ? $"{i}  " : "";
+            lines.Add("  " + slot + Bare(f).PadRight(width) + (f.OriginShape is null ? "" : "   from $" + f.OriginShape));
+        }
+        if (s.Doc is { Length: > 0 } doc) lines.Add(doc);
+        return string.Join("\n", lines);
+    }
+
+    private static string Bare(EventField f) => f.Name + ": " + f.Type + (f.Required ? "" : " = " + f.Default);
+    private static string Field(EventField f) => Bare(f) + (f.OriginShape is null ? "" : "   from $" + f.OriginShape);
+
+    private static bool FollowedByColon(string text, int offset)
+    {
+        int i = offset;
+        while (i < text.Length && (char.IsLetterOrDigit(text[i]) || text[i] == '_')) i++;
+        while (i < text.Length && text[i] is ' ' or '\t') i++;
+        return i < text.Length && text[i] == ':';
+    }
+
+    private static string Sigil(SignatureKind? k) => k switch
+    {
+        SignatureKind.Builder => "&", SignatureKind.Shape => "$", _ => "@",
+    };
 
     private static Signature? Resolve(Lower scope, SignatureKind kind, IReadOnlyList<string> path, string name)
     {

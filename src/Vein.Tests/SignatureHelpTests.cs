@@ -53,6 +53,14 @@ public class SignatureHelpTests
     }
 
     [Fact]
+    public void Inside_an_attach_the_help_is_the_shapes_fields()
+    {
+        var call = At("attach $Price to e { amount: 3, |");
+        Assert.Equal(("Price", SignatureKind.Shape, 1), (call!.Name, call.Kind, call.ActiveSlot));
+        Assert.StartsWith("$Price(", SignatureHelp.Describe(call, new[] { new EventField("amount", "int", true, null) }));
+    }
+
+    [Fact]
     public void A_counted_bring_is_not_mistaken_for_a_function_call()
     {
         // The word before `Panel(` is the count, not `bring`, so the function-call reader took `Panel` for

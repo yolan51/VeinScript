@@ -99,6 +99,12 @@ internal sealed class SignaturePopup
             e.Fields.Count == 0 ? "event — carries nothing" : "event — `?` after the name fills in every field",
             "#DCDCAA");   // the Event colour
 
+    /// `attach $Price to e {` — the shape's fields. Named, like a payload; usually declared in another bundle.
+    public void ShowShape(string name, IReadOnlyList<EventField> fields, int active, int callStart) =>
+        ShowParams("attach $", name, fields.Select(Param).ToList(), (" { ", " }"), active, callStart,
+            fields.Count == 0 ? "shape — carries nothing" : "shape — `?` after `attach $S to e` fills in every field",
+            "#4EC9B0");   // the Shape colour
+
     private static string Param(EventField f) =>
         f.Name + ": " + f.Type + (f.Required ? "" : " = " + (f.Default ?? "default")) +
         (f.OriginShape is { Length: > 0 } s ? "  $" + s : "");

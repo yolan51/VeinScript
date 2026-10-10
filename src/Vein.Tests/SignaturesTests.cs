@@ -213,6 +213,69 @@ public class SignaturesTests : IDisposable
         static (SignatureKind?, string, string) Parts(SignatureRef r) => (r.Kind, string.Join(".", r.Path), r.Name);
     }
 
+    // ---- hover ---------------------------------------------------------------------------------------
+
+    private string? HoverAt(string body, string marked)
+    {
+        // `marked` is a line of the shard body with the hover point written as `|`.
+        int bar = marked.IndexOf('|');
+        string line = marked.Remove(bar, 1);
+        string src = "bundle Game by you {\n" + body + "\nshard S { run once {\n" + line + "\n} }\n}";
+        int offset = src.IndexOf(line, StringComparison.Ordinal) + bar;
+        var unit = new VeinCompilerService().Compile(new CompileRequest("Game.vein", src, ProjectDir: _dir)).Ast;
+        return Signatures.For(unit, _dir).DescribeAt(src, offset);
+    }
+
+    [Fact]
+    public void Hovering_a_kits_builder_shows_its_slots_in_bind_order()
+    {
+        string? h = HoverAt("need \"kit.Shop\"", "bring Cr|ate(1, \"EUR\", 2)");
+
+        Assert.NotNull(h);
+        Assert.StartsWith("builder &Crate   *kit.Shop.Api — builds an identity #Crate", h);
+        Assert.Contains("0  amount: int", h);
+        Assert.Contains("from $Price", h);
+        Assert.Contains("2  count: int = 1", h);
+        Assert.EndsWith("A crate on the shelf.", h);
+    }
+
+    [Fact]
+    public void Hovering_an_argument_names_its_slot()
+    {
+        // Positional binding means a literal cannot say which parameter it fills — the hover does.
+        Assert.Equal("Crate slot 1: currency: string = \"EUR\"   from $Price",
+                     HoverAt("need \"kit.Shop\"", "bring Crate(1, \"E|UR\", 2)"));
+    }
+
+    [Fact]
+    public void Hovering_a_payload_field_gives_its_type_and_origin()
+    {
+        Assert.Equal("@Sold.amount: int   from $Price",
+                     HoverAt("need \"kit.Shop\"", "emit @Sold { amo|unt: 3, item: \"x\" }"));
+    }
+
+    [Fact]
+    public void Hovering_a_qualified_reference_works_without_a_need()
+    {
+        string? h = HoverAt("", "emit *kit.Shop.Api.@So|ld { item: \"x\" }");
+        Assert.StartsWith("event @Sold   *kit.Shop.Api", h);
+    }
+
+    [Fact]
+    public void Hovering_a_shape_shows_its_fields_and_the_marks_it_brings()
+    {
+        string? h = HoverAt("need \"kit.Shop\"", "let e = spawn()\nattach $Ta|g to e { label: \"x\" }");
+        Assert.StartsWith("shape $Tag   *kit.Shop.Api — attaching it also marks #Tagged", h);
+        Assert.Contains("label: string", h);
+    }
+
+    [Fact]
+    public void A_member_access_is_not_mistaken_for_a_reference()
+    {
+        // `s.item` names a field of a binding; `item` is not an event, builder or shape.
+        Assert.Null(SignatureRef.At("hear @Sold as s { let x = s.item }", "hear @Sold as s { let x = s.it".Length));
+    }
+
     // ---- the guard against drift ---------------------------------------------------------------------
 
     [Fact]

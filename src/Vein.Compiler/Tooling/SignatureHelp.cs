@@ -42,8 +42,9 @@ public static class SignatureHelp
                 // An unclosed opener. `(` is an argument list, `{` an emit payload — and a `{` that is
                 // a block rather than a payload simply has no head before it, so no help is offered.
                 var head = FillHeads.Before(source, i);
+                // `{` is a payload after `emit` and a shape's fields after `attach $S to e`.
                 bool fits = c == '(' ? head is { Kind: SignatureKind.Builder }
-                                     : head is { Kind: SignatureKind.Event, Keyword: "emit" };
+                                     : head is { Kind: SignatureKind.Event, Keyword: "emit" } or { Kind: SignatureKind.Shape };
                 return fits
                     ? new CallContext(head!.Name, head.Kind == SignatureKind.Event, Slot(source, i, caret, ','), i)
                       { Path = head.Path, Kind = head.Kind }
@@ -113,7 +114,8 @@ public static class SignatureHelp
     /// only thing saying which parameter you are in.
     public static string? Describe(CallContext call, IReadOnlyList<EventField> fields)
     {
-        if (fields.Count == 0) return $"{(call.IsEvent ? "@" : "&")}{call.Name} — no fields";
+        string sigil = call.Kind switch { SignatureKind.Event => "@", SignatureKind.Shape => "$", _ => "&" };
+        if (fields.Count == 0) return $"{sigil}{call.Name} — no fields";
 
         var parts = fields.Select((f, i) =>
         {
@@ -121,7 +123,7 @@ public static class SignatureHelp
             return i == call.ActiveSlot ? "[" + one + "]" : one;
         });
 
-        return $"{(call.IsEvent ? "@" : "&")}{call.Name}( {string.Join(", ", parts)} )";
+        return $"{sigil}{call.Name}( {string.Join(", ", parts)} )";
     }
 
     /// Which slot the caret is in: separators between the opener and the caret, at depth zero.

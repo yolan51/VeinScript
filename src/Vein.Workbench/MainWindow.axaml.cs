@@ -56,6 +56,7 @@ public partial class MainWindow : Window
     private string _hoverSrc = "\0";
     private CompilationUnit? _hoverAst;
     private MemberIndex.Model? _hoverModel;
+    private Signatures? _hoverScope;   // what an @Event, &Builder or $Shape takes, from any bundle
 
     // Resolved from the XAML name scope after load (robust regardless of generated fields).
     private TextEditor _editor = null!;
@@ -1534,6 +1535,8 @@ public partial class MainWindow : Window
                 { _sigPopup.ShowBuilder(EventCatalog.BuilderEntryOf(sig), bc.ActiveSlot, bc.Open); return; }
                 if (sig.Kind == SignatureKind.Event)
                 { _sigPopup.ShowEvent(EventCatalog.Entry(sig), bc.ActiveSlot, bc.Open); return; }
+                if (sig.Kind == SignatureKind.Shape)
+                { _sigPopup.ShowShape(sig.Name, sig.Fields, bc.ActiveSlot, bc.Open); return; }
             }
             _sigPopup.Hide();
             return;
@@ -3601,6 +3604,7 @@ public partial class MainWindow : Window
         _hoverSrc = src;
         _hoverAst = _service.Compile(new CompileRequest("untitled.vein", src, ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
         _hoverModel = _hoverAst is null ? null : MemberIndex.Build(_hoverAst);
+        _hoverScope = _hoverAst is null ? null : Signatures.For(_hoverAst, ProjectDir);
     }
 
     private string? ResolveHover(int offset)
@@ -3610,6 +3614,11 @@ public partial class MainWindow : Window
         if (word is null) return null;
         EnsureHoverModel();
         if (_hoverModel is null || _hoverAst is null) return null;
+
+        // 0) Anything about a signature — a field in an `emit`/`attach` body, a slot in a `bring`, or an
+        //    @Event / &Builder / $Shape itself — from ANY bundle, through the compiler's own lookup. What is
+        //    below covers the rest: shape declarations, struct literals, marks and functions.
+        if (_hoverScope?.DescribeAt(text, offset) is { } sig) return sig;
 
         // 1) A field name inside an emit / struct / shape / event body → its declared type.
         var (kind, name) = EnclosingBraceHead(text, start);
@@ -3627,19 +3636,7 @@ public partial class MainWindow : Window
             }
         }
 
-        // 2) A positional builder argument → the corresponding parameter's type.
-        var (bname, idx) = EnclosingBuilderArg(text, start);
-        if (bname is not null)
-        {
-            var b = FindBuilder(_hoverAst, bname);
-            if (b is not null)
-            {
-                var prms = BuilderParams(_hoverAst, b);
-                if (idx < prms.Count) return $"{bname} arg {idx}: {prms[idx].Name} : {prms[idx].Type}";
-            }
-        }
-
-        // 3) The word itself is a declared symbol.
+        // 2) The word itself is a declared symbol (builders and their slots were answered in step 0).
         //
         // THE SIGIL DECIDES, when there is one. `WordAt` returns the identifier without it, and a shape
         // and a mark MAY SHARE A NAME (RULES 14e) — so guessing by lookup order made `#MenuItem` report
@@ -3652,15 +3649,13 @@ public partial class MainWindow : Window
             case '$': return _hoverModel.Shapes.ContainsKey(word) ? Shape(word) : $"shape ${word}";
             case '@': return _hoverModel.Events.ContainsKey(word) ? Event(word) : $"event @{word}";
             case '#': return Mark(word);
-            case '&':
-                return FindBuilder(_hoverAst, word) is { } sb ? Builder(sb, word) : $"builder &{word}";
+            case '&': return $"builder &{word}";   // a builder step 0 could not resolve
         }
 
         // No sigil: a bare name in an expression. Order is a fallback, not a guess about kind — a
         // builder and a function are named without one, and a shape or event mentioned bare is rare.
         if (_hoverModel.Shapes.ContainsKey(word)) return Shape(word);
         if (_hoverModel.Events.ContainsKey(word)) return Event(word);
-        if (FindBuilder(_hoverAst, word) is { } bd) return Builder(bd, word);
         if (FuncIndex.Find(_hoverAst, word, ProjectDir) is { Fn: not null } hit)
             return FuncIndex.Signature(hit.Fn, hit.Owner);
         if (IsMark(word)) return Mark(word);
@@ -3673,10 +3668,6 @@ public partial class MainWindow : Window
         string Event(string n) =>
             $"event @{n} {{ " +
             string.Join(", ", _hoverModel!.Events[n].Select(f => $"{f.Name}: {f.Type}")) + " }";
-
-        string Builder(BuilderDecl b, string n) =>
-            $"builder {BuilderKind(b)} {n}(" +
-            string.Join(", ", BuilderParams(_hoverAst!, b).Select(p => $"{p.Name}: {p.Type}")) + ")";
 
         // A mark carries no fields, so the useful extra fact is whether a shape shares its name —
         // which is legal, common, and the source of the confusion this hover used to cause.
@@ -3706,19 +3697,6 @@ public partial class MainWindow : Window
         }
     }
 
-
-    // A builder's parameters = its members minus the output-channel field, $Shape expanded. Keep in sync
-    // with Lower.OutputFields (a channel-less builder has no output field → all members are params).
-    private static readonly string[] BuilderOutputs = { "markup", "code", "css", "line" };
-    private static List<Sig.Field> BuilderParams(CompilationUnit ast, BuilderDecl b)
-    {
-        var output = b.Members.OfType<FieldDecl>().FirstOrDefault(f => BuilderOutputs.Contains(f.Name));
-        var members = output is null ? b.Members : b.Members.Where(m => !ReferenceEquals(m, output)).ToList();
-        return Sig.Expand(members, Sig.Shapes(ast));
-    }
-    private static string BuilderKind(BuilderDecl b) =>
-        b.Members.OfType<FieldDecl>().FirstOrDefault(f => BuilderOutputs.Contains(f.Name))?.Name switch
-        { "code" => "script", "css" => "style", "line" => "console", "markup" => "html", _ => "event" };
 
     private static (string?, int) WordAt(string text, int offset)
     {
@@ -3752,24 +3730,6 @@ public partial class MainWindow : Window
         return ("", null);
     }
 
-    /// The builder name and argument index whose `( … )` encloses `pos`.
-    private static (string?, int) EnclosingBuilderArg(string text, int pos)
-    {
-        int depth = 0, commas = 0, i = pos - 1;
-        for (; i >= 0; i--)
-        {
-            char c = text[i];
-            if (c == ')') depth++;
-            else if (c == '(') { if (depth == 0) break; depth--; }
-            else if (c == ',' && depth == 0) commas++;
-        }
-        if (i < 0) return (null, 0);
-        int j = i - 1; while (j >= 0 && char.IsWhiteSpace(text[j])) j--;
-        int end = j + 1;
-        while (j >= 0 && IsIdent(text[j])) j--;
-        string name = text[(j + 1)..end];
-        return name.Length == 0 ? (null, 0) : (name, commas);
-    }
 
     private static bool IsIdent(char c) => char.IsLetterOrDigit(c) || c == '_';
 
@@ -3808,21 +3768,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private static BuilderDecl? FindBuilder(CompilationUnit ast, string name)
-    {
-        BuilderDecl? Search(IEnumerable<Decl> decls)
-        {
-            foreach (var d in decls)
-                switch (d)
-                {
-                    case BuilderDecl b when b.Name == name: return b;
-                    case BundleDecl bu when Search(bu.Members) is { } r: return r;
-                    case PublicatorDecl p when Search(p.Members) is { } r: return r;
-                }
-            return null;
-        }
-        return Search(ast.Bundles);
-    }
 
     // Typing `*` offers the stdlib's cross-bundle symbols as full qualified paths (e.g.
     // `Vein.Console.Io.@Print`); selecting one completes `*Vein.Console.Io.@Print`.

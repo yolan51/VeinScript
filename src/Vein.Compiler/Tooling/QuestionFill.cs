@@ -224,7 +224,7 @@ public static class QuestionFill
     }
 
     /// The innermost bracket still open at `at`, skipping strings; -1 when none.
-    private static int Unclosed(string text, int at)
+    internal static int Unclosed(string text, int at)
     {
         int depth = 0;
         for (int i = at - 1; i >= 0; i--)
@@ -241,7 +241,7 @@ public static class QuestionFill
     }
 
     /// Commas at depth zero in an argument list so far, and the text after the last one.
-    private static (int Commas, string Tail) Args(string written)
+    internal static (int Commas, string Tail) Args(string written)
     {
         int commas = 0, depth = 0, lastComma = -1;
         for (int i = 0; i < written.Length; i++)
