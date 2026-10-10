@@ -176,19 +176,40 @@ public class DiagnosticsTests
     }
 
     [Fact]
-    public void Filling_the_rest_on_purpose_is_not_reported()
+    public void Leaving_a_field_empty_on_purpose_is_not_reported()
     {
-        // `?` is the author saying "I am knowingly leaving the rest empty". A check that fired here
-        // would punish the one spelling that states the intent.
-        //
-        // The `?` goes INSIDE the argument list. Written `bring Row("x")?` it is a parse error, and
-        // this test asserted only the ABSENCE of VS0228 — so it passed on a program that never
-        // compiled. Hence the second assertion: a test for "no warning" has to prove there was
-        // something to warn about.
-        var d = Diagnose(RowDecl + "  shard S { run once { bring Row(\"only-title\", ?) } }");
+        // Writing the empty value is the author saying "I am knowingly leaving this empty", and a check
+        // that fired here would punish the one spelling that states the intent. (A saved `?` used to say
+        // it; `?` is now the Workbench's shortcut and writes exactly this.)
+        var d = Diagnose(RowDecl + "  shard S { run once { bring Row(\"only-title\", 0) } }");
 
         Assert.DoesNotContain(d, x => x.Severity == Vein.Compiler.Diagnostics.Severity.Error);
         Assert.DoesNotContain(d, x => x.Code == "VS0228");
+    }
+
+    [Theory]
+    [InlineData("bring Row(\"only-title\", ?)")]
+    [InlineData("bring Row ?")]
+    [InlineData("emit @Order ?")]
+    [InlineData("emit @Order { item: \"x\", ? }")]
+    public void A_question_mark_saved_in_a_file_is_VS0347_at_the_question_mark(string statement)
+    {
+        // `?` is the Workbench's "show me the signature" key. Saved, it used to be a silent fill-with-zeros —
+        // hiding exactly the fields `?` exists to show. Now it is an error whose Quick Fix writes them.
+        var d = Diagnose(RowDecl + "  event @Order { item: string, qty: int = 1 }\n" +
+                         "  shard S { run once { " + statement + " } }");
+
+        var e = Assert.Single(d, x => x.Code == "VS0347");
+        Assert.Equal(Vein.Compiler.Diagnostics.Severity.Error, e.Severity);
+        Assert.Equal(statement.IndexOf('?') + "  shard S { run once { ".Length + 1, e.Span.Col);
+    }
+
+    [Fact]
+    public void Retired_fill_rest_keeps_the_old_line_honest()
+    {
+        // The VS0228 check is unchanged by the retirement: leaving a required field out is still reported.
+        var d = Diagnose(RowDecl + "  shard S { run once { bring Row(\"only-title\") } }");
+        Assert.Contains(d, x => x.Code == "VS0228");
     }
 
     // ---- `base` — "the value this parameter's declaration gave it" ---------------------------------
@@ -633,8 +654,7 @@ public class DiagnosticsTests
         // The `base` form: padded/col are given, and body/class/accent keep their declared values.
         Assert.Contains("class=panel  accent=#4444aa  padded=false  col=1", output);
 
-        // `?` honours a default where there is one and zeroes only what has none — this is the line
-        // that corrected the sample: it was written claiming `?` ignores defaults, and it does not.
+        // What the Workbench's `?` writes: the empty value where there is no default, `base` where there is.
         Assert.Contains("title=[Untitled] note=[] slug=[untitled]", output);
     }
 }

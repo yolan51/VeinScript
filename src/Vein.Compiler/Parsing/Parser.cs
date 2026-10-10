@@ -124,7 +124,7 @@ public sealed class Parser
                 bool fill = false;
                 bool hasStart = Check(TokenKind.KwStart) && Peek(1).Kind != TokenKind.EventRef;
                 if (hasStart) { Advance(); (fields, fill) = ParseEmitBody(); }
-                loads.Add(new AppLoad(p, fields, fill, hasStart, ls));
+                loads.Add(new AppLoad(p, fields, fill, hasStart, ls) { FillAt = fill ? _fillAt : null });
             }
             else { _diag.Error("VS0106", $"Expected 'load', found '{Cur.Text}'.", Here); Advance(); }
             SkipTerms();
@@ -916,15 +916,21 @@ public sealed class Parser
         var s = Here; Advance();
         var (path, ev) = ParseEventRef("@EventName");
         var (fields, fill) = ParseEmitBody();
-        return new EmitStmt(ev, fields, fill, s) { EventPath = path };
+        return new EmitStmt(ev, fields, fill, s) { EventPath = path, FillAt = fill ? _fillAt : null };
     }
 
-    /// The tail shared by `emit`/`start`: `?` (fill-the-rest), `{ a: 1, ? }`, or nothing (`@E` alone —
-    /// omitted fields fill from defaults/context at runtime).
+    /// Where the last `?` was, so the lowerer can point at it: `?` is the Workbench's shortcut, and one left
+    /// in a file is reported THERE (VS0347) rather than at the statement.
+    private SourceSpan? _fillAt;
+
+    /// The tail shared by `emit`/`start`: `{ a: 1 }`, or nothing (`@E` alone — omitted fields fill from
+    /// defaults/context at runtime). A `?` still PARSES here, so that one left in a file gets VS0347 with its
+    /// fix rather than a bare syntax error.
     private (List<FieldInit> Fields, bool Fill) ParseEmitBody()
     {
         var fields = new List<FieldInit>();
         bool fill = false;
+        _fillAt = Check(TokenKind.Question) ? Here : null;
         if (Match(TokenKind.Question)) fill = true;
         else if (Check(TokenKind.LBrace))
         {
@@ -932,7 +938,7 @@ public sealed class Parser
             SkipTerms();
             while (!Check(TokenKind.RBrace) && !AtEnd)
             {
-                if (Match(TokenKind.Question)) fill = true;
+                if (Check(TokenKind.Question)) { _fillAt ??= Here; Advance(); fill = true; }
                 else
                 {
                     var fs = Here;
@@ -955,7 +961,7 @@ public sealed class Parser
         Expect(TokenKind.KwStart, "'start'");
         var (path, ev) = ParseEventRef("@EventName after 'start'");
         var (fields, fill) = ParseEmitBody();
-        return new StartDecl(ev, fields, fill, s) { EventPath = path };
+        return new StartDecl(ev, fields, fill, s) { EventPath = path, FillAt = fill ? _fillAt : null };
     }
 
     /// An event reference: bare `@Event` (local) OR `*Author.Bundle.@Event` (a collision-safe reference
@@ -1038,6 +1044,7 @@ public sealed class Parser
 
         var args = new List<Expr>();
         bool fill = false;
+        _fillAt = Check(TokenKind.Question) ? Here : null;
         if (Match(TokenKind.Question))                    // bring X ?
             fill = true;
         else if (Check(TokenKind.LParen))                 // bring X(a, ?)
@@ -1046,7 +1053,7 @@ public sealed class Parser
             if (!Check(TokenKind.RParen))
                 while (true)
                 {
-                    if (Match(TokenKind.Question)) { fill = true; break; }
+                    if (Check(TokenKind.Question)) { _fillAt = Here; Advance(); fill = true; break; }
 
                     // `base` is admitted HERE and nowhere else. It is not a value — there is nothing it
                     // could evaluate to outside an argument list, because what it means is decided by
@@ -1063,7 +1070,7 @@ public sealed class Parser
         // means exactly this in `target … as self` and `hear … as e`; `bring` stays a statement.
         string? bind = Match(TokenKind.KwAs) ? ExpectName("a name after 'as'").Text : null;
 
-        return new BringStmt(count, name, args, fill, s) { BuilderPath = path, Bind = bind };
+        return new BringStmt(count, name, args, fill, s) { BuilderPath = path, Bind = bind, FillAt = fill ? _fillAt : null };
     }
 
     /// `do name(…)` / `do *A.B.P.name(…)` — an SF call (D13). A statement, never an expression: an SF

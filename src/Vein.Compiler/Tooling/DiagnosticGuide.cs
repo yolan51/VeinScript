@@ -4,7 +4,7 @@ namespace Vein.Compiler.Tooling;
 public sealed record DiagnosticNote(string Code, string Why, string Doc);
 
 // WHY: the diagnostics already explain themselves and name their own fix — VS0228 ends "Add the value,
-// or write `?` to fill the rest with typed zeros on purpose". Restating those here would be a second
+// or write its empty value … on purpose". Restating those here would be a second
 // copy of the same sentence, drifting the moment one of them is reworded.
 //
 // So this carries only what a message CANNOT: why the rule exists, and where the reasoning is written
@@ -112,6 +112,9 @@ public static class DiagnosticGuide
 
         new("VS0320", "A name is one declaration — there is no overloading, and the second used to replace the first without a word. Defaults give \"fewer arguments\", a variant (`from`) gives \"some arguments fixed\".",
             "docs/RULES.md — rule 7d"),
+
+        new("VS0347", "`?` is the Workbench's key for SEEING a signature — typed after `emit @E`, `bring X` or `attach $S to e`, it writes every field and is gone. Saved, it used to fill the rest with zeros silently, hiding the very fields it exists to show. The Quick Fix writes them.",
+            "docs/TOOLING.md — `?`"),
 
         new("VS0344", "A builder, fn or SF binds BY POSITION, so a bundle swapping two parameters of the same type passes the count check and the literal check and changes what the call means. vein.lock is the only record of the order this call was written against. Accepting the new order fixes nothing by itself — fix the arguments first.",
             "docs/RULES.md — rule 20a"),

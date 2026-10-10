@@ -23,25 +23,24 @@ public class QuickFixTests
         source[..fix.Edit.Offset] + fix.Edit.Text + source[(fix.Edit.Offset + fix.Edit.Length)..];
 
     [Fact]
-    public void A_short_bring_is_offered_the_fill_rest_marker()
+    public void A_short_bring_is_offered_the_missing_arguments()
     {
-        // The message already says to write `?`. Having read that, you should not also have to find
-        // the bracket.
+        // The message says which slots are missing. Having read that, you should not also have to find
+        // the bracket and count — and the fix writes values, never `?`, which is the Workbench's shortcut.
         var (src, fixes) = Fix(
             "    shape $P { a: int, b: int }\n" +
             "    builder Panel { include $P }\n" +
             "    shard S { run once { bring Panel(1) } }", "VS0228");
 
         var fix = Assert.Single(fixes);
-        Assert.Contains("?", fix.Title);
-        Assert.Contains("bring Panel(1, ?)", Applied(src, fix));
+        // The fixture's `include $P` is read as a FIELD named include, so Panel takes three slots.
+        Assert.Contains("bring Panel(1, 0, 0)", Applied(src, fix));
     }
 
     [Fact]
-    public void The_marker_goes_inside_the_bracket()
+    public void The_missing_arguments_go_inside_the_bracket()
     {
-        // RULES 14: `?` belongs INSIDE the argument list. After the bracket it parses as something else
-        // entirely, so the fix has to find the `)` rather than append to the line.
+        // The `)` is found, not assumed to end the line.
         var (src, fixes) = Fix(
             "    shape $P { a: int, b: int }\n" +
             "    builder Panel { include $P }\n" +
@@ -49,8 +48,25 @@ public class QuickFixTests
 
         string after = Applied(src, Assert.Single(fixes));
 
-        Assert.DoesNotContain("Panel(1)?", after);
-        Assert.DoesNotContain("Panel(1) ?", after);
+        Assert.DoesNotContain("?", after);
+        Assert.DoesNotContain("Panel(1)0", after);
+    }
+
+    [Theory]
+    [InlineData("bring Panel(1, ?)", "bring Panel(1, 0, 0)")]
+    [InlineData("bring Panel ?", "bring Panel(")]
+    public void A_saved_question_mark_is_expanded_by_its_fix(string written, string expected)
+    {
+        // VS0347: the fix does what typing `?` in the Workbench does.
+        var (src, fixes) = Fix(
+            "    shape $P { a: int, b: int }\n" +
+            "    builder Panel { include $P }\n" +
+            "    shard S { run once { " + written + " } }", "VS0347");
+
+        string after = Applied(src, Assert.Single(fixes));
+        Assert.Contains(expected, after);
+        Assert.DoesNotContain(new VeinCompilerService().Compile(new CompileRequest("t.vein", after)).Diagnostics,
+                              d => d.Code is "VS0347" or "VS0228");
     }
 
     [Fact]

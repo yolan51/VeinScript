@@ -237,6 +237,9 @@ public static class AppLinker
         var result = new Dictionary<string, object?>(StringComparer.Ordinal);
         if (load is null || !load.HasStart) return result;
 
+        if (load.Fill)
+            diag.Error("VS0347", Lower.SavedQuestion("boot fields"), load.FillAt ?? load.Span);
+
         foreach (var f in load.Overrides)
         {
             // Literals only. An override is written at the composition site, where there is no shard, no

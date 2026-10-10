@@ -63,12 +63,18 @@ public sealed record AppDecl(string Name, IReadOnlyList<AppLoad> Loads, SourceSp
 /// One `load "path"` in an app, with an optional `start { … }` clause that OVERRIDES the loaded
 /// bundle's own start payload (the dev fills only the fields they want to change). `HasStart` records
 /// that a `start` clause was written (even if empty); `Fill` is the `?` fill-the-rest marker.
-public sealed record AppLoad(string Path, IReadOnlyList<FieldInit> Overrides, bool Fill, bool HasStart, SourceSpan Span) : Node(Span);
+public sealed record AppLoad(string Path, IReadOnlyList<FieldInit> Overrides, bool Fill, bool HasStart, SourceSpan Span) : Node(Span)
+{
+    /// Where a `?` was written, when `Fill` — reported as VS0347.
+    public SourceSpan? FillAt { get; init; }
+}
 
 /// `start @Event { payload }` — the boot event fired first when the program runs (an emit-style body,
 /// so `?` fill-the-rest applies). Allowed at bundle level (run a single file) and app level (§RUNTIME).
 public sealed record StartDecl(string Event, IReadOnlyList<FieldInit> Fields, bool FillRest, SourceSpan Span) : Decl(Span)
 {
+    /// Where a `?` was written, when `FillRest` — reported as VS0347: `?` is the Workbench's shortcut, not syntax.
+    public SourceSpan? FillAt { get; init; }
     /// A `*Author.Bundle` qualifier on the boot event; empty = bare local event.
     public IReadOnlyList<string> EventPath { get; init; } = Array.Empty<string>();
 }
@@ -237,6 +243,8 @@ public sealed record MarkStmt(bool Remove, Expr Target, string Mark, SourceSpan 
 // placeholder for required fields — so it compiles/runs for testing.
 public sealed record EmitStmt(string Event, IReadOnlyList<FieldInit> Fields, bool FillRest, SourceSpan Span) : Stmt(Span)
 {
+    /// Where a `?` was written, when `FillRest` — reported as VS0347: `?` is the Workbench's shortcut, not syntax.
+    public SourceSpan? FillAt { get; init; }
     /// A `*Author.Bundle` qualifier on the event (`emit *studio.Core.@Boot`); empty = bare local event.
     public IReadOnlyList<string> EventPath { get; init; } = Array.Empty<string>();
 }
@@ -263,6 +271,8 @@ public sealed record OrderedStmt(string Key, IReadOnlyList<Stmt> Body, SourceSpa
 
 public sealed record BringStmt(Expr? Count, string Builder, IReadOnlyList<Expr> Args, bool FillRest, SourceSpan Span) : Stmt(Span)
 {
+    /// Where a `?` was written, when `FillRest` — reported as VS0347: `?` is the Workbench's shortcut, not syntax.
+    public SourceSpan? FillAt { get; init; }
     /// A `*Author.Bundle.Publicator` qualifier on the builder (`bring *Vein.Console.Io.&Console(…)`);
     /// empty ⇒ a bare/local `&`-builder resolved in this bundle.
     public IReadOnlyList<string> BuilderPath { get; init; } = Array.Empty<string>();

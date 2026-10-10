@@ -128,19 +128,21 @@ public class ServiceTests
     }
 
     [Fact]
-    public void Emit_fill_rest_is_parsed_and_shown_in_ir()
+    public void A_saved_emit_question_mark_parses_and_is_reported()
     {
+        // It still PARSES — so the error is the one that names the fix, not a bare syntax error — and the
+        // IR tree still shows where it was.
         var r = Compile("bundle B { event @D { x: int } shard S { hear @R as q { emit @D ? } } }");
-        Assert.True(r.Success);
+        Assert.Contains(r.Diagnostics, d => d.Code == "VS0347");
         Assert.Contains("Emit @D  fill=?", r.IrText);
     }
 
     [Fact]
-    public void Bring_fill_rest_is_parsed_and_shown_in_ir()
+    public void A_saved_bring_question_mark_parses_and_is_reported()
     {
         var r = Compile("bundle B { event @Html { markup: string } builder Row { a: string  b: string  markup = a } " +
                         "shard U { hear @R as q { bring Row(\"x\", ?) } } }");
-        Assert.True(r.Success);
+        Assert.Contains(r.Diagnostics, d => d.Code == "VS0347");
         Assert.Contains("Bring Row  fill=?", r.IrText);
     }
 

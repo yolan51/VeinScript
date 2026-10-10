@@ -15,8 +15,8 @@ public sealed record QuickFix(string Title, TextEdit Edit)
 }
 
 // WHY: some diagnostics name their own fix in the message and then make you type it. VS0228 ends "Add
-// the value, or write `?` to fill the rest with typed zeros on purpose" — the `?` is a single character
-// in a known place, and having read that sentence you should not also have to find the bracket.
+// the value, or write its empty value … to leave it empty on purpose" — the missing slots are known, and
+// having read that sentence you should not also have to find the bracket and count the commas.
 //
 // DELIBERATELY SMALL. Only fixes that are mechanically certain are offered: the two below change what
 // the program means in exactly the way the diagnostic says it should, with no guess about intent. A
@@ -33,7 +33,8 @@ public static class QuickFixes
     {
         return diagnostic.Code switch
         {
-            "VS0228" => FillRest(diagnostic, source),
+            "VS0228" => FillRest(diagnostic, source, projectDir),
+            "VS0347" => ExpandSaved(diagnostic, source, projectDir),
             "VS0218" => DeclareMark(diagnostic, source),
             "VS0338" or "VS0339" => NameTheAuthor(diagnostic, source, projectDir),
             "VS0341" => DoOrNot(diagnostic, source),
@@ -192,12 +193,12 @@ public static class QuickFixes
         return Array.Empty<QuickFix>();
     }
 
-    /// VS0228 — `bring B(a)` needs more arguments. Insert `?` before the closing bracket, which is the
-    /// language's own "fill the rest on purpose" and what the message tells you to write.
+    /// VS0228 — `bring B(a)` needs more arguments. Write the ones still missing, just before the `)`:
+    /// exactly what typing `?` there would write — the empty value for a required slot, `base` for an
+    /// optional one. (This used to insert `?` itself, which is the Workbench's shortcut and not syntax.)
     ///
-    /// RULES 14: `?` goes INSIDE the argument list. Putting it after the bracket parses as something
-    /// else entirely, so the bracket has to be found rather than assumed to be at the end of the line.
-    private static IReadOnlyList<QuickFix> FillRest(Diagnostic d, string source)
+    /// The bracket is found rather than assumed to be at the end of the line.
+    private static IReadOnlyList<QuickFix> FillRest(Diagnostic d, string source, string? projectDir)
     {
         int start = OffsetOf(source, d.Span.Line, d.Span.Col);
         if (start < 0) return Array.Empty<QuickFix>();
@@ -205,13 +206,32 @@ public static class QuickFixes
         int close = MatchingParen(source, start);
         if (close < 0) return Array.Empty<QuickFix>();
 
-        // An empty list takes a bare `?`; a non-empty one needs the comma. Reading backwards from the
-        // bracket rather than counting arguments, because that is the character the comma attaches to.
-        int before = close - 1;
-        while (before > start && char.IsWhiteSpace(source[before])) before--;
-        string insert = source[before] == '(' ? "?" : ", ?";
+        // Plan it as if `?` had been typed just before the `)`, against the source as it is.
+        if (Plan(source.Insert(close, "?"), close, source, projectDir) is not FillEdit edit) return Array.Empty<QuickFix>();
+        return new[] { new QuickFix("Write the missing arguments", new TextEdit(close, 0, edit.Text)) };
+    }
 
-        return new[] { new QuickFix("Fill the rest with `?`", new TextEdit(close, 0, insert)) };
+    /// VS0347 — a `?` saved in the file. Do what typing it in the Workbench does: write the signature.
+    private static IReadOnlyList<QuickFix> ExpandSaved(Diagnostic d, string source, string? projectDir)
+    {
+        int q = OffsetOf(source, d.Span.Line, d.Span.Col);
+        if (q < 0 || q >= source.Length || source[q] != '?') return Array.Empty<QuickFix>();
+
+        if (Plan(source, q, source.Remove(q, 1), projectDir) is not FillEdit edit) return Array.Empty<QuickFix>();
+        return new[] { new QuickFix("Write the fields `?` stood for", new TextEdit(edit.Start, edit.Length, edit.Text)) };
+    }
+
+    /// The `?` planner, with the scope compiled from `resolveAgainst` — the text without the `?`, which is
+    /// a keystroke and must not cost the declarations around it.
+    private static FillOutcome? Plan(string text, int q, string resolveAgainst, string? projectDir)
+    {
+        try
+        {
+            var unit = new Service.VeinCompilerService()
+                .Compile(new Service.CompileRequest("quickfix.vein", resolveAgainst, ProjectDir: projectDir)).Ast;
+            return QuestionFill.Plan(text, q, Signatures.For(unit, projectDir));
+        }
+        catch (Exception) { return null; }
     }
 
     /// VS0218 — a `#Mark` this bundle never declared. Declaring it is the fix: the diagnostic exists

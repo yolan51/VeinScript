@@ -129,13 +129,12 @@ public class ConsoleGraphTests
     [Fact]
     public void Mark_typed_field_zero_fills_to_the_root_address()
     {
-        // `?` on a Mark field has no meaningful empty value — "" would be a pipe named "vein.console.".
-        // The event is declared locally because `?` fills from the module's own types, and a cross-bundle
-        // `*Vein.Console.Io.@Console` is not linked in (see Interp's fill path).
+        // A Mark field has no meaningful empty value — "" would be a pipe named "vein.console.". `base` on
+        // a field with no default takes the typed zero (VS0231 says so), and a Mark's is the root address.
         var r = Compile(
             "bundle B by me { start @Boot { } event @Boot { } " +
             "event @Console { name: Mark, firsttext: string } " +
-            "shard M { hear @Boot as b { emit @Console ? } } }");
+            "shard M { hear @Boot as b { emit @Console { name: base, firsttext: \"\" } } } }");
         Assert.True(r.Success);
 
         (string Name, string First)? got = null;

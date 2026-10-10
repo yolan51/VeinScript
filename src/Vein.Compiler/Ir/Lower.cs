@@ -250,6 +250,7 @@ public sealed partial class Lower
         var startDecl = startDecls.FirstOrDefault();
         // `start @Request { … }` names an event too, and usually one from another bundle. Registering it
         // is what types `r.path` inside the handler that hears it.
+        if (startDecl is { FillRest: true }) _diag.Error("VS0347", SavedQuestion("fields"), startDecl.FillAt ?? startDecl.Span);
         if (startDecl is not null)
         {
             RegisterImportedEvent(startDecl.EventPath, startDecl.Event);
@@ -1264,8 +1265,8 @@ public sealed partial class Lower
         var missing = prms.Take(required).Skip(br.Args.Count).Select(p => p.Name);
         _diag.Warning("VS0228",
             $"`bring {builder}` needs {required} argument(s) and got {br.Args.Count} — " +
-            $"{string.Join(", ", missing)} will be empty. Add the value, or write `?` to fill the rest " +
-            "with typed zeros on purpose.", br.Span);
+            $"{string.Join(", ", missing)} will be empty. Add the value, or write its empty value " +
+            "(\"\", 0, false) to leave it empty on purpose — the Quick Fix writes them.", br.Span);
     }
 
     /// `emit @E { … }` against @E's declaration.
@@ -1781,6 +1782,7 @@ public sealed partial class Lower
                     new IrExpr[] { LowerExpr(mk.Target), new IrTypeNameExpr(mk.Mark) }));
             }
             case EmitStmt em:
+                if (em.FillRest) _diag.Error("VS0347", SavedQuestion("fields"), em.FillAt ?? em.Span);
                 CheckEmitPayload(em);
                 RegisterImportedEvent(em.EventPath, em.Event);
                 NoteEventUse(em.EventPath, em.Event);
@@ -2195,6 +2197,8 @@ public sealed partial class Lower
 
     private IrStmt LowerBring(BringStmt br)
     {
+        if (br.FillRest) _diag.Error("VS0347", SavedQuestion("arguments"), br.FillAt ?? br.Span);
+
         // Qualified `bring *Author.Bundle.Publicator.&Builder(…)` resolves against the stdlib's builders;
         // a bare/local `bring Builder(…)` resolves against this bundle. Either way we get a BuilderDecl and
         // desugar it identically (the qualifier is dropped — like emit — since the runtime keys on the name).
@@ -2317,6 +2321,13 @@ public sealed partial class Lower
     }
 
     private (string, IrExpr) LowerFieldInit(FieldInit f) => (f.Name, LowerExpr(f.Value));
+
+    /// VS0347's sentence. `?` is the Workbench's "show me the signature" key — typed, it expands into the
+    /// fields and is gone. Saved in a file it used to be a quiet "fill the rest with zeros", which hid exactly
+    /// the fields `?` exists to show; now it is an error whose Quick Fix does what the key would have done.
+    internal static string SavedQuestion(string what) =>
+        $"`?` is the Workbench's signature shortcut, not VeinScript — it fills nothing in a saved file. " +
+        $"Write the remaining {what} (`base` keeps a declared default), or apply the Quick Fix, which writes them.";
 
     /// Named fields — an `emit`/`start` payload or an `attach` body — where a value may be `base`: the
     /// default the FIELD is declared with, which is what `base` means for a `bring` argument too. Resolved

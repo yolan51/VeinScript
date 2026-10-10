@@ -80,12 +80,14 @@ Bundle BuilderDefaults  author=you
 |    `--- Mark #Draft
 |--- Shard Sketch
 |    `--- RunOnce
-|         `--- Bring Draft  fill=?
-|              `--- Arg = Str "Untitled"
+|         `--- Bring Draft
+|              |--- Arg = Str "Untitled"
+|              |--- Arg = Str ""
+|              `--- Arg = Ref base
 `--- Shard ShowDraft
      `--- Settled
           |--- Emit *Vein.Console.Io.@Print
-          |    `--- Arg text = Str "-- a `?` draft: zero where there is no default, default wher..."
+          |    `--- Arg text = Str "-- an empty value where there is no default, the default whe..."
           `--- Target $Draft #Draft as d
                `--- Emit *Vein.Console.Io.@Print
                     `--- Arg text = Concat

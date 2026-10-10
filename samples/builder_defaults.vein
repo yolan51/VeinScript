@@ -34,17 +34,17 @@
 //
 // TWO WAYS TO SAY "FEWER ON PURPOSE", and they compose rather than compete:
 //
-//     a default        `body: string = "(none)"`      the DECLARATION supplies a value, once, for
-//                                                     every call site that stops short of it
-//     `?` (FillRest)   `bring Panel("hi", ?)`         the CALL says "fill the rest" — using each
-//                                                     field's default where it has one, and a typed
-//                                                     zero (0 / "" / false) where it does not
+//     a default   `body: string = "(none)"`   the DECLARATION supplies a value, once, for every call
+//                                             site that stops short of it
+//     `base`      `bring Panel("hi", base)`   the CALL takes that default in a slot it has to pass
 //
-// So `?` is not "zeros instead of defaults" — it respects them. What `?` adds is permission: a field
-// with NO default is normally required, and `?` is how a call site says it is knowingly leaving it
-// empty. Without it that is VS0228; with it, nothing is reported, because you said so.
+// A field with NO default is required, and leaving it out is VS0228. To leave it empty ON PURPOSE,
+// write its empty value — `""`, `0`, `false` — so the call says so.
 //
-// The `?` goes INSIDE the argument list — `bring Panel("hi", ?)`, not `bring Panel("hi")?`.
+// You rarely type any of this. In the Workbench, `bring Panel ?` writes every slot for you: a typed empty
+// value for each required one, `base` for each optional one, and a comment naming the field. The `?` is the
+// editor's shortcut and is gone once it has expanded — it is not VeinScript, and one saved in a file is
+// VS0347.
 
 bundle BuilderDefaults by you {
 
@@ -146,17 +146,15 @@ bundle BuilderDefaults by you {
         }
     }
 
-    // ---- and the `?` form ----------------------------------------------------------------------------
+    // ---- what the Workbench's `?` writes ---------------------------------------------------------------
     //
     // A DIFFERENT shape, so it does not mix into the query above — and deliberately one where the second
-    // field has NO default, because that is the case `?` exists for.
+    // field has NO default.
     //
-    // `note` is required: `bring Draft("Untitled")` alone would be VS0228, "note will be empty". Adding
-    // `?` does not change what happens — `note` is empty either way — it changes who is responsible.
-    // The warning says "you may not have meant this"; `?` answers "I did".
-    //
-    // And `?` still honours defaults where they exist. `slug` below has one, and the output shows it
-    // filled in rather than blanked, which is why `?` is safe to reach for on a wide builder.
+    // `note` is required: `bring Draft("Untitled")` alone is VS0228, "note will be empty". Typing
+    // `bring Draft ?` writes `""` for it — the empty value, said on purpose — and `base` for `slug`, which
+    // keeps the declared "untitled" rather than copying it. The call below is that expansion, with the
+    // title filled in.
 
     shape $Draft { title: string, note: string, slug: string = "untitled" }
     mark #Draft
@@ -164,12 +162,12 @@ bundle BuilderDefaults by you {
     builder Draft { $Draft   mark #Draft }
 
     shard Sketch {
-        run once { bring Draft("Untitled", ?) }
+        run once { bring Draft("Untitled", "", base) }
     }
 
     shard ShowDraft {
         settled {
-            emit *Vein.Console.Io.@Print { text: "-- a `?` draft: zero where there is no default, default where there is --" }
+            emit *Vein.Console.Io.@Print { text: "-- an empty value where there is no default, the default where there is --" }
             target $Draft #Draft as d {
                 emit *Vein.Console.Io.@Print {
                     text: "   title=[" + d.Draft.title + "] note=[" + d.Draft.note +
