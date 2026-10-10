@@ -31,6 +31,18 @@ public static class SourceEdits
             : Comment(lines, meaningful.Min(IndentOf));
     }
 
+    /// Where a completion should START replacing, given the offset just after the typed trigger.
+    ///
+    /// A sigil list (`@`, `$`, `#`, `&`) opens on the sigil, so its window starts AFTER it. A local entry
+    /// inserts a bare name there and is right. An entry from another bundle inserts its full path —
+    /// `*Vein.Console.Io.@Print` — which carries its own sigil, and writing that after the typed `@` gave
+    /// `@Vein.Console.Io.@Print`, which does not parse. So a `*` insert takes the typed sigil with it.
+    public static int CompletionStart(string text, int segmentStart, string insert) =>
+        insert.StartsWith('*') && segmentStart > 0 && segmentStart <= text.Length
+        && text[segmentStart - 1] is '@' or '$' or '#' or '&'
+            ? segmentStart - 1
+            : segmentStart;
+
     /// True when this line's first non-blank content is a `//`.
     public static bool IsCommented(string line) => line.TrimStart().StartsWith(Marker, StringComparison.Ordinal);
 

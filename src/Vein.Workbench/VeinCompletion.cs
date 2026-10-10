@@ -94,8 +94,9 @@ public sealed class VeinCompletion : ICompletionData
     public void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs)
     {
         var doc = textArea.Document;
-        int start = completionSegment.Offset;
-        doc.Replace(completionSegment, _insert);
+        // A full `*path` carries its own sigil, so it replaces the one typed to open the list.
+        int start = Vein.Compiler.Tooling.SourceEdits.CompletionStart(doc.Text, completionSegment.Offset, _insert);
+        doc.Replace(start, completionSegment.EndOffset - start, _insert);
         if (_needsDo) AddDo(doc, start);
     }
 

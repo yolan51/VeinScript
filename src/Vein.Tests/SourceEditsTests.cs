@@ -10,6 +10,17 @@ public class SourceEditsTests
 {
     private static IReadOnlyList<string> Toggle(params string[] lines) => SourceEdits.ToggleComment(lines);
 
+    [Theory]
+    [InlineData("emit @", "*Vein.Console.Io.@Print", 5)]    // the typed `@` is replaced by the path's own
+    [InlineData("bring &", "*kit.Shop.Api.&Crate", 6)]
+    [InlineData("emit @", "Hit", 6)]                        // a local name goes after the sigil, as before
+    [InlineData("bring ", "*kit.Shop.Api.&Crate", 6)]       // no sigil typed: nothing to take
+    public void A_qualified_completion_replaces_the_sigil_that_opened_it(string typed, string insert, int start)
+    {
+        // `@` + `Vein.Console.Io.@Print` was `@Vein.Console.Io.@Print`, which does not parse.
+        Assert.Equal(start, SourceEdits.CompletionStart(typed, typed.Length, insert));
+    }
+
     [Fact]
     public void An_uncommented_block_gets_commented()
     {

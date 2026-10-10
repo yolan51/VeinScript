@@ -77,6 +77,23 @@ public class ScopeIndexTests : IDisposable
     }
 
     [Fact]
+    public void Two_bundles_sharing_one_event_name_are_both_offered()
+    {
+        // Keyed by bare name, the second `@Dispatch` silently vanished from the `@` list — the one list a
+        // dev would open to find out that there are two.
+        File.WriteAllText(Path.Combine(_bundles, "Radio.vein"),
+            "bundle Radio by acme { publicator Wire { shared(\"r\") event @Dispatch { to: string } } }");
+        File.WriteAllText(Path.Combine(_bundles, "Courier.vein"),
+            "bundle Courier by zenith { publicator Post { shared(\"c\") event @Dispatch { parcel: int } } }");
+        BundleIndex.Invalidate(_bundles);
+
+        var all = Scope("bundle Game by you {\n  need \"acme.Radio\"\n  need \"zenith.Courier\"\n}", SymbolKind.Event);
+
+        var both = all.Where(e => e.Name == "Dispatch").Select(e => e.Qualified).OrderBy(q => q).ToArray();
+        Assert.Equal(new[] { "*acme.Radio.Wire.@Dispatch", "*zenith.Courier.Post.@Dispatch" }, both);
+    }
+
+    [Fact]
     public void A_shared_mark_is_offered_too()
     {
         Kit();

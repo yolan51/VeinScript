@@ -3562,7 +3562,7 @@ public partial class MainWindow : Window
                 // word after it, never the sigil itself.
                 Insert: bareOnly || entry.Local
                     ? entry.Name
-                    : entry.Qualified[1..],   // drop the leading `*`; `$`/`#`/`@` was the trigger char
+                    : entry.Qualified,          // the full `*path`; it replaces the typed sigil (SourceEdits.CompletionStart)
                 // The tooltip carries all three — kind, fields, doc. The doc goes separately into the
                 // ROW as well, because a tooltip is only read by someone who already guessed right.
                 Describe: (string?)entry.Describe(label),
@@ -3773,164 +3773,40 @@ public partial class MainWindow : Window
 
     private static bool IsIdent(char c) => char.IsLetterOrDigit(c) || c == '_';
 
-    /// What `bring` looks like before its arguments. Defined in EventCatalog so it is testable.
-    private const string BringHead = EventCatalog.BringHead;
-
-    /// Typing `?` right after `emit @Event` or `bring Builder` expands it into the field list, each
-    /// slot carrying a value you can edit. Leaves `?` as-is elsewhere.
+    /// `?` is the "show me the signature" key: right after `emit @E`, `start @E`, `bring X` or
+    /// `attach $S to e` it writes every field with its type and origin; typed again right after the
+    /// bracket (`??`) it compacts that onto one line; inside the braces or brackets it adds what is not
+    /// written yet. It is a SHORTCUT, never syntax — every outcome replaces or removes the `?`.
     ///
-    /// A SECOND `?` — typing `??` — gives the compact one-liner instead: `bring Unit(base, base)`, no
-    /// comments, for when you already know the signature and just want the slots. The expanded form is
-    /// for learning what a builder takes; this one is for filling it in.
+    /// The decisions live in `QuestionFill` (tested); this applies them. Resolution goes through
+    /// `Signatures` — the compiler's own lookup — so a kit in `bundles/`, a qualified path to a bundle this
+    /// file does not `need`, and an alias all expand the fields that will actually bind.
     private void TryExpandOnQuestion()
     {
         int q = _editor.CaretOffset - 1;             // the just-typed '?'
-        if (q < 0) return;
-        string before = _editor.Text[..q];
+        if (q < 0 || q >= _editor.Text.Length || _editor.Text[q] != '?') return;
 
-        // The first `?` already expanded, so a second one lands after the text it produced. Undo that
-        // expansion and redo it compactly, which is what makes `??` feel like one gesture rather than
-        // an edit on top of an edit.
-        if (TryCompactOnSecondQuestion(q)) return;
-
-        // `emit @Hit ?` or `emit *A.B.P.@Hit ?` — group 1 is the path when qualified, group 2 the name.
-        var emit = Regex.Match(before, @"emit\s+(?:\*([\w.]+)\.)?@(\w+)\s*$");
-        var start = Regex.Match(before, @"start\s+@(\w+)\s*$");   // a bundle's entry-point payload
-        var bring = Regex.Match(before, BringHead + @"\s*$");
-        if (!emit.Success && !start.Success && !bring.Success) { ShowFieldPicks(before); return; }
-
-        var ast = _service.Compile(new CompileRequest("untitled.vein", _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
-        if (ast is null) return;
-
-        string? body = emit.Success ? EmitBody(ast, emit.Groups[2].Value, emit.Groups[1].Success ? emit.Groups[1].Value : null)
-                     : start.Success ? EmitBody(ast, start.Groups[1].Value)   // start payload = the event's fields
-                     : BringBody(ast, bring.Groups["name"].Value, HeadPath(bring));
-        // `?` is documented for emit / start / bring — the sites that CONSTRUCT a payload. `hear` binds
-        // one instead, so there is nothing to fill; its fields surface through `<binding>.` completion.
-        if (body is null) return;
-
-        // Line the expansion up under the statement it belongs to. It was written flush left, so inside a
-        // shard the fields and the closing bracket landed at column 0.
-        var line = _editor.Document.GetLineByOffset(q);
-        string lineText = _editor.Document.GetText(line.Offset, line.Length);
-        string indent = lineText[..(lineText.Length - lineText.TrimStart().Length)];
-        if (indent.Length > 0) body = body.Replace("\n", "\n" + indent);
-
-        _editor.Document.Replace(q, 1, body);          // replace the '?' with the expansion
-        int hole = body.IndexOf('?');                  // caret at the first required hole
-        // No hole: land just after the closing bracket — which for a `bring` now sits mid-line, before the last
-        // slot's comment — so a second `?` there compacts it, as it did when the `)` ended the text.
-        int closeAt = body.LastIndexOf("base)", StringComparison.Ordinal);
-        int close = bring.Success && !emit.Success && !start.Success && closeAt >= 0 ? closeAt + 5 : body.Length;
-        _editor.CaretOffset = q + (hole >= 0 ? hole : close);
-    }
-
-    // Both go through EventCatalog with the project dir, so `?` sees what the COMPILER sees — including
-    // the shared events and builders of NEEDED bundles. The Workbench used to reach a builder through a
-    // private FindBuilder/BuilderParams pair that walked the local AST only, so `bring Button ?` against
-    // anything from `need "Vein.Web"` silently expanded to nothing: the one case a `?` is most wanted in.
-    /// `?` typed INSIDE `emit @E { … }` or `bring X( … )`: offer the fields, each showing its type and
-    /// the `$Shape` it came from. A popup, not an expansion — inside a payload `?` is the documented
-    /// fill-the-rest token (`emit @Damaged { amount: 5, ? }`), so dismissing the list has to leave the
-    /// `?` exactly where it was. Picking an entry is a deliberate act and replaces it with `name: `.
-    private void ShowFieldPicks(string before)
-    {
-        var ast = _service.Compile(new CompileRequest("untitled.vein", _editor.Text,
+        // Resolve against the text WITHOUT the `?`: it is a keystroke, and where the parser would reject it
+        // (inside an argument list, after an attach) it must not cost the declarations around it.
+        string without = _editor.Text.Remove(q, 1);
+        var ast = _service.Compile(new CompileRequest("untitled.vein", without,
             ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
-        if (ast is null) return;
+        int line = _editor.Document.GetLineByOffset(q).LineNumber;
 
-        // A `(` opening closer than the innermost `{` means we are in an argument list, not a payload.
-        var (builder, _) = EnclosingBuilderArg(before, before.Length);
-        int brace = LastOpen(before, '{', '}');
-        int paren = LastOpen(before, '(', ')');
-
-        IReadOnlyList<EventField>? fields = null;
-        if (builder is not null && paren > brace)
-            fields = EventCatalog.Builders(ast, ProjectDir).FirstOrDefault(b => b.Name == builder)?.Fields;
-        else if (brace >= 0)
+        switch (QuestionFill.Plan(_editor.Text, q, Signatures.For(ast, ProjectDir, line)))
         {
-            var head = Regex.Match(before[..brace], @"(?:emit|start)\s+@(\w+)\s*$");
-            if (head.Success)
-                fields = EventCatalog.Catalog(ast, ProjectDir).FirstOrDefault(e => e.Name == head.Groups[1].Value)?.Fields;
+            case FillEdit edit:
+                _editor.Document.Replace(edit.Start, edit.Length, edit.Text);
+                _editor.CaretOffset = Math.Min(edit.Caret, _editor.Document.TextLength);
+                SetStatus(edit.Status);
+                break;
+            case FillProblem problem:
+                _editor.Document.Remove(problem.At, 1);
+                _editor.CaretOffset = problem.At;
+                SetStatus(problem.Status);
+                break;
         }
-        if (fields is null || fields.Count == 0) return;
-
-        // Drop the ones already written in this payload — the list is what is LEFT to fill.
-        string open = brace > paren ? before[(brace + 1)..] : before[(paren + 1)..];
-        var picks = EventCatalog.FieldPicks(fields)
-            .Where(p => !Regex.IsMatch(open, @"\b" + Regex.Escape(p.Insert.TrimEnd(' ', ':')) + @"\s*:"))
-            .ToList();
-        if (picks.Count == 0) return;
-
-        _completion = new CompletionWindow(_editor.TextArea);
-        SizeCompletion(_completion);
-        _completion.CompletionList.IsFiltering = true;
-        foreach (var (label, insert) in picks)
-            _completion.CompletionList.CompletionData.Add(new VeinCompletion(label, "field", insert));
-        _completion.Closed += (_, _) => _completion = null;
-        _completion.Show();
     }
-
-    /// Offset of the innermost unclosed `open` before the end of `text`, or -1.
-    private static int LastOpen(string text, char open, char close)
-    {
-        int depth = 0;
-        for (int i = text.Length - 1; i >= 0; i--)
-        {
-            if (text[i] == close) depth++;
-            else if (text[i] == open) { if (depth == 0) return i; depth--; }
-        }
-        return -1;
-    }
-
-    /// `??` on a builder: replace the expansion the first `?` just made with the one-line form.
-    ///
-    /// Recognised by looking BACK from the caret for `bring X(` — the text the first `?` wrote — rather
-    /// than by remembering that an expansion happened. State would go stale the moment someone typed
-    /// anything between the two, and reading the document cannot.
-    private bool TryCompactOnSecondQuestion(int q)
-    {
-        string text = _editor.Text;
-
-        // `bring Unit(` … caret. Everything from the `(` to the matching `)` is what we replace.
-        var open = Regex.Match(text[..q], BringHead + @"\s*\($", RegexOptions.RightToLeft);
-        if (!open.Success)
-        {
-            // Or the whole expanded block is already there and the caret sits inside it.
-            open = Regex.Match(text[..q], BringHead + @"\s*\(", RegexOptions.RightToLeft);
-            if (!open.Success) return false;
-        }
-
-        int lparen = text.IndexOf('(', open.Index);
-        if (lparen < 0) return false;
-
-        int rparen = BracketMatcher.Match(text, lparen) is { } pair && pair.Close > lparen ? pair.Close : -1;
-        if (rparen < 0 || rparen < q - 1) return false;
-
-        var ast = _service.Compile(new CompileRequest("untitled.vein", text,
-            ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
-        if (ast is null) return false;
-
-        if (BringBody(ast, open.Groups["name"].Value, HeadPath(open), compact: true) is not { } compact) return false;
-
-        // Drop the just-typed `?` along with the block it followed.
-        _editor.Document.Replace(lparen, rparen - lparen + 1, compact);
-        _editor.CaretOffset = lparen + compact.Length;
-        SetStatus($"bring {open.Groups["name"].Value}{compact} — every slot is its declared default; replace the ones you mean.");
-        return true;
-    }
-
-    private static string[] HeadPath(Match m) => m.Groups["path"].Success ? m.Groups["path"].Value.Split('.') : Array.Empty<string>();
-
-    // Both resolve through `Signatures` — the compiler's own lookup — so a qualified head reaches a bundle
-    // this file does not `need`, and a name two needed bundles share is not silently one of them.
-    private string? EmitBody(CompilationUnit ast, string eventName, string? path = null) =>
-        Signatures.For(ast, ProjectDir).Event(path is null ? Array.Empty<string>() : path.Split('.'), eventName).Hit is { } ev
-            ? EventCatalog.Body(ev.Fields) : null;
-
-    private string? BringBody(CompilationUnit ast, string builderName, string[] path, bool compact = false) =>
-        Signatures.For(ast, ProjectDir).Builder(path, builderName).Hit is { } b
-            ? EventCatalog.Args(b.Fields, compact) : null;
 
     private static BuilderDecl? FindBuilder(CompilationUnit ast, string name)
     {
@@ -3983,7 +3859,7 @@ public partial class MainWindow : Window
         if (ast is not null)
             foreach (var entry in ScopeIndex.For(ast, SymbolKind.Builder, ProjectDir))
                 if (known.Add(entry.Name))
-                    local.Add((entry.Label, entry.Qualified[1..]));   // `bring *A.B.P.&Name(…)`
+                    local.Add((entry.Label, entry.Qualified));   // `bring *A.B.P.&Name(…)`, replacing a typed `&`
 
         ShowCompletion(local, "builder");
     }

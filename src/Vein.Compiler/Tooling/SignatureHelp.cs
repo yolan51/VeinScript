@@ -141,7 +141,7 @@ public static class SignatureHelp
 
     /// Whether the offset falls inside a string literal on its own line. Line-scoped because VeinScript
     /// has no multi-line strings, and scanning from the top per character would be quadratic.
-    private static bool InString(string source, int at)
+    internal static bool InString(string source, int at)
     {
         int lineStart = source.LastIndexOf('\n', Math.Max(0, Math.Min(at, source.Length - 1))) + 1;
         bool inString = false;

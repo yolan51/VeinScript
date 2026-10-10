@@ -124,10 +124,13 @@ public static class ScopeIndex
 
         var needs = Needs(unit);
         var index = Index(projectDir);
+        var localNames = byName.Keys.ToHashSet(StringComparer.Ordinal);
         foreach (var s in Shared(projectDir, kind))
         {
-            if (byName.ContainsKey(s.Name)) continue;   // local wins
-            byName[s.Name] = new ScopeEntry(
+            if (localNames.Contains(s.Name)) continue;   // local wins
+            // Keyed by the QUALIFIED name: two bundles sharing `@Dispatch` are two entries, each insertable
+            // by its path. Keyed by the bare name, the second silently vanished from the list.
+            byName[s.QualifiedName] = new ScopeEntry(
                 s.Name, sigil,
                 Origin: string.Join(".", s.PathSegments),
                 Qualified: s.QualifiedName,
