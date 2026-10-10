@@ -1,0 +1,14 @@
+# vein.discovery — what the editor's `*`, `$`, `#`, `@` and `&` lists OFFER in this project.
+#
+# Without this file, kit_fill inherits samples/vein.discovery one folder up, which says `silent all` and
+# exposes only Vein.Console and Vein.Math — so typing `*` here listed no `kit.Shop` at all, even though
+# every reference to it compiles and runs. The nearest policy wins, and this is it.
+#
+# Only what is OFFERED changes: `shared("…")` still decides what may be used, and `need "kit.Shop"` what a
+# bare name means. Delete the `expose kit.Shop` line and `*` stops listing the kit, while the game builds
+# exactly as before.
+
+silent all
+
+expose kit.Shop            # the installed kit — `*kit.Shop.Api.@Sold`, `&Crate`, `$Price`, …
+expose Vein.Console        # `@Print`, which the game emits to
