@@ -115,7 +115,7 @@ publicator); `veinc symbols` validates every qualified reference resolves to exa
 boot event the runtime fires first (instead of the default `@Request { path }`). A bundle with **no**
 `start` is purely reactive — it only `hear`s events others emit. An app has no boot event of its own — it
 boots each loaded bundle that has a `start`, optionally overriding the payload at the load site
-(`load "f" start { … }`). The body is emit-style, so `?` fill-the-rest works, and `veinc render … --set
+(`load "f" start { … }`). The body is emit-style (a field may be `base`, its declared default), and `veinc render … --set
 field=value` overrides payload fields at boot (see [RUNTIME.md](RUNTIME.md)):
 
 ```
@@ -300,7 +300,7 @@ event @MouseDown { *Vein.Math.Values.$Vec2, button: int }   // → x: float, y: 
 > reports `VS0210: Unknown shape`. Within the declaring file, a bare `$Shape` include needs no `shared`.
 
 `=` marks a member **defaulted** (optional, overridable); no `=` marks it **required**. `veinc events`
-and the `?` fill-the-rest sigil report and satisfy exactly the members listed here (with `$Shape`
+and the Workbench's `?` report exactly the members listed here (with `$Shape`
 includes expanded to their fields); the catalog records which shape each reused field came from.
 
 **Provenance — always present.** Beyond the fields you declare, the runtime auto-attaches a **provenance
@@ -366,7 +366,7 @@ builder Console { name: string, firsttext: string }  // no channel ⇒ bring Con
 There is no `( )` parameter list and no trailing kind keyword. Instantiate with `bring` (§4), which
 binds arguments positionally to the parameters (every member except the output field, with `$Shape`
 includes expanded), fills defaults, and emits the output event. `bring N Name(…)` repeats N times;
-`?` fills the rest.
+`base` in a slot takes that parameter's declared default — also as a field value in `emit`, `start` and `attach`.
 
 **Identity templates.** A `mark #M` member — the `mark` statement (§4) minus its target, because inside
 a template the target is the identity being built — makes the builder construct an identity:

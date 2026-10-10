@@ -517,9 +517,10 @@ fire before the program runs, and the Workbench shows them because they are ordi
 | literal of the wrong kind | **VS0230** | warning — `bring Row(42, "words")` |
 | a `bundles/` member's parameters moved since `vein.lock` | **VS0344** | error — fix the call, then `veinc lock` (20a) |
 | a `bundles/` member otherwise changed since `vein.lock` | **VS0345** | warning (20a) |
+| a `?` saved in a file | **VS0347** | error — the Quick Fix writes the fields `?` stood for |
 
-`?` (FillRest) and a parameter with a **default** are the two ways to say "fewer on purpose", and
-neither is reported. An `int` where a `float` is declared is widening, not a mismatch.
+A parameter with a **default**, `base` in its slot, and an explicit empty value (`""`, `0`) are the ways to say "fewer on purpose", and
+none is reported. A saved `?` is **VS0347**: `?` is the Workbench's key for writing a signature out (TOOLING.md), not syntax. An `int` where a `float` is declared is widening, not a mismatch.
 
 **What is deliberately NOT checked**, each for a reason:
 

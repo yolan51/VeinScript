@@ -43,102 +43,77 @@ $ veinc events samples/payload.vein
 `--json` prints the same data (`{Name, Shared, Fields:[{Name, Type, Required, Default}]}`) — the seam
 an editor consumes for the `@` completion list.
 
-## `?` — fill-the-rest (emit / bring)
+## `?` — fill the signature (Workbench)
 
-For quick/testing code, `?` fills every field or param you didn't supply: its **default** if it has
-one, else a **typed zero placeholder** (`0`, `0.0`, `false`, `""`) so it compiles and runs even for
-required fields. You still override only what matters.
+`?` is the Workbench's key for **seeing what something takes** — an event's payload, a builder's slots, a
+shape's fields — wherever it is declared: this file, a kit in `bundles/`, the standard library. It is a
+**shortcut, not VeinScript**: whatever it does, no `?` stays in the file. One saved in a file is **VS0347**,
+and its Quick Fix does what the key would have done.
 
-```
-emit @Damaged { amount: 5, ? }   // amount=5; victim (required) -> placeholder; others -> defaults
-emit @Damaged ?                  // fill everything
-bring Row("hi", ?)               // supply the first param, placeholder the rest
-bring Button ?                   // placeholder all params
-```
+| typed | writes |
+|---|---|
+| `emit @Sold ?` / `start @Sold ?` | the whole payload, one field per line |
+| `bring Crate ?` | the whole argument list, in the order `bring` binds it |
+| `attach $Price to e ?` | the shape's fields |
+| `??` right after that bracket | the same, on one line |
+| `?` inside `{ … }` or `( … )` | only the fields or slots not written yet |
 
-Semantics match the required/defaulted rule: a field/param **with a default is optional** (`?` uses
-the default), one **without a default is required** (`?` uses the placeholder). Replace the
-placeholders with real values as needed; without `?`, omitted fields still fill from defaults +
-context (the current event/locals), just not with placeholders. The `?` shows in the IR as
-`fill=?` on the `Emit`/`Bring` node.
-
-**In the Workbench**, typing `?` right after `emit @Event`, `start @Event` or `bring Builder` *expands*
-it into the field list, each field labelled with its type and — when it arrived through an include —
-**the `$Shape` it came from**. That provenance is the point: an include flattens someone else's shape
-into this payload, so those field names appear in no declaration on screen.
+**One rule for every kind.** A REQUIRED field gets its type's empty value — `""`, `0`, `0.0`, `false` — and
+a comment saying REQUIRED, so the placeholder you still have to replace is visible. An OPTIONAL field gets
+`base`: "the default the declaring bundle chose". `base` keeps following that bundle; copying today's value
+would freeze it into your call.
 
 ```
-emit @Moved ?        ->  emit @Moved {
-                             x: ?      // required — float   from $Pos
-                             y: ?      // required — float   from $Pos
-                             who: ?    // required — string
-                             fast: ?   // optional — bool = false
-                         }
+emit @Sold ?    ->  emit @Sold {
+                        amount: 0      // required — int   from $Price
+                        item: ""      // required — string
+                        currency: base      // optional — string = "EUR"   from $Price
+                    }
 
-bring Button ?       ->  bring Button(
-                             ?,     // label: string   from $Vein.UI.Widgets.Button
-                             ?      // id: string      from $Vein.UI.Widgets.Button
-                         )
+bring Crate ?   ->  bring Crate(
+                        0,        // amount: int   from $Price   REQUIRED — give it a value
+                        base,     // currency: string   from $Price   optional — default "EUR"
+                        base)     // count: int   from $Stock   optional — default 1
 ```
 
-Required fields come first and the caret lands on the first hole. This is the same body
-`veinc scaffold` prints — one format, one implementation.
+`from $Price` is the point: an include flattens someone else's shape into the payload, so those names
+appear in no declaration on screen. `base` is legal as a `bring` argument and as a field value in `emit`,
+`start` and `attach` — always the declared default.
 
-Typed **inside** a payload or argument list, `?` opens a completion list of the fields still unfilled,
-each showing its type and origin shape. It is a list, not an expansion: `?` there is the fill-the-rest
-token above (`emit @Damaged { amount: 5, ? }`), so dismissing the popup leaves it untouched. Picking an
-entry replaces it with `name: `.
+**Any reference resolves**, through the compiler's own lookup: a bare name a `need` widened, a qualified
+`*kit.Shop.Api.@Sold` (no `need` required), an alias's `*S.Api.&Crate`. A bare name two needed bundles
+both export is ambiguous (VS0216): `?` inserts nothing and the status bar names both paths.
 
-Both see what the compiler sees, including the shared events and builders of `use`d bundles — so
-`bring Button ?` works on a builder you did not write, which is the case it exists for.
+Hover gives the same answer without writing anything: a reference shows its fields, types, origins and
+doc; an argument shows the slot it fills; a payload field shows its type. `samples/kit_fill` is the worked
+example — a kit written by someone else, used without opening it.
 
-## `veinc scaffold <file> <@Event | &Builder>`
+## `veinc scaffold <file> <ref> [--json]` — the same, outside the Workbench
 
-Prints a paste-ready `emit` body with **required fields first**, each a `?` placeholder plus a label,
-so you only replace what you need:
-
-```
-$ veinc scaffold samples/events.vein Damage
-emit @Damage {
-    amount: ?      // required — int
-}
-
-$ veinc scaffold samples/payload.vein Hit
-emit @Hit {
-    amount: ?      // optional — default 1
-}
-```
-
-The scaffold is a snippet: it deliberately isn't valid VeinScript until you replace the `?`s. Replace
-them (or delete the optional lines to accept defaults), and it parses/renders like any `emit`.
-
-### Builders — `veinc scaffold <file> <&Builder>`
-
-The same for a `bring`, and this is where it earns the most. A builder's parameters are its members with
-`$Shape` **includes flattened**, so the field names live one level down in the shape — and for a
-`shared` builder the declaration is in another bundle entirely. The scaffold names every slot, in the
-order `bring` binds them, with the shape each came from:
+For VS Code or any terminal: prints exactly what `?` would insert, for any reference the file can reach.
 
 ```
-$ veinc scaffold samples/entities_template.vein Unit
-// &Unit builds an identity #Unit
-bring Unit(
-    ?,     // hp: int   from $Health
-    ?      // sp: int   from $Shield
-)
-
-$ veinc scaffold stdlib/Web.vein '&Image'
-// &Image builds @Html
-bring Image(
-    ?,     // source: string   from $Vein.UI.Widgets.Image
-    ?      // alt: string
-)
+$ veinc scaffold samples/kit_fill/game.vein '&Crate'
+// &Crate builds an identity #Crate   (*kit.Shop.Api.&Crate)
+bring Crate(
+    0,        // amount: int   from $Price   REQUIRED — give it a value
+    base,     // currency: string   from $Price   optional — default "EUR"
+    base)     // count: int   from $Stock   optional — default 1
 ```
 
-The sigil picks the catalog — `@Name` an event, `&Name` a builder — and a bare name tries the event
-first, then the builder. `bring X ?` is the same list written at the call site: it fills every remaining
-parameter with its type's zero, which is what makes it useful for seeing the shape of a call before you
-know the values.
+The reference is `@Event`, `&Builder`, `$Shape`, a bare name (tries event, builder, shape), or a path —
+`'*kit.Shop.Api.@Sold'`, an alias's `'*S.Api.&Crate'`. **Quote it**, in PowerShell and bash alike: `$` and
+`&` mean something to both. A shape prints its `attach` form, the marks it brings, and — asked by path —
+the `need` that makes its bare name usable (`attach` takes bare shapes, RULES 17b). An ambiguous name
+exits 2 with one ready-to-run command per candidate; an unknown one lists what is in scope. `--json`
+gives the fields for a tool to read.
+
+To run it on the selected name from VS Code, a task:
+
+```json
+{ "label": "veinc scaffold", "type": "process", "command": "veinc",
+  "args": ["scaffold", "${file}", "${selectedText}"] }
+```
 
 ## `veinc symbols <app.vein> [--json]` — cross-bundle discovery
 
