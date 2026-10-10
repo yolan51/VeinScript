@@ -3595,7 +3595,32 @@ public partial class MainWindow : Window
         var tvp = _editor.GetPositionFromPoint(e.GetPosition(_editor));
         if (tvp is null) { ToolTip.SetTip(_editor, null); return; }
         int offset = _editor.Document.GetOffset(tvp.Value.Line, tvp.Value.Column);
-        ToolTip.SetTip(_editor, ResolveHover(offset));
+        ToolTip.SetTip(_editor, NoteAt(offset) ?? ResolveHover(offset));
+    }
+
+    /// The short words a NOTE's underline stands for, when the pointer is on one. The full sentence is in
+    /// the Diagnostics panel; on the line itself, a glance is enough.
+    private static readonly Dictionary<string, string> NoteTips = new(StringComparer.Ordinal)
+    {
+        ["VS0348"] = "Overriding shape",
+    };
+
+    private string? NoteAt(int offset)
+    {
+        var doc = _editor.Document;
+        string? here = _currentPath is null ? null : Path.GetFileName(_currentPath);
+        foreach (var d in _diags)
+        {
+            if (d.Severity != Severity.Info || !NoteTips.TryGetValue(d.Code, out var tip)) continue;
+            if (!string.IsNullOrEmpty(d.Span.File) && here is not null
+                && !string.Equals(Path.GetFileName(d.Span.File), here, StringComparison.OrdinalIgnoreCase)) continue;
+            if (d.Span.Line < 1 || d.Span.Line > doc.LineCount) continue;
+
+            int start;
+            try { start = doc.GetOffset(d.Span.Line, Math.Max(1, d.Span.Col)); } catch { continue; }
+            if (offset >= start && offset <= start + Math.Max(1, d.Span.Length)) return tip;
+        }
+        return null;
     }
 
     private void EnsureHoverModel()

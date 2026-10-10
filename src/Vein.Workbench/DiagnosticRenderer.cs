@@ -43,7 +43,9 @@ public sealed class DiagnosticRenderer : IBackgroundRenderer
         var error = new Pen(Brushes.OrangeRed, 2);
         var warning = new Pen(new SolidColorBrush(Color.Parse("#E0A33C")), 2);
         // A NOTE is not a problem — a fact about the line — so it is quieter: thin, dotted, blue.
-        var note = new Pen(new SolidColorBrush(Color.Parse("#4FA3E0")), 1) { DashStyle = DashStyle.Dot };
+        // Explicit 2px dashes: the built-in DashStyle.Dot is ZERO-length dashes, which draw nothing with
+        // the default flat line cap — the note was there and invisible.
+        var note = new Pen(new SolidColorBrush(Color.Parse("#4FA3E0")), 1.5) { DashStyle = new DashStyle(new[] { 2.0, 2.0 }, 0) };
         int docLength = textView.Document?.TextLength ?? 0;
 
         foreach (var (offset, length, severity) in Marks)
