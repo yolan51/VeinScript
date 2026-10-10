@@ -1,0 +1,58 @@
+// event_shape.vein — an EVENT can include a `$Shape`, exactly as a builder can.
+//
+//   veinc render samples/event_shape.vein
+//   veinc render samples/event_shape.vein --set players=4      (override one shape field at boot)
+//
+// → HTTP 200   "duel seed=42 players=2 at 1.5,-2"     (players=4 with the --set)
+//
+// WHY A SHAPE IN AN EVENT. `$Rules` below is declared ONCE and reused by two events. Re-typing
+// `seed: int, players: int` into each would be two declarations of one idea, and the day `$Rules` gains a
+// field only the copy you remembered would carry it. The include is a COMPILE-TIME field copy (RULES 8,
+// 15b): the event ends up with the shape's fields as its own, defaults included.
+//
+// What it shows, in the order the program runs:
+//
+//   1. `event @NewGame { $Rules, mode: string }` — `start` fills it BY NAME, and `players` comes from the
+//      shape's default because nothing names it. `--set players=4` overrides it like any boot field.
+//   2. A `hear` reads the fields FLAT: `g.seed`, not `g.Rules.seed`. The include copied fields into the
+//      event; it did not nest a shape inside it.
+//   3. `event @Placed { $Rules, *Vein.Math.Values.$Vec2, label: string }` — two includes, one of them from
+//      the standard library by its qualified path. There is no "pass the whole shape" at an emit: every
+//      field is named, which is the price of reading them flat.
+//   4. `builder Ping { *Vein.Math.Values.$Vec2, note: string }` — a builder with no output field and no
+//      `mark` emits an event named after ITSELF carrying its parameters (RULES 5). So `bring Ping(x, y, …)`
+//      is a POSITIONAL constructor for `@Ping`, and the shape decides the order of its first arguments.
+
+bundle EventShapes by you {
+
+    // The vocabulary. A shape is data an identity could carry; here nothing attaches it at all — it is
+    // used purely as a reusable field list.
+    shape $Rules { seed: int, players: int = 2 }
+
+    // Boot. Named fields, any order; the missing `players` takes the shape's default.
+    start @NewGame { seed: 42, mode: "duel" }
+
+    event @NewGame  { $Rules, mode: string }
+    event @Placed   { $Rules, *Vein.Math.Values.$Vec2, label: string }
+    event @Response { status: int, body: string }
+
+    builder Ping { *Vein.Math.Values.$Vec2, note: string }
+
+    shard Board {
+        // 2 + 3 — read flat, and hand the shape's fields on by name.
+        hear @NewGame as g {
+            emit @Placed { seed: g.seed, players: g.players, x: 1.5, y: -2.0, label: g.mode }
+        }
+
+        // 4 — the same values, now passed POSITIONALLY: x and y come first because `$Vec2` is first.
+        hear @Placed as p {
+            bring Ping(p.x, p.y, p.label + " seed=" + p.seed + " players=" + p.players)
+        }
+
+        // The last link answers the request. Each event carried forward what the next one needed — there
+        // is no shared variable to stash it in, and that is the point of a payload.
+        hear @Ping as k {
+            emit @Response { status: 200, body: k.note + " at " + k.x + "," + k.y }
+        }
+    }
+}
