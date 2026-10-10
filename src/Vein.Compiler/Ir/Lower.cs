@@ -257,7 +257,7 @@ public sealed partial class Lower
         }
         var start = startDecl is null ? null : new IrStart(
             EventKey(startDecl.EventPath, startDecl.Event),
-            startDecl.Fields.Select(f => (f.Name, LowerExpr(f.Value))).ToList(),
+            LowerNamedFields(startDecl.Fields, () => EventFields(startDecl.EventPath, startDecl.Event), "@" + startDecl.Event),
             startDecl.FillRest);
 
         // A DECLARED mark exists whether or not this bundle uses it: the tag type is emitted so the engine
@@ -1785,7 +1785,8 @@ public sealed partial class Lower
                 RegisterImportedEvent(em.EventPath, em.Event);
                 NoteEventUse(em.EventPath, em.Event);
                 return new IrExprStmt(new IrRuntimeCall("Emit",
-                    new IrExpr[] { new IrStructInit(EventKey(em.EventPath, em.Event), em.Fields.Select(LowerFieldInit).ToList(), em.FillRest) }));
+                    new IrExpr[] { new IrStructInit(EventKey(em.EventPath, em.Event),
+                        LowerNamedFields(em.Fields, () => EventFields(em.EventPath, em.Event), "@" + em.Event), em.FillRest) }));
             case DestroyStmt d:
                 return new IrExprStmt(new IrRuntimeCall("DestroyEntity", new[] { LowerExpr(d.Target) }));
             case AttachStmt at:
@@ -1813,7 +1814,7 @@ public sealed partial class Lower
 
                 IrExpr init = at.Init is null
                     ? new IrTypeNameExpr(at.Shape)
-                    : new IrStructInit(at.Shape, at.Init.Select(LowerFieldInit).ToList());
+                    : new IrStructInit(at.Shape, LowerNamedFields(at.Init, () => ShapeFieldList(at.Shape), "$" + at.Shape));
                 return WithShapeMarks(
                     new IrExprStmt(new IrRuntimeCall("AddComponent",
                         new IrExpr[] { LowerExpr(at.Target), init })),
@@ -2317,6 +2318,46 @@ public sealed partial class Lower
 
     private (string, IrExpr) LowerFieldInit(FieldInit f) => (f.Name, LowerExpr(f.Value));
 
+    /// Named fields — an `emit`/`start` payload or an `attach` body — where a value may be `base`: the
+    /// default the FIELD is declared with, which is what `base` means for a `bring` argument too. Resolved
+    /// here, at compile time, so the interpreter and the C# backend both see an ordinary expression.
+    ///
+    /// `declared` is asked only when some value is `base`, and quietly: the code that lowers the statement
+    /// has already resolved the same declaration with its warnings.
+    private List<(string, IrExpr)> LowerNamedFields(
+        IEnumerable<FieldInit> fields, Func<IReadOnlyList<(string Name, TypeRef? Type, Expr? Default, string? From)>?> declared,
+        string owner)
+    {
+        IReadOnlyList<(string Name, TypeRef? Type, Expr? Default, string? From)>? decl = null;
+        var list = new List<(string, IrExpr)>();
+        foreach (var f in fields)
+        {
+            if (f.Value is not DefaultArgExpr d) { list.Add(LowerFieldInit(f)); continue; }
+
+            decl ??= declared() ?? Array.Empty<(string, TypeRef?, Expr?, string?)>();
+            var field = decl.FirstOrDefault(p => p.Name == f.Name);
+            if (field.Default is { } value) { list.Add((f.Name, LowerExpr(value))); continue; }
+
+            // Not silently a zero — `base` claims there is a default to take (the same as VS0231 at a bring).
+            if (field.Name is not null)
+                _diag.Warning("VS0231",
+                    $"{owner} field '{f.Name}' has no default, so `base` fills it with a typed zero. " +
+                    "Give the field a default in its declaration, or write a value.", d.Span);
+            list.Add((f.Name, ZeroLiteral(field.Type?.Name ?? "string")));
+        }
+        return list;
+    }
+
+    private IReadOnlyList<(string Name, TypeRef? Type, Expr? Default, string? From)>? EventFields(
+        IReadOnlyList<string> path, string name) =>
+        ResolveEventOwned(path, name, report: false) is { Decl: { } decl } owned
+            ? ExpandMembers(decl.Members, owned.Key, report: false)
+            : null;
+
+    private IReadOnlyList<(string Name, TypeRef? Type, Expr? Default, string? From)>? ShapeFieldList(string shape) =>
+        IncludeFields(new ShapeInclude(shape, null, null, default), null, report: false).Fields?
+            .Select(f => (f.Name, f.Type, f.Default, (string?)null)).ToList();
+
     // ---- expressions ----------------------------------------------------
 
     private IrExpr LowerExpr(Expr e)
@@ -2471,8 +2512,9 @@ public sealed partial class Lower
             // about where it was written, not about what it is.
             case DefaultArgExpr:
                 _diag.Error("VS0232",
-                    "`base` means \"this parameter's declared default\", so it only has a meaning as a " +
-                    "`bring` argument. There is no parameter here for it to take a default from.", e.Span);
+                    "`base` means \"the declared default\", so it only has a meaning as a `bring` argument or " +
+                    "as a field value in `emit`, `start` or `attach`. There is nothing here for it to take a " +
+                    "default from.", e.Span);
                 return new IrLiteral(null, IrLiteralKind.Int);
 
             default:

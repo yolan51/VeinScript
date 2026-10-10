@@ -938,7 +938,7 @@ public sealed class Parser
                     var fs = Here;
                     string name = ExpectName("field name").Text;
                     Expect(TokenKind.Colon, "':'");
-                    fields.Add(new FieldInit(name, ParseExpr(), fs));
+                    fields.Add(new FieldInit(name, ParseFieldValue(), fs));
                 }
                 Match(TokenKind.Comma);
                 SkipTerms();
@@ -1323,12 +1323,24 @@ public sealed class Parser
             var s = Here;
             string name = ExpectName("field name").Text;
             Expect(TokenKind.Colon, "':'");
-            fields.Add(new FieldInit(name, ParseExpr(), s));
+            fields.Add(new FieldInit(name, ParseFieldValue(), s));
             if (!Match(TokenKind.Comma)) { }
             SkipTerms();
         }
         Expect(TokenKind.RBrace, "'}'");
         return fields;
+    }
+
+    /// A named field's value: an expression, or `base` — "the default this field is declared with", the
+    /// same word a `bring` argument uses for its parameter's default. So `emit @Sold { currency: base }`
+    /// keeps whatever the bundle that declared @Sold chose, and the Workbench's `?` can write `base` for
+    /// every optional field of an event, a shape or a builder alike.
+    private Expr ParseFieldValue()
+    {
+        if (!Check(TokenKind.KwBase)) return ParseExpr();
+        var s = Here;
+        Advance();
+        return new DefaultArgExpr(s);
     }
 
     // ---- error recovery -------------------------------------------------

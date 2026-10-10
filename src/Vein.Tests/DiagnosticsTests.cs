@@ -400,6 +400,57 @@ public class DiagnosticsTests
         Assert.Contains(d, x => x.Code == "VS0229");
     }
 
+    // ---- `base` as a field value: the declared default, in a payload or an attach ------------------------
+
+    [Fact]
+    public void Base_in_an_emit_payload_is_the_events_declared_default()
+    {
+        // The Workbench's `?` writes `base` for every optional field, so it has to mean in a payload what
+        // it means at a bring: the default the declaration chose — not a copy of today's value.
+        var output = Run(
+            "  event @Order { item: string, qty: int = 3 }\n" +
+            "  shard S { run once { emit @Order { item: \"nuts\", qty: base } } }\n" +
+            "  shard H { hear @Order as o { " + P("o.item + \" x\" + o.qty") + " } }");
+
+        Assert.Contains("nuts x3", output);
+    }
+
+    [Fact]
+    public void Base_in_an_attach_is_the_shapes_declared_default()
+    {
+        var output = Run(
+            "  shape $Price { amount: int, currency: string = \"EUR\" }\n" +
+            "  shard S { run once { let e = spawn()\n    attach $Price to e { amount: 4, currency: base } } }\n" +
+            "  shard R { each tick { target $Price as p { " + P("p.Price.amount + \" \" + p.Price.currency") + " } } }");
+
+        Assert.Contains("4 EUR", output);
+    }
+
+    [Fact]
+    public void Base_in_a_start_payload_is_the_default_too()
+    {
+        var r = new VeinCompilerService().Compile(new CompileRequest("t.vein",
+            "bundle T by me {\n  start @Go { seed: base }\n  event @Go { seed: int = 7 }\n" +
+            "  event @Response { status: int, body: string }\n" +
+            "  shard K { hear @Go as g { emit @Response { status: 200, body: \"seed=\" + g.seed } } }\n}"));
+        Assert.True(r.Success, string.Join("\n", r.Diagnostics));
+        Assert.Contains("seed=7", new Interp().Render(r.Modules[0], "/").Body);
+    }
+
+    [Fact]
+    public void Base_on_a_field_with_no_default_is_VS0231_and_a_typed_zero()
+    {
+        var d = Diagnose("  event @Order { item: string, qty: int }\n  shard S { run once { emit @Order { item: \"x\", qty: base } } }");
+        Assert.Contains(d, x => x.Code == "VS0231" && x.Message.Contains("'qty'"));
+    }
+
+    [Fact]
+    public void Base_outside_a_field_or_an_argument_still_means_nothing()
+    {
+        var d = Diagnose("  shape $P { a: int = 1 }\n  shard S { run once { let x = P { a: base } } }");
+        Assert.Contains(d, x => x.Code == "VS0232");
+    }
+
     [Fact]
     public void Two_builders_with_one_name_are_VS0320_not_an_overload()
     {

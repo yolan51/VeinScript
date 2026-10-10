@@ -98,7 +98,7 @@ public class QuestionFillTests : IDisposable
 
         Assert.Contains("amount: 0      // required — int   from $Price", after);
         Assert.Contains("item: \"\"      // required — string", after);
-        Assert.Contains("currency: \"EUR\"      // optional — string = \"EUR\"   from $Price", after);
+        Assert.Contains("currency: base      // optional — string = \"EUR\"   from $Price", after);   // the kit's default, kept
         Assert.Empty(Errors(after));
     }
 
@@ -141,7 +141,9 @@ public class QuestionFillTests : IDisposable
     {
         string after = Expand(Game("  shard S { run once {\n" + line + "\n  } }", needs));
 
-        Assert.Contains("base,     // amount: int   from $Price   REQUIRED — give it a value", after);
+        // Required: a typed empty value. Optional: `base`, the kit's own default.
+        Assert.Matches(@"0,\s+// amount: int   from \$Price   REQUIRED — give it a value", after);
+        Assert.Contains("base,     // currency: string   from $Price   optional — default \"EUR\"", after);
         Assert.Contains("base)     // count: int   from $Stock   optional — default 1", after);
         Assert.Empty(Errors(after));
     }
@@ -178,7 +180,7 @@ public class QuestionFillTests : IDisposable
         var compact = QuestionFill.Plan(again, edit.Caret, Signatures.For(unit, _dir));
 
         string after = Apply(compact, again);
-        Assert.Contains("emit @Sold { amount: 0, item: \"\", currency: \"EUR\" }", after);
+        Assert.Contains("emit @Sold { amount: 0, item: \"\", currency: base }", after);
         Assert.DoesNotContain("?", after);
     }
 
@@ -195,7 +197,7 @@ public class QuestionFillTests : IDisposable
         Assert.True(compact is FillEdit, $"{compact}\n---\n{again}");
         string after = Apply(compact, again);
 
-        Assert.Contains("bring Crate(base, base, base)", after);
+        Assert.Contains("bring Crate(0, base, base)", after);
         Assert.DoesNotContain("?", after);
         Assert.DoesNotContain("REQUIRED", after);   // the slot comments go with the expansion
     }
@@ -217,7 +219,7 @@ public class QuestionFillTests : IDisposable
         var (o, text) = Type(Game("  shard S { run once {\n    emit @Sold { item: \"pear\", ?| }\n  } }"));
         string after = Apply(o, text);
 
-        Assert.Contains("emit @Sold { item: \"pear\", amount: 0, currency: \"EUR\" }", after);
+        Assert.Contains("emit @Sold { item: \"pear\", amount: 0, currency: base }", after);
         Assert.Empty(Errors(after));
     }
 
@@ -227,14 +229,14 @@ public class QuestionFillTests : IDisposable
         var (o, text) = Type(Game("  shard S { run once {\n    emit @Sold {\n        item: \"pear\"\n        ?|\n    }\n  } }"));
         string after = Apply(o, text);
 
-        Assert.Contains("        amount: 0      // required — int   from $Price\n        currency: \"EUR\"", after);
+        Assert.Contains("        amount: 0      // required — int   from $Price\n        currency: base", after);
         Assert.Empty(Errors(after));
     }
 
     [Theory]
     [InlineData("    bring Crate(5, ?|)", "bring Crate(5, base, base)")]
     [InlineData("    bring Crate(5 ?|)", "bring Crate(5 , base, base)")]
-    [InlineData("    bring Crate(?|)", "bring Crate(base, base, base)")]
+    [InlineData("    bring Crate(?|)", "bring Crate(0, base, base)")]
     public void Inside_an_argument_list_it_adds_the_slots_not_passed(string line, string expected)
     {
         var (o, text) = Type(Game("  shard S { run once {\n" + line + "\n  } }"));

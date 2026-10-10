@@ -121,26 +121,29 @@ public static class EventCatalog
         if (fields.Count == 0) return "{ }";
         var sb = new StringBuilder("{\n");
         foreach (var f in fields.Where(f => f.Required).Concat(fields.Where(f => !f.Required)))
-            sb.Append("    ").Append(f.Name).Append(": ").Append(Placeholder(f)).Append("      // ")
+            sb.Append("    ").Append(f.Name).Append(": ").Append(Fill(f)).Append("      // ")
               .Append(f.Required ? "required — " + f.Type : "optional — " + f.Type + " = " + f.Default)
               .Append(f.OriginShape is null ? "" : "   from $" + f.OriginShape)
               .Append('\n');
         return sb.Append('}').ToString();
     }
 
-    /// A VALUE for a field, not a `?`.
+    /// What a filled-in signature writes for one field or slot — the SAME rule for an event, a shape and a
+    /// builder, so `?` reads the same everywhere:
     ///
-    /// This used to emit `name: ?`, and that does not parse: `?` is the standalone fill-the-rest marker,
-    /// and in value position it is VS0104 "unexpected '?' in expression". Every scaffolded emit body
-    /// with a field in it was code that could not compile — which is a strange thing for a scaffold to
-    /// hand you, and stranger still that the tool that produced it is the one that would reject it.
+    ///   REQUIRED   a typed empty value — `""`, `0`, `0.0`, `false`. It compiles, and it is visibly a
+    ///              placeholder: the line's comment says REQUIRED and the value is the one to replace.
+    ///   OPTIONAL   `base` — "the default the declaring bundle chose". Keeping it costs nothing and keeps
+    ///              following that bundle; replacing it is the deliberate override.
     ///
-    /// A typed zero compiles and is editable, which is what a placeholder is for. A declared default is
-    /// used when there is one, so the line already says what the field would have been.
+    /// Copying the default's VALUE instead (as payloads used to) froze today's default into the caller, so
+    /// the day the kit changed it the caller silently kept the old one.
+    public static string Fill(EventField f) => f.Required ? Placeholder(f) : "base";
+
+    /// A typed empty value, never a `?` — `name: ?` does not parse (VS0104): `?` is the Workbench's
+    /// shortcut, not a value.
     internal static string Placeholder(EventField f)
     {
-        if (!f.Required && f.Default is { Length: > 0 } d) return d;
-
         return f.Type switch
         {
             "string" or "Mark" => "\"\"",
@@ -183,15 +186,10 @@ public static class EventCatalog
     /// an include flattens someone else's shape into this parameter list, and the reader is looking at
     /// four bare slots with nothing on screen to say which is which.
     ///
-    /// EVERY SLOT IS `base`, and that is what makes this paste-able. It used to be `?`, which does not
-    /// parse: `bring X(?, ?)` is VS0100, because `?` fills the WHOLE argument list and is not a
-    /// per-slot token. `base` is — it means "this parameter's declared default", it mixes freely with
-    /// real values, and replacing one is exactly the edit a scaffold exists to invite.
-    ///
-    /// A parameter with no default still takes `base` and raises VS0231, which reads "'X' parameter 'a'
-    /// has no default, so `base` fills it with a typed zero. Give the field a default in its shape, or
-    /// pass a value." That is a better outcome than a silent hole: the compiler names the slots you
-    /// still have to think about.
+    /// Each slot follows `Fill`: a REQUIRED one gets a typed empty value to replace, an OPTIONAL one gets
+    /// `base` — "this parameter's declared default", which mixes freely with real values and keeps
+    /// following the bundle that declared it. The comment says which is which, so the slots you still
+    /// have to think about are the ones marked REQUIRED.
     public static string Args(BuilderEntry b, bool compact = false) => Args(b.Fields, compact);
 
     public static string Args(IReadOnlyList<EventField> fields, bool compact = false)
@@ -199,7 +197,10 @@ public static class EventCatalog
         if (fields.Count == 0) return "()";
 
         // The one-line form: you already know the signature and want the slots.
-        if (compact) return "(" + string.Join(", ", fields.Select(_ => "base")) + ")";
+        if (compact) return "(" + string.Join(", ", fields.Select(Fill)) + ")";
+
+        // The comments line up, whatever each slot's value is.
+        int width = fields.Max(f => Fill(f).Length) + 1;
 
         var sb = new StringBuilder("(\n");
         for (int i = 0; i < fields.Count; i++)
@@ -210,7 +211,7 @@ public static class EventCatalog
             // `)` on the next line worked — until `base` was replaced with the value it asks for: `50` ends a
             // statement, and the `)` below it was an error. Written this way the slot can be overwritten.
             bool last = i == fields.Count - 1;
-            sb.Append("    base").Append(last ? ")" : ",").Append("     // ").Append(f.Name)
+            sb.Append("    ").Append((Fill(f) + (last ? ")" : ",")).PadRight(width)).Append("     // ").Append(f.Name)
               .Append(": ").Append(f.Type)
               .Append(f.OriginShape is null ? "" : "   from $" + f.OriginShape)
               .Append(f.Required ? "   REQUIRED — give it a value" : "   optional — default " + f.Default);

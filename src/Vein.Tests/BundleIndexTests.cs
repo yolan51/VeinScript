@@ -460,23 +460,23 @@ public class BundleIndexTests : IDisposable
         Assert.Contains("x: 0.0      // required — float   from $Pos", body);
         Assert.Contains("who: \"\"      // required — string", body);
         Assert.DoesNotContain("who: \"\"      // required — string   from", body);   // declared inline
-        Assert.Contains("fast: false      // optional — bool = false", body);        // not C#'s "False"
+        // Optional takes `base` — the declaration's own default — and the comment spells it (not C#'s "False").
+        Assert.Contains("fast: base      // optional — bool = false", body);
     }
 
     [Fact]
     public void Builder_args_name_the_shape_each_slot_fills()
     {
         // `bring` binds positionally, so the slots carry no names. Without the comment there is nothing
-        // on screen saying which is which. Each slot is `base`, because `?` is not per-slot: `(?, ?)`
-        // VS0100.
+        // on screen saying which is which. Both are required, so each holds its type's empty value.
         string dir = TempDir();
         var unit = Parse("bundle Demo by me { shape $Box { label: string, width: int }\n" +
                          " builder Box { $Box   markup = label } }", dir);
 
         string args = EventCatalog.Args(Assert.Single(EventCatalog.Builders(unit), b => b.Name == "Box"));
 
-        Assert.Contains("base,     // label: string   from $Box", args);
-        Assert.Contains("base)     // width: int   from $Box", args);   // last slot closes the call on its own line
+        Assert.Contains("\"\",     // label: string   from $Box", args);
+        Assert.Contains("0)      // width: int   from $Box", args);   // last slot closes the call on its own line
     }
 
     [Fact]

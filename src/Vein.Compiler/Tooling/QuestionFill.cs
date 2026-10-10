@@ -58,8 +58,7 @@ public static class QuestionFill
 
         // The caret goes just after the closing bracket — for a builder that is mid-line, before the last
         // slot's comment — which is exactly where a second `?` compacts it.
-        int last = full.LastIndexOf("base)", StringComparison.Ordinal);
-        int close = sig.Kind == SignatureKind.Builder && last >= 0 ? last + "base)".Length : full.Length;
+        int close = sig.Kind == SignatureKind.Builder ? AfterLastSlot(full) : full.Length;
         return new FillEdit(start, q + 1 - start, full, start + close,
             Summary(head, sig) + "  ·  ?? right after the bracket gives the one-line form.");
     }
@@ -118,7 +117,7 @@ public static class QuestionFill
                 return new FillProblem(q, $"{Ref(head, sig)} takes {sig.Fields.Count} argument(s), and they are all passed.");
 
             string lead = tail.Trim().Length > 0 ? ", " : "";
-            string slots = lead + string.Join(", ", left.Select(_ => "base"));
+            string slots = lead + string.Join(", ", left.Select(EventCatalog.Fill));
             return new FillEdit(q, 1, slots, q + slots.Length,
                 $"{Ref(head, sig)}: {left.Count} more — " + string.Join(", ", left.Select(Label)));
         }
@@ -132,7 +131,7 @@ public static class QuestionFill
         string insert = ownLine
             ? string.Join("\n" + indent, rest.Select(Line))
             : (Regex.IsMatch(written, @"[{,]\s*$") || written.Trim().Length == 0 ? "" : ", ") +
-              string.Join(", ", rest.Select(f => f.Name + ": " + EventCatalog.Placeholder(f)));
+              string.Join(", ", rest.Select(f => f.Name + ": " + EventCatalog.Fill(f)));
         return new FillEdit(q, 1, insert, q + insert.Length,
             $"{Ref(head, sig)}: {rest.Count} more — " + string.Join(", ", rest.Select(Label)));
     }
@@ -148,10 +147,10 @@ public static class QuestionFill
     public static string Short(Signature sig) => sig.Kind == SignatureKind.Builder
         ? EventCatalog.Args(sig.Fields, compact: true)
         : sig.Fields.Count == 0 ? "{ }"
-        : "{ " + string.Join(", ", Ordered(sig.Fields).Select(f => f.Name + ": " + EventCatalog.Placeholder(f))) + " }";
+        : "{ " + string.Join(", ", Ordered(sig.Fields).Select(f => f.Name + ": " + EventCatalog.Fill(f))) + " }";
 
     private static string Line(EventField f) =>
-        f.Name + ": " + EventCatalog.Placeholder(f) + "      // " +
+        f.Name + ": " + EventCatalog.Fill(f) + "      // " +
         (f.Required ? "required — " + f.Type : "optional — " + f.Type + " = " + f.Default) +
         (f.OriginShape is null ? "" : "   from $" + f.OriginShape);
 
@@ -197,6 +196,15 @@ public static class QuestionFill
     };
 
     // ---- text mechanics ----------------------------------------------------------------------------------
+
+    /// Just past the `)` that closes an argument expansion — on its last line, before that slot's comment.
+    /// A slot's value is a typed zero or `base`, neither of which holds a bracket.
+    private static int AfterLastSlot(string args)
+    {
+        int lastLine = args.LastIndexOf('\n') + 1;
+        int close = args.IndexOf(')', lastLine);
+        return close < 0 ? args.Length : close + 1;
+    }
 
     private static string IndentOf(string text, int at)
     {

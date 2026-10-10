@@ -77,12 +77,14 @@ public class ScaffoldCompilesTests
     }
 
     [Fact]
-    public void A_defaulted_field_is_scaffolded_with_its_default()
+    public void A_defaulted_field_is_scaffolded_as_base_and_the_comment_names_the_default()
     {
-        // Better than a typed zero: the line then says what the field would have been anyway.
+        // `base` keeps following the declaration — copying today's value froze it into the caller, so a
+        // changed default upstream was silently ignored here. The comment still says what it is.
         string body = EventCatalog.Body(EventCatalog.Catalog(Unit()).Single(e => e.Name == "Mixed"));
 
-        Assert.Contains("loud: true", body);
+        Assert.Contains("loud: base", body);
+        Assert.Contains("= true", body);
     }
 
     // ---- builders ---------------------------------------------------------------------------------
@@ -134,18 +136,19 @@ public class ScaffoldCompilesTests
     }
 
     [Fact]
-    public void A_slot_with_no_default_still_takes_base_and_says_so()
+    public void A_required_slot_takes_a_typed_empty_value_and_says_so()
     {
-        // `base` on a parameter with no default is VS0231, and the warning is the useful part: it names
-        // the slots you still have to think about. Better than a hole that compiles silently wrong.
+        // A required slot has no default for `base` to take, so it gets the empty value of its type — a
+        // placeholder that compiles — and the comment marks it REQUIRED: the slot to replace.
         var entry = EventCatalog.Builders(Unit()).Single(b => b.Name == "Required");
         string args = EventCatalog.Args(entry);
 
         Assert.Contains("REQUIRED", args);
+        Assert.DoesNotContain("base", args.Split('\n').First(l => l.Contains("REQUIRED")).Split("//")[0]);
 
         var diagnostics = Compile("bring Required" + args);
         Assert.DoesNotContain(diagnostics, d => d.Severity == Severity.Error);
-        Assert.Contains(diagnostics, d => d.Code == "VS0231");
+        Assert.DoesNotContain(diagnostics, d => d.Code == "VS0231");
     }
 
     [Fact]
