@@ -349,28 +349,19 @@ switch (command)
 
     case "scaffold":
     {
-        if (args.Length < 3) { Console.Error.WriteLine("usage: veinc scaffold <file.vein> <@Event | &Builder>"); return 2; }
-        // The sigil picks which catalog to look in; a bare name tries the event first, then the builder,
-        // so `veinc scaffold f.vein Unit` finds an identity template without needing to know the spelling.
-        string raw = args[2];
-        string want = raw.TrimStart('@', '&');
+        if (args.Length < 3)
+        {
+            Console.Error.WriteLine("usage: veinc scaffold <file.vein> <@Event | &Builder | $Shape | *Author.Bundle.Pub.@Event …> [--json]");
+            return 2;
+        }
+        // The same signature the Workbench's `?` shows, as the text it would insert — for a member of this
+        // file, of a needed bundle, or of any bundle by its path. A bare name tries event, builder, shape.
         var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
         if (!diagnostics.HasErrors)
         {
-            var events = raw.StartsWith('&') ? new List<EventEntry>() : EventCatalog.Catalog(unit, projectDir);
-            var builders = raw.StartsWith('@') ? new List<BuilderEntry>() : EventCatalog.Builders(unit, projectDir);
-
-            var ev = events.FirstOrDefault(e => string.Equals(e.Name, want, StringComparison.Ordinal));
-            var bl = builders.FirstOrDefault(b => string.Equals(b.Name, want, StringComparison.Ordinal));
-
-            if (ev is not null) Console.Write(EventCatalog.Scaffold(ev));
-            else if (bl is not null) Console.Write(EventCatalog.Scaffold(bl));
-            else
-            {
-                var available = events.Select(e => "@" + e.Name).Concat(builders.Select(b => "&" + b.Name));
-                Console.Error.WriteLine($"no event or builder '{want}'. available: {string.Join(", ", available)}");
-                return 2;
-            }
+            var scaffold = Scaffolder.Render(unit, projectDir, args[2], path);   // the path as typed, so a suggested command can be re-run
+            if (scaffold.Error is not null) { Console.Error.WriteLine(scaffold.Error); return 2; }
+            Console.Write(args.Contains("--json") ? Scaffolder.Json(scaffold) + "\n" : scaffold.Text);
         }
         break;
     }

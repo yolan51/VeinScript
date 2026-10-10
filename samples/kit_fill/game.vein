@@ -3,6 +3,13 @@
 //
 //   veinc run samples/kit_fill/game.vein --ticks 1
 //
+// OUTSIDE THE WORKBENCH (VS Code, a terminal), the same signatures — printed as the text `?` would insert:
+//
+//   veinc scaffold samples/kit_fill/game.vein '@Sold'
+//   veinc scaffold samples/kit_fill/game.vein '&Crate'
+//   veinc scaffold samples/kit_fill/game.vein '$Price'
+//   veinc scaffold samples/kit_fill/game.vein '*kit.Shop.Api.&Receipt'
+//
 // The kit is bundles/Shop.vein, written by `kit`. Everything this game uses from it is reached by
 // `need "kit.Shop"`, and none of its fields are written anywhere you can see — that is what `?` is for.
 //
