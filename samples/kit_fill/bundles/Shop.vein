@@ -1,0 +1,29 @@
+//   NOT RUN ON ITS OWN — it is the kit samples/kit_fill/game.vein is built on. Open that one and press ▶.
+// samples/kit_fill/bundles/Shop.vein — SOMEONE ELSE'S bundle, installed into this project.
+//
+// Written by `kit`, not by the game. The publicator is the whole API: the event, the shapes and the
+// builders below are `shared`, so `need "kit.Shop"` makes their bare names mean them in the game. Nothing
+// in the game copies their fields — the Workbench's `?` reads them from here, includes expanded.
+
+bundle Shop by kit {
+
+    publicator Api {
+        shared("A price: how much, and in what.")
+        shape $Price { amount: int, currency: string = "EUR" }
+
+        shared("How many are in it.")
+        shape $Stock { count: int = 1 }
+
+        shared("A sale at the till.")
+        event @Sold { $Price, item: string }
+
+        shared("Worn by every crate.")
+        mark #Crate
+
+        shared("A crate on the shelf: a price, a stock count, and the #Crate mark.")
+        builder Crate { $Price $Stock   mark #Crate }
+
+        shared("A printed receipt line.")
+        builder Receipt { $Price, item: string   line = "receipt: " + item + " " + amount + " " + currency }
+    }
+}

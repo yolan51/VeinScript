@@ -1,0 +1,67 @@
+// kit_fill/game.vein — an event, a shape and builders from SOMEONE ELSE'S bundle, filled in without
+// opening their file.
+//
+//   veinc run samples/kit_fill/game.vein --ticks 1
+//
+// The kit is bundles/Shop.vein, written by `kit`. Everything this game uses from it is reached by
+// `need "kit.Shop"`, and none of its fields are written anywhere you can see — that is what `?` is for.
+//
+// TRY IT IN THE WORKBENCH. On an empty line inside `run once`, type one of these and then `?`:
+//
+//   emit @Sold ?                       the payload: amount, item, currency — each with its type, and
+//                                      `from $Price` on the two that arrive through the kit's include
+//   bring Crate ?                      the slots in the order `bring` binds them: amount, currency, count
+//   let e = spawn()   then
+//   attach $Price to e ?               the shape's fields, filled by name like a payload
+//   bring *kit.Shop.Api.&Receipt ?     a qualified path works even without the `need`
+//
+// Type `?` again right after the closing bracket for the one-line form. Inside a half-written
+// `emit @Sold { item: "pear", ? }` it adds only the fields still missing. The `?` never stays in the
+// file: it is the Workbench's shortcut, not VeinScript.
+//
+// What is below is those expansions, filled in.
+
+bundle Market by you {
+
+    need "kit.Shop"
+
+    shard Till {
+        run once {
+            // emit @Sold ?  — filled in. `amount` and `currency` come from the kit's $Price.
+            emit @Sold {
+                amount: 3
+                item: "pear"
+                currency: "EUR"
+            }
+
+            // bring Crate ?  — positional: $Price's two fields first, then $Stock's count.
+            bring Crate(
+                12,        // amount: int   from $Price
+                "EUR",     // currency: string   from $Price
+                40)        // count: int   from $Stock
+
+            // attach $Price to e ?  — a shape is filled by NAME, like a payload.
+            let tag = spawn()
+            attach $Price to tag { amount: 5, currency: "USD" }
+
+            // bring *kit.Shop.Api.&Receipt ?  — a fragment builder: it prints a line. `base` takes the
+            // declared default, so the currency here is the kit's "EUR".
+            bring *kit.Shop.Api.&Receipt(3, base, "pear")
+        }
+
+        hear @Sold as s {
+            emit *Vein.Console.Io.@Print { text: "sold " + s.item + " for " + s.amount + " " + s.currency }
+        }
+    }
+
+    // The crate the kit's builder made carries the kit's shapes — read here by their bare names.
+    shard Shelf {
+        settled {
+            target $Price $Stock #Crate as c {
+                emit *Vein.Console.Io.@Print {
+                    text: "crate: " + c.Stock.count + " at " + c.Price.amount + " " + c.Price.currency
+                }
+            }
+        }
+    }
+}
