@@ -185,11 +185,19 @@ internal static class BuildCommand
         // server pays nothing; a game runs.
         int ticks = 0;
         double fps = 60;
-        for (int i = 0; i < args.Length - 1; i++)
+        // Everything that is not the exe's own `--ticks N` / `--fps N` is the PROGRAM's, for `args()`:
+        // `tasks.exe add "buy milk"` hands the program ["add", "buy milk"].
+        var programArgs = new List<string>();
+        for (int i = 0; i < args.Length; i++)
         {
-            if (args[i] == "--ticks") int.TryParse(args[i + 1], out ticks);
-            if (args[i] == "--fps") double.TryParse(args[i + 1], System.Globalization.NumberStyles.Float,
-                                                    System.Globalization.CultureInfo.InvariantCulture, out fps);
+            if (args[i] == "--ticks" && i + 1 < args.Length) { int.TryParse(args[++i], out ticks); continue; }
+            if (args[i] == "--fps" && i + 1 < args.Length)
+            {
+                double.TryParse(args[++i], System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out fps);
+                continue;
+            }
+            programArgs.Add(args[i]);
         }
 
         foreach (var m in modules)
@@ -198,8 +206,8 @@ internal static class BuildCommand
             // launched it happened to start. A game is not launched from a shell, and a save that lands
             // in an unpredictable folder is silent: the write succeeds and the next run starts anew.
             string here = AppContext.BaseDirectory;
-            var interp = ticks > 0 ? new Interp { Ticks = ticks, BaseDirectory = here }
-                                   : new Interp { FrameRate = fps, BaseDirectory = here };
+            var interp = ticks > 0 ? new Interp { Ticks = ticks, BaseDirectory = here, Args = programArgs }
+                                   : new Interp { FrameRate = fps, BaseDirectory = here, Args = programArgs };
             interp.Run(m, Console.In, Console.Out, messaging: true);
         }
         return 0;

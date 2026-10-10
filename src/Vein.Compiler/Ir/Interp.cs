@@ -580,6 +580,17 @@ public sealed class Interp
     /// identical and mean different folders.
     public string? BaseDirectory { get; set; }
 
+    /// The program's command-line arguments, as `args()` answers them. Empty unless a host passes some:
+    /// `veinc run f.vein -- a b c`, or whatever a built exe was started with.
+    public IReadOnlyList<string> Args { get; set; } = Array.Empty<string>();
+
+    /// `now()` — local time, ISO 8601 to the second. `VEIN_NOW` replaces it outright, which is how a test
+    /// of a program that stamps dates gets the same output every run.
+    private static string Now() =>
+        Environment.GetEnvironmentVariable("VEIN_NOW") is { Length: > 0 } fixedNow
+            ? fixedNow
+            : DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+
     /// A relative path against `BaseDirectory`; an absolute one is left exactly as written, because a
     /// program that computed a full path has already said where it means.
     private string ResolvePath(string path) =>
@@ -1678,7 +1689,7 @@ public sealed class Interp
         { "spawn", "here", "pick", "len", "random", "join", "toJson", "fromJson",
           "split", "lines", "words", "chars", "trim", "code", "chr", "upper", "lower",
           "contains", "startsWith", "endsWith", "indexOf", "substring", "replace",
-          "int", "float", "string", "bool", "isNumber" };
+          "int", "float", "string", "bool", "isNumber", "args", "now" };
 
     /// Prebuilt (built-in) functions that DO return a value — the only functions that return.
     ///
@@ -1691,6 +1702,12 @@ public sealed class Interp
         // This console's own address. Every spawned console runs the SAME program, so `here() == #Main`
         // is how a program says "only the window the user launched does this".
         "here" => _self,
+        // The program's command-line arguments — `veinc run f.vein -- a b`, or a built exe's own. A list, so
+        // `len`, `args()[0]` and `target args() as a` all work on it.
+        "args" => Args.Cast<object?>().ToList(),
+        // Local wall-clock time, ISO 8601 to the second. Pulled, not delivered — a deliberate exception
+        // (RULES 28f) — and fixed by `VEIN_NOW` so a test can expect an exact date.
+        "now" => Now(),
         "pick" => args.Count > 0 && args[0] is IReadOnlyList<object?> { Count: > 0 } items
             ? items[_rng.Next(items.Count)]
             : null,

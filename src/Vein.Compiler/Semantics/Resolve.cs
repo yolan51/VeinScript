@@ -354,7 +354,7 @@ public sealed class Resolve
         "len" or "int" or "code" or "indexOf" => IrTypeRef.Of("int"),
         "random" or "float" => IrTypeRef.Of("float"),
         "bool" or "isNumber" or "contains" or "startsWith" or "endsWith" => IrTypeRef.Of("bool"),
-        "join" or "toJson" or "string" or "trim" or "upper" or "lower"
+        "join" or "toJson" or "string" or "trim" or "upper" or "lower" or "now"
             or "substring" or "replace" or "chr" => IrTypeRef.Of("string"),
         "here" => IrTypeRef.Of("Mark"),
         _ => null,

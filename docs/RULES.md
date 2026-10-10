@@ -693,6 +693,17 @@ a comparison saying something else has nothing left to stand on.
 Note what the third rule is **not**: a fallback to zero. `"abc"` against `3` compares `"abc"` with
 `"3"` — deterministic, and the same place `==` lands when it cannot compare numerically.
 
+**28f. `args()` is the command line; `now()` is the clock, and `VEIN_NOW` pins it.** A tool reads
+what it was started with as a list of strings: `veinc run tasks.vein -- add "buy milk"` (everything after
+`--`), or a built exe's own arguments (`tasks.exe add "buy milk"`). `len(args())`, `args()[0]` and
+`target args() as a { … }` work on it like any list.
+
+`now()` is local time, ISO 8601 to the second — `2026-10-10T19:52:33`. It is PULLED, which is a
+deliberate exception: everything else time-shaped in this language is delivered as an event, so a program
+stays deterministic. A date stamped on a record is the case that does not fit that, and `VEIN_NOW`
+(`VEIN_NOW=2026-01-02T03:04:05`) replaces the answer outright, which is how a test of such a program
+expects an exact output. Both are interpreter-only.
+
 **28b. A file is an event, and a failure is a message.** `*Vein.Files.Io.@ReadFile { path }` answers
 with `@FileLoaded` or `@FileMissing`; `@WriteFile` answers with `@FileWritten` or `@FileMissing`. That
 is the same shape as `@Fetch`/`@Fetched`/`@Failed` and a console send's `@Undelivered` — there is no

@@ -220,7 +220,11 @@ switch (command)
         if (!diagnostics.HasErrors)
         {
             int ticks = 0;
-            for (int i = 2; i < args.Length; i++) if (Ticks(args, ref i) is { } t) ticks = t;
+            // Everything after `--` belongs to the PROGRAM (`args()`), not to veinc: `veinc run tasks.vein -- add "milk"`.
+            int dashdash = Array.IndexOf(args, "--");
+            string[] programArgs = dashdash < 0 ? Array.Empty<string>() : args[(dashdash + 1)..];
+            int flagsEnd = dashdash < 0 ? args.Length : dashdash;
+            for (int i = 2; i < flagsEnd; i++) if (Ticks(args, ref i) is { } t) ticks = t;
 
             if (linkedRun is { } la)
             {
@@ -230,7 +234,7 @@ switch (command)
                 // A relative `@WriteFile` path means the PROGRAM's folder, not the shell's — run the same
                 // program from two directories and its saves used to land in two places, neither beside
                 // the `.vein` that asked for them.
-                new Interp { Ticks = ticks, BaseDirectory = projectDir }
+                new Interp { Ticks = ticks, BaseDirectory = projectDir, Args = programArgs }
                     .Run(la.Module, Console.In, Console.Out, messaging: true);
             }
             else
@@ -250,7 +254,7 @@ switch (command)
                 LockCommand.Record(projectDir, uses);
 
                 foreach (var module in lowered)
-                    new Interp { Ticks = ticks, BaseDirectory = projectDir }.Run(module, Console.In, Console.Out, messaging: true);
+                    new Interp { Ticks = ticks, BaseDirectory = projectDir, Args = programArgs }.Run(module, Console.In, Console.Out, messaging: true);
             }
         }
         break;
