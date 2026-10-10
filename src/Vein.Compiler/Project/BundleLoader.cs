@@ -60,9 +60,9 @@ public static class BundleLoader
         //
         // A fragment therefore cannot close a phase. That is the deliberate half of the trade: the
         // extension point is for adding behaviour, and the bundle keeps the last word.
+        // Duplicates are checked by Lower, once per bundle whether or not it has fragments (VS0320).
         var host = unit.Bundles[0];
         var merged = host with { Members = extra.Concat(host.Members).ToList() };
-        CheckDuplicates(merged, diag);
 
         var bundles = unit.Bundles.ToList();
         bundles[0] = merged;
@@ -184,17 +184,31 @@ public static class BundleLoader
         }
     }
 
-    /// Two fragments declaring the same primitive is a merge conflict the single-file case could never
-    /// produce, so it needs its own diagnostic rather than surfacing later as a confusing redefinition.
-    private static void CheckDuplicates(BundleDecl bundle, DiagnosticBag diag)
+    /// One name declared twice in one bundle — across two fragments, or twice in a single file.
+    ///
+    /// This used to run only when a bundle HAD fragments, on the reasoning that a merge conflict was
+    /// something "the single-file case could never produce". It can: two `builder Line { … }` in one file
+    /// compiled, and the second silently replaced the first — `Lower` keeps one declaration per name. With
+    /// different parameter counts the only symptom was a VS0228 describing the WRONG builder; with the same
+    /// count there was no diagnostic at all. So it runs for every bundle now, from Lower.
+    ///
+    /// A builder or function gets one more sentence, because the reason somebody writes two of them is
+    /// usually overloading, and VeinScript has none: a name means one declaration.
+    internal static void CheckDuplicates(BundleDecl bundle, DiagnosticBag diag)
     {
         var seen = new Dictionary<string, SourceSpan>(StringComparer.Ordinal);
 
         void Check(string key, SourceSpan span)
         {
-            if (seen.TryGetValue(key, out var first))
-                diag.Error("VS0320", $"'{key}' is declared twice in bundle '{bundle.Name}' (first at {first}).", span);
-            else seen[key] = span;
+            if (!seen.TryGetValue(key, out var first)) { seen[key] = span; return; }
+
+            string why = key.StartsWith('&')
+                ? " VeinScript has no overloading, so the second would silently replace the first. Rename one, " +
+                  "give a parameter a default, or derive a variant: `builder Short from " + key[1..] + " { … }`."
+                : key.EndsWith("()")
+                ? " VeinScript has no overloading, so the second would silently replace the first. Rename one."
+                : "";
+            diag.Error("VS0320", $"'{key}' is declared twice in bundle '{bundle.Name}' (first at {first}).{why}", span);
         }
 
         void Walk(IEnumerable<Decl> members)

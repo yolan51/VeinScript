@@ -401,6 +401,41 @@ public class DiagnosticsTests
     }
 
     [Fact]
+    public void Two_builders_with_one_name_are_VS0320_not_an_overload()
+    {
+        // The second used to replace the first silently. With the SAME parameter count nothing was
+        // reported at all and every `bring` ran the second; with a different count the only symptom was
+        // a VS0228 describing the wrong builder. VeinScript has no overloading, so the name is taken.
+        var same = Diagnose(
+            "  builder Line { text: string   line = \"first: \" + text }\n" +
+            "  builder Line { text: string   line = \"second: \" + text }\n" +
+            "  shard S { run once { bring Line(\"x\") } }");
+        var other = Diagnose(
+            "  builder Line { text: string   line = text }\n" +
+            "  builder Line { a: string, b: string   line = a + b }\n" +
+            "  shard S { run once { bring Line(\"x\", \"y\") } }");
+
+        var d = Assert.Single(same, x => x.Code == "VS0320");
+        Assert.Equal(Vein.Compiler.Diagnostics.Severity.Error, d.Severity);
+        Assert.Equal(3, d.Span.Line);                       // reported at the SECOND declaration
+        Assert.Contains("no overloading", d.Message);
+        Assert.Contains("builder Short from Line", d.Message);
+        Assert.Contains(other, x => x.Code == "VS0320");
+    }
+
+    [Fact]
+    public void A_function_or_shape_declared_twice_is_VS0320_too()
+    {
+        var fns = Diagnose(
+            "  fn twice(n: int) -> int { return n * 2 }\n" +
+            "  fn twice(s: string) -> string { return s + s }\n");
+        var shapes = Diagnose("  shape $P { a: int }\n  shape $P { b: int }\n");
+
+        Assert.Contains(fns, x => x.Code == "VS0320" && x.Message.Contains("'twice()'") && x.Message.Contains("no overloading"));
+        Assert.Contains(shapes, x => x.Code == "VS0320" && x.Message.Contains("'$P'"));
+    }
+
+    [Fact]
     public void A_bare_call_that_need_widened_is_checked_like_the_qualified_one()
     {
         // `need` makes bare `print` mean `*Vein.Console.Io.print`, and that path skipped both checks —

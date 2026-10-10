@@ -158,6 +158,10 @@ public sealed partial class Lower
         _loweredName = bundle.Name;
         _ownerKey = (bundle.Author ?? "local") + "." + bundle.Name;
 
+        // Before Collect, which keeps ONE declaration per name — so a duplicate is reported rather than
+        // silently replaced.
+        BundleLoader.CheckDuplicates(bundle, _diag);
+
         var types = new List<IrType>();
         var funcs = new List<IrFunction>();
         var shards = new List<IrShard>();

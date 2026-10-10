@@ -96,6 +96,15 @@ alternative: writing a second builder that repeats the shape list duplicates the
 deriving from it, so the day `Coin` gains a shape the copy silently stops being a coin. `veinc scaffold`
 and the editor's `?` list only the remaining parameters, because they flatten a variant the same way.
 
+**7d. A name is ONE declaration — there is no overloading.** Two `builder Line`, two `fn twice` or two
+`shape $P` in one bundle is **VS0320**, at the second. It used to be silent: the second replaced the
+first, so with the same parameter count every `bring Line(…)` ran a builder its author did not write, and
+with a different count the only clue was a VS0228 describing the wrong one. "The same thing with fewer
+arguments" is a default (`prefix: string = ""`); "the same thing with some arguments fixed" is a variant
+(7c). Overloading by signature is an open design question, not a bug left in — a builder's name is also
+the event it emits, a variant's base, an `ordered by` key and a `vein.lock` line, and each of those
+would have to say which one it means.
+
 **8. A `$Shape` include is a COMPILE-TIME field expansion, and `bring` attaches nothing.** The include
 copies the shape's fields into the signature; it does not make the built thing carry the component. So:
 
