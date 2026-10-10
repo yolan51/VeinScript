@@ -3290,7 +3290,7 @@ public partial class MainWindow : Window
                 int col = Math.Max(1, d.Span.Col);
                 int offset;
                 try { offset = doc.GetOffset(line, col); } catch { offset = -1; }
-                return (offset, Math.Max(1, d.Span.Length), d.Severity == Severity.Error);
+                return (offset, Math.Max(1, d.Span.Length), d.Severity);
             }).ToList();
         _editor.TextArea.TextView.InvalidateVisual();
     }
@@ -3331,7 +3331,8 @@ public partial class MainWindow : Window
         _diagSummary.Text = _diags.Count == 0
             ? ""
             : $"{_diags.Count(d => d.Severity == Severity.Error)} error(s), " +
-              $"{_diags.Count(d => d.Severity != Severity.Error)} warning(s)" +
+              $"{_diags.Count(d => d.Severity == Severity.Warning)} warning(s)" +
+              (_diags.Any(d => d.Severity == Severity.Info) ? $", {_diags.Count(d => d.Severity == Severity.Info)} note(s)" : "") +
               (hidden > 0 ? $"  ·  {hidden} hidden" : "");
     }
 

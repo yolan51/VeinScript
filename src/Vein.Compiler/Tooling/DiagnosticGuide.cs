@@ -113,7 +113,10 @@ public static class DiagnosticGuide
         new("VS0320", "A name is one declaration — there is no overloading, and the second used to replace the first without a word. Defaults give \"fewer arguments\", a variant (`from`) gives \"some arguments fixed\".",
             "docs/RULES.md — rule 7d"),
 
-        new("VS0347", "`?` is the Workbench's key for SEEING a signature — typed after `emit @E`, `bring X` or `attach $S to e`, it writes every field and is gone. Saved, it used to fill the rest with zeros silently, hiding the very fields it exists to show. The Quick Fix writes them.",
+        new("VS0348", "A shape is one component per identity, so this attach REPLACES the one already there — never a second copy — and a replacement is the whole component: unwritten fields take the shape's default. Often intended (rewiring a handler); to change one field instead, assign it.",
+            "docs/RULES.md — rule 11b"),
+
+        new("VS0347","`?` is the Workbench's key for SEEING a signature — typed after `emit @E`, `bring X` or `attach $S to e`, it writes every field and is gone. Saved, it used to fill the rest with zeros silently, hiding the very fields it exists to show. The Quick Fix writes them.",
             "docs/TOOLING.md — `?`"),
 
         new("VS0344", "A builder, fn or SF binds BY POSITION, so a bundle swapping two parameters of the same type passes the count check and the literal check and changes what the call means. vein.lock is the only record of the order this call was written against. Accepting the new order fixes nothing by itself — fix the arguments first.",

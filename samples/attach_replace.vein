@@ -1,0 +1,51 @@
+// attach_replace.vein — attaching a shape an identity ALREADY carries replaces it, whole.
+//
+//   veinc run samples/attach_replace.vein --ticks 2
+//   bash tools/check-backend.sh          (the same program, emitted to C# and diffed against the above)
+//
+// A shape is ONE component per identity (RULES 11b). A second `attach` never adds a copy — `p.Price`
+// would no longer say which one — it REPLACES the component, and a replacement is the WHOLE component:
+// a field the second attach does not write goes back to the shape's DEFAULT, not to its old value.
+//
+// So below, the price starts at `5 USD`, is re-attached as `{ amount: 9 }`, and comes out `9 EUR` — the
+// currency was not mentioned, so it is the shape's "EUR", not the "USD" it had. To change ONE field and
+// keep the rest, assign it instead: `p.Price.amount = 9`.
+//
+// Both runtimes agree on that by construction: the compiler writes every defaulted field into the attach
+// itself. (The interpreter used to fill defaults at runtime and the C# backend did not, so the backend
+// printed an empty currency — this sample is the guard.) The Workbench marks the re-attach with a note,
+// VS0348, because "fields go back to their defaults" is the part that surprises.
+
+bundle AttachReplace by you {
+
+    shape $Price { amount: int, currency: string = "EUR" }
+    mark #Item
+
+    shard Seed {
+        run once {
+            let e = spawn()
+            attach $Price to e { amount: 5, currency: "USD" }
+            mark e #Item
+        }
+    }
+
+    // The first tick re-attaches every 5-priced item with only `amount` written.
+    shard Reprice {
+        each tick {
+            target $Price #Item as p {
+                if p.Price.amount == 5 {
+                    attach $Price to p { amount: 9 }
+                }
+            }
+        }
+    }
+
+    // One line per item — a copy would make two.
+    shard Report {
+        settled {
+            target $Price #Item as p {
+                emit *Vein.Console.Io.@Print { text: "e" + Entity + " " + p.Price.amount + " " + p.Price.currency }
+            }
+        }
+    }
+}

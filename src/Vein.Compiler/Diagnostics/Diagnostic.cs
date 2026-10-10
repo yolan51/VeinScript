@@ -27,6 +27,11 @@ public sealed class DiagnosticBag
     public void Warning(string code, string message, SourceSpan span) =>
         _items.Add(new Diagnostic(Severity.Warning, code, message, span));
 
+    /// Not a problem — a fact worth knowing at that line, like "this attach replaces a shape the identity
+    /// already carries". Never fails a build and never counts as a warning (the samples sweep forbids those).
+    public void Info(string code, string message, SourceSpan span) =>
+        _items.Add(new Diagnostic(Severity.Info, code, message, span));
+
     /// For a diagnostic built with more than the three fields above — one carrying `Data`.
     public void Add(Diagnostic diagnostic) => _items.Add(diagnostic);
 

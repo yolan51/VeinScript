@@ -130,6 +130,25 @@ every `target` matches nothing — which looks exactly like a query with no resu
 **11. `spawn` is immediate; `attach`, `unattach`, `mark`, `unmark` and `destroy` are DEFERRED** to the
 commit point, after the folds. That is what stops one unit seeing a world another half-changed.
 
+**11b. A shape is ONE component per identity — `attach` REPLACES it, whole.** Attaching `$Price` to an
+identity that already carries it never adds a second copy: `p.Price.amount` would no longer say which.
+It replaces the component, and the replacement is the WHOLE component, so a field the new `attach` does
+not write goes back to the shape's **default**, not to the value it had:
+
+```
+attach $Price to e { amount: 5, currency: "USD" }
+attach $Price to e { amount: 9 }          // now 9 "EUR" — the shape's default, not "USD"
+
+target $Price as p { p.Price.amount = 9 } // to change ONE field and keep the rest, assign it
+```
+
+Re-attaching is legal and sometimes the point — `samples/dom_rewire.vein` rewires every button's
+`$Handler` that way — so it is not a warning. Where the compiler can be SURE the shape is already there
+(inside a `target` that matched it, or after an earlier `attach` in the same block) it is note
+**VS0348**, which says the part that surprises. Several of a thing per identity is a list field, or child
+identities with `$Parent` (13c). Both runtimes agree because the compiler writes every defaulted field
+into the attach itself; `samples/attach_replace.vein` is in check-backend as the guard.
+
 **12. A structural change is invisible inside the event that made it.** Attach in a `hear` handler and a
 `target` in that same handler will not see it; the next event will. Seed worlds in `run once`.
 

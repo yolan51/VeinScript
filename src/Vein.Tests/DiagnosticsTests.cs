@@ -472,6 +472,50 @@ public class DiagnosticsTests
         Assert.Contains(d, x => x.Code == "VS0232");
     }
 
+    // ---- re-attaching a shape: one component per identity, replaced whole --------------------------------
+
+    private const string PriceDecl = "  shape $Price { amount: int, currency: string = \"EUR\" }\n  mark #Item\n";
+
+    [Fact]
+    public void A_reattach_replaces_the_component_and_omitted_fields_take_the_default()
+    {
+        var output = Run(PriceDecl +
+            "  shard S { run once { let e = spawn()\n    attach $Price to e { amount: 5, currency: \"USD\" }\n    mark e #Item } }\n" +
+            "  shard R { each tick { target $Price #Item as p { if p.Price.amount == 5 { attach $Price to p { amount: 9 } } } } }\n" +
+            "  shard P { settled { target $Price #Item as p { " + P("p.Price.amount + \" \" + p.Price.currency") + " } } }");
+
+        Assert.Contains("9 EUR", output);              // not "9 USD": the attach is the whole component
+        Assert.Equal(1, output.Split("9 EUR").Length - 1);   // and one component, not a copy
+    }
+
+    [Fact]
+    public void Reattaching_inside_a_target_that_matched_the_shape_is_a_note()
+    {
+        var d = Diagnose(PriceDecl + "  shard R { each tick { target $Price as p { attach $Price to p { amount: 9 } } } }");
+
+        var note = Assert.Single(d, x => x.Code == "VS0348");
+        Assert.Equal(Vein.Compiler.Diagnostics.Severity.Info, note.Severity);   // legal and often meant
+        Assert.Contains("REPLACES it whole", note.Message);
+        Assert.Contains("p.Price.field", note.Message);
+    }
+
+    [Fact]
+    public void A_second_attach_in_the_same_block_is_a_note()
+    {
+        var d = Diagnose(PriceDecl +
+            "  shard S { run once { let e = spawn()\n    attach $Price to e { amount: 1 }\n    attach $Price to e { amount: 2 } } }");
+        Assert.Contains(d, x => x.Code == "VS0348" && x.Span.Line == 6);   // the SECOND attach
+    }
+
+    [Theory]
+    [InlineData("let e = spawn()\n    attach $Price to e { amount: 1 }")]                                            // fresh
+    [InlineData("let e = spawn()\n    if true { attach $Price to e { amount: 1 } }\n    attach $Price to e { amount: 2 }")] // only maybe
+    [InlineData("let e = spawn()\n    attach $Price to e { amount: 1 }\n    unattach $Price from e\n    attach $Price to e { amount: 2 }")]
+    public void Nothing_is_said_when_the_shape_is_not_certainly_there(string body)
+    {
+        Assert.DoesNotContain(Diagnose(PriceDecl + "  shard S { run once { " + body + " } }"), x => x.Code == "VS0348");
+    }
+
     [Fact]
     public void Two_builders_with_one_name_are_VS0320_not_an_overload()
     {

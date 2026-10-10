@@ -1657,7 +1657,45 @@ public sealed partial class Lower
 
     // ---- statements -----------------------------------------------------
 
-    private IrBlock LowerBlock(Block b) => new(b.Statements.Select(LowerStmt).ToList());
+    private IrBlock LowerBlock(Block b)
+    {
+        // What a block learns about which shapes an identity carries ends with the block: an attach inside
+        // an `if` says nothing about the code after it.
+        int carried = _carried.Count;
+        var block = new IrBlock(b.Statements.Select(LowerStmt).ToList());
+        _carried.RemoveRange(carried, _carried.Count - carried);
+        return block;
+    }
+
+    /// `(name, $Shape)` pairs KNOWN to be on an identity at this point in the code, and why: a `target`
+    /// matched the shape, an earlier `attach` put it there, or a `bring … as name` built it. Only certain
+    /// facts go in — what a block adds is dropped when it ends — so VS0348 never guesses.
+    private readonly List<(string Name, string Shape, string Why)> _carried = new();
+
+    /// `attach $S to name` where `name` is known to carry `$S` already: it REPLACES the component whole
+    /// (RULES 11b). Legal and often meant — samples/dom_rewire.vein rewires a handler exactly so — which is
+    /// why this is a note and not a warning. What it says is the part that surprises: fields the attach
+    /// does not write go back to the shape's DEFAULT, not to what they were.
+    private void NoteReattach(AttachStmt at)
+    {
+        if (at.Target is not NameExpr n) return;
+        // The MOST RECENT fact about this pair decides — an `unattach` after an attach means it is gone.
+        for (int i = _carried.Count - 1; i >= 0; i--)
+        {
+            var (name, shape, why) = _carried[i];
+            if (name != n.Name || shape != at.Shape) continue;
+            if (why != Gone)
+                _diag.Info("VS0348",
+                    $"`{n.Name}` already carries ${at.Shape} here ({why}), so this attach REPLACES it whole — " +
+                    $"every field it does not write goes back to the shape's default, not to its current value. " +
+                    $"To change one field, assign it: `{n.Name}.{at.Shape}.field = …`.", at.Span);
+            break;
+        }
+        _carried.Add((n.Name, at.Shape, "an earlier attach put it there"));
+    }
+
+    /// The `Why` of an entry that says the shape was REMOVED here (`unattach`).
+    private const string Gone = "\0gone";
 
     private IrStmt LowerStmt(Stmt s)
     {
@@ -1743,7 +1781,12 @@ public sealed partial class Lower
                 }
 
                 using var _ = BindTarget(q.Bind);
-                return new IrLoop(IrLoopKind.Target, null, q.Bind, null, new IrQuery(q.Components, q.Tags, q.Bind, q.OrderShape, q.OrderField), null, LowerBlock(q.Body));
+                // Inside the body, the binding carries every shape the query matched on — certain.
+                int carried = _carried.Count;
+                foreach (var shape in q.Components) _carried.Add((q.Bind, shape, "the target matched it"));
+                var body = LowerBlock(q.Body);
+                _carried.RemoveRange(carried, _carried.Count - carried);
+                return new IrLoop(IrLoopKind.Target, null, q.Bind, null, new IrQuery(q.Components, q.Tags, q.Bind, q.OrderShape, q.OrderField), null, body);
             }
             case RepeatStmt r:
                 return new IrLoop(IrLoopKind.Repeat, null, r.Var, null, null, LowerExpr(r.Count), LowerBlock(r.Body));
@@ -1799,6 +1842,9 @@ public sealed partial class Lower
                 // identity with no `$GameCamera`, which every query then acts on and cannot read.
                 if (at.Remove)
                 {
+                    // It is gone now, so a later attach of it is a fresh one, not a replacement. Recorded as
+                    // an entry rather than by deleting the earlier one, which may belong to an outer block.
+                    if (at.Target is NameExpr gone) _carried.Add((gone.Name, at.Shape, Gone));
                     RegisterAttachedShape(at.Shape, at.Span);
                     return WithShapeMarks(
                         new IrExprStmt(new IrRuntimeCall("RemoveComponent",
@@ -1813,10 +1859,26 @@ public sealed partial class Lower
                 // word. The include path was fixed for this once; the attach STATEMENT is the other
                 // way in and was missed.
                 RegisterAttachedShape(at.Shape, at.Span);
+                NoteReattach(at);
 
-                IrExpr init = at.Init is null
+                // AN ATTACH IS THE WHOLE COMPONENT (RULES 11b), so every field with a declared default that
+                // the statement does not write is written here, at compile time. The interpreter seeded
+                // those defaults itself while the C# backend emitted `new S { written }` and left the rest
+                // at C#'s default — `attach $Price to e { amount: 5 }` was currency "EUR" interpreted and
+                // empty compiled, with no note. Filled in the IR, both runtimes read the same thing.
+                var written = at.Init is null
+                    ? new List<(string, IrExpr)>()
+                    : LowerNamedFields(at.Init, () => ShapeFieldList(at.Shape), "$" + at.Shape);
+                if (ShapeFieldList(at.Shape) is { } declared)
+                {
+                    var named = written.Select(w => w.Item1).ToHashSet(StringComparer.Ordinal);
+                    foreach (var f in declared)
+                        if (f.Default is { } value && !named.Contains(f.Name)) written.Add((f.Name, LowerExpr(value)));
+                }
+
+                IrExpr init = at.Init is null && written.Count == 0
                     ? new IrTypeNameExpr(at.Shape)
-                    : new IrStructInit(at.Shape, LowerNamedFields(at.Init, () => ShapeFieldList(at.Shape), "$" + at.Shape));
+                    : new IrStructInit(at.Shape, written);
                 return WithShapeMarks(
                     new IrExprStmt(new IrRuntimeCall("AddComponent",
                         new IrExpr[] { LowerExpr(at.Target), init })),
