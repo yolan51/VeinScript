@@ -90,9 +90,9 @@ public class ConsoleBroadcastTests
     {
         var output = Run(Bundle(
             "  shard Ticker { every 1 { let consoles = [#Alpha, #Beta, #Gamma]\n" +
-            "      target consoles as c { " + P("\"-> \" + c") + " } } }"));
+            "      target consoles as c { " + P("\"→ \" + c") + " } } }"));
 
-        Assert.Equal(new[] { "-> Alpha", "-> Beta", "-> Gamma" }, Lines(output));
+        Assert.Equal(new[] { "→ Alpha", "→ Beta", "→ Gamma" }, Lines(output));
     }
 
     [Fact]

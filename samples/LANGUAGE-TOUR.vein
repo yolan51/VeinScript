@@ -522,7 +522,7 @@ bundle ConsoleRoles by you {
         // ADVISORY (the sender's name is unauthenticated); over Vein.Net it is enforced — §10.
         hear *Vein.Console.Io.@Message as m audience #Main {
             seen += 1
-            emit *Vein.Console.Io.@Print { text: m.from + " -> " + m.text + " (#" + seen + ")" }
+            emit *Vein.Console.Io.@Print { text: m.from + " → " + m.text + " (#" + seen + ")" }
         }
     }
 

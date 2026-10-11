@@ -22,24 +22,24 @@ bundle TextSplitJoin by you {
             // SPLIT keeps everything. "a,,b" is three pieces and the middle one is empty — a caller
             // counting columns in a CSV needs the empty column to still be there.
             let cells = split("north,,south,east", ",")
-            emit *Vein.Console.Io.@Print { text: "cells    = " + len(cells) + " -> " + join(cells, "|") }
+            emit *Vein.Console.Io.@Print { text: "cells    = " + len(cells) + " → " + join(cells, "|") }
 
             // LINES, not split(text, "\n"). They look equivalent and are not: a file written on
             // Windows leaves a `\r` on every line, and `line == "end"` then fails against "end\r"
             // with both sides looking identical in any output. That trap is what this closes.
             let rows = lines("first\r\nsecond\nthird")
-            emit *Vein.Console.Io.@Print { text: "lines    = " + len(rows) + " -> " + join(rows, "/") }
+            emit *Vein.Console.Io.@Print { text: "lines    = " + len(rows) + " → " + join(rows, "/") }
 
             // WORDS collapses runs of whitespace and drops empties. `split(line, " ")` on "a  b"
             // gives three pieces with an empty middle, and a program that cannot inspect characters
             // has no good way to tell an empty word from a real one after the fact.
             let ws = words("  the   quick  brown   ")
-            emit *Vein.Console.Io.@Print { text: "words    = " + len(ws) + " -> " + join(ws, ".") }
+            emit *Vein.Console.Io.@Print { text: "words    = " + len(ws) + " → " + join(ws, ".") }
 
             // CHARS completes the family. A character is a one-character string — there is no `char`
             // type and no 'a' literal, because `==` already compares one and ordering already works.
             let cs = chars("abc")
-            emit *Vein.Console.Io.@Print { text: "chars    = " + len(cs) + " -> " + join(cs, "-") }
+            emit *Vein.Console.Io.@Print { text: "chars    = " + len(cs) + " → " + join(cs, "-") }
         }
     }
 

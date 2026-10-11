@@ -322,14 +322,14 @@ public class TextAndFileTests
                         }
                         hear *Vein.Files.Io.@FileLoaded as f {
                             if startsWith(f.tag, "slot") {
-                                emit *Vein.Console.Io.@Print { text: f.tag + " -> " + trim(f.text) }
+                                emit *Vein.Console.Io.@Print { text: f.tag + " → " + trim(f.text) }
                             }
                         }
                     }
                 """, ticks: 4);
 
-            Assert.Contains("slot1 -> level=3", output);
-            Assert.Contains("slot3 -> level=9", output);
+            Assert.Contains("slot1 → level=3", output);
+            Assert.Contains("slot3 → level=9", output);
         }
         finally { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); }
     }

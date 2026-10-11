@@ -284,11 +284,9 @@ public sealed class SignatureLock
         string? returns = null;
         if (after.Length > 0)
         {
-            // `return T` since D16. A lock written before it says `-> T`; it is still READ, so an existing
-            // vein.lock keeps working and is rewritten in the new spelling the next time it is recorded.
-            if (after.StartsWith("return ")) returns = after["return ".Length..].Trim();
-            else if (after.StartsWith("->")) returns = after[2..].Trim();
-            else return null;
+            // `fn K (v: float) return float` — the same word a declaration uses (SYNTAX-DECISIONS D16).
+            if (!after.StartsWith("return ")) return null;
+            returns = after["return ".Length..].Trim();
         }
         return Params(sig[1..close]) is { } ps ? new LockEntry(kind.Value, key, ps, returns) : null;
     }

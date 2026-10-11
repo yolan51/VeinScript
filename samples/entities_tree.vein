@@ -130,7 +130,7 @@ bundle EntitiesTree by you {
         settled {
             target $Card $Parent as c {
                 emit *Vein.Console.Io.@Print {
-                    text: "card e" + Entity + " '" + c.Card.title + "' -> parent e" + c.Parent.of
+                    text: "card e" + Entity + " '" + c.Card.title + "' → parent e" + c.Parent.of
                 }
             }
         }

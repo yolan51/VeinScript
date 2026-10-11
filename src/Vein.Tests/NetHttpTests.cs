@@ -79,10 +79,10 @@ public class NetHttpTests : IDisposable
             "  shard S { run once {\n" +
             "    emit *Vein.Net.Http.@Fetch { url: \"https://x.test/one\", method: \"GET\", body: \"\" }\n" +
             "    emit *Vein.Net.Http.@Fetch { url: \"https://x.test/two\", method: \"GET\", body: \"\" } } }\n" +
-            "  shard R { hear *Vein.Net.Http.@Fetched as f { " + P("f.url + \" -> \" + f.body") + " } }");
+            "  shard R { hear *Vein.Net.Http.@Fetched as f { " + P("f.url + \" → \" + f.body") + " } }");
 
-        Assert.Contains("https://x.test/one -> body-of https://x.test/one", output);
-        Assert.Contains("https://x.test/two -> body-of https://x.test/two", output);
+        Assert.Contains("https://x.test/one → body-of https://x.test/one", output);
+        Assert.Contains("https://x.test/two → body-of https://x.test/two", output);
     }
 
     [Fact]

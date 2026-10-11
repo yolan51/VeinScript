@@ -47,7 +47,7 @@ bundle EntitiesBind by you {
     shard Report {
         settled {
             target $Edge #Edge as e {
-                emit *Vein.Console.Io.@Print { text: "edge e" + Entity + " -> e" + e.Edge.to + " w=" + e.Edge.weight }
+                emit *Vein.Console.Io.@Print { text: "edge e" + Entity + " → e" + e.Edge.to + " w=" + e.Edge.weight }
             }
         }
     }
