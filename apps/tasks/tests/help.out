@@ -1,0 +1,5 @@
+  add <title>     a new task
+  list            every task, oldest first
+  done <id>       mark one done      undo <id>   mark it not done
+  remove <id>     delete one
+  quit            leave

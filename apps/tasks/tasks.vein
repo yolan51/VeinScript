@@ -1,0 +1,185 @@
+// tasks.vein — a task tracker. The first real tool written in VeinScript, built to find what is missing.
+//
+//   veinc run apps/tasks/tasks.vein                        interactive — type `help`
+//   veinc run apps/tasks/tasks.vein -- add buy milk        one command, then exit
+//   veinc test apps/tasks                                  its tests (apps/tasks/tests)
+//
+// Tasks live in `tasks.json` beside the program. Each one is an IDENTITY carrying `$Task` — the language's
+// own record — so listing is a `target`, sorting is `by Task.id`, and saving is `toJson` per task.
+//
+// Exit codes for the one-shot form: 0 ok, 1 unknown command or bad usage, 2 no such task.
+// What writing this taught is in FRICTION.md beside it.
+
+bundle Tasks by you {
+
+    need "Vein.Console"
+    need "Vein.Files"
+
+    shape $Task { id: int, title: string, done: bool = false, added: string = "" }
+    mark #Task
+    builder Task { $Task   mark #Task }
+
+    // Raised once the saved tasks are loaded (or there were none) — everything that reads them waits for
+    // this, because a `bring` is only visible from the NEXT event (RULES 12b).
+    event @Ready { }
+
+    // One line of work: a verb and the rest of the line. `oneShot` is true when it came from the command
+    // line, and then the program exits with the command's code.
+    event @Command { verb: string, rest: string, oneShot: bool }
+
+    // Write every task back to tasks.json. Its own event for the same reason as @Ready: it must run AFTER
+    // the command that changed things has committed.
+    event @Save { }
+
+    shard Tracker {
+        var nextId = 1
+
+        // ---- loading ----------------------------------------------------------------------------
+
+        run once {
+            emit *Vein.Files.Io.@ReadFile { path: "tasks.json", tag: "load" }
+        }
+
+        hear *Vein.Files.Io.@FileLoaded as f {
+            if f.tag == "load" {
+                let rows = fromJson(f.text)
+                target rows as row: $Task {
+                    bring Task(row.id, row.title, row.done, row.added)
+                    if row.id >= nextId { nextId = row.id + 1 }
+                }
+                emit @Ready { }
+            }
+        }
+
+        hear *Vein.Files.Io.@FileMissing as f {
+            if f.tag == "load" { emit @Ready { } }     // the first run: nothing saved yet
+        }
+
+        // ---- input: the command line, or one line at a time ---------------------------------------
+
+        hear @Ready as r {
+            if len(args()) > 0 {
+                var rest = ""
+                target args() as a {
+                    if Index == 1 { rest = a }
+                    if Index > 1 { rest = rest + " " + a }
+                }
+                emit @Command { verb: args()[0], rest: rest, oneShot: true }
+            } else {
+                do print("tasks — type `help` for the commands, `quit` to leave.")
+            }
+        }
+
+        hear @Input as i {
+            let line = trim(i.text)
+            if len(line) > 0 {
+                let space = indexOf(line, " ")
+                if space < 0 {
+                    emit @Command { verb: line, rest: "", oneShot: false }
+                } else {
+                    emit @Command { verb: substring(line, 0, space), rest: trim(substring(line, space + 1)), oneShot: false }
+                }
+            }
+        }
+
+        // ---- the commands ---------------------------------------------------------------------------
+
+        hear @Command as c {
+            var code = 0
+            var toggle = ""
+
+            match c.verb {
+                when add {
+                    if len(c.rest) == 0 {
+                        do print("usage: add <title>")
+                        code = 1
+                    } else {
+                        bring Task(nextId, c.rest, false, now())
+                        do print("added " + nextId + ": " + c.rest)
+                        nextId = nextId + 1
+                        emit @Save { }
+                    }
+                }
+                when list {
+                    var shown = 0
+                    target $Task #Task by Task.id as t {
+                        var box = "[ ]"
+                        if t.Task.done { box = "[x]" }
+                        do print("  " + t.Task.id + "  " + box + " " + t.Task.title + "   (" + substring(t.Task.added, 0, 10) + ")")
+                        shown = shown + 1
+                    }
+                    if shown == 0 { do print("no tasks yet — add one with: add <title>") }
+                }
+                // Handled below, together: an `fn` cannot change the world and an `SF` cannot return a
+                // code, so "flip a task and say whether it existed" has no helper (FRICTION.md #3).
+                when done { toggle = "done" }
+                when undo { toggle = "undo" }
+                when remove {
+                    if not isNumber(c.rest) {
+                        do print("usage: remove <id>")
+                        code = 1
+                    } else {
+                        var found = false
+                        target $Task #Task as t {
+                            if t.Task.id == int(c.rest) {
+                                destroy t
+                                found = true
+                            }
+                        }
+                        if found {
+                            do print("removed " + c.rest)
+                            emit @Save { }
+                        } else {
+                            do print("no task " + c.rest)
+                            code = 2
+                        }
+                    }
+                }
+                when help {
+                    do print("  add <title>     a new task")
+                    do print("  list            every task, oldest first")
+                    do print("  done <id>       mark one done      undo <id>   mark it not done")
+                    do print("  remove <id>     delete one")
+                    do print("  quit            leave")
+                }
+                when quit { do quit(0) }
+                else {
+                    do print("unknown command: " + c.verb + " — try `help`")
+                    code = 1
+                }
+            }
+
+            if len(toggle) > 0 {
+                if not isNumber(c.rest) {
+                    do print("usage: " + toggle + " <id>")
+                    code = 1
+                } else {
+                    var found = false
+                    target $Task #Task as t {
+                        if t.Task.id == int(c.rest) {
+                            t.Task.done = toggle == "done"
+                            found = true
+                        }
+                    }
+                    if found {
+                        do print(toggle + " " + c.rest)
+                        emit @Save { }
+                    } else {
+                        do print("no task " + c.rest)
+                        code = 2
+                    }
+                }
+            }
+
+            if c.oneShot { do quit(code) }
+        }
+
+        // ---- saving ---------------------------------------------------------------------------------
+
+        hear @Save as s {
+            var parts = []
+            target $Task #Task by Task.id as t { parts += toJson(t.Task) }
+            emit *Vein.Files.Io.@WriteFile { path: "tasks.json", text: "[" + join(parts, ",") + "]" }
+        }
+    }
+}
