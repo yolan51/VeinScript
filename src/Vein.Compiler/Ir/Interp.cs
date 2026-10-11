@@ -1207,6 +1207,9 @@ public sealed class Interp
             // `@PrintError` — stderr when the host gave one (`veinc run`, a built exe, `veinc test`), else
             // the same output as @Print (the Workbench shows one stream).
             if (name == "PrintError") { Err?.WriteLine(Str(payload.GetValueOrDefault("text"))); continue; }
+            // `@PrintInline` — no line ending, and flushed, or a prompt sits in the buffer until the user
+            // has already typed the answer to it.
+            if (name == "PrintInline") { _out?.Write(Str(payload.GetValueOrDefault("text"))); _out?.Flush(); continue; }
 
             // `@Quit { code }` — the program is done. What is already queued still runs (a save emitted
             // just before it lands), then nothing more is read: no input, no frames, no timers.
@@ -1715,7 +1718,7 @@ public sealed class Interp
     /// compiled into a no-op.
     public static readonly IReadOnlySet<string> HostEvents =
         new HashSet<string>(StringComparer.Ordinal)
-        { "Response", "Print", "Console", "Send", "Listen", "Link", "Fetch", "ReadFile", "WriteFile", "PlaySound", "Quit", "PrintError" };
+        { "Response", "Print", "Console", "Send", "Listen", "Link", "Fetch", "ReadFile", "WriteFile", "PlaySound", "Quit", "PrintError", "PrintInline" };
 
     /// <summary>The readable half of an event key: `me.T.Go` → `Go`.</summary>
     /// <remarks>
@@ -1758,7 +1761,8 @@ public sealed class Interp
         { "spawn", "here", "pick", "len", "random", "join", "toJson", "fromJson",
           "split", "lines", "words", "chars", "trim", "code", "chr", "upper", "lower",
           "contains", "startsWith", "endsWith", "indexOf", "substring", "replace",
-          "int", "float", "string", "bool", "isNumber", "args", "now", "remove", "sort" };
+          "int", "float", "string", "bool", "isNumber", "args", "now", "remove", "sort",
+          "slice", "padLeft", "padRight", "env" };
 
     /// Prebuilt (built-in) functions that DO return a value — the only functions that return.
     ///
@@ -1781,6 +1785,11 @@ public sealed class Interp
         // so `xs = remove(xs, 2)` reads as what it does.
         "remove" => args.Count > 1 ? ListOps.Remove(args[0], args[1]) : new List<object?>(),
         "sort" => args.Count > 0 ? ListOps.Sort(args[0]) : new List<object?>(),
+        // A piece of a list, `substring`'s rule: start, then how many (all the rest when left out).
+        "slice" => args.Count > 1 ? ListOps.Slice(args[0], args[1], args.Count > 2 ? args[2] : null) : new List<object?>(),
+        // An environment variable, "" when it is not set — the same answer as a set-but-empty one, which is
+        // what a program means by "not configured". Pulled, like `now()`: the environment is the host's.
+        "env" => args.Count > 0 ? Environment.GetEnvironmentVariable(Str(args[0])) ?? "" : "",
         "pick" => args.Count > 0 && args[0] is IReadOnlyList<object?> { Count: > 0 } items
             ? items[_rng.Next(items.Count)]
             : null,
@@ -1879,6 +1888,12 @@ public sealed class Interp
         "substring" => Substring(args),
 
         "replace" => args.Count > 2 ? Str(args[0]).Replace(Str(args[1]), Str(args[2]), StringComparison.Ordinal) : "",
+
+        // `padLeft(id, 3)` is "  7": text widened to `width` with spaces (or the first character of `fill`),
+        // for columns that line up. Never cut — text already wider comes back whole, because a table with
+        // one long row is still right and a truncated title is not.
+        "padLeft" => Pad(args, left: true),
+        "padRight" => Pad(args, left: false),
 
         // ---- conversions ------------------------------------------------------------------------
         //
@@ -1990,6 +2005,16 @@ public sealed class Interp
 
     /// `substring(s, start)` to the end, or `substring(s, start, length)`. Both clamped to the string:
     /// a start past the end gives "", a length past the end gives what is there.
+    private static string Pad(List<object?> args, bool left)
+    {
+        string s = args.Count > 0 ? Str(args[0]) : "";
+        if (args.Count < 2) return s;
+        int width = (int)Math.Clamp(AsLong(args[1]), 0, 10_000);
+        string fill = args.Count > 2 ? Str(args[2]) : "";
+        char c = fill.Length > 0 ? fill[0] : ' ';
+        return left ? s.PadLeft(width, c) : s.PadRight(width, c);
+    }
+
     private static string Substring(List<object?> args)
     {
         if (args.Count < 2) return "";

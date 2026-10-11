@@ -1,0 +1,28 @@
+// text_pad.vein — columns that line up: padLeft and padRight.
+//
+//   veinc run samples/text_pad.vein --ticks 1
+//
+// In tools/check-backend.sh, so the interpreter and the C# backend are diffed on both.
+//
+// `padLeft(text, width)` widens text to `width` with spaces in front; `padRight` puts them behind. A
+// third argument picks the fill character instead. Anything that is not text is printed first, so
+// `padLeft(7, 3)` is "  7".
+//
+// They NEVER CUT. Text already wider than `width` comes back whole: a table with one long row is still
+// right, and a truncated title is not. Found missing by apps/tasks, whose ids past 9 pushed the list
+// one column out of line.
+
+bundle TextPad by you {
+
+    shard Table {
+        run once {
+            emit *Vein.Console.Io.@Print { text: padRight("id", 4) + padRight("task", 12) + "done" }
+            emit *Vein.Console.Io.@Print { text: padLeft(7, 3) + " " + padRight("buy milk", 12) + "no" }
+            emit *Vein.Console.Io.@Print { text: padLeft(12, 3) + " " + padRight("walk dog", 12) + "yes" }
+
+            // a fill character, and text already wider than the width
+            emit *Vein.Console.Io.@Print { text: "order " + padLeft(42, 6, "0") }
+            emit *Vein.Console.Io.@Print { text: "[" + padLeft("much too long", 4) + "]" }
+        }
+    }
+}

@@ -262,6 +262,16 @@ public sealed class CSharpBackend : IVeinBackend
             sb.AppendLine("        return s.Substring(start, take);");
             sb.AppendLine("    }");
             sb.AppendLine();
+            sb.AppendLine("    /// `padLeft` / `padRight` — widened, never cut; the interpreter does the same.");
+            sb.AppendLine("    public static string Pad(object? v, object? width, object? fill, bool left)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        var s = S(v);");
+            sb.AppendLine("        var w = (int)System.Math.Clamp(I(width), 0, 10_000);");
+            sb.AppendLine("        var f = fill is null ? \"\" : S(fill);");
+            sb.AppendLine("        var c = f.Length > 0 ? f[0] : ' ';");
+            sb.AppendLine("        return left ? s.PadLeft(w, c) : s.PadRight(w, c);");
+            sb.AppendLine("    }");
+            sb.AppendLine();
             sb.AppendLine("    /// `chars(s)` — one entry per character.");
             sb.AppendLine("    public static System.Collections.Generic.List<object?> Chars(object? v) =>");
             sb.AppendLine("        System.Linq.Enumerable.ToList(System.Linq.Enumerable.Select(S(v), c => (object?)c.ToString()));");
@@ -1221,7 +1231,7 @@ public sealed class CSharpBackend : IVeinBackend
         name is "spawn" or "random" or "len" or "code" or "chr" or "chars" or "upper" or "lower"
              or "contains" or "startsWith" or "endsWith" or "indexOf" or "substring" or "replace"
              or "split" or "lines" or "words" or "trim" or "join"
-             or "int" or "float" or "string" or "bool" or "isNumber";
+             or "int" or "float" or "string" or "bool" or "isNumber" or "padLeft" or "padRight";
 
     private string RuntimeCall(IrRuntimeCall c)
     {
@@ -1266,6 +1276,8 @@ public sealed class CSharpBackend : IVeinBackend
             case "string": return $"__VeinText.S({Expr(c.Args[0])})";
             case "bool": return $"__VeinText.ToBool({Expr(c.Args[0])})";
             case "isNumber": return $"__VeinText.IsNum({Expr(c.Args[0])})";
+            case "padLeft" or "padRight":
+                return $"__VeinText.Pad({Expr(c.Args[0])}, {Expr(c.Args[1])}, {(c.Args.Count > 2 ? Expr(c.Args[2]) : "null")}, {(c.Name == "padLeft" ? "true" : "false")})";
 
             // `attach $C to e { … }` carries a struct init and emits directly. `attach $C to e` with no
             // initialiser carries a bare TYPE NAME instead, which through Expr would emit as a string

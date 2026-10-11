@@ -54,6 +54,17 @@ public static class ListOps
         return result;
     }
 
+    /// `slice(xs, start, count)` — a new list of `count` elements from `start`, or everything from `start`
+    /// when `count` is left out. CLAMPED like `substring`, whose argument order it follows: a slice past the
+    /// end is shorter, never an error, so `slice(args(), 1)` is "the rest" even when there is none.
+    public static List<object?> Slice(object? list, object? start, object? count)
+    {
+        var all = list is IEnumerable<object?> l ? l.ToList() : new List<object?>();
+        int from = (int)Math.Clamp(Index(start), 0, all.Count);
+        int take = count is null ? all.Count - from : (int)Math.Clamp(Index(count), 0, all.Count - from);
+        return all.GetRange(from, take);
+    }
+
     /// A new list, sorted as `target … by Shape.field` sorts: text ordinally, numbers numerically, stable.
     public static List<object?> Sort(object? list) =>
         list is IEnumerable<object?> l ? l.OrderBy(x => x, EntityStore.OrderKey.Instance).ToList() : new List<object?>();

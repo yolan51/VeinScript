@@ -202,6 +202,53 @@ public class ProgramIoTests
         Assert.Contains("true", output);
     }
 
+    // ---- printInline, slice, padding, env (the tasks pilot's FRICTION #2, #5, #8, #9) -------------------
+
+    [Fact]
+    public void PrintInline_stays_on_the_line_and_print_carries_on_from_it()
+    {
+        string output = Run(
+            "  shard S { run once {\n    do printInline(\"tasks> \")\n    do printInline(\"a\")\n" +
+            "    do print(\"b\")\n    do print(\"next\") } }");
+        Assert.Equal("tasks> ab\nnext\n", output.Replace("\r", ""));
+    }
+
+    [Fact]
+    public void Slice_takes_start_then_count_and_clamps_like_substring()
+    {
+        string output = Run(
+            "  shard S { run once {\n    let xs = [\"a\", \"b\", \"c\", \"d\"]\n" +
+            "    do print(join(slice(xs, 1), \",\"))\n    do print(join(slice(xs, 1, 2), \",\"))\n" +
+            "    do print(\"[\" + join(slice(xs, 9), \",\") + \"]\")\n    do print(join(slice(args(), 1), \" \")) } }",
+            new[] { "add", "buy", "milk" });
+        Assert.Equal("b,c,d\nb,c\n[]\nbuy milk\n", output.Replace("\r", ""));
+    }
+
+    [Fact]
+    public void Padding_widens_and_never_cuts()
+    {
+        string output = Run(
+            "  shard S { run once {\n    do print(\"[\" + padLeft(7, 3) + \"]\")\n" +
+            "    do print(\"[\" + padRight(\"ab\", 4) + \"]\")\n    do print(\"[\" + padLeft(5, 3, \"0\") + \"]\")\n" +
+            "    do print(\"[\" + padLeft(\"toolong\", 3) + \"]\") } }");
+        Assert.Equal("[  7]\n[ab  ]\n[005]\n[toolong]\n", output.Replace("\r", ""));
+    }
+
+    [Fact]
+    public void Env_reads_a_variable_and_an_unset_one_is_empty()
+    {
+        Environment.SetEnvironmentVariable("VEIN_TEST_ENV_X", "hello");
+        try
+        {
+            string output = Run(
+                "  shard S { run once {\n    do print(\"x=\" + env(\"VEIN_TEST_ENV_X\"))\n" +
+                "    do print(\"y=[\" + env(\"VEIN_TEST_ENV_SURELY_UNSET\") + \"]\") } }");
+            Assert.Contains("x=hello", output);
+            Assert.Contains("y=[]", output);
+        }
+        finally { Environment.SetEnvironmentVariable("VEIN_TEST_ENV_X", null); }
+    }
+
     // ---- shard state -------------------------------------------------------------------------------------
 
     [Fact]

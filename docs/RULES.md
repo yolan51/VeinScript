@@ -739,6 +739,30 @@ is a reported error rather than a drop. All of it is **interpreter-only** for no
 emits lists as fixed-size typed arrays, and `veinc emit` says so at each use rather than emitting
 something that computes a different answer.
 
+`slice(xs, start, count)` is a NEW list of `count` elements from `start`, or everything from `start` when
+`count` is left out. The argument order and the clamping follow `substring`: a slice past the end is
+shorter, never an error, so `join(slice(args(), 1), " ")` is "every argument after the verb" even when
+there are none.
+
+**28i. Columns, prompts and the environment: `padLeft` / `padRight`, `printInline`, `env`.** Each one
+was found missing by apps/tasks (FRICTION #2, #8, #9).
+
+```
+padLeft(7, 3)               // "  7"     — widened with spaces in front; padRight puts them behind
+padLeft(42, 6, "0")         // "000042"  — a fill character
+padLeft("much too long", 4) // unchanged — padding NEVER cuts: a long row is still right, a cut title is not
+do printInline("tasks> ")   // no line ending — the next print carries on from here
+env("APPDATA")              // an environment variable; "" when it is not set
+```
+
+- `printInline` is the `@PrintInline { text }` event, beside `@Print`. It is flushed at once, so a prompt
+  is on the screen before the program waits for the answer. `print` itself keeps ending the line.
+- `env` is PULLED, like `now()` (28f): the environment belongs to the host, not to the program's events.
+  An unset variable and an empty one are the same answer, `""`, which is what a program means by "not
+  configured".
+- `padLeft` / `padRight` compile with the C# backend (samples/text_pad.vein is diffed by
+  check-backend). `slice`, `env` and `printInline` are interpreter-only, and `veinc emit` says so.
+
 **28b. A file is an event, and a failure is a message.** `*Vein.Files.Io.@ReadFile { path }` answers
 with `@FileLoaded` or `@FileMissing`; `@WriteFile` answers with `@FileWritten` or `@FileMissing`. That
 is the same shape as `@Fetch`/`@Fetched`/`@Failed` and a console send's `@Undelivered` — there is no
