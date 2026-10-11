@@ -23,7 +23,9 @@ const body = src.slice(src.indexOf('<main>') + 6, src.indexOf('</main>'));
 
 // A Vein string literal. Only \ and " need escaping; the lexer's other escapes (\n \t \r) we emit
 // deliberately, never accidentally, so they are added after this point and not by it.
-const veinStr = (s) => '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+// The ONE content change from the snapshot: an fn result is `return T`, never an arrow (SYNTAX-DECISIONS D16).
+const noArrow = (s) => s.replace(/(\b(?:fn|SF)\s+\w+\s*\([^()]*\))\s*(?:->|-&gt;)\s*/g, '$1 return ');
+const veinStr = (s) => '"' + noArrow(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
 
 const stripTags = (s) => s.replace(/<[^>]*>/g, '');
 

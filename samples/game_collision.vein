@@ -30,7 +30,7 @@ bundle GameCollision by you {
 
     // No `abs` in the standard library, and the pair test needs one on both axes. Small enough to
     // declare, and it doubles as this file's use of a plain `fn` over floats.
-    fn abs(v: float) -> float {
+    fn abs(v: float) return float {
         if v < 0.0 { return 0.0 - v }
         return v
     }

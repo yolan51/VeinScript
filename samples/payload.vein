@@ -11,7 +11,7 @@ bundle Demo {
     event @Response  { status: int, body: string }
 
     shard Source {
-        hear @Request as req { emit @Hit }               // amount omitted -> default 1
+        hear @Request as req { emit @Hit }               // amount omitted → default 1
     }
 
     bridge Sync {

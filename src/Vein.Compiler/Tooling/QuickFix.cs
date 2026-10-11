@@ -38,6 +38,7 @@ public static class QuickFixes
             "VS0218" => DeclareMark(diagnostic, source),
             "VS0338" or "VS0339" => NameTheAuthor(diagnostic, source, projectDir),
             "VS0341" => DoOrNot(diagnostic, source),
+            "VS0349" => ArrowToReturn(diagnostic, source),
             "VS0343" => QualifyOrderKey(diagnostic, source),
             "VS0345" => AcceptSignature(diagnostic),
             _ => Array.Empty<QuickFix>()
@@ -162,6 +163,15 @@ public static class QuickFixes
 
         string text = want.Groups[1].Value + "." + want.Groups[2].Value;
         return new[] { new QuickFix($"Write `{text}`", new TextEdit(key.Groups[1].Index, key.Groups[1].Length, text)) };
+    }
+
+    /// VS0349 — `fn f(x: int) -> int`: the arrow becomes the word `return` (D16). Certain: the span is the
+    /// `->` token itself, and the spelling is the only thing that changes.
+    private static IReadOnlyList<QuickFix> ArrowToReturn(Diagnostic d, string source)
+    {
+        int at = OffsetOf(source, d.Span.Line, d.Span.Col);
+        if (at < 0 || at + 2 > source.Length || source.Substring(at, 2) != "->") return Array.Empty<QuickFix>();
+        return new[] { new QuickFix("Write `return` instead of `->`", new TextEdit(at, 2, "return")) };
     }
 
     /// VS0341 (D13) — an SF called without `do`, or an fn called with one. Certain either way: the

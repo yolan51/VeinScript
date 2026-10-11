@@ -29,7 +29,7 @@ bundle SfEmitHear by you {
     event @Hit { who: string, amount: int }
     event @Healed { who: string, amount: int }
 
-    fn doubled(n: int) -> int { return n * 2 }
+    fn doubled(n: int) return int { return n * 2 }
 
     // An SF that emits. `do` at every call site is what says "this line changes things".
     SF strike(who: string, amount: int) {

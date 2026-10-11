@@ -13,7 +13,7 @@ bundle Combat by yolan {
         event @Request { path: string }
     }
 
-    event @Damage { amount: int }       // bundle-level -> private to this bundle
+    event @Damage { amount: int }       // bundle-level → private to this bundle
 
     shape $Health { hp: int folds sum }
 

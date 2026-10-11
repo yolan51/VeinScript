@@ -94,9 +94,9 @@ public class AppLoadTests : IDisposable
         // The other side of the import rule. Nothing pinned VS0333 before — the only thing that
         // exercised it was the false positive — so this is what stops the import exemption from quietly
         // widening into "never warn".
-        Write("A.vein", "bundle Alpha by me {\n  fn twice(n: int) -> int { return n * 2 }\n" +
+        Write("A.vein", "bundle Alpha by me {\n  fn twice(n: int) return int { return n * 2 }\n" +
                         "  need \"Vein.Console\"\n  shard Boot { run once { print(twice(2)) } }\n}");
-        Write("B.vein", "bundle Beta by me {\n  fn twice(n: int) -> int { return n + n }\n" +
+        Write("B.vein", "bundle Beta by me {\n  fn twice(n: int) return int { return n + n }\n" +
                         "  need \"Vein.Console\"\n  shard Boot { run once { print(twice(3)) } }\n}");
         var app = Write("Clash.app.vein", "app Clash { load \"A.vein\"   load \"B.vein\" }");
 

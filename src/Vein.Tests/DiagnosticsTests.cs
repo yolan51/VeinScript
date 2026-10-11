@@ -359,7 +359,7 @@ public class DiagnosticsTests
         // The line this check will not cross. There is no inference pass, so the type of `a + b` is
         // genuinely unknown here — and a warning that fires on correct code is worse than no warning.
         var d = Diagnose(RowDecl +
-            "  fn pick() -> int { return 1 }\n" +
+            "  fn pick() return int { return 1 }\n" +
             "  shard S { run once { let n = pick()\n    bring Row(\"ok\", n) } }");
 
         Assert.DoesNotContain(d, x => x.Code == "VS0230");
@@ -405,7 +405,7 @@ public class DiagnosticsTests
         // Nothing checked this in either direction. `add(1,2,3,4)` returned 3, `add(1)` returned 1 and
         // `add()` returned 0 — every one a plausible-looking number.
         var d = Diagnose(
-            "  fn add(a: int, b: int) -> int { return a + b }\n" +
+            "  fn add(a: int, b: int) return int { return a + b }\n" +
             "  shard S { run once { " + P("add(1, 2, 3, 4)") + "\n    " + P("add(1)") + " } }");
 
         Assert.Equal(2, d.Count(x => x.Code == "VS0229"));
@@ -543,8 +543,8 @@ public class DiagnosticsTests
     public void A_function_or_shape_declared_twice_is_VS0320_too()
     {
         var fns = Diagnose(
-            "  fn twice(n: int) -> int { return n * 2 }\n" +
-            "  fn twice(s: string) -> string { return s + s }\n");
+            "  fn twice(n: int) return int { return n * 2 }\n" +
+            "  fn twice(s: string) return string { return s + s }\n");
         var shapes = Diagnose("  shape $P { a: int }\n  shape $P { b: int }\n");
 
         Assert.Contains(fns, x => x.Code == "VS0320" && x.Message.Contains("'twice()'") && x.Message.Contains("no overloading"));

@@ -33,13 +33,43 @@ public class FunctionTests
     [Fact]
     public void Fn_returns_a_value()
     {
-        Assert.Contains("5", Prints("fn add(a: int, b: int) -> int { return a + b }", "add(2, 3)"));
+        Assert.Contains("5", Prints("fn add(a: int, b: int) return int { return a + b }", "add(2, 3)"));
+    }
+
+    // ---- the result type follows the WORD `return` — no arrows (SYNTAX-DECISIONS D16) ----------------
+
+    [Fact]
+    public void An_arrow_result_is_VS0349_naming_the_fix_and_only_one_error()
+    {
+        var r = Compile("bundle T by me { fn add(a: int, b: int) -> int { return a + b } }");
+        var d = Assert.Single(r.Diagnostics, x => x.Severity == Vein.Compiler.Diagnostics.Severity.Error);
+        Assert.Equal("VS0349", d.Code);
+        Assert.Contains("return int", d.Message);
+    }
+
+    [Fact]
+    public void The_quick_fix_for_an_arrow_writes_return_and_the_result_compiles()
+    {
+        string src = "bundle T by me { fn add(a: int, b: int) -> int { return a + b } }";
+        var d = Compile(src).Diagnostics.First(x => x.Code == "VS0349");
+        var fix = Assert.Single(Vein.Compiler.Tooling.QuickFixes.For(d, src));
+
+        string fixedSrc = src.Remove(fix.Edit.Offset, fix.Edit.Length).Insert(fix.Edit.Offset, fix.Edit.Text);
+        Assert.Contains("fn add(a: int, b: int) return int {", fixedSrc);
+        Assert.True(Compile(fixedSrc).Success);
+    }
+
+    [Fact]
+    public void An_SF_with_a_return_result_is_still_VS0105()
+    {
+        var r = Compile("bundle T by me { SF go(a: int) return int { } }");
+        Assert.Contains(r.Diagnostics, x => x.Code == "VS0105");
     }
 
     [Fact]
     public void Fn_supports_early_return()
     {
-        const string clamp = @"fn clamp(v: int, lo: int, hi: int) -> int {
+        const string clamp = @"fn clamp(v: int, lo: int, hi: int) return int {
             if v < lo { return lo }
             if v > hi { return hi }
             return v
@@ -53,7 +83,7 @@ public class FunctionTests
     public void Fn_can_recurse()
     {
         Assert.Contains("120", Prints(
-            "fn fact(n: int) -> int { if n <= 1 { return 1 } return n * fact(n - 1) }", "fact(5)"));
+            "fn fact(n: int) return int { if n <= 1 { return 1 } return n * fact(n - 1) }", "fact(5)"));
     }
 
     [Fact]
@@ -61,7 +91,7 @@ public class FunctionTests
     {
         // A depth guard, so a non-terminating fn yields null instead of blowing the stack.
         var output = Run("bundle T by me { start @Boot { } event @Boot { } " +
-                         "fn loop(n: int) -> int { return loop(n) } " +
+                         "fn loop(n: int) return int { return loop(n) } " +
                          "shard M { hear @Boot as b { emit *Vein.Console.Io.@Print { text: \"r=\" + loop(1) } } } }");
         Assert.Contains("r=", output);
     }
@@ -72,7 +102,7 @@ public class FunctionTests
         // A function body gets a fresh scope: the parameter `n` must not clobber the caller's own `n`.
         var output = Run(
             "bundle T by me { start @Boot { } event @Boot { } " +
-            "fn f(n: int) -> int { return n * 100 } " +
+            "fn f(n: int) return int { return n * 100 } " +
             "shard M { hear @Boot as b { let n = 7 " +
             "  emit *Vein.Console.Io.@Print { text: \"f=\" + f(9) } " +
             "  emit *Vein.Console.Io.@Print { text: \"n=\" + n } } } }");
@@ -95,7 +125,7 @@ public class FunctionTests
     [Fact]
     public void Sf_may_not_declare_a_return_type()
     {
-        Assert.False(Compile("bundle B { SF f(a: int) -> int { } }").Success);
+        Assert.False(Compile("bundle B { SF f(a: int) return int { } }").Success);
     }
 
     [Fact]
@@ -108,9 +138,9 @@ public class FunctionTests
     [Fact]
     public void Fn_is_accepted_where_sf_is()
     {
-        Assert.True(Compile("bundle B { fn f() -> int { return 1 } }").Success);                 // bundle level
-        Assert.True(Compile("bundle B { publicator P { fn f() -> int { return 1 } } }").Success); // publicator
-        Assert.True(Compile("bundle B { event @X { } shard S { fn f() -> int { return 1 } " +
+        Assert.True(Compile("bundle B { fn f() return int { return 1 } }").Success);                 // bundle level
+        Assert.True(Compile("bundle B { publicator P { fn f() return int { return 1 } } }").Success); // publicator
+        Assert.True(Compile("bundle B { event @X { } shard S { fn f() return int { return 1 } " +
                             "hear @X as e { } } }").Success);                                     // shard-local
     }
 

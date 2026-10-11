@@ -35,10 +35,10 @@
 
 bundle DbQuery by you {
 
-    fn site() -> string { return "https://YOUR-PROJECT.supabase.co" }
-    fn key() -> string { return "PASTE-YOUR-ANON-KEY" }
+    fn site() return string { return "https://YOUR-PROJECT.supabase.co" }
+    fn key() return string { return "PASTE-YOUR-ANON-KEY" }
 
-    fn tasks() -> string { return "/rest/v1/tasks" }
+    fn tasks() return string { return "/rest/v1/tasks" }
 
     // ---- the query format, one idea per function -------------------------------------------------
     //
@@ -49,31 +49,31 @@ bundle DbQuery by you {
     // `select` picks columns. Asking for `*` when you want three of them is the most common waste in a
     // PostgREST app: the row still crosses the network in full. `order` is the cheapest place to sort,
     // because Postgres has an index and this program does not.
-    fn qBasic() -> string {
+    fn qBasic() return string {
         return tasks() + "?select=id,title,rank&order=rank.asc"
     }
 
     // Comparison operators: eq, neq, gt, gte, lt, lte. Several filters on one URL are ANDed.
-    fn qFilter() -> string {
+    fn qFilter() return string {
         return tasks() + "?select=id,title,rank&rank=gte.3&done=is.false&order=rank.asc"
     }
 
     // `in.(…)` is set membership, and `not.` negates any operator — so `rank=not.in.(1,2)` is the
     // complement of this. Note the parentheses are literal and need no encoding.
-    fn qInSet() -> string {
+    fn qInSet() return string {
         return tasks() + "?select=id,title,rank&rank=in.(1,3)&order=rank.asc"
     }
 
     // OR is not a filter on a column, so it does not follow the `column=` shape: it is its own parameter
     // holding a comma-separated list of conditions. `and=(…)` exists too, for nesting inside an or.
-    fn qOr() -> string {
+    fn qOr() return string {
         return tasks() + "?select=id,title,rank&or=(rank.eq.1,done.is.true)&order=rank.asc"
     }
 
     // Paging. ORDER IS NOT OPTIONAL HERE, even though the syntax allows leaving it out: without it
     // Postgres may return rows in any order it likes, so page 2 can repeat or skip rows from page 1.
     // A limit without an order is a bug that only shows up under load.
-    fn qPage() -> string {
+    fn qPage() return string {
         return tasks() + "?select=id,title,rank&order=rank.asc&limit=2&offset=1"
     }
 
@@ -81,11 +81,11 @@ bundle DbQuery by you {
     // the child rows nested in each parent as an array — which `fromJson` gives back as a list, so
     // `target row.comments as cm` walks it with no unpacking step. The foreign key is what makes this
     // work; there is no `on` clause to write.
-    fn qEmbed() -> string {
+    fn qEmbed() return string {
         return tasks() + "?select=id,title,comments(id,body)&order=rank.asc"
     }
 
-    fn embedUrl() -> string { return site() + qEmbed() }
+    fn embedUrl() return string { return site() + qEmbed() }
 
     // ---- announce the connection -----------------------------------------------------------------
 

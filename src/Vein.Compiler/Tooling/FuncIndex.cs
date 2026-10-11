@@ -75,12 +75,12 @@ public static class FuncIndex
         return (null, null);
     }
 
-    /// `fn addNumber(id: string, delta: int) -> string`, with the owning path when it came from a
+    /// `fn addNumber(id: string, delta: int) return string`, with the owning path when it came from a
     /// needed bundle. `SF` and `fn` are shown as written, because the difference is the point: an SF
     /// is behaviour, a fn is computation.
     public static string Signature(FuncDecl f, string? owner) =>
         (f.IsPure ? "SF " : "fn ") + f.Name +
         "(" + string.Join(", ", f.Params.Select(p => p.Name + ": " + (p.Type?.Name ?? "?"))) + ")" +
-        (f.Return is null ? "" : " -> " + f.Return.Name) +
+        (f.Return is null ? "" : " return " + f.Return.Name) +
         (owner is null ? "" : "      *" + owner);
 }

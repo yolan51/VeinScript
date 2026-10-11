@@ -27,8 +27,8 @@ dialect. There is no general `class`.
 | `publicator` | `publicator N { … }` | a bundle's public grouping — members are visible to this bundle's shards (bundle-wide) | namespace segment in `*` paths |
 | `shared` | `shared("doc")` **above a decl, inside a publicator** | marks that decl public **across all bundles** (+ doc) — only `shared` members appear in `veinc symbols` and are reachable via `*Author.Bundle.Publicator.@…` | error outside a publicator; the doc is a LABEL shown in the completion row, so over 160 chars is **VS0243** (a warning) |
 | `let` / `var` | `let x [:T] = e` / `var x …` | immutable / mutable binding | |
-| `SF` | `SF f(p: T) { … }` | shard function — emits events, returns nothing (`-> R` is VS0105); called `do f(…)` | |
-| `fn` | `fn f(p: T) -> R { … return e }` | function — computes and returns a value; callable in any expression | |
+| `SF` | `SF f(p: T) { … }` | shard function — emits events, returns nothing (`return R` is VS0105); called `do f(…)` | |
+| `fn` | `fn f(p: T) return R { … return e }` | function — computes and returns a value; callable in any expression | |
 | `do` | `do f(…)` · `do *A.B.P.f(…)` | calls an `SF` — required, and only for an SF; an `fn` or a built-in is called bare (D15) | VS0341 either way round |
 | `return` | `return [e]` | return a value from an `fn`; outside one it is VS0107 | |
 | `if`* / `else` | `if c { … } else { … }` | conditional | *`if` is an **add** |
@@ -76,7 +76,7 @@ dialect. There is no general `class`.
 
 | Keyword | Meaning | Note |
 |---------|---------|------|
-| `random` | `random() -> float` in `[0,1)` | becomes stdlib; `chance` lowers to it |
+| `random` | `random() return float` in `[0,1)` | becomes stdlib; `chance` lowers to it |
 | `count` | `count Q` — size of a query/collection | becomes a stdlib/query method |
 
 ### Reserved (in the lexer, no assigned meaning yet)
@@ -134,7 +134,7 @@ see `DefaultProject/Scripts/SpawnerScript.cs`). Precise mapping in
 [BACKEND-CONTRACT.md](BACKEND-CONTRACT.md).
 
 ### 3.4 Built-in free functions (stdlib, provisional)
-`random() -> float` · `print(s: string)` · `abs min max sqrt` · `len(c) -> int` · `join(list, sep)`.
+`random() return float` · `print(s: string)` · `abs min max sqrt` · `len(c) return int` · `join(list, sep)`.
 A `Core`/`Std` bundle, not keywords.
 
 `spawn() -> Entity` is here too, and deliberately **not** a keyword: `let e = spawn()` already parses

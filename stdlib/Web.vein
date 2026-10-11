@@ -219,62 +219,62 @@ bundle Web by Vein {
     // real escape needs a string function the language does not have yet.
     publicator Js {
         shared("The statements a and b, in order.")
-        fn seq(a: string, b: string) -> string { return a + b }
+        fn seq(a: string, b: string) return string { return a + b }
 
         shared("JavaScript written out as-is — the escape hatch when the vocabulary has no word for it.")
-        fn raw(js: string) -> string { return js }
+        fn raw(js: string) return string { return js }
 
         shared("Set an element's text to a literal string.")
-        fn text(id: string, value: string) -> string {
+        fn text(id: string, value: string) return string {
             return "document.getElementById('" + id + "').innerText='" + value + "';"
         }
 
         shared("Set an element's text to the value of a JavaScript expression.")
-        fn expr(id: string, js: string) -> string {
+        fn expr(id: string, js: string) return string {
             return "document.getElementById('" + id + "').innerText=" + js + ";"
         }
 
         shared("Add to an element's text read as a number. A negative delta subtracts.")
-        fn addNumber(id: string, delta: int) -> string {
+        fn addNumber(id: string, delta: int) return string {
             return "var e=document.getElementById('" + id + "');e.innerText=(+e.innerText)+(" + delta + ");"
         }
 
         shared("Add or remove a class on an element.")
-        fn addClass(id: string, cls: string) -> string {
+        fn addClass(id: string, cls: string) return string {
             return "document.getElementById('" + id + "').classList.add('" + cls + "');"
         }
 
         shared("Remove a class from an element.")
-        fn removeClass(id: string, cls: string) -> string {
+        fn removeClass(id: string, cls: string) return string {
             return "document.getElementById('" + id + "').classList.remove('" + cls + "');"
         }
 
         shared("Toggle a class on an element.")
-        fn toggleClass(id: string, cls: string) -> string {
+        fn toggleClass(id: string, cls: string) return string {
             return "document.getElementById('" + id + "').classList.toggle('" + cls + "');"
         }
 
         shared("Navigate to a url.")
-        fn goto(url: string) -> string { return "location.href='" + url + "';" }
+        fn goto(url: string) return string { return "location.href='" + url + "';" }
 
         shared("A browser alert, for a literal message.")
-        fn alert(message: string) -> string { return "alert('" + message + "');" }
+        fn alert(message: string) return string { return "alert('" + message + "');" }
 
         shared("Write a literal message to the browser console.")
-        fn log(message: string) -> string { return "console.log('" + message + "');" }
+        fn log(message: string) return string { return "console.log('" + message + "');" }
 
         shared("Run a body of JavaScript every N milliseconds, forever.")
-        fn everyMs(ms: int, body: string) -> string {
+        fn everyMs(ms: int, body: string) return string {
             return "setInterval(function(){" + body + "}," + ms + ");"
         }
 
         shared("Set one CSS property on an element to a literal value.")
-        fn setStyle(id: string, prop: string, value: string) -> string {
+        fn setStyle(id: string, prop: string, value: string) return string {
             return "document.getElementById('" + id + "').style." + prop + "='" + value + "';"
         }
 
         shared("Set one CSS property on an element to the value of a JavaScript expression.")
-        fn setStyleExpr(id: string, prop: string, js: string) -> string {
+        fn setStyleExpr(id: string, prop: string, js: string) return string {
             return "document.getElementById('" + id + "').style." + prop + "=" + js + ";"
         }
     }

@@ -215,7 +215,7 @@ public class PublisherTests : IDisposable
             Directory.CreateDirectory(dir);
             string file = Path.Combine(dir, "Keys.vein");
             File.WriteAllText(file,
-                "bundle Keys by alice {\n    fn apiKey() -> string { return \"9f3Ka81mZq47LpXv02Tb\" }\n}\n");
+                "bundle Keys by alice {\n    fn apiKey() return string { return \"9f3Ka81mZq47LpXv02Tb\" }\n}\n");
 
             var plan = Publisher.Prepare(dir, "alice");
 

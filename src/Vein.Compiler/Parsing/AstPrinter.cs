@@ -53,7 +53,7 @@ public static class AstPrinter
                 foreach (var m in bl.Members) Line(sb, ind + 1, SigMember(m));
                 break;
             case FuncDecl fn:
-                Line(sb, ind, tag($"{(fn.IsPure ? "SF" : "fn")} {fn.Name}({string.Join(", ", fn.Params.Select(p => p.Name + ": " + Type(p.Type)))}) -> {(fn.Return is null ? "void" : Type(fn.Return))}"));
+                Line(sb, ind, tag($"{(fn.IsPure ? "SF" : "fn")} {fn.Name}({string.Join(", ", fn.Params.Select(p => p.Name + ": " + Type(p.Type)))}) return {(fn.Return is null ? "void" : Type(fn.Return))}"));
                 PrintBlock(sb, fn.Body, ind + 1);
                 break;
             case VarDecl v: Line(sb, ind, $"{(v.Mutable ? "var" : "let")} {v.Name}"); break;

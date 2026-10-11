@@ -463,7 +463,7 @@ public sealed class Parser
 
     /// SF is the only function kind. It never returns a value — it emits events (auto origin/source).
     /// `SF name(params) { … }` — a shard function: emits events, returns nothing.
-    /// `fn name(params) -> T { … return e }` — a function: computes and returns a value.
+    /// `fn name(params) return T { … return e }` — a function: computes and returns a value.
     /// The two are deliberately distinct (see SYNTAX-DECISIONS D6): behaviour vs computation.
     private FuncDecl ParseFunc()
     {
@@ -480,11 +480,19 @@ public sealed class Parser
         }
         Expect(TokenKind.RParen, "')'");
 
+        // `fn f(x: int) return int { … }` — the result type is introduced by the WORD the body already uses
+        // to give it back. VeinScript has no arrows and no lambdas: `->` was the old spelling, and it is
+        // now VS0349 with the fix in the message (the type is still read, so this is one error rather than
+        // a cascade). An SF declares no result either way — it emits instead (VS0105).
         TypeRef? ret = null;
-        if (Check(TokenKind.Arrow))
+        if (Check(TokenKind.KwReturn) || Check(TokenKind.Arrow))
         {
+            if (Check(TokenKind.Arrow))
+                _diag.Error("VS0349", "VeinScript has no `->` — write the result type after the word `return`: `fn f(x: int) return int { … }`.", Here);
             if (isSf) _diag.Error("VS0105", "SF has no return type; it emits events instead of returning.", Here);
-            else { Advance(); ret = ParseTypeRef(); }
+            Advance();
+            var type = ParseTypeRef();
+            if (!isSf) ret = type;
         }
 
         // `return` is legal only inside an `fn`; an SF emits instead (VS0107).

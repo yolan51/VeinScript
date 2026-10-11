@@ -119,7 +119,7 @@ row was checked against the code on 2026-10-09.
 | 5 | `serve` lets a program read any path (`..`, absolute) while answering HTTP | `Interp.ResolvePath` | confine to the project under `serve` — security |
 | 6 | a bundle-level `let`/`var` is dropped | `Lower.LowerMember`, "not modeled yet" | an error until module state is designed |
 | 7 | recursion past 256 returns null; `while` past 100k stops | `Interp` caps | raise `@DiagnosticRaised`, so a guard sees it |
-| 8 | an `fn … -> T` that falls off the end returns null | `Interp.CallUser` | a warning at the declaration |
+| 8 | an `fn … return T` that falls off the end returns null | `Interp.CallUser` | a warning at the declaration |
 | 9 | a typo in an enum `match` arm never matches (mark arms are checked) | `Lower`, `MatchStmt` | check arms against the enum's cases |
 | 10 | reassigning a `let` is accepted | `Mutable` is carried and never checked | an error |
 | 11 | `on mute unmute transform map count sync` and `T?` give generic parse errors; KEYWORDS.md claims meanings for three | the parser never handles them | a "reserved" diagnostic; decide or cut (SYNTAX-DECISIONS open item) |
@@ -144,7 +144,7 @@ and writing `$View`, that draws `$World` positions.
   - It is the spelling `emit @E { f: v }` already uses, so `bring Card(title: "x")` reads like the
     `emit @Card { title: "x" }` it lowers to.
   - A reorder then cannot change a named call's meaning, and a rename becomes a loud error.
-  - Needs its own decision (D16). It does not replace vein.lock, which protects every positional call
+  - Needs its own decision (D17). It does not replace vein.lock, which protects every positional call
     already written.
 - **A helper that changes the world AND answers** (apps/tasks FRICTION #3). This is the biggest design
   question the pilot raised.

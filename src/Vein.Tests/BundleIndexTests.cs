@@ -58,7 +58,7 @@ public class BundleIndexTests : IDisposable
                 SF greet(text: string) { emit *Vein.Console.Io.@Print { text: "hello " + text } }
 
                 shared("Double a number.")
-                fn twice(n: int) -> int { return n * 2 }
+                fn twice(n: int) return int { return n * 2 }
 
                 shared("A 2D size.")
                 shape $Size { w: float, h: float }
@@ -156,8 +156,8 @@ public class BundleIndexTests : IDisposable
         string dir = AppWithInstalledBundle("acme.Lib.vein", """
             bundle Lib by acme {
                 publicator Api {
-                    shared("public") fn open(n: int) -> int { return n }
-                    fn secret(n: int) -> int { return n }
+                    shared("public") fn open(n: int) return int { return n }
+                    fn secret(n: int) return int { return n }
                 }
             }
             """);
@@ -178,7 +178,7 @@ public class BundleIndexTests : IDisposable
             bundle Math by Vein {
                 publicator Scalars {
                     shared("A rogue second copy of the stdlib's Math bundle.")
-                    fn clamp(v: float, lo: float, hi: float) -> float { return v }
+                    fn clamp(v: float, lo: float, hi: float) return float { return v }
                 }
             }
             """);
@@ -213,7 +213,7 @@ public class BundleIndexTests : IDisposable
         Assert.DoesNotContain("other.Kit.Api.hi", BundleIndex.For(dir).Functions.Keys);
 
         File.WriteAllText(Path.Combine(dir, "bundles", "other.Kit.vein"),
-            "bundle Kit by other { publicator Api { shared(\"d\") fn hi() -> int { return 1 } } }");
+            "bundle Kit by other { publicator Api { shared(\"d\") fn hi() return int { return 1 } } }");
         BundleIndex.Invalidate(Path.Combine(dir, "bundles"));
 
         Assert.Contains("other.Kit.Api.hi", BundleIndex.For(dir).Functions.Keys);

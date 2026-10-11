@@ -177,17 +177,17 @@ module Demo
   type Health : Component { hp: int folds sum, mp: int }
   type Damaged : Message   { amount: int, victim: Entity }
   type Dead : Tag { }
-  fn clamp(v: int, lo: int, hi: int) -> int  [pure]
+  fn clamp(v: int, lo: int, hi: int) return int  [pure]
     if (< v lo) then { return lo }
     if (> v hi) then { return hi }
     return v
   shard Drain  @system @query(components=[Health], tags=[Enemy], bind=self)
-    fn tick() -> void
+    fn tick() return void
       loop target self: Entity in query
         assign self.Health.hp = (+ self.Health.hp -1)      // folds sum
         if (< (call random) 0.30) then
           call Emit (Damaged { amount: 5, victim: self })
-    fn settled() -> void
+    fn settled() return void
       loop target self: Entity in query
         if (<= self.Health.hp 0) then
           call AddTag self Dead

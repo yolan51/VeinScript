@@ -37,7 +37,7 @@ public class SignatureLockTests : IDisposable
 
     // ---- the fixture: one installed kit, written from a template so a test can change one line ----------
 
-    private const string Clamp = "fn clamp(v: float, lo: float, hi: float) -> float { return v }";
+    private const string Clamp = "fn clamp(v: float, lo: float, hi: float) return float { return v }";
     private const string Say = "SF say(who: string, what: string) { emit *Vein.Console.Io.@Print { text: who + what } }";
     private const string Pt = "shape $Pt { x: float, y: float }";
     private const string Thing = "builder Thing { $Pt $Hp   mark #Thing }";
@@ -111,7 +111,7 @@ public class SignatureLockTests : IDisposable
     {
         // The check needs something to compare with; and compiling — every keystroke in the Workbench —
         // must never be what creates the file.
-        Kit(clamp: "fn clamp(lo: float, hi: float, v: float) -> float { return v }");
+        Kit(clamp: "fn clamp(lo: float, hi: float, v: float) return float { return v }");
         var r = Compile(Game());
 
         Assert.Empty(Lock(r));
@@ -136,7 +136,7 @@ public class SignatureLockTests : IDisposable
             "builder kit.Geo.Calc.Card (title: string, body: string)",
             "builder kit.Geo.Calc.Thing (x: float, y: float, hp: int)",
             "event kit.Geo.Calc.Moved { dx: float, dy: float }",
-            "fn kit.Geo.Calc.clamp (v: float, lo: float, hi: float) -> float",
+            "fn kit.Geo.Calc.clamp (v: float, lo: float, hi: float) return float",
             "sf kit.Geo.Calc.say (who: string, what: string)",
         }, lines);
         Assert.DoesNotContain("\r", text);
@@ -195,12 +195,12 @@ public class SignatureLockTests : IDisposable
     [Fact]
     public void A_reordered_fn_is_an_error_at_every_call_qualified_or_bare()
     {
-        var r = AfterChange(() => Kit(clamp: "fn clamp(lo: float, hi: float, v: float) -> float { return v }"));
+        var r = AfterChange(() => Kit(clamp: "fn clamp(lo: float, hi: float, v: float) return float { return v }"));
 
         var errors = Lock(r);
         Assert.All(errors, d => Assert.Equal("VS0344", d.Code));
         Assert.Equal(new[] { 4, 5 }, errors.Select(d => d.Span.Line).OrderBy(l => l));
-        Assert.Contains("(v: float, lo: float, hi: float) -> float → (lo: float, hi: float, v: float) -> float", errors[0].Message);
+        Assert.Contains("(v: float, lo: float, hi: float) return float → (lo: float, hi: float, v: float) return float", errors[0].Message);
         Assert.Contains("'v' was 1st, is now 3rd", errors[0].Message);
         Assert.False(r.Success);
     }
@@ -212,7 +212,7 @@ public class SignatureLockTests : IDisposable
         string game = Game("  shard S { run once { let a = *G.Calc.clamp(1.0, 0.0, 2.0) } }\n",
                            needs: "  need \"kit.Geo\" as G\n");
         Baseline(Compile(game));
-        Kit(clamp: "fn clamp(hi: float, lo: float, v: float) -> float { return v }");
+        Kit(clamp: "fn clamp(hi: float, lo: float, v: float) return float { return v }");
 
         Assert.Contains(Compile(game).Diagnostics, d => d.Code == "VS0344");
     }
@@ -250,7 +250,7 @@ public class SignatureLockTests : IDisposable
     public void A_renamed_parameter_is_a_warning_not_an_error()
     {
         // Nothing moved — the call still passes its first value first. Worth a look, not a refusal.
-        var r = AfterChange(() => Kit(clamp: "fn clamp(value: float, lo: float, hi: float) -> float { return value }"));
+        var r = AfterChange(() => Kit(clamp: "fn clamp(value: float, lo: float, hi: float) return float { return value }"));
 
         Assert.All(Lock(r), d => Assert.Equal("VS0345", d.Code));
         Assert.Equal(2, Lock(r).Count);
@@ -353,7 +353,7 @@ public class SignatureLockTests : IDisposable
         File.WriteAllText(Path.Combine(_bundles, "Other.vein"),
             "bundle Other by kit {\n  need \"kit.Geo\"\n" +
             "  publicator Api {\n    shared(\"wrap\")\n" +
-            "    fn wrap(v: float) -> float { return *kit.Geo.Calc.clamp(v, 0.0, 1.0) }\n  }\n" +
+            "    fn wrap(v: float) return float { return *kit.Geo.Calc.clamp(v, 0.0, 1.0) }\n  }\n" +
             "  shard Own { run once { let k = clamp(0.5, 0.0, 1.0) } }\n}\n");
         BundleIndex.Invalidate(_bundles);
         Game("  shard S { run once { let w = *kit.Other.Api.wrap(0.5) } }\n", needs: "  need \"kit.Other\"\n");
@@ -364,7 +364,7 @@ public class SignatureLockTests : IDisposable
         var linked = AppLinker.Link(app, File.ReadAllText(app), diag);
 
         Assert.NotNull(linked);
-        Assert.Equal("fn kit.Other.Api.wrap (v: float) -> float", Assert.Single(linked!.OutsideUses).Line);
+        Assert.Equal("fn kit.Other.Api.wrap (v: float) return float", Assert.Single(linked!.OutsideUses).Line);
     }
 
     // ---- accepting a change --------------------------------------------------------------------------
@@ -375,15 +375,15 @@ public class SignatureLockTests : IDisposable
         Kit();
         string game = Game();
         Baseline(Compile(game));
-        Kit(clamp: "fn clamp(lo: float, hi: float, v: float) -> float { return v }");
+        Kit(clamp: "fn clamp(lo: float, hi: float, v: float) return float { return v }");
         var drifted = Compile(game);
 
         var output = new StringWriter();
         var result = SignatureLock.Relock(_dir, drifted.OutsideUses, pruneUnused: false, output);
 
         Assert.Single(result.Changed);
-        Assert.Contains("was fn kit.Geo.Calc.clamp (v: float, lo: float, hi: float) -> float", output.ToString());
-        Assert.Contains("now fn kit.Geo.Calc.clamp (lo: float, hi: float, v: float) -> float", output.ToString());
+        Assert.Contains("was fn kit.Geo.Calc.clamp (v: float, lo: float, hi: float) return float", output.ToString());
+        Assert.Contains("now fn kit.Geo.Calc.clamp (lo: float, hi: float, v: float) return float", output.ToString());
         Assert.Empty(Lock(Compile(game)));
     }
 
@@ -440,14 +440,14 @@ public class SignatureLockTests : IDisposable
     public void A_changed_signature_offers_one_fix_that_accepts_it()
     {
         string game = Game();
-        var r = AfterChange(() => Kit(clamp: "fn clamp(value: float, lo: float, hi: float) -> float { return value }"));
+        var r = AfterChange(() => Kit(clamp: "fn clamp(value: float, lo: float, hi: float) return float { return value }"));
         var d = Lock(r).First(x => x.Code == "VS0345");
 
         var fix = Assert.Single(Vein.Compiler.Tooling.QuickFixes.For(d, File.ReadAllText(game), _dir));
         Assert.Equal(LockPath, fix.File);
         Assert.True(Vein.Compiler.Tooling.QuickFixes.ApplyToFile(fix, out var problem), problem);
 
-        Assert.Contains("fn kit.Geo.Calc.clamp (value: float, lo: float, hi: float) -> float", File.ReadAllText(LockPath));
+        Assert.Contains("fn kit.Geo.Calc.clamp (value: float, lo: float, hi: float) return float", File.ReadAllText(LockPath));
         Assert.Empty(Lock(Compile(game)));
     }
 
@@ -457,7 +457,7 @@ public class SignatureLockTests : IDisposable
         // Accepting the new order would silence every call while fixing none of them — the calls are
         // what is wrong. So there is no button; the remedy is fixing them, then `veinc lock`.
         string game = Game();
-        var r = AfterChange(() => Kit(clamp: "fn clamp(lo: float, hi: float, v: float) -> float { return v }"));
+        var r = AfterChange(() => Kit(clamp: "fn clamp(lo: float, hi: float, v: float) return float { return v }"));
         var d = Lock(r).First(x => x.Code == "VS0344");
 
         Assert.Empty(Vein.Compiler.Tooling.QuickFixes.For(d, File.ReadAllText(game), _dir));

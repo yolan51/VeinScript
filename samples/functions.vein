@@ -3,7 +3,7 @@
 //
 // VeinScript splits functions by WHAT THEY PRODUCE:
 //
-//     SF   a shard function — EMITS events, returns nothing.   (`-> T` and `return` are errors)
+//     SF   a shard function — EMITS events, returns nothing.   (a `return T` result and `return` are errors)
 //     fn   a function       — COMPUTES and returns a value.    (callable in any expression)
 //
 // A shard's behaviour is expressed by emitting, so an SF is a named emit sequence; `fn` is the reusable
@@ -21,7 +21,7 @@ bundle Functions by you {
         // A `fn` returns — so it can be used wherever a value can. This one is `shared`, which means
         // another bundle could call it as *you.Functions.Api.bonus(…).
         shared("Score bonus for a streak, capped at 50.")
-        fn bonus(streak: int) -> int {
+        fn bonus(streak: int) return int {
             if streak <= 0 { return 0 }
             if streak > 10 { return 50 }
             return streak * 5
@@ -36,7 +36,7 @@ bundle Functions by you {
 
     // A local `fn` needs no `shared` — that keyword is about crossing bundles, not about being callable
     // here. `fn` may recurse.
-    fn fib(n: int) -> int {
+    fn fib(n: int) return int {
         if n <= 1 { return n }
         return fib(n - 1) + fib(n - 2)
     }

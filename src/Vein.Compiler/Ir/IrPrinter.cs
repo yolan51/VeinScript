@@ -35,7 +35,7 @@ public static class IrPrinter
         string ps = string.Join(", ", f.Params.Select(p => $"{p.Name}: {p.Type}"));
         string kw = f.IsPure ? "SF" : "method";   // non-SF IrFunctions are generated shard methods
         string attrs = Attrs(f.Attrs, exclude: "sf");
-        sb.AppendLine($"{Ind(ind)}{kw} {f.Name}({ps}) -> {f.Return}{attrs}");
+        sb.AppendLine($"{Ind(ind)}{kw} {f.Name}({ps}) return {f.Return}{attrs}");
         PrintBlock(sb, f.Body, ind + 1);
     }
 

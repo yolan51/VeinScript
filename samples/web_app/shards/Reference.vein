@@ -5,8 +5,10 @@
 // this is 1028 content nodes, and inlining it would bury the five routes it documents.
 //
 // CONTENT IS VERBATIM: a transcription of a generated snapshot dated 2026-08-29. No wording,
-// signature or example was changed. Parts of it predate the current language, and the page says so
-// in a callout at the top rather than quietly correcting anything.
+// signature or example was changed — with ONE exception: an fn result is spelled `return T`, not with an
+// arrow (SYNTAX-DECISIONS D16), so the page never teaches a spelling that no longer compiles. Parts of it
+// predate the current language, and the page says so in a callout at the top rather than quietly
+// correcting anything else.
 //
 // The one thing that differs is LAYOUT. 88 paragraphs in the source were literal ```veinscript
 // fences its generator never converted, leaking one line of code per <p>; those 44 blocks are
@@ -1201,7 +1203,7 @@ shard Reference {
             bring Paragraph("Restricts a value <code class=\"inline-code\">v</code> to a specified range defined by <code " +
                             "class=\"inline-code\">lo</code> and <code class=\"inline-code\">hi</code>. If the value is outside " +
                             "the range, it returns the nearest boundary.")
-            bring CodeBlock("fn clamp(v: float, lo: float, hi: float) -&gt; float {\n" +
+            bring CodeBlock("fn clamp(v: float, lo: float, hi: float) return float {\n" +
                             "    if v &lt; lo { return lo }\n" +
                             "    if v &gt; hi { return hi }\n" +
                             "    return v\n" +
@@ -1213,14 +1215,14 @@ shard Reference {
                             "class=\"inline-code\">b</code> based on the factor <code class=\"inline-code\">t</code>. It does not " +
                             "clamp <code class=\"inline-code\">t</code>, allowing for extrapolation if <code " +
                             "class=\"inline-code\">t</code> is outside the 0.0 to 1.0 range.")
-            bring CodeBlock("fn lerp(a: float, b: float, t: float) -&gt; float {\n" +
+            bring CodeBlock("fn lerp(a: float, b: float, t: float) return float {\n" +
                             "    return a + (b - a) * t\n" +
                             "}")
             bring Open("ul")
                 bring ListItem("<strong>fn min</strong>")
             bring Close("ul")
             bring Paragraph("Compares two floating-point numbers and returns the smaller of the two.")
-            bring CodeBlock("fn min(a: float, b: float) -&gt; float {\n" +
+            bring CodeBlock("fn min(a: float, b: float) return float {\n" +
                             "    if a &lt; b { return a }\n" +
                             "    return b\n" +
                             "}")
@@ -1228,7 +1230,7 @@ shard Reference {
                 bring ListItem("<strong>fn max</strong>")
             bring Close("ul")
             bring Paragraph("Compares two floating-point numbers and returns the larger of the two.")
-            bring CodeBlock("fn max(a: float, b: float) -&gt; float {\n" +
+            bring CodeBlock("fn max(a: float, b: float) return float {\n" +
                             "    if a &gt; b { return a }\n" +
                             "    return b\n" +
                             "}")
@@ -1236,7 +1238,7 @@ shard Reference {
                 bring ListItem("<strong>fn abs</strong>")
             bring Close("ul")
             bring Paragraph("Calculates the absolute value of a number, ensuring the result is non-negative.")
-            bring CodeBlock("fn abs(v: float) -&gt; float {\n" +
+            bring CodeBlock("fn abs(v: float) return float {\n" +
                             "    if v &lt; 0.0 { return -v }\n" +
                             "    return v\n" +
                             "}")
@@ -1245,7 +1247,7 @@ shard Reference {
             bring Close("ul")
             bring Paragraph("Computes the squared Euclidean distance between two 2D points. By omitting the square root " +
                             "operation, this function provides a computationally cheap way to compare distances.")
-            bring CodeBlock("fn distance2(x1: float, y1: float, x2: float, y2: float) -&gt; float {\n" +
+            bring CodeBlock("fn distance2(x1: float, y1: float, x2: float, y2: float) return float {\n" +
                             "    return (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1)\n" +
                             "}")
             bring Subsubheading("Logic and Operators")
@@ -1989,11 +1991,11 @@ shard Reference {
             bring Paragraph("Example:")
             bring CodeBlock("let isReady = false")
             bring Subsubheading("fn")
-            bring Paragraph("Syntax: <code class=\"inline-code\">fn Name(params) -&gt; Type { ... }</code>")
+            bring Paragraph("Syntax: <code class=\"inline-code\">fn Name(params) return Type { ... }</code>")
             bring Paragraph("Description: Declares a reusable computation function. It can return values but cannot emit " +
                             "events or modify identity state directly.")
             bring Paragraph("Example:")
-            bring CodeBlock("fn add(a: int, b: int) -&gt; int { return a + b }")
+            bring CodeBlock("fn add(a: int, b: int) return int { return a + b }")
             bring Subsubheading("folds")
             bring Paragraph("Syntax: <code class=\"inline-code\">field: Type folds Reducer</code>")
             bring Paragraph("Description: A field modifier used in <code class=\"inline-code\">shape</code> declarations to " +
@@ -2087,7 +2089,7 @@ shard Reference {
             bring Paragraph("Description: Exits the current <code class=\"inline-code\">fn</code> and provides a result to the " +
                             "caller.")
             bring Paragraph("Example:")
-            bring CodeBlock("fn square(n: int) -&gt; int { return n * n }")
+            bring CodeBlock("fn square(n: int) return int { return n * n }")
             bring Subsubheading("settled")
             bring Paragraph("Syntax: <code class=\"inline-code\">settled { ... }</code>")
             bring Paragraph("Description: A shard schedule that runs once per tick, specifically after all <code " +
@@ -2129,7 +2131,7 @@ shard Reference {
             bring Paragraph("Example:")
             bring CodeBlock("publicator Math {\n" +
                             "    shared(&quot;Absolute value&quot;)\n" +
-                            "    fn abs(n: float) -&gt; float { ... }\n" +
+                            "    fn abs(n: float) return float { ... }\n" +
                             "}")
             bring Subsubheading("start")
             bring Paragraph("Syntax: <code class=\"inline-code\">start @Event { payload }</code>")
@@ -2290,7 +2292,7 @@ shard Reference {
                             "class=\"inline-code\">Entity</code>, <code class=\"inline-code\">Mark</code>), or generic " +
                             "collections.")
             bring CodeBlock("var items: list&lt;string&gt;\n" +
-                            "fn process(id: Entity, msg: string) -&gt; bool { ... }")
+                            "fn process(id: Entity, msg: string) return bool { ... }")
             bring Subsubheading("Pattern Matching")
             bring Paragraph("The <code class=\"inline-code\">match</code> keyword branches based on enum values or literals.")
             bring CodeBlock("match state {\n" +
@@ -2441,11 +2443,11 @@ shard Reference {
                 bring ListItem("<code class=\"inline-code\">shape $Color { r: float, g: float, b: float, a: float }</code>")
                 bring ListItem("<code class=\"inline-code\">shape $Rect { x: float, y: float, width: float, height: float }</code>")
                 bring ListItem("<strong>Scalars:</strong>")
-                bring ListItem("<code class=\"inline-code\">fn clamp(v: float, lo: float, hi: float) -&gt; float</code>")
-                bring ListItem("<code class=\"inline-code\">fn lerp(a: float, b: float, t: float) -&gt; float</code>")
-                bring ListItem("<code class=\"inline-code\">fn min(a: float, b: float) -&gt; float</code>")
-                bring ListItem("<code class=\"inline-code\">fn max(a: float, b: float) -&gt; float</code>")
-                bring ListItem("<code class=\"inline-code\">fn abs(v: float) -&gt; float</code>")
+                bring ListItem("<code class=\"inline-code\">fn clamp(v: float, lo: float, hi: float) return float</code>")
+                bring ListItem("<code class=\"inline-code\">fn lerp(a: float, b: float, t: float) return float</code>")
+                bring ListItem("<code class=\"inline-code\">fn min(a: float, b: float) return float</code>")
+                bring ListItem("<code class=\"inline-code\">fn max(a: float, b: float) return float</code>")
+                bring ListItem("<code class=\"inline-code\">fn abs(v: float) return float</code>")
             bring Close("ul")
             bring Subsubheading("Vein.Transform")
             bring Open("ul")

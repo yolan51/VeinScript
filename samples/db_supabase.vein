@@ -46,7 +46,7 @@ bundle DbSupabase by you {
     // The paths below stay plain functions, because they are LITERALS rather than data — nothing
     // attaches them, nothing queries them, and there is no second copy to keep in step.
 
-    fn tablePath() -> string { return "/rest/v1/tasks" }
+    fn tablePath() return string { return "/rest/v1/tasks" }
 
     // `order=rank.asc` is the FIRST place to impose an order, and the cheapest: Postgres has an index and
     // this program does not. `by Task.rank` on the query below is the second place, and it is here as
@@ -62,7 +62,7 @@ bundle DbSupabase by you {
     // — a fragment builder emitting @Html — comes out right. See samples/entities_bring_rows.vein.
     // It is not used here because `order=rank.asc` already did the work, on a machine with an index.
     // See docs/SYNTAX-DECISIONS.md D14.
-    fn selectPath() -> string { return tablePath() + "?select=id,title,rank,done&order=rank.asc" }
+    fn selectPath() return string { return tablePath() + "?select=id,title,rank,done&order=rank.asc" }
 
     // NO QUERY PARAMETER IS BUILT FROM DATA HERE, and that is a rule rather than a convenience. There is
     // no percent-encoding in VeinScript: encoding is defined over BYTES and `code(c)` gives a UTF-16

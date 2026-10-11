@@ -34,7 +34,7 @@ after the `match` does the work. `remove` repeats the find loop. This is the big
 pilot raised.
 
 **Not a fix: an `SF` that returns.** An SF acts by emitting, on purpose, and never returns
-(LANGUAGE.md; `SF f() -> T` is VS0105). The answer has to be one of these:
+(LANGUAGE.md; `SF f() return T` is VS0105). The answer has to be one of these:
 - a read-only query an `fn` may use (`any $Task where Task.id == n`), so the question ("does it
   exist?") is an `fn` and the change is an `SF`;
 - a reply event, which is the IOP way but costs a round-trip for something synchronous.

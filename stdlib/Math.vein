@@ -26,26 +26,26 @@ bundle Math by Vein {
     // exactly what makes these safe to call from anywhere, including inside a `target` loop.
     publicator Scalars {
         shared("Clamp v into [lo, hi].")
-        fn clamp(v: float, lo: float, hi: float) -> float {
+        fn clamp(v: float, lo: float, hi: float) return float {
             if v < lo { return lo }
             if v > hi { return hi }
             return v
         }
 
         shared("Linear interpolation from a to b at t (t in 0..1; not clamped).")
-        fn lerp(a: float, b: float, t: float) -> float { return a + (b - a) * t }
+        fn lerp(a: float, b: float, t: float) return float { return a + (b - a) * t }
 
         shared("The smaller of a and b.")
-        fn min(a: float, b: float) -> float { if a < b { return a } return b }
+        fn min(a: float, b: float) return float { if a < b { return a } return b }
 
         shared("The larger of a and b.")
-        fn max(a: float, b: float) -> float { if a > b { return a } return b }
+        fn max(a: float, b: float) return float { if a > b { return a } return b }
 
         shared("Absolute value of v.")
-        fn abs(v: float) -> float { if v < 0.0 { return -v } return v }
+        fn abs(v: float) return float { if v < 0.0 { return -v } return v }
 
         shared("Squared distance between two points — no square root, so it is cheap to compare.")
-        fn distance2(x1: float, y1: float, x2: float, y2: float) -> float {
+        fn distance2(x1: float, y1: float, x2: float, y2: float) return float {
             return (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1)
         }
     }
@@ -66,10 +66,10 @@ bundle Math by Vein {
     // already qualifies a call to a function in its own publicator for exactly this reason.
     publicator Round {
         shared("Toward zero: trunc(4.7) is 4, trunc(-4.7) is -4. What `int(v)` does, named.")
-        fn trunc(v: float) -> float { return int(v) }
+        fn trunc(v: float) return float { return int(v) }
 
         shared("Down, always: floor(4.7) is 4, floor(-4.7) is -5.")
-        fn floor(v: float) -> float {
+        fn floor(v: float) return float {
             let t = int(v)
             // Truncation already went down for a positive value; for a negative one it went UP, and
             // only when there was a fraction to discard. `t > v` is exactly that case.
@@ -78,14 +78,14 @@ bundle Math by Vein {
         }
 
         shared("Up, always: ceil(4.2) is 5, ceil(-4.2) is -4.")
-        fn ceil(v: float) -> float {
+        fn ceil(v: float) return float {
             let t = int(v)
             if t < v { return t + 1 }
             return t
         }
 
         shared("Nearest, halves away from zero: round(2.5) is 3, round(-2.5) is -3.")
-        fn round(v: float) -> float {
+        fn round(v: float) return float {
             // Away from zero rather than half-up, so rounding a value and rounding its negation give
             // answers that are negations of each other. Half-up quietly breaks that symmetry, and a
             // total of rounded numbers then drifts in one direction.
@@ -94,13 +94,13 @@ bundle Math by Vein {
         }
 
         shared("Nearest, keeping `places` decimals: roundTo(3.14159, 2) is 3.14.")
-        fn roundTo(v: float, places: int) -> float {
+        fn roundTo(v: float, places: int) return float {
             let scale = *Vein.Math.Round.pow10(places)
             return *Vein.Math.Round.round(v * scale) / scale
         }
 
         shared("10 raised to n, for n >= 0.")
-        fn pow10(n: int) -> float {
+        fn pow10(n: int) return float {
             var p = 1.0
             repeat n { p = p * 10.0 }
             return p
@@ -116,7 +116,7 @@ bundle Math by Vein {
 
     publicator Roots {
         shared("Square root, by Newton's method. Negative input answers 0 rather than failing.")
-        fn sqrt(v: float) -> float {
+        fn sqrt(v: float) return float {
             // Zero rather than an error, matching how every other total operation in the language
             // behaves — `substring` clamps, `indexOf` answers -1, `int("abc")` is 0. There is no
             // `catch` to put a guard in.
@@ -130,7 +130,7 @@ bundle Math by Vein {
         }
 
         shared("Distance between two points. `distance2` is cheaper when you only need to compare.")
-        fn distance(x1: float, y1: float, x2: float, y2: float) -> float {
+        fn distance(x1: float, y1: float, x2: float, y2: float) return float {
             return *Vein.Math.Roots.sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1))
         }
     }

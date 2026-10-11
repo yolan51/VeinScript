@@ -708,12 +708,12 @@ public class ServiceTests
     {
         // Composing behaviour from small functions only helps if the signatures are visible. This is the
         // logic behind hover; it lives in Tooling rather than the Workbench precisely so it can be tested.
-        var r = Compile("bundle T by me { fn addNumber(id: string, delta: int) -> string { return id } }");
+        var r = Compile("bundle T by me { fn addNumber(id: string, delta: int) return string { return id } }");
 
         var hit = FuncIndex.Find(r.Ast!, "addNumber", null);
         Assert.NotNull(hit.Fn);
         Assert.Null(hit.Owner);                                   // local, so no qualified path
-        Assert.Equal("fn addNumber(id: string, delta: int) -> string", FuncIndex.Signature(hit.Fn!, hit.Owner));
+        Assert.Equal("fn addNumber(id: string, delta: int) return string", FuncIndex.Signature(hit.Fn!, hit.Owner));
     }
 
     [Fact]
@@ -736,7 +736,7 @@ public class ServiceTests
         var hit = FuncIndex.Find(r.Ast!, "addNumber", null);
         Assert.NotNull(hit.Fn);
         Assert.Equal("Vein.Web.Js.addNumber", hit.Owner);
-        Assert.Contains("fn addNumber(id: string, delta: int) -> string", FuncIndex.Signature(hit.Fn!, hit.Owner));
+        Assert.Contains("fn addNumber(id: string, delta: int) return string", FuncIndex.Signature(hit.Fn!, hit.Owner));
     }
 
     [Fact]

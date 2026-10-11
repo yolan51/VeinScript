@@ -224,10 +224,10 @@ public static class ScopeIndex
         };
     }
 
-    /// <summary>`(n: int) -> int` — what a function takes and gives, for its row's tooltip.</summary>
+    /// <summary>`(n: int) return int` — what a function takes and gives, for its row's tooltip.</summary>
     private static string Params(FuncDecl f) =>
         "(" + string.Join(", ", f.Params.Select(p => p.Name + ": " + Sig.TypeStr(p.Type))) + ")" +
-        (f.Return is null ? "" : " -> " + Sig.TypeStr(f.Return));
+        (f.Return is null ? "" : " return " + Sig.TypeStr(f.Return));
 
     /// <summary>`x: float, y: float` — the fields of a body, in declaration order.</summary>
     private static string? FieldList(IEnumerable<Node> members)

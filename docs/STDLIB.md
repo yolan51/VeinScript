@@ -20,7 +20,7 @@ bundle Name by author {                 // author roots the qualified name (*aut
         shared("doc")
         builder Name { param: T   markup = expr }     // markup→@Html, code→@Script, css→@Style
         shared("doc")
-        fn compute(v: T) -> T { return v }            // computation — callable in any expression
+        fn compute(v: T) return T { return v }            // computation — callable in any expression
         shared("doc")
         SF announce(v: T) { emit @Event { … } }       // behaviour — a named emit sequence
     }

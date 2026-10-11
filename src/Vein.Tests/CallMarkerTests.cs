@@ -10,7 +10,7 @@ namespace Vein.Tests;
 public class CallMarkerTests
 {
     private const string Decls =
-        "  fn twice(n: int) -> int { return n * 2 }\n" +
+        "  fn twice(n: int) return int { return n * 2 }\n" +
         "  SF say(t: string) { emit *Vein.Console.Io.@Print { text: t } }\n";
 
     private static CompilationResult Compile(string body) =>

@@ -37,13 +37,13 @@ bundle Characters by you {
     // fixed, every classifier anyone needs is one comparison, and a language that added a type for this
     // would be charging a type for something a range test already answers.
 
-    fn isDigit(c: string) -> bool { return c >= "0" and c <= "9" }
-    fn isLower(c: string) -> bool { return c >= "a" and c <= "z" }
-    fn isUpper(c: string) -> bool { return c >= "A" and c <= "Z" }
-    fn isLetter(c: string) -> bool { return isLower(c) or isUpper(c) }
+    fn isDigit(c: string) return bool { return c >= "0" and c <= "9" }
+    fn isLower(c: string) return bool { return c >= "a" and c <= "z" }
+    fn isUpper(c: string) return bool { return c >= "A" and c <= "Z" }
+    fn isLetter(c: string) return bool { return isLower(c) or isUpper(c) }
 
     // `_` is one character and compares like any other. No escape, no special case.
-    fn isIdentChar(c: string) -> bool { return isLetter(c) or isDigit(c) or c == "_" }
+    fn isIdentChar(c: string) return bool { return isLetter(c) or isDigit(c) or c == "_" }
 
     // ---- a real use: is this a legal identifier? ------------------------------------------------
     //

@@ -80,7 +80,7 @@ internal sealed class SignaturePopup
         string kind = fn.IsPure ? "SF — runs inline and changes things; called with `do`" : "fn — computes a value, changes nothing";
         ShowParams((fn.IsPure ? "do " : "") + (owner is null ? "" : "*" + owner + "."), fn.Name,
             fn.Params.Select(p => p.Name + ": " + (p.Type?.Name ?? "?")).ToList(),
-            ("(", ")" + (fn.Return is null ? "" : " -> " + fn.Return.Name)),
+            ("(", ")" + (fn.Return is null ? "" : " return " + fn.Return.Name)),
             active, callStart, fn.Doc is { Length: > 0 } d ? d + "\n" + kind : kind,
             fn.IsPure ? "#F47067" : "#9CDCFE");   // SF coral / fn sky
     }

@@ -23,7 +23,7 @@ public class SemanticPaintTests
     {
         var got = Painted("""
             bundle B {
-                fn twice(n: int) -> int { return n * 2 }
+                fn twice(n: int) return int { return n * 2 }
                 SF hurt(n: int) { emit @Hit { n: twice(n) } }
                 shard S { run once { do hurt(twice(1)) } }
             }
@@ -49,7 +49,7 @@ public class SemanticPaintTests
     [Fact]
     public void Names_in_comments_and_strings_are_left_alone()
     {
-        var got = Painted("bundle B {\n // fn fake() and run once\n fn real() -> int { return 1 }\n shard S { run once { let s = \"real() *A.B.@E\" } }\n}");
+        var got = Painted("bundle B {\n // fn fake() and run once\n fn real() return int { return 1 }\n shard S { run once { let s = \"real() *A.B.@E\" } }\n}");
         Assert.Equal(new[] { "real:Fn", "run:Schedule", "once:Schedule" }, got);
     }
 
@@ -102,7 +102,7 @@ public class SemanticPaintTests
     [Fact]
     public void Half_typed_source_still_paints()
     {
-        Assert.Contains("f:Fn", Painted("bundle B {\n fn f() -> int { return \"unterminated"));
+        Assert.Contains("f:Fn", Painted("bundle B {\n fn f() return int { return \"unterminated"));
     }
 
     [Fact]

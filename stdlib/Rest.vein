@@ -41,10 +41,10 @@ bundle Rest by Vein {
     //                  "Prefer", "return=representation")
     publicator Headers {
         shared("One header line — the start of a header string.")
-        fn one(name: string, value: string) -> string { return name + ": " + value }
+        fn one(name: string, value: string) return string { return name + ": " + value }
 
         shared("Add a header to an existing string. Safe on an empty one — no leading blank line matters, the transport skips them.")
-        fn also(headers: string, name: string, value: string) -> string {
+        fn also(headers: string, name: string, value: string) return string {
             return headers + "\n" + name + ": " + value
         }
 
@@ -53,19 +53,19 @@ bundle Rest by Vein {
         // right one. Note the transport already defaults a body to application/json, so this is for
         // saying so explicitly, or for the `accept` direction where there is no default.
         shared("Content-Type: application/json — the transport's default, stated out loud.")
-        fn json() -> string { return "Content-Type: application/json" }
+        fn json() return string { return "Content-Type: application/json" }
 
         shared("Accept a media type in the reply, e.g. accept(\"application/json\").")
-        fn accept(mime: string) -> string { return "Accept: " + mime }
+        fn accept(mime: string) return string { return "Accept: " + mime }
     }
 
     // Auth — the two schemes that cover most keyed APIs.
     publicator Auth {
         shared("Authorization: Bearer <token> — OAuth2, JWTs, and most modern APIs.")
-        fn bearer(token: string) -> string { return "Authorization: Bearer " + token }
+        fn bearer(token: string) return string { return "Authorization: Bearer " + token }
 
         shared("A key in a header of the service's own choosing, e.g. apiKey(\"apikey\", key) or apiKey(\"X-API-Key\", key).")
-        fn apiKey(name: string, key: string) -> string { return name + ": " + key }
+        fn apiKey(name: string, key: string) return string { return name + ": " + key }
 
         // PostgREST-family services (Supabase included, but the pattern is theirs, not ours — see the
         // file header) want the SAME key sent two ways: a named header routes the request to the right
@@ -78,7 +78,7 @@ bundle Rest by Vein {
         // so a bare name inside that body is looked up in the caller's own locals, not this bundle's.
         // Only a `*Vein.Rest…` reference re-triggers the same import, recursively, for the callee too.
         shared("Both headers a PostgREST-style API wants for one key: apiKey(name, key) plus bearer(key).")
-        fn keyed(name: string, key: string) -> string {
+        fn keyed(name: string, key: string) return string {
             return *Vein.Rest.Headers.also(*Vein.Rest.Auth.apiKey(name, key), "Authorization", "Bearer " + key)
         }
     }
@@ -90,13 +90,13 @@ bundle Rest by Vein {
     // page as data. `ok(f.status)` is the guard that belongs at the top of every `hear @Fetched`.
     publicator Status {
         shared("True for 2xx — the request succeeded. Check this before parsing a body.")
-        fn ok(status: int) -> bool { return status >= 200 and status < 300 }
+        fn ok(status: int) return bool { return status >= 200 and status < 300 }
 
         shared("True for 4xx — this program got something wrong: a bad key, a bad path, a bad body.")
-        fn clientError(status: int) -> bool { return status >= 400 and status < 500 }
+        fn clientError(status: int) return bool { return status >= 400 and status < 500 }
 
         shared("True for 5xx — the service got something wrong. This is the one worth retrying.")
-        fn serverError(status: int) -> bool { return status >= 500 and status < 600 }
+        fn serverError(status: int) return bool { return status >= 500 and status < 600 }
     }
 
     // Db — a keyed REST endpoint you talk to more than once: a PostgREST-style API (Supabase, or any

@@ -45,7 +45,7 @@ public class SecretScanTests
     public void A_named_secret_with_an_opaque_value_is_caught()
     {
         // Neither half alone would do it: the name says what it is, the shape says it is real.
-        var (text, found) = Scan("""    fn key() -> string { return "9f3Ka81mZq47LpXv02Tb" }""");
+        var (text, found) = Scan("""    fn key() return string { return "9f3Ka81mZq47LpXv02Tb" }""");
 
         Assert.Single(found);
         Assert.Equal("api key", found[0].Kind);

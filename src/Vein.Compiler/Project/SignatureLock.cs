@@ -66,7 +66,7 @@ public sealed class LockEntry
 
     public string Signature => Kind == LockKind.Event
         ? (Params.Count == 0 ? "{ }" : "{ " + string.Join(", ", Params) + " }")
-        : "(" + string.Join(", ", Params) + ")" + (Returns is null ? "" : " -> " + Returns);
+        : "(" + string.Join(", ", Params) + ")" + (Returns is null ? "" : " return " + Returns);
 
     public string Line => KindWord + " " + Key + " " + Signature;
 
@@ -284,8 +284,11 @@ public sealed class SignatureLock
         string? returns = null;
         if (after.Length > 0)
         {
-            if (!after.StartsWith("->")) return null;
-            returns = after[2..].Trim();
+            // `return T` since D16. A lock written before it says `-> T`; it is still READ, so an existing
+            // vein.lock keeps working and is rewritten in the new spelling the next time it is recorded.
+            if (after.StartsWith("return ")) returns = after["return ".Length..].Trim();
+            else if (after.StartsWith("->")) returns = after[2..].Trim();
+            else return null;
         }
         return Params(sig[1..close]) is { } ps ? new LockEntry(kind.Value, key, ps, returns) : null;
     }

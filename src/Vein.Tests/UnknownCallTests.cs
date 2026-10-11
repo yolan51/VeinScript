@@ -65,7 +65,7 @@ public class UnknownCallTests
     {
         var diags = new VeinCompilerService().Compile(new CompileRequest("t.vein", """
             bundle T by you {
-                fn double(n: int) -> int { return n * 2 }
+                fn double(n: int) return int { return n * 2 }
                 shard S { run once { let v = double(4) } }
             }
             """)).Diagnostics;
@@ -80,7 +80,7 @@ public class UnknownCallTests
         // If that order ever changed, every recursive `fn` in the language would become VS0234.
         var diags = new VeinCompilerService().Compile(new CompileRequest("t.vein", """
             bundle T by you {
-                fn fib(n: int) -> int {
+                fn fib(n: int) return int {
                     if n < 2 { return n }
                     return fib(n - 1) + fib(n - 2)
                 }

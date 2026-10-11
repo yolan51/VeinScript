@@ -149,7 +149,7 @@ public class CharacterTests
         // The argument against a `char` keyword: with ordering fixed, every classifier anyone needs is
         // one comparison written in the language itself.
         string output = Run("""
-                fn isDigit(c: string) -> bool { return c >= "0" and c <= "9" }
+                fn isDigit(c: string) return bool { return c >= "0" and c <= "9" }
                 shard S {
                     run once {
                         if isDigit("7") { emit *Vein.Console.Io.@Print { text: "7 yes" } }

@@ -220,7 +220,7 @@ public class MultiFileBundleTests : IDisposable
         Directory.CreateDirectory(Path.Combine(lib, "publicators"));
         File.WriteAllText(Path.Combine(lib, "acme.Lib.vein"), "bundle Lib by acme { }");
         File.WriteAllText(Path.Combine(lib, "publicators", "Api.vein"),
-            "shared(\"Double it.\")\nfn twice(n: int) -> int { return n * 2 }");
+            "shared(\"Double it.\")\nfn twice(n: int) return int { return n * 2 }");
 
         var r = new VeinCompilerService().Compile(new CompileRequest("Demo.vein",
             "bundle Demo by me { start @Boot { } event @Boot { } " +

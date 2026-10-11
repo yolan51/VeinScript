@@ -468,7 +468,7 @@ Two kinds, split by what they produce. An **`fn` computes and returns a value**;
 and returns nothing**.
 
 ```
-fn clamp(v: int, lo: int, hi: int) -> int {         // computation — usable in any expression
+fn clamp(v: int, lo: int, hi: int) return int {         // computation — usable in any expression
     if v < lo { return lo }
     if v > hi { return hi }
     return v
@@ -479,8 +479,8 @@ SF hurt(victim: Entity, amount: int) {              // behaviour — emits, neve
 }
 ```
 
-Params are `name: Type`. An `fn` declares its result after `->` and uses `return`; an `SF` does neither —
-`SF f() -> T` is `VS0105` and `return` outside an `fn` is `VS0107`. That split is the point: a shard's
+Params are `name: Type`. An `fn` declares its result after the word `return` and gives it back with `return`; an `SF` does neither —
+`SF f() return T` is `VS0105` and `return` outside an `fn` is `VS0107`. That split is the point: a shard's
 behaviour is expressed by emitting, so an SF is a *named emit sequence*, while an `fn` is reusable
 computation you can call inside a condition, a field value, or a `target` loop.
 
@@ -621,8 +621,8 @@ queryStmt   = "target" { SHAPEREF | MARKREF } "as" IDENT block ;   (* a statemen
 hearBlock   = "hear" EVENTREF "as" IDENT block ;
 
 funcDecl    = sfDecl | fnDecl ;
-sfDecl      = "SF" IDENT "(" [ params ] ")" block ;              (* emits; no `->`, no `return` *)
-fnDecl      = "fn" IDENT "(" [ params ] ")" [ "->" type ] block ; (* returns a value *)
+sfDecl      = "SF" IDENT "(" [ params ] ")" block ;              (* emits; no result type, no `return` *)
+fnDecl      = "fn" IDENT "(" [ params ] ")" [ "return" type ] block ; (* returns a value; D16 *)
 params      = param { "," param } ;  param = IDENT ":" type ;
 varDecl     = ("let" | "var") IDENT [ ":" type ] [ "=" expr ] ;
 type        = IDENT [ "<" type { "," type } ">" ] [ "?" ] ;

@@ -1,6 +1,6 @@
 // site.vein — a reactive website in IOP. A page is ASSEMBLED, not returned:
-//   @Request -> content shards emit @Html fragments -> ShardView concatenates them
-//   -> on @Render the ShardView emits the finished @Response page.
+//   @Request → content shards emit @Html fragments → ShardView concatenates them
+//   → on @Render the ShardView emits the finished @Response page.
 // Run it:  veinc render samples/site.vein  /
 
 bundle Site {

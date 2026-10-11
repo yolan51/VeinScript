@@ -77,8 +77,8 @@ bundle WebApp by you {
     // Deriving both (rather than storing names) is what keeps every render loop FLAT — see RULES.md 12c,
     // where a nested `target` silently reads empty from the outer binding. A button IS its handler, so
     // naming its function is `fnName(Entity)` — no lookup, no second loop, nothing that can disagree.
-    fn domId(e: Entity)  -> string { return "e" + e }
-    fn fnName(e: Entity) -> string { return "h" + e }
+    fn domId(e: Entity) return string { return "e" + e }
+    fn fnName(e: Entity) return string { return "h" + e }
 
     // One section of the reference at /docs. The BODY of that page cannot be a query — `target` binds
     // one shape per loop and there is no way to ask an entity which shape it carries, so a document

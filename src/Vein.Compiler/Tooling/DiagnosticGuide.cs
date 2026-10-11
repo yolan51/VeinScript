@@ -101,6 +101,9 @@ public static class DiagnosticGuide
         new("VS0236", "A query's binding reads fields, and the shapes it names are what give it fields to read — `target #Enemy as e` leaves `e` with nothing on it. It was also silently skipped by the C# backend, which has no query-by-mark, so the same program did one thing interpreted and another compiled.",
             "docs/RULES.md — target"),
 
+        new("VS0349", "Deliberate, not missing: an fn names its result after the WORD `return`, the same word its body gives it back with — `fn f(x: int) return int { … }`. VeinScript has no arrows and no lambdas; every function is declared and named.",
+            "docs/SYNTAX-DECISIONS.md — D16"),
+
         new("VS0006", "Deliberate, not missing: logic is spelled in words, so inequality is `not (a == b)` and negation is `not x`. `!` is kept unlexed for a future sigil. The lexer still hands the parser the token you meant, so this is one error rather than a cascade about braces.",
             "docs/SYNTAX-DECISIONS.md — D12"),
 

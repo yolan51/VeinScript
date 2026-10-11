@@ -23,7 +23,7 @@ bundle DomRewire by you {
     mark #Button
 
     // The function's name IS its identity — nothing stores a name, so nothing can disagree about one.
-    fn fnName(e: Entity) -> string { return "h" + e }
+    fn fnName(e: Entity) return string { return "h" + e }
 
     // One line per button, because a `mark` member makes this an identity template:
     //   bring Btn("button", "one", "…")  ==  spawn + attach $Element + attach $Handler + mark #Button

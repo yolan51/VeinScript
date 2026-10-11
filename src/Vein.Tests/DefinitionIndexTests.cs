@@ -151,7 +151,7 @@ public class DefinitionIndexTests
         // Outline listed every SF under "Functions" and every `fn` under "Shard functions", and Find
         // References on an SF found no calls, because calls are filed by the declaration's kind.
         var ix = Index(
-            "    fn twice(n: int) -> int { return n * 2 }\n" +
+            "    fn twice(n: int) return int { return n * 2 }\n" +
             "    SF shout(n: int) { }\n" +
             "    shard S { run once { shout(twice(1)) } }");
 

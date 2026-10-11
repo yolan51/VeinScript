@@ -439,7 +439,7 @@ order its arguments bind:
 
 ```
 builder kit.Coins.Pickups.Coin (x: float, y: float, value: int)
-fn kit.Geo.Calc.clamp (v: float, lo: float, hi: float) -> float
+fn kit.Geo.Calc.clamp (v: float, lo: float, hi: float) return float
 shape kit.Movement.Drive.Mover (dx: float, dy: float)
 event kit.Coins.Pickups.Collected { by: Entity, value: int }
 ```
@@ -585,8 +585,8 @@ a character carried by nothing is just a value.
 So every classifier is an ordinary `fn`:
 
 ```
-fn isDigit(c: string)  -> bool { return c >= "0" and c <= "9" }
-fn isLetter(c: string) -> bool { return (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") }
+fn isDigit(c: string) return bool { return c >= "0" and c <= "9" }
+fn isLetter(c: string) return bool { return (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") }
 ```
 
 **Two strings compare ORDINALLY; anything else compares numerically.** This was a real bug until it was

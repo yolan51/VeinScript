@@ -103,12 +103,12 @@ parallelism possible. Web/desktop are modeled as identities + shards too (see
 over identities, functions are reusable computation. Both `fn` and `SF` exist.
 
 D6 originally framed the pair as *`fn` effectful / `SF` verified-pure*, and the docs long showed
-`SF clamp(…) -> int`. The implementation had gone the other way — rejecting `fn` outright
+`SF clamp(…) return int` (the arrow is gone too, see D16). The implementation had gone the other way — rejecting `fn` outright
 (`VS0106: VeinScript has no fn`) and making `SF` emit-only — so the docs and the compiler contradicted
 each other for as long as both existed. Resolved in favour of a split by **what a function produces**,
 which is the distinction that actually earns two keywords:
 
-| | produces | may `return` | `-> T` |
+| | produces | may `return` | `return T` in the signature (D16) |
 |---|---|---|---|
 | `SF` | events (`emit`) | no — VS0107 | no — VS0105 |
 | `fn` | a value | yes | yes |
@@ -388,6 +388,32 @@ every SF in scope, with its `shared("…")` line; and a bare call to one is `VS0
 
 `do` is a keyword inside the range that may still be spelled as a field name (`shape $Task { do: string }`),
 like `from`, `count` and `to`.
+
+---
+
+## D16 — An fn's result type follows the word `return`; no arrows, no lambdas {#return}
+
+> **Reported as `VS0349`**: `->` in a declaration ("write the result type after the word `return`").
+> The type is still read, so it is one error, not a cascade.
+
+**DECIDED.** An `fn` names what it gives back with the same word its body uses to give it back:
+
+```
+fn isDigit(c: string) return bool {
+    return c >= "0" and c <= "9"
+}
+```
+
+*Why.* Logic is words here (D12), statement heads are words (D15), and an `fn`'s result was the one
+place a glyph stood in for a meaning. `->` also reads as "maps to", which invites the lambda and
+function-type syntax this language does not have and will not get. Every function is declared, named
+and called by name. `return` was already a keyword and already means exactly this, so the signature and
+the body now say the same thing.
+
+**No lambdas, ever.** There is no anonymous function, no `x => …`, no `\x -> …`, and no function type.
+Behaviour that would be passed as a lambda elsewhere is a named `fn`, an `SF`, or an event.
+
+An `SF` still declares no result, under either spelling (VS0105): it emits.
 
 ---
 

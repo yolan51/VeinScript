@@ -111,7 +111,7 @@ bundle Demo {
     event @Response  { status: int, body: string }
 
     shard Source {
-        hear @Request as req { emit @Hit }               // amount omitted -> default 1
+        hear @Request as req { emit @Hit }               // amount omitted → default 1
     }
 
     bridge Sync {
@@ -160,8 +160,8 @@ bundle Demo {
 // ============================================================================================
 //  4. site.vein — A REACTIVE WEBSITE
 //  A page is ASSEMBLED, not returned:
-//    @Request -> content shards emit @Html fragments -> ShardView concatenates them
-//    -> on @Render the ShardView emits the finished @Response page.
+//    @Request → content shards emit @Html fragments → ShardView concatenates them
+//    → on @Render the ShardView emits the finished @Response page.
 //  Run:  veinc render samples/site.vein /
 // ============================================================================================
 
@@ -219,7 +219,7 @@ bundle Site {
 // ============================================================================================
 //  5. mypage.vein — `builder` TEMPLATES + `bring`
 //  A `builder` is a reusable element: params, then ONE output field whose value is the template.
-//  The output field's name decides the kind:  markup -> @Html,  code -> @Script,  css -> @Style.
+//  The output field's name decides the kind:  markup → @Html,  code → @Script,  css → @Style.
 //  `bring` instantiates it (optionally N times); a ShardView hears the fragments and assembles.
 //  Run:  veinc render samples/mypage.vein /
 // ============================================================================================
@@ -743,10 +743,10 @@ bundle UseDemo by you {
 //
 //    veinc run    <file> [--ticks N]  console session: @Print/@Input, `every N` timers, the network
 //    veinc render <file> [path]       one-shot: fire the boot event, capture @Response
-//    veinc serve  <file> --port N     real HTTP into that same @Request -> @Response pipeline
+//    veinc serve  <file> --port N     real HTTP into that same @Request → @Response pipeline
 //    veinc build  <file> [--rid R]    standalone exe (embeds the interpreter); --rid linux-x64 to
 //                                     cross-build a server for a VPS
-//    veinc emit   <file> -o <dir>     HIR -> C# for the SECS backend (identity half only: shapes,
+//    veinc emit   <file> -o <dir>     HIR → C# for the SECS backend (identity half only: shapes,
 //                                     marks, target, folds, run once/each tick/settled — ~10x the
 //                                     interpreter; the reactive half stays interpreted)
 //    veinc symbols <app.vein>         the combined cross-bundle API, with collisions flagged

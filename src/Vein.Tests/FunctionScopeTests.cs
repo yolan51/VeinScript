@@ -18,8 +18,8 @@ public class FunctionScopeTests
 
     private static IReadOnlyList<ScopeIndex.ScopeEntry> Scope(SymbolKind kind) =>
         ScopeIndex.For(new VeinCompilerService().Compile(new CompileRequest("t.vein",
-            "bundle T by you {\n fn twice(n: int) -> int { return n * 2 }\n SF say(t: string) { }\n" +
-            " shard S { fn inner() -> int { return 1 } }\n}")).Ast!, kind, Root());
+            "bundle T by you {\n fn twice(n: int) return int { return n * 2 }\n SF say(t: string) { }\n" +
+            " shard S { fn inner() return int { return 1 } }\n}")).Ast!, kind, Root());
 
     [Fact]
     public void Local_fns_and_SFs_are_separate_lists()
