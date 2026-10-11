@@ -317,7 +317,8 @@ public sealed class Interp
             var (carriedShapes, carriedMarks) = AttrLists(shard.Attrs, "carries");
             var fc = _registry.Register(shard.Name, kind, carriedShapes, carriedMarks);
             var inst = new Instance { Name = shard.Name, Fc = fc };
-            foreach (var f in shard.State) inst.State[f.Name] = Default(f.Type.Name);
+            foreach (var f in shard.State)
+                inst.State[f.Name] = f.Default is { } init ? Eval(init, inst, new Dictionary<string, object?>()) : Default(f.Type.Name);
             foreach (var m in shard.Methods)
             {
                 // A schedule block (`run once` / `each tick` / `settled` / …) is a body the CLOCK calls,
@@ -620,12 +621,16 @@ public sealed class Interp
         });
     }
 
+    /// What `now()` answers, when a host pins it — `veinc test` does, so a program that stamps dates gives
+    /// the same output every run. Null: `VEIN_NOW` if set, else the real clock.
+    public string? FixedNow { get; set; }
+
     /// `now()` — local time, ISO 8601 to the second. `VEIN_NOW` replaces it outright, which is how a test
     /// of a program that stamps dates gets the same output every run.
-    private static string Now() =>
-        Environment.GetEnvironmentVariable("VEIN_NOW") is { Length: > 0 } fixedNow
-            ? fixedNow
-            : DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+    private string Now() =>
+        FixedNow is { Length: > 0 } pinned ? pinned
+        : Environment.GetEnvironmentVariable("VEIN_NOW") is { Length: > 0 } fixedNow ? fixedNow
+        : DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
 
     /// A relative path against `BaseDirectory`; an absolute one is left exactly as written, because a
     /// program that computed a full path has already said where it means.

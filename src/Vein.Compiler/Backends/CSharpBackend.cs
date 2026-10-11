@@ -613,7 +613,10 @@ public sealed class CSharpBackend : IVeinBackend
         sb.AppendLine("{");
         _fields.Clear();
         foreach (var f in shard.State) _fields.Add(f.Name);
-        foreach (var f in shard.State) sb.AppendLine($"    public {Cs(f.Type)} {Ident(f.Name)};");
+        foreach (var f in shard.State)
+            sb.AppendLine(f.Default is { } init
+                ? $"    public {Cs(f.Type)} {Ident(f.Name)} = {Expr(init)};"
+                : $"    public {Cs(f.Type)} {Ident(f.Name)};");
         if (shard.State.Count > 0) sb.AppendLine();
 
         // `hear` blocks, collected first so Subscribe can wire them — and only for events this module

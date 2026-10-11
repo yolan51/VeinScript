@@ -1520,7 +1520,10 @@ public sealed partial class Lower
                 case ScheduleBlock sb: methods.Add(LowerSchedule(sb)); break;
                 case HearBlock hb: methods.Add(LowerHear(hb)); break;
                 case FuncDecl f: methods.Add(LowerFunc(f)); break;
-                case VarDecl v: state.Add(new IrField(v.Name, v.Type is null ? IrTypeRef.Of("infer") : LowerTypeRef(v.Type), null)); break;
+                // The INITIALISER goes with it. It was dropped here, so `var n = 0` started EMPTY and
+                // `var x: int = 5` started at 0 — the declared value never reached either runtime.
+                case VarDecl v: state.Add(new IrField(v.Name, v.Type is null ? IrTypeRef.Of("infer") : LowerTypeRef(v.Type), null,
+                                                      v.Init is null ? null : LowerExpr(v.Init))); break;
             }
         }
 
@@ -1537,7 +1540,10 @@ public sealed partial class Lower
             {
                 case HearBlock hb: methods.Add(LowerHear(hb)); break;
                 case FuncDecl f: methods.Add(LowerFunc(f)); break;
-                case VarDecl v: state.Add(new IrField(v.Name, v.Type is null ? IrTypeRef.Of("infer") : LowerTypeRef(v.Type), null)); break;
+                // The INITIALISER goes with it. It was dropped here, so `var n = 0` started EMPTY and
+                // `var x: int = 5` started at 0 — the declared value never reached either runtime.
+                case VarDecl v: state.Add(new IrField(v.Name, v.Type is null ? IrTypeRef.Of("infer") : LowerTypeRef(v.Type), null,
+                                                      v.Init is null ? null : LowerExpr(v.Init))); break;
             }
         }
         var attrs = new List<IrAttr> { IrAttr.Of("view") };
