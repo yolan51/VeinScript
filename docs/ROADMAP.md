@@ -113,7 +113,6 @@ row was checked against the code on 2026-10-09.
 
 | # | Today, silently | Where | Fix |
 |---|---|---|---|
-| 1 | `xs[i] = v` and `p.x = v` on a list or record do nothing — LANGUAGE.md's own `grid[i] = 0` hits it | `Interp.DoAssign` writes locals and component fields only | implement for list/dict (+ backend), else an error |
 | 2 | `target rows as row: $Task { row.titel }` reads empty, though RULES 27 says the fields are checked | Resolve types the binding and reports nothing | warn on a field the ascribed shape lacks |
 | 3 | `hear @E as e { e.feild }` reads empty | payload fields are typed in Resolve | the same warning for `hear` bindings (vein.lock already covers a field a bundle *removed*) |
 | 4 | a shared `fn` calling a sibling by bare name answers empty when called from another bundle | workaround at `stdlib/Math.vein` ("THE INTERNAL CALLS BELOW ARE FULLY QUALIFIED") | `ImportExternalFunction` resolves the imported body against its OWNER bundle |
@@ -147,12 +146,28 @@ and writing `$View`, that draws `$World` positions.
   - A reorder then cannot change a named call's meaning, and a rename becomes a loud error.
   - Needs its own decision (D16). It does not replace vein.lock, which protects every positional call
     already written.
-- **Tests in VeinScript.** Authors have no assert and no `veinc test`. Proposed:
-  - `expect cond, "why"`, raising a failure diagnostic;
-  - `veinc test`, running `tests/*.vein` with `--ticks` and exiting non-zero on a failure;
+- **A helper that changes the world AND answers** (apps/tasks FRICTION #3). This is the biggest design
+  question the pilot raised.
+  - An `fn` returns but cannot `bring`, `destroy` or assign; an `SF` can, but returns nothing. So "flip
+    task N and say whether it existed" has no helper, and `done` / `undo` / `remove` repeat one loop.
+  - Options:
+    - an `SF` that returns a value;
+    - a reply event, which is the IOP way but costs a round-trip for something synchronous;
+    - a read-only query expression an `fn` may use (`any $Task where …`), so the question and the
+      change come apart.
+  - Needs its own D-decision.
+- **Tests in VeinScript.** `veinc test` exists: golden cases with `.in` / `.args` / `.out` / `.err` /
+  `.code` / `.files/` / `.after/`, and `now()` pinned. Still open:
+  - `expect cond, "why"`, raising a failure diagnostic, for tests of logic rather than of output;
   - "Run tests" in the Workbench.
-- **Lists you can build.** Append via `+=`, matching D4: mutation is `+=`, and `push` was cut. Add
-  index assignment (Tier 1 #1), `contains`, `slice`, and `sort by` matching `ordered by`. Then close D9.
+- **Lists, the rest.** `+=`, `xs[i] = v`, `remove`, `sort` and `slice` are done (RULES 28h). Still open:
+  `contains` on a list (today it is text-only), `sort by` matching `ordered by`, and backend emission
+  (all of these are interpreter-only). Then close D9.
+- **A hint for "a bring is visible from the NEXT event"** (FRICTION #6). By design (RULES 12b), but every
+  newcomer trips on it. Proposed: an info note on a `target` of a shape that a `bring` in the same
+  handler just created.
+- **`veinc build` of an app manifest.** The exe now carries fragments and `bundles/`, but a manifest is
+  still refused, with a pointer to `veinc emit`.
 - **String building without `+` chains.** Either option needs its own D-decision:
   - interpolation spelled `\(expr)`, since `\` already escapes and a `{…}` form would collide with the
     CSS and HTML in web strings;
@@ -181,16 +196,17 @@ and writing `$View`, that draws `$World` positions.
 - **`veinc run --compiled` through `Vein.Jit` (M).** It exists, and only its tests call it. The catch:
   `veinc` is net8 and `Vein.Jit` is net9.
 - **Host additions (S–M).**
-  - Wall-clock time, delivered as an event: pulling it would break determinism, which is why there is
-    no clock today.
-  - Environment variables and directory listing.
+  - `now()` and `env(name)` exist, both PULLED as documented exceptions (RULES 28f, 28i).
+  - `dataDir("app")`: the per-user data folder by each OS's convention, so an installed tool needs no
+    `TASKS_FILE`-style variable (FRICTION #9).
+  - Directory listing.
   - Trig and vector operations in `Vein.Math`.
 - **Carried over below:** packed storage, TLS for peers, the UI-as-a-tree model, `SecsRuntime.Probe`.
 
 ### Docs that now mislead (S, alongside anything above)
 
 - KEYWORDS.md: says 61 keywords where there are 63, and claims `map` / `count` / `sync`.
-- LANGUAGE.md: `T?`, and `grid[i] = 0`.
+- LANGUAGE.md: `T?`.
 - RUNTIME.md: says HMAC where it is AES-256-GCM.
 - STDLIB.md: lists stdlib shards that do not exist.
 - BACKEND-CONTRACT.md: `--backend csharp`, which does not exist.
@@ -272,6 +288,12 @@ closed it. `git log --grep` on the phrase finds the full account.
 
 | What | And the part worth remembering |
 |---|---|
+| A real tool, written in the language: apps/tasks | The first dogfood pilot: a task-tracker CLI with 20 golden cases, run by `dotnet test` (AppsTests). It forced everything in the next rows. apps/tasks/FRICTION.md is the log: what was tried, the workaround, the verdict. |
+| A console tool could not be written | There was no `args()`, no way to quit or set an exit code, no end-of-input signal, no stderr, and no clock. Now there are `args()`, `quit(code)`, `@InputEnded`, `printError`, `now()` (RULES 28f/28g), plus `printInline`, `slice`, `padLeft`/`padRight` and `env` (28h/28i). An unheard runtime error goes to stderr and exits 1, where it used to print to stdout and exit 0. |
+| Lists could not be built (Tier 1 #1) | `xs[i] = v` did nothing, silently, and `+=` on a list did number addition and answered 0. Now `+=` appends, `xs[i] = v` sets (one past the end appends, further is an error), and a parsed record's field can be assigned. |
+| A shard `var`'s initialiser was dropped | `var n = 0` started EMPTY and `var x: int = 5` started at 0. Found by writing `veinc test`'s own tests. |
+| `quit` ran lines already read ahead | Messaging mode reads stdin on its own thread, so `quit` then `list` listed. Found by the pilot's interactive golden case. |
+| `veinc build` packaged one file | Fragments (`shards/`, `publicators/`) and `bundles/` were dropped, because the exe re-parsed `program.vein` alone. It now carries what `veinc run` reads and loads it the same way. |
 | A reordered parameter in an installed bundle | Builders, fns and SFs bind BY POSITION, and `bundles/` is re-read from source every compile — so a kit swapping two same-typed parameters changed every call's meaning while the count and literal checks passed. `vein.lock` records the bind order the project was written against: a MOVED parameter is VS0344 at each call. It is recorded from the very list binding walks, so record and binding cannot disagree (RULES 20a). |
 | A bare call that `need` widened skipped the arity check | `do print("a", "b", "c")` was silent while the same call spelled `*Vein.Console.Io.print(…)` was VS0229. The spelling decided the safety. |
 | `use X as Y` | Became `need "Author.Bundle" as Y` — the alias names the head of a `*` path and widens no bare name, which is what makes it the answer to VS0216 (RULES 18b). `use` itself is VS0338. |
