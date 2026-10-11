@@ -9,13 +9,31 @@ using Vein.Compiler.Tooling;
 
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("usage: veinc <new|check|lock|tokens|ast|ir|render|serve|run|build|emit|graph|events|scaffold|symbols|exec> <file.vein> [arg]");
+    Console.Error.WriteLine("usage: veinc <new|check|lock|test|tokens|ast|ir|render|serve|run|build|emit|graph|events|scaffold|symbols|exec> <file.vein> [arg]");
     return 2;
 }
 
 // `new` scaffolds a project — its second arg is `bundle|app`, not a file, so handle it before the
 // file-reading path below.
 if (args[0] == "new") return NewCommand.Run(args);
+
+// `test` takes a FOLDER as well as a file (`veinc test apps/tasks`), so it too runs before the file check.
+if (args[0] == "test")
+{
+    if (TestRunner.FindProgram(args[1]) is not { } program)
+    {
+        Console.Error.WriteLine($"test: no program in {args[1]} — name a .vein file, or a folder holding one main .vein (or its app manifest).");
+        return 2;
+    }
+    var results = TestRunner.RunAll(program);
+    if (results.Count == 0)
+    {
+        Console.Error.WriteLine($"test: no cases in {Path.Combine(Path.GetDirectoryName(program)!, "tests")} — a case is a `name.out` file (plus optional .in / .args / .code / .err / .files/).");
+        return 2;
+    }
+    Console.WriteLine(TestRunner.Report(results));
+    return results.All(r => r.Passed) ? 0 : 1;
+}
 
 string command = args[0];
 string path = args[1];

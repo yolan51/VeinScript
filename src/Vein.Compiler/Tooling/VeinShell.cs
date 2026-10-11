@@ -50,7 +50,7 @@ public static class VeinShell
     /// Every verb the CLI accepts (`src/Vein.Cli/Program.cs`). Typo'd verbs are reported here rather
     /// than launching a process that prints a usage line and exits 2.
     private static readonly HashSet<string> Verbs = new(StringComparer.Ordinal)
-    { "tokens", "ast", "ir", "graph", "events", "symbols", "check", "lock",
+    { "tokens", "ast", "ir", "graph", "events", "symbols", "check", "lock", "test",
       "run", "serve", "build", "emit", "exec", "render", "scaffold", "new" };
 
     /// Parse one typed line.

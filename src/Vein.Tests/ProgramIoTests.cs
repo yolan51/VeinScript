@@ -168,6 +168,19 @@ public class ProgramIoTests
         Assert.Contains("true", output);
     }
 
+    // ---- shard state -------------------------------------------------------------------------------------
+
+    [Fact]
+    public void A_shard_var_starts_at_its_initialiser()
+    {
+        // Lower dropped the initialiser, so `var n = 0` started EMPTY and `var x: int = 5` started at 0.
+        // Found writing veinc test's own tests: a counter printed "lines " with nothing after it.
+        string output = Run(
+            "  shard S {\n    var n = 0\n    var x: int = 5\n    var label = \"start\"\n" +
+            "    run once { do print(\"n=\" + n + \" x=\" + x + \" label=\" + label) } }");
+        Assert.Contains("n=0 x=5 label=start", output);
+    }
+
     // ---- now() -------------------------------------------------------------------------------------------
 
     [Fact]

@@ -170,6 +170,38 @@ This is **discovery + resolution only** (surface + tooling): references and over
 and checked. Linking the loaded bundles into one running program and actually firing the (overridden)
 starts (`veinc render app.vein`) is a follow-on.
 
+## `veinc test <folder-or-file>` — test a program by what it prints
+
+Runs the program once per case and compares what it prints and how it exits. A case is files in
+`<project>/tests/`, named for it:
+
+| file | means | |
+|---|---|---|
+| `add.out` | what it must print to stdout | required — this file IS the case |
+| `add.in` | stdin, fed line by line | optional |
+| `add.args` | its arguments, one per line (so a space needs no quoting) | optional |
+| `add.code` | the exit code it must end with | optional, default 0 |
+| `add.err` | what it must print to stderr | optional, compared only when present |
+| `add.files/` | files the run starts with — copied into its folder | optional |
+
+```
+$ veinc test apps/tasks
+pass  add
+FAIL  done-missing
+      line 1:
+        expected: no task 9
+        actual:   no such task: 9
+1 passed, 1 failed
+```
+
+- **Every case runs in a fresh temporary folder.** The program's relative paths (`tasks.json`) land
+  there, so a test never touches real data, and no case sees another's leftovers.
+- **`now()` is pinned** to `2026-01-01T09:00:00`, so a date in the output is exact.
+- Line endings are normalised and trailing blank lines trimmed.
+- **The program:** a `.vein` file; or, for a folder, its app manifest, else the `.vein` named after the
+  folder, else its only main `.vein`.
+- **Exit code:** 0 when every case passes, 1 otherwise, 2 when there is nothing to test.
+
 ## `veinc lock <app-or-file>` — accept what `bundles/` looks like now
 
 `vein.lock` (RULES 20a) records, for every member a project uses from `bundles/`, the order its arguments
