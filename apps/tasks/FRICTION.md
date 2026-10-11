@@ -31,8 +31,12 @@ return anything. So there is no way to write the helper.
 
 The workaround is in the `@Command` handler: `done` and `undo` set a `toggle` variable, and shared code
 after the `match` does the work. `remove` repeats the find loop. This is the biggest design question the
-pilot raised. Two candidate fixes:
-- an `SF` that returns a value;
+pilot raised.
+
+**Not a fix: an `SF` that returns.** An SF acts by emitting, on purpose, and never returns
+(LANGUAGE.md; `SF f() -> T` is VS0105). The answer has to be one of these:
+- a read-only query an `fn` may use (`any $Task where Task.id == n`), so the question ("does it
+  exist?") is an `fn` and the change is an `SF`;
 - a reply event, which is the IOP way but costs a round-trip for something synchronous.
 
 ## 4. `quit` did not stop lines already read ahead — **fixed** (2026-10-10)

@@ -150,11 +150,11 @@ and writing `$View`, that draws `$World` positions.
   question the pilot raised.
   - An `fn` returns but cannot `bring`, `destroy` or assign; an `SF` can, but returns nothing. So "flip
     task N and say whether it existed" has no helper, and `done` / `undo` / `remove` repeat one loop.
+  - **Ruled out: an `SF` that returns.** An SF acts by emitting, on purpose (LANGUAGE.md, VS0105).
   - Options:
-    - an `SF` that returns a value;
-    - a reply event, which is the IOP way but costs a round-trip for something synchronous;
-    - a read-only query expression an `fn` may use (`any $Task where …`), so the question and the
-      change come apart.
+    - a read-only query expression an `fn` may use (`any $Task where …`), so the question is an `fn`
+      and the change is an `SF`;
+    - a reply event, which is the IOP way but costs a round-trip for something synchronous.
   - Needs its own D-decision.
 - **Tests in VeinScript.** `veinc test` exists: golden cases with `.in` / `.args` / `.out` / `.err` /
   `.code` / `.files/` / `.after/`, and `now()` pinned. Still open:
