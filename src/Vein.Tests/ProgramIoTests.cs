@@ -45,6 +45,76 @@ public class ProgramIoTests
         Assert.Contains("n=0", Run("  shard S { run once { do print(\"n=\" + len(args())) } }"));
     }
 
+    // ---- @Quit and exit codes -----------------------------------------------------------------------------
+
+    private static (Interp Interp, string Output, string Errors) RunFull(string body, string input = "", params string[] args)
+    {
+        var output = new StringWriter();
+        var errors = new StringWriter();
+        var interp = new Interp { Args = args, ErrorOutput = errors };
+        interp.Run(Module(body), new StringReader(input), output);
+        return (interp, output.ToString(), errors.ToString());
+    }
+
+    [Fact]
+    public void A_one_shot_command_quits_at_boot_with_its_code_and_reads_no_input()
+    {
+        // `tasks list` prints and is done — waiting for stdin after that would hang the shell.
+        var (interp, output, _) = RunFull(
+            "  shard S { run once { do print(\"listed\")\n    do quit(3) }\n" +
+            "    hear @Input as i { do print(\"read \" + i.text) } }",
+            input: "should not be read\n");
+
+        Assert.Contains("listed", output);
+        Assert.DoesNotContain("read", output);
+        Assert.True(interp.Stopped);
+        Assert.Equal(3, interp.ExitCode);
+    }
+
+    [Fact]
+    public void Quitting_stops_reading_but_what_was_already_queued_still_runs()
+    {
+        var (interp, output, _) = RunFull(
+            "  shard S { hear @Input as i { if i.text == \"stop\" {\n" +
+            "      do quit(0)\n      do print(\"saved\") } else { do print(\"got \" + i.text) } } }",   // `} else {` on ONE line (RULES 2b)
+            input: "a\nstop\nc\n");
+
+        Assert.Contains("got a", output);
+        Assert.Contains("saved", output);          // emitted after the quit, in the same handler
+        Assert.DoesNotContain("got c", output);    // the line after it is never read
+        Assert.Equal(0, interp.ExitCode);
+    }
+
+    [Fact]
+    public void Input_ending_is_an_event_raised_once_after_the_last_line()
+    {
+        var (_, output, _) = RunFull(
+            "  shard S {\n    var n = 0\n    hear @Input as i { n += 1 }\n" +
+            "    hear @InputEnded as e { do print(\"total \" + n + \" of \" + e.lines) } }",
+            input: "x\ny\nz\n");
+
+        Assert.Contains("total 3 of 3", output);
+        Assert.Equal(1, output.Split("total").Length - 1);
+    }
+
+    [Fact]
+    public void An_error_nobody_heard_goes_to_the_error_output_and_fails_the_run()
+    {
+        // `% 0` is the one thing that genuinely throws. Unheard, it used to print to stdout and exit 0 —
+        // a failed tool that a script could not tell from a working one.
+        var (interp, output, errors) = RunFull("  shard S { run once { let x = 5 % 0 } }");
+
+        Assert.Contains("error", errors);
+        Assert.DoesNotContain("error", output);
+        Assert.Equal(1, interp.ExitCode);
+    }
+
+    [Fact]
+    public void A_clean_run_exits_zero()
+    {
+        Assert.Equal(0, RunFull("  shard S { run once { do print(\"fine\") } }").Interp.ExitCode);
+    }
+
     // ---- now() -------------------------------------------------------------------------------------------
 
     [Fact]

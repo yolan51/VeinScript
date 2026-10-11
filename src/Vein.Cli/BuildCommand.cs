@@ -200,16 +200,21 @@ internal static class BuildCommand
             programArgs.Add(args[i]);
         }
 
+        int exit = 0;
         foreach (var m in modules)
         {
             // A relative `@WriteFile` path is anchored at the EXE, not at wherever the shortcut that
             // launched it happened to start. A game is not launched from a shell, and a save that lands
             // in an unpredictable folder is silent: the write succeeds and the next run starts anew.
             string here = AppContext.BaseDirectory;
-            var interp = ticks > 0 ? new Interp { Ticks = ticks, BaseDirectory = here, Args = programArgs }
-                                   : new Interp { FrameRate = fps, BaseDirectory = here, Args = programArgs };
+            var interp = ticks > 0 ? new Interp { Ticks = ticks, BaseDirectory = here, Args = programArgs, ErrorOutput = Console.Error }
+                                   : new Interp { FrameRate = fps, BaseDirectory = here, Args = programArgs, ErrorOutput = Console.Error };
             interp.Run(m, Console.In, Console.Out, messaging: true);
+            // The program's own exit code — `@Quit { code }`, or 1 after an error nobody heard — so a
+            // script or a shell can tell success from failure.
+            if (interp.ExitCode != 0) exit = interp.ExitCode;
+            if (interp.Stopped) break;
         }
-        return 0;
+        return exit;
         """;
 }

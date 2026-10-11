@@ -29,6 +29,7 @@ if (!File.Exists(path))
 string source = File.ReadAllText(path);
 var diagnostics = new DiagnosticBag();
 int reportedDiagnostics = 0;   // link diagnostics already printed; the final sweep skips them.
+int programExit = 0;           // what a program that RAN asked to exit with (`@Quit`, or 1 after an unheard error)
 
 // An `app` manifest declares `load`s, not bundles, so `unit.Bundles` is empty for one. Rather than
 // iterating that empty list (which printed nothing and exited 0 — "it ran and produced no output", the
@@ -234,8 +235,10 @@ switch (command)
                 // A relative `@WriteFile` path means the PROGRAM's folder, not the shell's — run the same
                 // program from two directories and its saves used to land in two places, neither beside
                 // the `.vein` that asked for them.
-                new Interp { Ticks = ticks, BaseDirectory = projectDir, Args = programArgs }
+                var appInterp = new Interp { Ticks = ticks, BaseDirectory = projectDir, Args = programArgs, ErrorOutput = Console.Error };
+                appInterp
                     .Run(la.Module, Console.In, Console.Out, messaging: true);
+                programExit = appInterp.ExitCode;
             }
             else
             {
@@ -254,7 +257,12 @@ switch (command)
                 LockCommand.Record(projectDir, uses);
 
                 foreach (var module in lowered)
-                    new Interp { Ticks = ticks, BaseDirectory = projectDir, Args = programArgs }.Run(module, Console.In, Console.Out, messaging: true);
+                {
+                    var interp = new Interp { Ticks = ticks, BaseDirectory = projectDir, Args = programArgs, ErrorOutput = Console.Error };
+                    interp.Run(module, Console.In, Console.Out, messaging: true);
+                    if (interp.ExitCode != 0) programExit = interp.ExitCode;
+                    if (interp.Stopped) break;   // `@Quit` ends the program, not just this bundle
+                }
             }
         }
         break;
@@ -423,7 +431,7 @@ switch (command)
 }
 
 foreach (var d in diagnostics.Items.Skip(reportedDiagnostics)) Console.Error.WriteLine(d);
-return diagnostics.HasErrors ? 1 : 0;
+return diagnostics.HasErrors ? 1 : programExit;
 
 static string Display(Token t) =>
     t.Kind == TokenKind.Term ? "" :

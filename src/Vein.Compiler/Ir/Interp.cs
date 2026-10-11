@@ -202,9 +202,11 @@ public sealed class Interp
             FireBoot(module, "/", null);
             Drain();
             RunFrames();
-            // Simple synchronous loop: stdin line → @Input → drain, until EOF.
+            if (Stopped) return;   // a one-shot command that quit at boot does not wait for input
+            // Simple synchronous loop: stdin line → @Input → drain, until EOF or `@Quit`.
             string? line;
-            while ((line = input.ReadLine()) is not null) { FireInput(line); Drain(); }
+            while (!Stopped && (line = input.ReadLine()) is not null) { FireInput(line); Drain(); }
+            if (!Stopped) { FireInputEnded(); Drain(); }
             return;
         }
 
@@ -225,6 +227,9 @@ public sealed class Interp
         Drain();
         RunFrames();
 
+        // `tasks list` prints and quits at boot; waiting for stdin after that would hang the shell.
+        if (Stopped) { _net?.Stop(); _inbox = null; return; }
+
         using var bus = ConsoleBus.Start(_self, (from, text) =>
         { try { inbox.Add(() => Receive(from, text)); } catch { /* inbox closed */ } });
 
@@ -241,6 +246,9 @@ public sealed class Interp
         {
             try { string? l; while ((l = input.ReadLine()) is not null) { var line = l; inbox.Add(() => { FireInput(line); Drain(); }); } }
             catch { /* input closed */ }
+
+            // The last chance to print a total or save, before a root run ends.
+            try { inbox.Add(() => { if (!Stopped) { FireInputEnded(); Drain(); } }); } catch { /* inbox closed */ }
 
             // A root run ends when stdin ends — `veinc run < file` should not hang. Two things keep it
             // alive instead, and both are "there is still someone to hear from":
@@ -264,7 +272,8 @@ public sealed class Interp
             foreach (var action in inbox.GetConsumingEnumerable())
             {
                 try { action(); }
-                catch (Exception ex) { _out?.WriteLine($"(runtime error, continuing: {ex.Message})"); }
+                catch (Exception ex) { _faulted = true; Err?.WriteLine($"(runtime error, continuing: {ex.Message})"); }
+                if (Stopped) { try { inbox.CompleteAdding(); } catch { } }
             }
         }
         catch { /* the inbox completed — the run is over */ }
@@ -376,6 +385,7 @@ public sealed class Interp
     private void FireInput(string text)
     {
         var stdin = _registry.Register("stdin", VeinKind.Runtime);
+        _linesRead++;
         Emit("Input", new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["text"] = text,
@@ -584,6 +594,32 @@ public sealed class Interp
     /// `veinc run f.vein -- a b c`, or whatever a built exe was started with.
     public IReadOnlyList<string> Args { get; set; } = Array.Empty<string>();
 
+    /// Where the runtime's own complaints go — an unheard error, a fault while reporting one. Null (the
+    /// default, and what a test gets) means the program's output; a command-line host passes stderr, so a
+    /// tool whose output is piped somewhere does not mix its errors into it.
+    public TextWriter? ErrorOutput { get; set; }
+    private TextWriter? Err => ErrorOutput ?? _out;
+
+    private int? _quitCode;
+    private long _linesRead;   // for `@InputEnded { lines }`
+    private bool _faulted;
+
+    /// The program asked to stop (`@Quit`).
+    public bool Stopped => _quitCode is not null;
+
+    /// What the process should exit with: the code `@Quit` gave, else 1 if an error went unheard, else 0.
+    public int ExitCode => _quitCode ?? (_faulted ? 1 : 0);
+
+    private void FireInputEnded()
+    {
+        var stdin = _registry.Register("stdin", VeinKind.Runtime);
+        Emit("InputEnded", new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["lines"] = _linesRead,
+            ["from"] = FromOf(stdin), ["origin"] = null, ["bundle"] = _bundle
+        });
+    }
+
     /// `now()` — local time, ISO 8601 to the second. `VEIN_NOW` replaces it outright, which is how a test
     /// of a program that stamps dates gets the same output every run.
     private static string Now() =>
@@ -716,7 +752,7 @@ public sealed class Interp
     private void RunFrames()
     {
         double delta = 1.0 / (FrameRate > 0 ? FrameRate : 60.0);
-        for (int i = 0; i < Ticks; i++)
+        for (int i = 0; i < Ticks && !Stopped; i++)
         {
             FireTicked(i + 1, delta);
             Frame();
@@ -995,7 +1031,7 @@ public sealed class Interp
             Fault?.Invoke(new InterpFault(_tick, owner.Name, what,
                                           _currentEntity == 0 ? null : _currentEntity, ex));
 
-            if (!canRaise) { _out?.WriteLine($"(error in {where} while reporting: {ex.Message})"); return; }
+            if (!canRaise) { _faulted = true; Err?.WriteLine($"(error in {where} while reporting: {ex.Message})"); return; }
 
             Emit("DiagnosticRaised", new Dictionary<string, object?>(StringComparer.Ordinal)
             {
@@ -1160,6 +1196,10 @@ public sealed class Interp
             if (name == "Response") { _responseBody = Str(payload.GetValueOrDefault("body")); _responseStatus = AsLong(payload.GetValueOrDefault("status")); continue; }
             if (name == "Print") { _out?.WriteLine(Str(payload.GetValueOrDefault("text"))); continue; }
 
+            // `@Quit { code }` — the program is done. What is already queued still runs (a save emitted
+            // just before it lands), then nothing more is read: no input, no frames, no timers.
+            if (name == "Quit") { _quitCode ??= (int)AsLong(payload.GetValueOrDefault("code")); continue; }
+
             // `@PlaySound` is TRANSPORT, like `@Print` — its meaning is an effect only a host can have,
             // and it is in `HostEvents` for that reason: the C# backend refuses it with a note rather
             // than compiling a game that is silent. What the host is, this interpreter does not know;
@@ -1208,7 +1248,9 @@ public sealed class Interp
             // So: a shard that hears it wins, and the console is the fallback rather than the default.
             if (name == "DiagnosticRaised" && !_handlers.ContainsKey("DiagnosticRaised"))
             {
-                _out?.WriteLine($"({SeverityWord(AsLong(payload.GetValueOrDefault("severity")))}: " +
+                long severity = AsLong(payload.GetValueOrDefault("severity"));
+                if (severity >= 2) _faulted = true;   // an unheard ERROR fails the run: exit code 1
+                Err?.WriteLine($"({SeverityWord(severity)}: " +
                                 Str(payload.GetValueOrDefault("message")) + ")");
                 continue;
             }
@@ -1646,7 +1688,7 @@ public sealed class Interp
     /// compiled into a no-op.
     public static readonly IReadOnlySet<string> HostEvents =
         new HashSet<string>(StringComparer.Ordinal)
-        { "Response", "Print", "Console", "Send", "Listen", "Link", "Fetch", "ReadFile", "WriteFile", "PlaySound" };
+        { "Response", "Print", "Console", "Send", "Listen", "Link", "Fetch", "ReadFile", "WriteFile", "PlaySound", "Quit" };
 
     /// <summary>The readable half of an event key: `me.T.Go` → `Go`.</summary>
     /// <remarks>
@@ -1678,7 +1720,7 @@ public sealed class Interp
             "Request", "Response", "DiagnosticRaised", "Failed", "Fetched",
             "FileLoaded", "FileMissing", "FileWritten", "Input", "Message", "Undelivered",
             "KeyDown", "KeyUp", "TextInput", "MouseDown", "MouseUp", "MouseMove",
-            "Ticked", "SoundEnded",
+            "Ticked", "SoundEnded", "InputEnded",
         };
 
     /// The names `Prebuilt` below answers to. Declared as a set because `Lower` needs the same list: a

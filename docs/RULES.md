@@ -704,6 +704,18 @@ stays deterministic. A date stamped on a record is the case that does not fit th
 (`VEIN_NOW=2026-01-02T03:04:05`) replaces the answer outright, which is how a test of such a program
 expects an exact output. Both are interpreter-only.
 
+**28g. A tool ends with `do quit(code)`, and hears its input end as `@InputEnded`.** Both live in
+`*Vein.Console.Io`.
+
+- `do quit(0)` (the `@Quit { code }` event) stops the program. What is already queued still runs — a save
+  emitted just before it lands — then nothing more is read: no input, no frames, no timers. A program
+  that quits at boot (`tasks list`) never waits for stdin. `code` is the process's exit code, under
+  `veinc run` and in a built exe alike.
+- `@InputEnded { lines }` is raised once when stdin closes — `tool < file` reached the end, or Ctrl+Z /
+  Ctrl+D — before the run finishes: the place to print a total or save.
+- An ERROR nobody hears (a fault, `Report.error`) goes to **stderr** and makes the exit code **1**, so a
+  script can tell a failed run from a working one. `@Quit`'s own code wins when there is one.
+
 **28b. A file is an event, and a failure is a message.** `*Vein.Files.Io.@ReadFile { path }` answers
 with `@FileLoaded` or `@FileMissing`; `@WriteFile` answers with `@FileWritten` or `@FileMissing`. That
 is the same shape as `@Fetch`/`@Fetched`/`@Failed` and a console send's `@Undelivered` — there is no

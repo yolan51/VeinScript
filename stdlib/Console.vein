@@ -13,6 +13,16 @@ bundle Console by Vein {
         shared("A line of text the user typed at the console (stdin).")
         event @Input { text: string }
 
+        // A tool's last chance: stdin closed — `tasks < commands.txt` reached the end, or the user typed
+        // Ctrl+Z / Ctrl+D. Print the total, save the file, then the run ends.
+        shared("Standard input has ended — raised once, before the run finishes; `lines` is how many were read.")
+        event @InputEnded { lines: int }
+
+        // What is already queued still runs (a save emitted just before lands), then nothing more is read.
+        // `code` is the process exit code: 0 for success, anything else tells a shell or a script it failed.
+        shared("Stop the program, with an exit code (0 = success).")
+        event @Quit { code: int = 0 }
+
         shared("Write a line to the console — `bring Line(\"…\")` emits @Print { text }.")
         builder Line { text: string   line = text }
 
@@ -45,5 +55,8 @@ bundle Console by Vein {
 
         shared("Spawn a named console window.")
         SF spawn(name: Mark, firsttext: string) { emit @Console { name: name, firsttext: firsttext } }
+
+        shared("Stop the program with an exit code — `do quit(0)` for success.")
+        SF quit(code: int) { emit @Quit { code: code } }
     }
 }
