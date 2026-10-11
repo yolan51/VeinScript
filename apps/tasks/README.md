@@ -34,14 +34,21 @@ tasks add buy milk
 An unknown command exits 1. Problems (usage, "no task 9", unknown commands) go to **stderr**, so
 `tasks list > out.txt` puts only the list in the file.
 
-In interactive mode every line is one command, and the exit codes do not apply: the session carries on
-until `quit` or the end of input.
+In interactive mode `tasks> ` asks for each command, and the exit codes do not apply: the session
+carries on until `quit` or the end of input.
 
 ## Data
 
 Tasks are kept in `tasks.json` beside the program: beside `tasks.vein` under `veinc run`, and beside
-`tasks.exe` for the built exe, whichever folder you run it from. The file is a JSON array of `$Task`
-records:
+`tasks.exe` for the built exe, whichever folder you run it from. To keep them elsewhere, set
+`TASKS_FILE` to a path:
+
+```
+$env:TASKS_FILE = "$env:APPDATA\tasks\tasks.json"     # PowerShell
+export TASKS_FILE=~/.local/share/tasks/tasks.json      # bash
+```
+
+The file is a JSON array of `$Task` records:
 
 ```json
 [{"id":1,"title":"buy milk","done":false,"added":"2026-01-01T09:00:00"}]

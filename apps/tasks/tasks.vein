@@ -4,8 +4,9 @@
 //   veinc run apps/tasks/tasks.vein -- add buy milk        one command, then exit
 //   veinc test apps/tasks                                  its tests (apps/tasks/tests)
 //
-// Tasks live in `tasks.json` beside the program. Each one is an IDENTITY carrying `$Task` — the language's
-// own record — so listing is a `target`, sorting is `by Task.id`, and saving is `toJson` per task.
+// Tasks live in `tasks.json` beside the program, or wherever the TASKS_FILE environment variable says.
+// Each one is an IDENTITY carrying `$Task` — the language's own record — so listing is a `target`, sorting
+// is `by Task.id`, and saving is `toJson` per task.
 //
 // Exit codes for the one-shot form: 0 ok, 1 unknown command or bad usage, 2 no such task. Problems go to
 // stderr (`printError`), so `tasks list > out.txt` keeps only the list.
@@ -34,11 +35,13 @@ bundle Tasks by you {
 
     shard Tracker {
         var nextId = 1
+        var file = "tasks.json"
 
         // ---- loading ----------------------------------------------------------------------------
 
         run once {
-            emit *Vein.Files.Io.@ReadFile { path: "tasks.json", tag: "load" }
+            if len(env("TASKS_FILE")) > 0 { file = env("TASKS_FILE") }
+            emit *Vein.Files.Io.@ReadFile { path: file, tag: "load" }
         }
 
         hear *Vein.Files.Io.@FileLoaded as f {
@@ -60,14 +63,10 @@ bundle Tasks by you {
 
         hear @Ready as r {
             if len(args()) > 0 {
-                var rest = ""
-                target args() as a {
-                    if Index == 1 { rest = a }
-                    if Index > 1 { rest = rest + " " + a }
-                }
-                emit @Command { verb: args()[0], rest: rest, oneShot: true }
+                emit @Command { verb: args()[0], rest: join(slice(args(), 1), " "), oneShot: true }
             } else {
                 do print("tasks — type `help` for the commands, `quit` to leave.")
+                do printInline("tasks> ")
             }
         }
 
@@ -80,6 +79,8 @@ bundle Tasks by you {
                 } else {
                     emit @Command { verb: substring(line, 0, space), rest: trim(substring(line, space + 1)), oneShot: false }
                 }
+            } else {
+                do printInline("tasks> ")     // an empty line: ask again
             }
         }
 
@@ -109,7 +110,7 @@ bundle Tasks by you {
                             if c.rest == "" or t.Task.done == wantDone {
                                 var box = "[ ]"
                                 if t.Task.done { box = "[x]" }
-                                do print("  " + t.Task.id + "  " + box + " " + t.Task.title + "   (" + substring(t.Task.added, 0, 10) + ")")
+                                do print(padLeft(t.Task.id, 3) + "  " + box + " " + t.Task.title + "   (" + substring(t.Task.added, 0, 10) + ")")
                                 shown = shown + 1
                             }
                         }
@@ -184,7 +185,9 @@ bundle Tasks by you {
                 }
             }
 
+            // One-shot: done, with the command's code. Interactive: ask for the next one.
             if c.oneShot { do quit(code) }
+            if not c.oneShot and not (c.verb == "quit") { do printInline("tasks> ") }
         }
 
         // ---- saving ---------------------------------------------------------------------------------
@@ -192,7 +195,7 @@ bundle Tasks by you {
         hear @Save as s {
             var parts = []
             target $Task #Task by Task.id as t { parts += toJson(t.Task) }
-            emit *Vein.Files.Io.@WriteFile { path: "tasks.json", text: "[" + join(parts, ",") + "]" }
+            emit *Vein.Files.Io.@WriteFile { path: file, text: "[" + join(parts, ",") + "]" }
         }
     }
 }
