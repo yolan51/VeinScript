@@ -55,7 +55,33 @@ internal static class BuildCommand
         Directory.CreateDirectory(temp);
         try
         {
-            File.WriteAllText(Path.Combine(temp, "program.vein"), source);
+            // THE PROGRAM IS EVERY FILE `veinc run` READS, not the one file named on the command line. The
+            // exe used to embed `program.vein` alone and re-parse it, so a bundle split into `shards/` and
+            // `publicators/` lost every fragment, and a `need` on something in `bundles/` resolved nothing.
+            // So the exe carries the main file, its fragments (BundleLoader's own list, in its own layout)
+            // and the project's `bundles/`, and loads them inside exactly as `run` does.
+            string project = Path.Combine(temp, "project");
+            string mainName = Path.GetFileName(sourcePath);
+            Directory.CreateDirectory(project);
+            File.WriteAllText(Path.Combine(project, mainName), source);
+            foreach (string fragment in Vein.Compiler.Project.BundleLoader.SourceFiles(sourcePath).Skip(1))
+            {
+                string target = Path.Combine(project, Path.GetRelativePath(sourceDir, fragment));
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Copy(fragment, target, overwrite: true);
+            }
+            if (ProjectBundles(sourceDir) is { } bundlesDir)
+                foreach (string file in Directory.EnumerateFiles(bundlesDir, "*.vein", SearchOption.AllDirectories))
+                {
+                    string target = Path.Combine(project, "bundles", Path.GetRelativePath(bundlesDir, file));
+                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                    File.Copy(file, target, overwrite: true);
+                }
+            // Which file is the main one, and which build this is — the exe unpacks into a folder named for
+            // the build, so a fragment deleted since an earlier build of the same name cannot linger there
+            // and be merged back in.
+            File.WriteAllText(Path.Combine(temp, "main.txt"), mainName);
+            File.WriteAllText(Path.Combine(temp, "build.txt"), Guid.NewGuid().ToString("N"));
 
             // THE STANDARD LIBRARY GOES INTO THE EXE, or the program inside it cannot see it.
             //
@@ -119,6 +145,21 @@ internal static class BuildCommand
         finally { try { Directory.Delete(temp, recursive: true); } catch { /* best-effort cleanup */ } }
     }
 
+    /// The `bundles/` folder this program's `need`s resolve from: the nearest one at or above its own
+    /// folder. Only the program's ancestors are searched, not the shell's current folder, which a
+    /// `veinc run` also falls back to. A build is a package, and whatever folder `veinc build` happened to
+    /// be typed in has no business inside it.
+    private static string? ProjectBundles(string sourceDir)
+    {
+        for (var d = new DirectoryInfo(sourceDir); d is not null; d = d.Parent)
+        {
+            string candidate = Path.Combine(d.FullName, "bundles");
+            if (Directory.Exists(candidate) && Directory.EnumerateFiles(candidate, "*.vein", SearchOption.AllDirectories).Any())
+                return candidate;
+        }
+        return null;
+    }
+
     private static string Sanitize(string n) =>
         new(n.Select(c => char.IsLetterOrDigit(c) || c == '_' ? c : '_').ToArray());
 
@@ -134,7 +175,9 @@ internal static class BuildCommand
           </PropertyGroup>
           <ItemGroup>
             <Reference Include="Vein.Compiler"><HintPath>{compilerDll}</HintPath></Reference>
-            <EmbeddedResource Include="program.vein" LogicalName="program.vein" />
+            <EmbeddedResource Include="main.txt" LogicalName="main.txt" />
+            <EmbeddedResource Include="build.txt" LogicalName="build.txt" />
+            <EmbeddedResource Include="project\**\*.vein" LogicalName="project/%(RecursiveDir)%(Filename)%(Extension)" />
             <EmbeddedResource Include="stdlib\**\*.vein" LogicalName="stdlib/%(RecursiveDir)%(Filename)%(Extension)" />
           </ItemGroup>
         </Project>
@@ -144,35 +187,37 @@ internal static class BuildCommand
     private const string HostProgram = """
         using Vein.Compiler.Diagnostics;
         using Vein.Compiler.Ir;
-        using Vein.Compiler.Lexing;
-        using Vein.Compiler.Parsing;
+        using Vein.Compiler.Project;
 
         var asm = System.Reflection.Assembly.GetExecutingAssembly();
-        using var stream = asm.GetManifestResourceStream("program.vein")!;
-        string src = new StreamReader(stream).ReadToEnd();
+        string Text(string res) { using var s = asm.GetManifestResourceStream(res)!; return new StreamReader(s).ReadToEnd().Trim(); }
 
-        var diag = new DiagnosticBag();
-        var unit = new Parser(new Lexer(src, "program.vein", diag).Tokenize(), diag).ParseUnit();
-        if (diag.HasErrors) { foreach (var d in diag.Items) Console.Error.WriteLine(d); return 1; }
-
-        // Put the embedded standard library back on disk so the bundle index can see it. A single-file
-        // exe has no folder beside it; a per-program temp folder, rewritten each start, is the honest
-        // stand-in. BundleIndex walks UP from this directory looking for one named `stdlib`, so the
-        // folder that CONTAINS stdlib/ is what gets handed to Lower.
-        string root = Path.Combine(Path.GetTempPath(), "vein-" + asm.GetName().Name);
+        // Put the embedded files back on disk: the standard library, and the program as `veinc run` would
+        // read it — the main file, its `shards/` and `publicators/`, and its `bundles/`. A single-file exe
+        // has no folder beside it, so a temp folder stands in, NAMED FOR THIS BUILD so a fragment an older
+        // build had cannot linger and be merged in. BundleIndex walks UP from the project looking for
+        // `stdlib` and `bundles`, so the project sits one level below the stdlib.
+        string root = Path.Combine(Path.GetTempPath(), "vein-" + asm.GetName().Name + "-" + Text("build.txt"));
         foreach (string res in asm.GetManifestResourceNames())
         {
-            if (!res.StartsWith("stdlib/", StringComparison.Ordinal)) continue;
-            string target = Path.Combine(root, res.Replace('/', Path.DirectorySeparatorChar));
+            if (!res.StartsWith("stdlib/", StringComparison.Ordinal) && !res.StartsWith("project/", StringComparison.Ordinal)) continue;
+            // `%(RecursiveDir)` keeps the BUILD machine's separator, so a resource name can hold either.
+            string target = Path.Combine(root, res.Replace('\\', '/').Replace('/', Path.DirectorySeparatorChar));
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             using var rs = asm.GetManifestResourceStream(res)!;
             using var fs = File.Create(target);
             rs.CopyTo(fs);
         }
+        string projectDir = Path.Combine(root, "project");
+        string main = Path.Combine(projectDir, Text("main.txt"));
+
+        var diag = new DiagnosticBag();
+        var unit = BundleLoader.Load(main, diag);
+        if (diag.HasErrors) { foreach (var d in diag.Items) Console.Error.WriteLine(d); return 1; }
 
         // One Lower per bundle — a shared one leaked each bundle's `use` list into the next.
         var modules = new List<IrModule>();
-        foreach (var b in unit.Bundles) modules.Add(new Lower(diag, root).LowerBundle(b));
+        foreach (var b in unit.Bundles) modules.Add(new Lower(diag, projectDir).LowerBundle(b));
 
         // CHECKED AFTER LOWERING, which is where a missing builder, an unknown shape or a bad `use`
         // are found. The check above only covers the parse; a program that lowered `bring Console(…)`
