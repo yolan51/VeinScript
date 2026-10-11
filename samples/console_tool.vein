@@ -1,0 +1,89 @@
+// console_tool.vein — a little score board you type into: the pieces a console tool is made of.
+//
+//   veinc run samples/console_tool.vein          (or press ▶ in the Workbench, then type into the console)
+//
+//   score> Ada Lovelace 95        a name (any number of words), then the points
+//   score> show                   the table, sorted by points
+//   score> quit
+//
+// What it shows, each one found missing by apps/tasks and added for it:
+//   * `fn grade(points: int) return string` — an fn names its result after the WORD `return`; VeinScript
+//     has no arrows and no lambdas (SYNTAX-DECISIONS D16)
+//   * `printInline("score> ")` — a prompt: text that does not end the line (RULES 28i)
+//   * `slice(parts, 0, n - 1)` — every word but the last is the name (RULES 28h)
+//   * `padRight` / `padLeft` — columns that line up, and never cut (RULES 28i)
+//   * `env("USERNAME")` — an environment variable, "" when unset (RULES 28i)
+//   * `printError(…)` — a problem goes to stderr, not into the output (RULES 28g)
+//   * `quit(0)` and `@InputEnded` — leaving on a command, or when the input runs out (RULES 28g)
+
+bundle ConsoleTool by you {
+
+    need "Vein.Console"
+
+    shape $Score { name: string, points: int }
+    mark #Score
+    builder Score { $Score   mark #Score }
+
+    // An fn computes and changes nothing; its result type follows the word its body gives it back with.
+    fn grade(points: int) return string {
+        if points >= 90 { return "A" }
+        if points >= 75 { return "B" }
+        return "C"
+    }
+
+    // Its own event, because a `bring` is visible from the NEXT event (RULES 12b).
+    event @Show { }
+
+    shard Board {
+
+        run once {
+            // Windows names the user USERNAME, everywhere else it is USER; neither may be set.
+            var who = env("USERNAME")
+            if len(who) == 0 { who = env("USER") }
+            if len(who) == 0 { who = "there" }
+
+            bring Score("Grace Hopper", 88)
+            bring Score("Linus", 71)
+
+            do print("hello " + who + " — type `<name> <points>`, `show`, or `quit`.")
+            do printInline("score> ")
+        }
+
+        hear @Input as i {
+            let parts = words(trim(i.text))
+            let n = len(parts)
+
+            if n == 0 {
+                do printInline("score> ")     // an empty line: ask again
+            } else {
+                if parts[0] == "quit" { do quit(0) }
+                if parts[0] == "show" { emit @Show { } }
+
+                if not (parts[0] == "quit") and not (parts[0] == "show") {
+                    if n < 2 or not isNumber(parts[n - 1]) {
+                        do printError("type a name, then the points — e.g. `Ada Lovelace 95`")
+                    } else {
+                        // Every word but the last is the name, however many there are.
+                        let name = join(slice(parts, 0, n - 1), " ")
+                        bring Score(name, int(parts[n - 1]))
+                        do print("added " + name)
+                    }
+                    do printInline("score> ")
+                }
+            }
+        }
+
+        hear @Show as s {
+            do print(padRight("name", 16) + padLeft("points", 6) + "  grade")
+            target $Score #Score by Score.points as row {        // ascending: a query has no descending yet (D13)
+                do print(padRight(row.Score.name, 16) + padLeft(row.Score.points, 6) + "  " + grade(row.Score.points))
+            }
+            do printInline("score> ")
+        }
+
+        hear @InputEnded as e {
+            do print("")
+            do print("bye — " + e.lines + " line(s) read.")
+        }
+    }
+}
