@@ -1204,6 +1204,9 @@ public sealed class Interp
             _current = payload;   // emits inside handlers inherit this event's id into their trail
             if (name == "Response") { _responseBody = Str(payload.GetValueOrDefault("body")); _responseStatus = AsLong(payload.GetValueOrDefault("status")); continue; }
             if (name == "Print") { _out?.WriteLine(Str(payload.GetValueOrDefault("text"))); continue; }
+            // `@PrintError` — stderr when the host gave one (`veinc run`, a built exe, `veinc test`), else
+            // the same output as @Print (the Workbench shows one stream).
+            if (name == "PrintError") { Err?.WriteLine(Str(payload.GetValueOrDefault("text"))); continue; }
 
             // `@Quit { code }` — the program is done. What is already queued still runs (a save emitted
             // just before it lands), then nothing more is read: no input, no frames, no timers.
@@ -1712,7 +1715,7 @@ public sealed class Interp
     /// compiled into a no-op.
     public static readonly IReadOnlySet<string> HostEvents =
         new HashSet<string>(StringComparer.Ordinal)
-        { "Response", "Print", "Console", "Send", "Listen", "Link", "Fetch", "ReadFile", "WriteFile", "PlaySound", "Quit" };
+        { "Response", "Print", "Console", "Send", "Listen", "Link", "Fetch", "ReadFile", "WriteFile", "PlaySound", "Quit", "PrintError" };
 
     /// <summary>The readable half of an event key: `me.T.Go` → `Go`.</summary>
     /// <remarks>

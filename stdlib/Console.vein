@@ -10,6 +10,11 @@ bundle Console by Vein {
         shared("Write a line of text to the console (stdout).")
         event @Print { text: string }
 
+        // stderr — for what went WRONG, so `tasks list > out.txt` keeps the list in the file and the
+        // problem on the screen. With no separate error stream (the Workbench), it lands with the rest.
+        shared("Write a line to the error output (stderr).")
+        event @PrintError { text: string }
+
         shared("A line of text the user typed at the console (stdin).")
         event @Input { text: string }
 
@@ -49,6 +54,9 @@ bundle Console by Vein {
         // Emit-only helpers — the same events, named as actions.
         shared("Write a line to this console.")
         SF print(text: string) { emit @Print { text: text } }
+
+        shared("Write a line to the error output (stderr) — for what went wrong.")
+        SF printError(text: string) { emit @PrintError { text: text } }
 
         shared("Send a line to another console by address.")
         SF send(dest: Mark, text: string) { emit @Send { to: dest, text: text } }

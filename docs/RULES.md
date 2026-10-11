@@ -715,6 +715,10 @@ expects an exact output. Both are interpreter-only.
   Ctrl+D — before the run finishes: the place to print a total or save.
 - An ERROR nobody hears (a fault, `Report.error`) goes to **stderr** and makes the exit code **1**, so a
   script can tell a failed run from a working one. `@Quit`'s own code wins when there is one.
+- `do printError("no task 9")` (the `@PrintError { text }` event) writes a line to **stderr**, so
+  `tasks list > out.txt` keeps only the list in the file. It is not a fault and does not change the exit
+  code; pair it with `quit(code)` for that. With no separate error stream (the Workbench), it lands with
+  the rest. `veinc test` compares it against `name.err`.
 
 **28h. A list grows with `+=`, an element is set with `xs[i] = v`, and `remove` / `sort` make new
 lists.** D4 already said mutation is `+=`; now it applies to lists:

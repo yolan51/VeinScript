@@ -127,6 +127,23 @@ public class ProgramIoTests
     }
 
     [Fact]
+    public void PrintError_writes_to_the_error_output_and_does_not_fail_the_run()
+    {
+        // A tool reports a problem on stderr and still chooses its own exit code — writing there is not
+        // a fault. With no separate error stream (the Workbench), it lands with the rest.
+        var (interp, output, errors) = RunFull("  shard S { run once { do print(\"list\")\n    do printError(\"no task 9\") } }");
+
+        Assert.Contains("list", output);
+        Assert.DoesNotContain("no task 9", output);
+        Assert.Contains("no task 9", errors);
+        Assert.Equal(0, interp.ExitCode);
+
+        var shared = new StringWriter();
+        new Interp().Run(Module("  shard S { run once { do printError(\"oops\") } }"), new StringReader(""), shared);
+        Assert.Contains("oops", shared.ToString());
+    }
+
+    [Fact]
     public void A_clean_run_exits_zero()
     {
         Assert.Equal(0, RunFull("  shard S { run once { do print(\"fine\") } }").Interp.ExitCode);
