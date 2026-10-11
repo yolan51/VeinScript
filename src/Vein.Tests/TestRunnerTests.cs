@@ -87,6 +87,27 @@ public class TestRunnerTests : IDisposable
     }
 
     [Fact]
+    public void Files_the_run_must_leave_are_compared_and_a_missing_or_different_one_fails()
+    {
+        // `name.after/` — a tool that saves is tested by what it saved. The program here writes nothing,
+        // so a case expecting a file fails naming it, and one expecting what `.files/` gave it passes.
+        Case("kept", "data hi\nlines 0\n", args: "read\n");
+        Directory.CreateDirectory(Path.Combine(Tests, "kept.files"));
+        File.WriteAllText(Path.Combine(Tests, "kept.files", "data.txt"), "hi\r\n");
+        Directory.CreateDirectory(Path.Combine(Tests, "kept.after"));
+        File.WriteAllText(Path.Combine(Tests, "kept.after", "data.txt"), "hi\n");   // line endings do not matter
+
+        Case("unsaved", "lines 0\n");
+        Directory.CreateDirectory(Path.Combine(Tests, "unsaved.after"));
+        File.WriteAllText(Path.Combine(Tests, "unsaved.after", "out.json"), "[]");
+
+        var results = Run().ToDictionary(r => r.Name);
+        Assert.True(results["kept"].Passed, results["kept"].Problem);
+        Assert.False(results["unsaved"].Passed);
+        Assert.Contains("out.json was not written", TestRunner.Report(results.Values.ToList()));
+    }
+
+    [Fact]
     public void A_folder_means_its_program_named_after_it()
     {
         Assert.Equal(Path.GetFileName(_dir) + ".vein", Path.GetFileName(TestRunner.FindProgram(_dir)));

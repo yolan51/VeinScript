@@ -183,6 +183,7 @@ Runs the program once per case and compares what it prints and how it exits. A c
 | `add.code` | the exit code it must end with | optional, default 0 |
 | `add.err` | what it must print to stderr | optional, compared only when present |
 | `add.files/` | files the run starts with — copied into its folder | optional |
+| `add.after/` | files the run must LEAVE, compared exactly — a tool that saves is tested by what it saved | optional |
 
 ```
 $ veinc test apps/tasks

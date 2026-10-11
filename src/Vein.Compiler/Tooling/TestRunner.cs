@@ -21,6 +21,7 @@ public sealed record TestResult(string Name, bool Passed, string Expected, strin
 //   add.code     the exit code it must end with               (optional, default 0)
 //   add.err      what it must write to stderr                  (optional — compared only when present)
 //   add.files/   files the run starts with, e.g. a tasks.json  (optional)
+//   add.after/   files the run must leave, compared exactly    (optional)
 //
 // Every case runs in a FRESH temporary folder (the program's relative paths land there), so a test never
 // touches real data and never sees another case's leftovers. `now()` is pinned to 2026-01-01T09:00:00 so
@@ -92,6 +93,20 @@ public static class TestRunner
             }
 
             string actual = Normalise(output.ToString());
+
+            // `name.after/` — files the run must have LEFT, compared byte-for-byte after normalising line
+            // endings. A tool that saves is tested by what it saved, not only by what it printed.
+            if (Directory.Exists(stem + ".after"))
+                foreach (var want in Directory.GetFiles(stem + ".after", "*", SearchOption.AllDirectories))
+                {
+                    string rel = Path.GetRelativePath(stem + ".after", want);
+                    string got = Path.Combine(work, rel);
+                    if (!File.Exists(got))
+                        return new TestResult(name, false, expected, actual, expectedCode, code, $"{rel} was not written");
+                    if (Normalise(File.ReadAllText(got)) != Normalise(File.ReadAllText(want)))
+                        return new TestResult(name, false, expected, actual, expectedCode, code,
+                            $"{rel} differs:\n  expected: {Normalise(File.ReadAllText(want))}\n  actual:   {Normalise(File.ReadAllText(got))}");
+                }
             bool errOk = !File.Exists(stem + ".err") || Normalise(errors.ToString()) == Normalise(File.ReadAllText(stem + ".err"));
             return new TestResult(name, actual == expected && code == expectedCode && errOk, expected, actual, expectedCode, code,
                 errOk ? null : "stderr differs:\n" + Normalise(errors.ToString()));
