@@ -7,7 +7,8 @@
 // Tasks live in `tasks.json` beside the program. Each one is an IDENTITY carrying `$Task` — the language's
 // own record — so listing is a `target`, sorting is `by Task.id`, and saving is `toJson` per task.
 //
-// Exit codes for the one-shot form: 0 ok, 1 unknown command or bad usage, 2 no such task.
+// Exit codes for the one-shot form: 0 ok, 1 unknown command or bad usage, 2 no such task. Problems go to
+// stderr (`printError`), so `tasks list > out.txt` keeps only the list.
 // What writing this taught is in FRICTION.md beside it.
 
 bundle Tasks by you {
@@ -91,7 +92,7 @@ bundle Tasks by you {
             match c.verb {
                 when add {
                     if len(c.rest) == 0 {
-                        do print("usage: add <title>")
+                        do printError("usage: add <title>")
                         code = 1
                     } else {
                         bring Task(nextId, c.rest, false, now())
@@ -101,14 +102,26 @@ bundle Tasks by you {
                     }
                 }
                 when list {
-                    var shown = 0
-                    target $Task #Task by Task.id as t {
-                        var box = "[ ]"
-                        if t.Task.done { box = "[x]" }
-                        do print("  " + t.Task.id + "  " + box + " " + t.Task.title + "   (" + substring(t.Task.added, 0, 10) + ")")
-                        shown = shown + 1
+                    if c.rest == "" or c.rest == "--open" or c.rest == "--done" {
+                        let wantDone = c.rest == "--done"
+                        var shown = 0
+                        target $Task #Task by Task.id as t {
+                            if c.rest == "" or t.Task.done == wantDone {
+                                var box = "[ ]"
+                                if t.Task.done { box = "[x]" }
+                                do print("  " + t.Task.id + "  " + box + " " + t.Task.title + "   (" + substring(t.Task.added, 0, 10) + ")")
+                                shown = shown + 1
+                            }
+                        }
+                        if shown == 0 {
+                            if c.rest == "" { do print("no tasks yet — add one with: add <title>") }
+                            if c.rest == "--open" { do print("nothing open") }
+                            if c.rest == "--done" { do print("nothing done yet") }
+                        }
+                    } else {
+                        do printError("usage: list [--open | --done]")
+                        code = 1
                     }
-                    if shown == 0 { do print("no tasks yet — add one with: add <title>") }
                 }
                 // Handled below, together: an `fn` cannot change the world and an `SF` cannot return a
                 // code, so "flip a task and say whether it existed" has no helper (FRICTION.md #3).
@@ -116,7 +129,7 @@ bundle Tasks by you {
                 when undo { toggle = "undo" }
                 when remove {
                     if not isNumber(c.rest) {
-                        do print("usage: remove <id>")
+                        do printError("usage: remove <id>")
                         code = 1
                     } else {
                         var found = false
@@ -130,28 +143,28 @@ bundle Tasks by you {
                             do print("removed " + c.rest)
                             emit @Save { }
                         } else {
-                            do print("no task " + c.rest)
+                            do printError("no task " + c.rest)
                             code = 2
                         }
                     }
                 }
                 when help {
                     do print("  add <title>     a new task")
-                    do print("  list            every task, oldest first")
+                    do print("  list            every task, oldest first   list --open / --done   only those")
                     do print("  done <id>       mark one done      undo <id>   mark it not done")
                     do print("  remove <id>     delete one")
                     do print("  quit            leave")
                 }
                 when quit { do quit(0) }
                 else {
-                    do print("unknown command: " + c.verb + " — try `help`")
+                    do printError("unknown command: " + c.verb + " — try `help`")
                     code = 1
                 }
             }
 
             if len(toggle) > 0 {
                 if not isNumber(c.rest) {
-                    do print("usage: " + toggle + " <id>")
+                    do printError("usage: " + toggle + " <id>")
                     code = 1
                 } else {
                     var found = false
@@ -165,7 +178,7 @@ bundle Tasks by you {
                         do print(toggle + " " + c.rest)
                         emit @Save { }
                     } else {
-                        do print("no task " + c.rest)
+                        do printError("no task " + c.rest)
                         code = 2
                     }
                 }

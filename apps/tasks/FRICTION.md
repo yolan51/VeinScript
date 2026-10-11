@@ -56,11 +56,12 @@ the command that changed things has committed. This is correct, and the RULES en
 newcomer will trip on it. It is a documentation and Workbench-hint item, not a language change: for
 example, a hover note on a `target` that sits in the same handler as a `bring` of the same shape.
 
-## 7. No way to print to stderr — **roadmap (Phase 2 needs it)**
+## 7. No way to print to stderr — **fixed** (2026-10-10)
 
 The plan's Phase 2 says errors go to stderr, so a script can use `tasks list > out.txt` and still see the
-problems. The runtime already has an error stream (unheard faults go there), but a program cannot write to
-it. The fix is small: `*Vein.Console.Io.@PrintError { text }` and an `SF printError(text)`.
+problems. The runtime already had an error stream (unheard faults went there), but a program could not
+write to it. Now there is `do printError(text)` (the `*Vein.Console.Io.@PrintError { text }` event), see
+RULES 28g. Every usage and "no task" message in `tasks` uses it, and the golden cases check it in `.err`.
 
 ## 8. No padding, so ids past 9 misalign the list — **roadmap (minor)**
 
