@@ -115,6 +115,59 @@ public class ProgramIoTests
         Assert.Equal(0, RunFull("  shard S { run once { do print(\"fine\") } }").Interp.ExitCode);
     }
 
+    // ---- lists you can build ------------------------------------------------------------------------------
+
+    [Fact]
+    public void A_list_grows_with_plus_equals_and_joins_with_plus()
+    {
+        string output = Run(
+            "  shard S { run once {\n    var xs = [3, 1]\n    xs += 2\n    xs += [9, 8]\n" +
+            "    do print(join(xs, \",\")) } }");
+        Assert.Contains("3,1,2,9,8", output);
+    }
+
+    [Fact]
+    public void Setting_an_element_works_and_one_past_the_end_appends()
+    {
+        // It silently did nothing — LANGUAGE.md's own `grid[i] = 0` with it.
+        string output = Run(
+            "  shard S { run once {\n    var xs = [1, 2, 3]\n    xs[0] = 7\n    xs[3] = 4\n" +
+            "    do print(join(xs, \",\")) } }");
+        Assert.Contains("7,2,3,4", output);
+    }
+
+    [Fact]
+    public void Writing_past_the_end_is_an_error_not_a_silent_drop()
+    {
+        var (interp, _, errors) = RunFull("  shard S { run once {\n    var xs = [1]\n    xs[5] = 2 } }");
+        Assert.Contains("past the end of a 1-item list", errors);
+        Assert.Equal(1, interp.ExitCode);
+    }
+
+    [Fact]
+    public void Remove_and_sort_return_new_lists()
+    {
+        string output = Run(
+            "  shard S { run once {\n    var xs = [\"pear\", \"apple\", \"fig\"]\n" +
+            "    do print(join(sort(xs), \",\"))\n    do print(join(remove(xs, 0), \",\"))\n" +
+            "    do print(join(xs, \",\")) } }");   // the original is untouched
+        Assert.Contains("apple,fig,pear", output);
+        Assert.Contains("apple,fig\n", output.Replace("\r", ""));
+        Assert.Contains("pear,apple,fig", output);
+    }
+
+    [Fact]
+    public void A_parsed_record_can_be_edited_and_written_back()
+    {
+        // The tasks pilot loads tasks.json, flips `done`, and saves — which needs `row.done = true`.
+        string output = Run(
+            "  shard S { run once {\n    var rows = fromJson(\"[{\\\"title\\\":\\\"milk\\\",\\\"done\\\":false}]\")\n" +
+            "    target rows as r { r.done = true }\n    var first = rows[0]\n    first[\"title\"] = \"oat milk\"\n" +
+            "    do print(toJson(rows)) } }");
+        Assert.Contains("oat milk", output);
+        Assert.Contains("true", output);
+    }
+
     // ---- now() -------------------------------------------------------------------------------------------
 
     [Fact]

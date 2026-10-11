@@ -722,6 +722,16 @@ public sealed class CSharpBackend : IVeinBackend
             // REQUIRE `let` is a separate decision, and making it an error would reject programs that
             // run correctly today. A bare `x` as a whole statement is a different matter and is VS0241.
             case IrAssign a:
+                // Lists here are fixed-size typed arrays, so growing or setting one has no honest emission
+                // yet. Said, not approximated: the program stays on `veinc run` (RULES 28h).
+                if (a.Target is IrIndex)
+                {
+                    _notes.Add("setting a list element (`xs[i] = …`) is interpreter-only — not emitted; keep this program on `veinc run`.");
+                    sb.AppendLine($"{pad}// not emitted: list element assignment (interpreter-only)");
+                    break;
+                }
+                if (a.Value is IrBinary { Op: IrBinOp.Add, Left: var grown } && grown.ResolvedType?.Name == "list")
+                    _notes.Add("growing a list with `+` / `+=` is interpreter-only — this file will not compile; keep this program on `veinc run`.");
                 if (a.Target is IrLocalRef bare && !_fields.Contains(bare.Name) && _bound.Add(bare.Name))
                     sb.AppendLine($"{pad}var {Ident(bare.Name)} = {Expr(a.Value)};");
                 else

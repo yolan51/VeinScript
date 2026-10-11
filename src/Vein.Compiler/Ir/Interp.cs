@@ -1543,9 +1543,24 @@ public sealed class Interp
 
         // `self.Health.hp = …` — a component field. The write lands in the activation's overlay, so it is
         // a fold CONTRIBUTION rather than an immediate mutation; see EntityStore.
-        if (a.Target is IrFieldAccess { Receiver: var recvExpr } fa
-            && Eval(recvExpr, self, locals) is ComponentRef cr)
-            _store.Write(cr.Entity, cr.Shape, fa.Field, value);
+        if (a.Target is IrFieldAccess { Receiver: var recvExpr } fa)
+        {
+            var recv = Eval(recvExpr, self, locals);
+            if (recv is ComponentRef cr) { _store.Write(cr.Entity, cr.Shape, fa.Field, value); return; }
+            // `row.title = …` on a record — a parsed JSON object is a dictionary, and setting a key on it
+            // is how a program edits data it loaded before writing it back.
+            if (recv is IDictionary<string, object?> record) { record[fa.Field] = value; return; }
+        }
+
+        // `xs[i] = v` / `m["k"] = v`. This silently did NOTHING — LANGUAGE.md's own `grid[i] = 0` with it —
+        // so a program that built a list wrote into the void and read back what it started with. In place,
+        // like the read: a list is the same list everywhere it is held.
+        if (a.Target is IrIndex ix)
+        {
+            var recv = Eval(ix.Receiver, self, locals);
+            var key = Eval(ix.Index, self, locals);
+            ListOps.Set(recv, key, value);
+        }
     }
 
     /// An entity id, or null when the value is not one. Entities are `long` at runtime.
@@ -1731,7 +1746,7 @@ public sealed class Interp
         { "spawn", "here", "pick", "len", "random", "join", "toJson", "fromJson",
           "split", "lines", "words", "chars", "trim", "code", "chr", "upper", "lower",
           "contains", "startsWith", "endsWith", "indexOf", "substring", "replace",
-          "int", "float", "string", "bool", "isNumber", "args", "now" };
+          "int", "float", "string", "bool", "isNumber", "args", "now", "remove", "sort" };
 
     /// Prebuilt (built-in) functions that DO return a value — the only functions that return.
     ///
@@ -1750,6 +1765,10 @@ public sealed class Interp
         // Local wall-clock time, ISO 8601 to the second. Pulled, not delivered — a deliberate exception
         // (RULES 28f) — and fixed by `VEIN_NOW` so a test can expect an exact date.
         "now" => Now(),
+        // A list without element `i`, and a list sorted the way `by Shape.field` sorts — both NEW lists,
+        // so `xs = remove(xs, 2)` reads as what it does.
+        "remove" => args.Count > 1 ? ListOps.Remove(args[0], args[1]) : new List<object?>(),
+        "sort" => args.Count > 0 ? ListOps.Sort(args[0]) : new List<object?>(),
         "pick" => args.Count > 0 && args[0] is IReadOnlyList<object?> { Count: > 0 } items
             ? items[_rng.Next(items.Count)]
             : null,
@@ -2068,6 +2087,9 @@ public sealed class Interp
         switch (b.Op)
         {
             case IrBinOp.Add:
+                // A LIST on the left builds a list: `xs += item` appends, `xs + ys` joins. It fell into
+                // number addition and answered 0, so a list could never grow (D4: mutation is `+=`).
+                if (l is IReadOnlyList<object?>) return ListOps.Plus(l, r);
                 if (l is string || r is string) return Str(l) + Str(r);   // string concat (prebuilt +)
                 return AsDouble(l) + AsDouble(r) is var sum && IsInt(l) && IsInt(r) ? (object)(long)sum : sum;
             case IrBinOp.Sub: return Num(AsDouble(l) - AsDouble(r), l, r);

@@ -716,6 +716,25 @@ expects an exact output. Both are interpreter-only.
 - An ERROR nobody hears (a fault, `Report.error`) goes to **stderr** and makes the exit code **1**, so a
   script can tell a failed run from a working one. `@Quit`'s own code wins when there is one.
 
+**28h. A list grows with `+=`, an element is set with `xs[i] = v`, and `remove` / `sort` make new
+lists.** D4 already said mutation is `+=`; now it applies to lists:
+
+```
+var xs = [3, 1]
+xs += 2                 // [3, 1, 2]        — appends (a list on the right is joined: xs += [9, 8])
+xs[0] = 7               // [7, 1, 2]        — in place; xs[len(xs)] = v appends; further is an ERROR
+let s = sort(xs)        // [1, 2, 7]        — a NEW list, sorted as `by Shape.field` sorts
+let r = remove(xs, 1)   // [7, 2]           — a NEW list; xs itself is unchanged
+row.done = true         // a parsed JSON record's field, set — and m["key"] = v on a dictionary
+```
+
+`xs[i] = v` used to do NOTHING, silently — LANGUAGE.md's own `grid[i] = 0` with it — and `+=` on a
+list did number addition and answered 0, so no program could build a list at all. Growing copies (so a
+list held elsewhere is not changed by an append); setting is in place, like reading. A write past the end
+is a reported error rather than a drop. All of it is **interpreter-only** for now: the C# backend
+emits lists as fixed-size typed arrays, and `veinc emit` says so at each use rather than emitting
+something that computes a different answer.
+
 **28b. A file is an event, and a failure is a message.** `*Vein.Files.Io.@ReadFile { path }` answers
 with `@FileLoaded` or `@FileMissing`; `@WriteFile` answers with `@FileWritten` or `@FileMissing`. That
 is the same shape as `@Fetch`/`@Fetched`/`@Failed` and a console send's `@Undelivered` — there is no

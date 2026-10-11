@@ -1134,7 +1134,7 @@ public sealed partial class Lower
         ["lines"] = (1, 1), ["words"] = (1, 1), ["trim"] = (1, 1), ["chars"] = (1, 1),
         ["code"] = (1, 1), ["chr"] = (1, 1), ["upper"] = (1, 1), ["lower"] = (1, 1),
         ["int"] = (1, 1), ["float"] = (1, 1), ["string"] = (1, 1), ["bool"] = (1, 1),
-        ["isNumber"] = (1, 1), ["args"] = (0, 0), ["now"] = (0, 0),
+        ["isNumber"] = (1, 1), ["args"] = (0, 0), ["now"] = (0, 0), ["sort"] = (1, 1), ["remove"] = (2, 2),
         ["join"] = (2, 2), ["split"] = (2, 2), ["contains"] = (2, 2), ["startsWith"] = (2, 2),
         ["endsWith"] = (2, 2), ["indexOf"] = (2, 2), ["substring"] = (2, 3), ["replace"] = (3, 3)
     };
