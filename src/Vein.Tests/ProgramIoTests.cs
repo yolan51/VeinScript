@@ -86,6 +86,23 @@ public class ProgramIoTests
     }
 
     [Fact]
+    public void Quitting_in_messaging_mode_drops_lines_already_read_ahead()
+    {
+        // Messaging mode reads stdin on its own thread, so a StringReader's every line is in the inbox
+        // before the first one runs. `quit` then `list` used to list. (Found by the tasks pilot.)
+        var output = new StringWriter();
+        var interp = new Interp();
+        interp.Run(Module(
+            "  shard S { hear @Input as i { if i.text == \"stop\" { do quit(5) } else { do print(\"got \" + i.text) } } }"),
+            new StringReader("a\nstop\nc\nd\n"), output, messaging: true);
+
+        Assert.Contains("got a", output.ToString());
+        Assert.DoesNotContain("got c", output.ToString());
+        Assert.DoesNotContain("got d", output.ToString());
+        Assert.Equal(5, interp.ExitCode);
+    }
+
+    [Fact]
     public void Input_ending_is_an_event_raised_once_after_the_last_line()
     {
         var (_, output, _) = RunFull(

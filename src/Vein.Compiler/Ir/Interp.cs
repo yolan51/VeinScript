@@ -271,6 +271,10 @@ public sealed class Interp
         {
             foreach (var action in inbox.GetConsumingEnumerable())
             {
+                // Lines the stdin thread read AHEAD are already in the inbox when `@Quit` lands — completing
+                // the inbox does not drop them. Stopping means not running them: `quit` then `list` used
+                // to list. (Found by the tasks pilot.)
+                if (Stopped) break;
                 try { action(); }
                 catch (Exception ex) { _faulted = true; Err?.WriteLine($"(runtime error, continuing: {ex.Message})"); }
                 if (Stopped) { try { inbox.CompleteAdding(); } catch { } }
