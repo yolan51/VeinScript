@@ -68,6 +68,21 @@ RULES 28g. Every usage and "no task" message in `tasks` uses it, and the golden 
 `list` prints `"  " + id + "  [ ] …"`, so task 10 is one column wider than task 9. There is no
 `padLeft(text, width)`. It is minor, but every table-printing tool will want it.
 
+## 9. The data file can only live beside the program — **roadmap**
+
+The built `tasks.exe` keeps `tasks.json` beside itself, whichever folder it is run from. That is right
+for a portable tool. For an installed one, though, the file belongs in a per-user folder such as
+`%APPDATA%\tasks` or `~/.local/share/tasks`, and a program cannot find that folder: there is no `env(name)`
+and no "user data folder" builtin. A one-line builtin would close this, either `env("APPDATA")` or a
+`dataDir("tasks")` that knows each OS's convention.
+
+## Not hit: a multi-file build
+
+The plan listed `veinc build` embedding fragments (`shards/`, `publicators/`) and `bundles/` as a likely
+blocker. `tasks` is one file, so it did not hit this, and the gap stays open on the roadmap. The build
+was checked as far as `tasks` reaches: `veinc build`, then `tasks.exe` run from another folder. Arguments,
+exit codes 0/1/2, the stdout/stderr split, and interactive `quit` all behave as under `veinc run`.
+
 ---
 
 ## What worked well
