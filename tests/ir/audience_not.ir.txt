@@ -1,0 +1,38 @@
+VeinIR v1  file=samples/audience_not.vein
+Bundle Lobby  author=you
+|--- Event @Chat
+|    `--- Field text: string
+|--- Shard Ledger
+|    `--- RunOnce
+|         `--- Emit @Chat
+|              `--- Arg text = Str "hi from Ledger"
+|--- Shard Billing
+|    `--- RunOnce
+|         `--- Emit @Chat
+|              `--- Arg text = Str "hi from Billing"
+|--- Shard Spammer  carries=[#Banned]
+|    `--- RunOnce
+|         `--- Emit @Chat
+|              `--- Arg text = Str "hi from Spammer"
+|--- Shard Kiosk
+|    `--- RunOnce
+|         `--- Emit @Chat
+|              `--- Arg text = Str "hi from Kiosk"
+|--- Shard AllBut
+|    `--- Hear @Chat as c  audience=[not !Ledger not !Spammer]
+|         `--- Emit *Vein.Console.Io.@Print
+|              `--- Arg text = Concat
+|                   |--- Str "all-but: "
+|                   `--- Path c.text
+|--- Shard OnlyLedger
+|    `--- Hear @Chat as c  audience=[!Ledger]
+|         `--- Emit *Vein.Console.Io.@Print
+|              `--- Arg text = Concat
+|                   |--- Str "only-ledger: "
+|                   `--- Path c.text
+`--- Shard Unbanned
+     `--- Hear @Chat as c  audience=[not #Banned]
+          `--- Emit *Vein.Console.Io.@Print
+               `--- Arg text = Concat
+                    |--- Str "unbanned: "
+                    `--- Path c.text

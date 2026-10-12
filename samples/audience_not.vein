@@ -1,0 +1,52 @@
+// audience_not.vein — choosing who a `hear` listens to, by shard and by mark, in both directions.
+//
+//   veinc run samples/audience_not.vein
+//
+// Four shards emit the same @Chat. Three listeners each admit a different set of them:
+//
+//   hear … audience not !Ledger not !Spammer   everyone EXCEPT those two shards
+//   hear … audience !Ledger                     ONLY Ledger
+//   hear … audience not #Banned                 everyone not carrying #Banned
+//
+// What it shows (SYNTAX-DECISIONS D19, RULES 17e):
+//   - `!Name` names a shard — the fifth sigil, next to $ # @ &. Misspell it and it is VS0352, "did you
+//     mean", where `if c.from.name == "Ledgr"` would compile and never match.
+//   - `not` in front of ANY entry excludes it. `!` itself never means "not" (D12): `!Ledger` is Ledger.
+//   - Spammer CARRIES #Banned (`shard Spammer #Banned`), so the mark barrier keeps it out too.
+//
+// Not in tools/check-backend.sh: the C# backend does not enforce `audience` yet, and says so in a note.
+//
+// It prints — one event at a time, each to every listener that admits it (Spammer's reaches nobody):
+//   only-ledger: hi from Ledger
+//   unbanned: hi from Ledger
+//   all-but: hi from Billing
+//   unbanned: hi from Billing
+//   all-but: hi from Kiosk
+//   unbanned: hi from Kiosk
+
+bundle Lobby by you {
+    event @Chat { text: string }
+
+    shard Ledger          { run once { emit @Chat { text: "hi from Ledger" } } }
+    shard Billing         { run once { emit @Chat { text: "hi from Billing" } } }
+    shard Spammer #Banned { run once { emit @Chat { text: "hi from Spammer" } } }
+    shard Kiosk           { run once { emit @Chat { text: "hi from Kiosk" } } }
+
+    shard AllBut {
+        hear @Chat as c audience not !Ledger not !Spammer {
+            emit *Vein.Console.Io.@Print { text: "all-but: " + c.text }
+        }
+    }
+
+    shard OnlyLedger {
+        hear @Chat as c audience !Ledger {
+            emit *Vein.Console.Io.@Print { text: "only-ledger: " + c.text }
+        }
+    }
+
+    shard Unbanned {
+        hear @Chat as c audience not #Banned {
+            emit *Vein.Console.Io.@Print { text: "unbanned: " + c.text }
+        }
+    }
+}
