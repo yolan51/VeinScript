@@ -334,6 +334,27 @@ public class AppLinkTests : IDisposable
     }
 
     [Fact]
+    public void Mute_names_its_own_bundles_shard_after_a_duplicate_is_renamed()
+    {
+        // Both bundles have a `Physics`, so the linker renames them `A.Physics` and `B.Physics`. A `mute`
+        // that kept the bare string "Physics" would now match neither; one keyed `me.A.Physics` still
+        // matches A's — and only A's.
+        Write("A.vein", "bundle A by me {\n" +
+            "  shard Physics { each tick { " + P("\"a-physics\"") + " } }\n" +
+            "  shard Ctl { run once { mute Physics } }\n}");
+        Write("B.vein", "bundle B by me {\n  shard Physics { each tick { " + P("\"b-physics\"") + " } }\n}");
+        var app = Write("T.app.vein", "app T {\n load \"A.vein\"\n load \"B.vein\"\n}");
+
+        var diag = new DiagnosticBag();
+        var linked = AppLinker.Link(app, File.ReadAllText(app), diag)!;
+        var sw = new StringWriter();
+        new Interp { Ticks = 1 }.Run(linked.Module, new StringReader(""), sw);
+
+        Assert.DoesNotContain("a-physics", sw.ToString());
+        Assert.Contains("b-physics", sw.ToString());
+    }
+
+    [Fact]
     public void A_unique_shard_name_is_left_alone()
     {
         // Qualifying everything would churn provenance output for the common case.

@@ -122,7 +122,7 @@ row was checked against the code on 2026-10-09.
 | 8 | an `fn … return T` that falls off the end returns null | `Interp.CallUser` | a warning at the declaration |
 | 9 | a typo in an enum `match` arm never matches (mark arms are checked) | `Lower`, `MatchStmt` | check arms against the enum's cases |
 | 10 | reassigning a `let` is accepted | `Mutable` is carried and never checked | an error |
-| 11 | `on mute unmute transform map count sync` and `T?` give generic parse errors; KEYWORDS.md claims meanings for three | the parser never handles them | a "reserved" diagnostic; decide or cut (SYNTAX-DECISIONS open item) |
+| 11 | `on transform map count sync` and `T?` give generic parse errors; KEYWORDS.md claims meanings for three (`mute`/`unmute` got one: D18) | the parser never handles them | a "reserved" diagnostic; decide or cut (SYNTAX-DECISIONS open item) |
 
 **Unlocked by the same audit (M).** `IrExpr.ResolvedType` IS assigned now — Resolve runs on every
 lowering — so the comments saying it never is are stale (`Lower.CheckLiteralType`, `CSharpBackend`,
@@ -288,6 +288,7 @@ closed it. `git log --grep` on the phrase finds the full account.
 
 | What | And the part worth remembering |
 |---|---|
+| A shard's name decided nothing | `mute Game` / `unmute Game` (D18) pause a shard by name, checked at compile time (VS0350/VS0351). Queued to the next commit, so the outcome never depends on shard order; resolved to the `Author.Bundle.Name` key, so an app link renaming a duplicated shard cannot break it. |
 | A real tool, written in the language: apps/tasks | The first dogfood pilot: a task-tracker CLI with 20 golden cases, run by `dotnet test` (AppsTests). It forced everything in the next rows. apps/tasks/FRICTION.md is the log: what was tried, the workaround, the verdict. |
 | A console tool could not be written | There was no `args()`, no way to quit or set an exit code, no end-of-input signal, no stderr, and no clock. Now there are `args()`, `quit(code)`, `@InputEnded`, `printError`, `now()` (RULES 28f/28g), plus `printInline`, `slice`, `padLeft`/`padRight` and `env` (28h/28i). An unheard runtime error goes to stderr and exits 1, where it used to print to stdout and exit 0. |
 | Lists could not be built (Tier 1 #1) | `xs[i] = v` did nothing, silently, and `+=` on a list did number addition and answered 0. Now `+=` appends, `xs[i] = v` sets (one past the end appends, further is an error), and a parsed record's field can be assigned. |

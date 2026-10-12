@@ -329,6 +329,7 @@ public sealed class Resolve
     private static IrTypeRef? Runtime(string name) => name switch
     {
         "Emit" or "AddTag" or "RemoveTag" or "AddComponent" or "RemoveComponent" or "DestroyEntity"
+            or "Mute" or "Unmute"
             => IrTypeRef.Of("void"),
         "random" => IrTypeRef.Of("float"),
         _ => null,

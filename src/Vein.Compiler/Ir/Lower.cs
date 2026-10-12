@@ -85,6 +85,25 @@ public sealed partial class Lower
     /// out is what makes the local spelling and the imported `*A.B.P.@Name` spelling agree on one key.
     private string _ownerKey = "local";
 
+    /// Every shard, ShardView and bridge this bundle declares, by name → the kinds that use it. A name
+    /// can be both a shard and a bridge (VS0320 keys them apart), which `mute` reports as VS0351.
+    private readonly Dictionary<string, List<string>> _shardKinds = new(StringComparer.Ordinal);
+
+    /// While an imported `fn`/`SF` is lowered: `Author.Bundle` of the bundle that wrote it. A `mute` in
+    /// its body names a shard of THAT bundle, not of the one importing it.
+    private string? _importOwner;
+
+    private void ShardKind(string name, string kind)
+    {
+        if (!_shardKinds.TryGetValue(name, out var kinds)) _shardKinds[name] = kinds = new List<string>();
+        kinds.Add(kind);
+    }
+
+    /// The routing key a shard is muted by: `Author.Bundle.Name`. Its `Name` is no good for this — the
+    /// app linker renames a duplicated one to `Bundle.Name` — so every shard carries this as `@key` and
+    /// `mute` lowers to it, the way an event is keyed by `EventKey` rather than its bare name.
+    private string ShardKey(string name) => _ownerKey + "." + name;
+
     /// `Author.Bundle` for each un-aliased `need`, in declaration order. A bare name that resolves
     /// nowhere locally is looked for in these — the widening half of what a `need` buys.
     ///
@@ -178,13 +197,18 @@ public sealed partial class Lower
                     break;
                 case PublicatorDecl pub: CollectDecls(pub.Members); break;
 
-                // Every event this compilation HEARS, for VS0237.
+                // Every event this compilation HEARS, for VS0237. And every shard-like name, for `mute`:
+                // collected up front because fragments lower first, so a fragment's `mute Kernel` is
+                // lowered before the main file's `shard Kernel` is.
                 case ShardDecl sh:
                     foreach (var hb in sh.Members.OfType<HearBlock>()) _heardEvents.Add(hb.Event);
+                    ShardKind(sh.Name, "shard");
                     break;
                 case ViewDecl vw:
                     foreach (var hb in vw.Members.OfType<HearBlock>()) _heardEvents.Add(hb.Event);
+                    ShardKind(vw.Name, "ShardView");
                     break;
+                case BridgeDecl br: ShardKind(br.Name, "bridge"); break;
             }
     }
 
@@ -1011,9 +1035,12 @@ public sealed partial class Lower
         // The body is the OTHER bundle's code. What it calls is that bundle's business, not a use this
         // program made, so nothing inside it is recorded in or checked against vein.lock.
         IrFunction lowered;
+        var outerOwner = _importOwner;
+        var owned = Owned(hit.Key);
+        _importOwner = owned[..Math.Max(0, owned.LastIndexOf('.'))];
         _importDepth++;
         try { lowered = LowerFunc(hit.Value) with { Name = mangled }; }
-        finally { _importDepth--; }
+        finally { _importDepth--; _importOwner = outerOwner; }
         // Tagged with WHERE IT CAME FROM. Every bundle that calls `print` imports its own copy under
         // this same mangled name, and the app linker then saw the name twice and warned (VS0333) that
         // two bundles had "declared" it — advising a rename of a function neither of them wrote. The
@@ -1506,7 +1533,7 @@ public sealed partial class Lower
         // A shard is a set of scheduled behaviour blocks; each `target` query nests inside a schedule.
         var state = new List<IrField>();
         var methods = new List<IrFunction>();
-        var attrs = new List<IrAttr> { IrAttr.Of(kind) };
+        var attrs = new List<IrAttr> { IrAttr.Of(kind), IrAttr.Of("key", ShardKey(name)) };
         // A mark a First-Class object CARRIES is a use — `shard Combat $Session #Trusted` names #Trusted.
         foreach (var cm in carriedMarks ?? (IReadOnlyList<string>)Array.Empty<string>()) UseMark(cm, default);
         if ((carriedShapes?.Count ?? 0) > 0 || (carriedMarks?.Count ?? 0) > 0)
@@ -1547,10 +1574,42 @@ public sealed partial class Lower
                                                       v.Init is null ? null : LowerExpr(v.Init))); break;
             }
         }
-        var attrs = new List<IrAttr> { IrAttr.Of("view") };
+        var attrs = new List<IrAttr> { IrAttr.Of("view"), IrAttr.Of("key", ShardKey(vw.Name)) };
         if (vw.CarriedShapes.Count > 0 || vw.CarriedMarks.Count > 0)
             attrs.Add(IrAttr.Of("carries", vw.CarriedShapes, vw.CarriedMarks));
         return new IrShard(vw.Name, state, null, methods, vw.Doc, attrs);
+    }
+
+    /// `mute Physics` → `call Mute("me.Game.Physics")`. The runtime queues it like `emit` and applies it
+    /// at the next commit (D18), so the shard being muted still finishes what it is hearing now —
+    /// whichever of the two is declared first.
+    private IrStmt LowerMute(MuteStmt mu)
+    {
+        string fn = mu.Unmute ? "Unmute" : "Mute";
+        IrStmt Call(string key) =>
+            new IrExprStmt(new IrRuntimeCall(fn, new IrExpr[] { new IrLiteral(key, IrLiteralKind.String) }));
+
+        // Inside another bundle's SF, the name is that bundle's shard. Its shards are not in this
+        // table, so it is keyed without a check; a key that matches nothing mutes nothing.
+        if (_importOwner is { } owner) return Call(owner + "." + mu.Shard);
+
+        string verb = mu.Unmute ? "unmute" : "mute";
+        if (!_shardKinds.TryGetValue(mu.Shard, out var kinds))
+        {
+            string hint = Nearest(mu.Shard, _shardKinds.Keys) is { } near ? $" Did you mean '{near}'?" : "";
+            _diag.Error("VS0350",
+                $"No shard named '{mu.Shard}' in this bundle.{hint} `{verb}` takes the name of a shard, " +
+                "ShardView or bridge declared in this bundle or its `shards/` fragments.", mu.NameSpan);
+            return new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
+        }
+        if (kinds.Count > 1)
+        {
+            _diag.Error("VS0351",
+                $"'{mu.Shard}' names both a {string.Join(" and a ", kinds)} in this bundle, so `{verb} " +
+                $"{mu.Shard}` could mean either. Rename one of them.", mu.NameSpan);
+            return new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
+        }
+        return Call(ShardKey(mu.Shard));
     }
 
     /// A schedule block becomes a shard method tagged with a `schedule` attr (once/tick/frame/every/
@@ -1841,6 +1900,7 @@ public sealed partial class Lower
                         LowerNamedFields(em.Fields, () => EventFields(em.EventPath, em.Event), "@" + em.Event), em.FillRest) }));
             case DestroyStmt d:
                 return new IrExprStmt(new IrRuntimeCall("DestroyEntity", new[] { LowerExpr(d.Target) }));
+            case MuteStmt mu: return LowerMute(mu);
             case AttachStmt at:
             {
                 // Detaching takes the shape's marks off with it: the mark says the identity carries this

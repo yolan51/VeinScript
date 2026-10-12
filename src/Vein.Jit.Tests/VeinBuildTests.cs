@@ -93,6 +93,49 @@ public class VeinBuildTests
     }
 
     [Fact]
+    public void Mute_lands_at_the_same_commit_compiled_as_interpreted()
+    {
+        // D18: queued, applied at the commit. Pause is declared FIRST, so a mute that applied immediately
+        // would skip Game's tick in the very frame it was written — and the two runtimes would disagree
+        // by one line.
+        const string src = """
+            bundle T by you {
+                event @Go { n: int }
+                shard Pause {
+                    var t: int = 0
+                    each tick {
+                        t += 1
+                        if t == 2 { mute Game }
+                        if t == 4 { unmute Game }
+                        emit @Go { n: t }
+                    }
+                }
+                shard Game {
+                    var n: int = 0
+                    each tick {
+                        n += 1
+                        emit *Vein.Console.Io.@Print { text: "game " + n }
+                    }
+                    hear @Go as g { emit *Vein.Console.Io.@Print { text: "heard " + g.n } }
+                }
+            }
+            """;
+
+        var module = Module(src);
+
+        var interpreted = new StringWriter();
+        new Vein.Compiler.Ir.Interp { Ticks = 6 }.Run(module, new StringReader(""), interpreted);
+
+        var compiled = VeinBuild.Compile(module);
+        Assert.True(compiled.Success, compiled.Report());
+
+        string expected = interpreted.ToString().Replace("\r\n", "\n").Trim();
+        Assert.Contains("game 4", expected);
+        Assert.DoesNotContain("heard 3", expected);   // muted: dropped, not delivered late
+        Assert.Equal(expected, RunCaptured(compiled.Assembly!, 6).Replace("\r\n", "\n").Trim());
+    }
+
+    [Fact]
     public void A_module_the_backend_cannot_emit_fails_with_the_source_in_hand()
     {
         // When generated C# does not compile, the errors name lines in a file nobody wrote and cannot

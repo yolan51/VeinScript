@@ -251,6 +251,9 @@ public sealed record EmitStmt(string Event, IReadOnlyList<FieldInit> Fields, boo
 public sealed record DestroyStmt(Expr Target, SourceSpan Span) : Stmt(Span);
 public sealed record AttachStmt(bool Remove, string Shape, Expr Target, IReadOnlyList<FieldInit>? Init, SourceSpan Span) : Stmt(Span);
 public sealed record ChanceStmt(double Probability, Block Body, SourceSpan Span) : Stmt(Span);
+/// `mute Physics` / `unmute Physics` — pause or resume a shard of this bundle by name (D18). Queued
+/// until the next commit, like `emit`. `NameSpan` covers just the name, for F12 and the squiggle.
+public sealed record MuteStmt(bool Unmute, string Shard, SourceSpan NameSpan, SourceSpan Span) : Stmt(Span);
 /// `ordered by k { … }` — run the brings inside sorted by one of their arguments, rather than in the
 /// order they were reached.
 ///

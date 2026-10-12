@@ -454,6 +454,7 @@ shard Drain {
 | `hear @E as evt { … }` | react to a message; `evt` bound to it |
 | `destroy self` | remove the identity |
 | `chance 30% { … }` | run the block with 30% probability |
+| `mute Game` / `unmute Game` | pause / resume a shard of this bundle by name, from the next commit — its handlers and schedules stop, its `var`s are kept (D18) |
 | `sync` | scheduling hint (ordering/parallelism) on the shard |
 
 A shard may also hold private state fields (`var`/`let`) and call functions.
@@ -641,7 +642,8 @@ matchStmt   = "match" expr "{" { "when" pattern block } [ "else" block ] "}" ;
 iopStmt     = "mark" expr MARKREF | "unmark" expr MARKREF
             | "emit" EVENTREF structBody | "destroy" expr
             | "attach" SHAPEREF "to" expr [ structBody ] | "unattach" SHAPEREF "from" expr
-            | "chance" PERCENT block ;
+            | "chance" PERCENT block
+            | "mute" IDENT | "unmute" IDENT ;              (* a shard of this bundle; D18 *)
 
 assignStmt  = lvalue ("=" | "+=" | "-=" | "*=" | "/=") expr ;
 exprStmt    = expr ;

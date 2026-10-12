@@ -2984,7 +2984,7 @@ public partial class MainWindow : Window
 
         if (CaretSymbol() is not { } site)
         {
-            SetStatus("Go to definition: put the caret on a $shape, #mark, @event, &builder or `need` line.");
+            SetStatus("Go to definition: put the caret on a $shape, #mark, @event, &builder, the shard after `mute`, or a `need` line.");
             return;
         }
 
@@ -3091,7 +3091,7 @@ public partial class MainWindow : Window
     {
         if (CaretSymbol() is not { } site)
         {
-            SetStatus("Find references: put the caret on a $shape, #mark, @event or &builder.");
+            SetStatus("Find references: put the caret on a $shape, #mark, @event, &builder or the shard after `mute`.");
             return;
         }
 
@@ -3150,7 +3150,9 @@ public partial class MainWindow : Window
                     : path, s);
         }
 
-        if (_rootFolder is null) return hits;
+        // A shard is named only from inside its own bundle (`mute`, D18), so another file's `shard Boot`
+        // is a different shard — listing it would answer a question nobody asked.
+        if (_rootFolder is null || kind is SymbolKind.Shard or SymbolKind.ShardView or SymbolKind.Bridge) return hits;
 
         foreach (string file in ProjectVeinFiles(_rootFolder))
         {
@@ -3475,6 +3477,7 @@ public partial class MainWindow : Window
         if (e.Text == "&") { ShowBuilderCompletion(); return; }  // &Elements — the Vein.Web builders and any local one
         if (e.Text == " " && JustTypedDo()) { ShowSfCompletion(); return; }   // `do ` — which SF? (D15)
         if (e.Text == " " && (JustTyped("emit") || JustTyped("hear"))) { ShowEventCompletionAfterKeyword(); return; }
+        if (e.Text == " " && (JustTyped("mute") || JustTyped("unmute"))) { ShowShardCompletion(); return; }   // D18
         if (e.Text is not ("$" or "#" or "@")) return;
 
         (SymbolKind kind, string label) = e.Text switch
@@ -3685,6 +3688,10 @@ public partial class MainWindow : Window
         if (FuncIndex.Find(_hoverAst, word, ProjectDir) is { Fn: not null } hit)
             return FuncIndex.Signature(hit.Fn, hit.Owner);
         if (IsMark(word)) return Mark(word);
+        // `mute Physics` — the only place a bare shard name is written outside its declaration.
+        if (_definitions.Definitions.FirstOrDefault(d => d.Name == word
+                && d.Kind is SymbolKind.Shard or SymbolKind.ShardView or SymbolKind.Bridge) is { } sh)
+            return $"{ShardKindWord(sh.Kind)} {word}";
         return null;
 
         string Shape(string n) =>
@@ -3877,6 +3884,23 @@ public partial class MainWindow : Window
 
         ShowCompletion(items, "SF");
     }
+
+    /// Typing `mute ` or `unmute ` lists this bundle's shards, ShardViews and bridges — fragments
+    /// included, because the compile that built `_definitions` merged them. Only this bundle's: `mute`
+    /// cannot reach another bundle's shard (D18), so offering one would offer a VS0350.
+    private void ShowShardCompletion()
+    {
+        var items = _definitions.Definitions
+            .Where(d => d.Kind is SymbolKind.Shard or SymbolKind.ShardView or SymbolKind.Bridge)
+            .OrderBy(d => d.Name, StringComparer.Ordinal)
+            .Select(d => (d.Name + "   " + ShardKindWord(d.Kind), d.Name))
+            .Distinct()
+            .ToList();
+        ShowCompletion(items, "shard");
+    }
+
+    private static string ShardKindWord(SymbolKind k) =>
+        k switch { SymbolKind.ShardView => "ShardView", SymbolKind.Bridge => "bridge", _ => "shard" };
 
     /// True when the caret sits just after `do ` that starts a statement.
     private bool JustTypedDo() => JustTyped("do");

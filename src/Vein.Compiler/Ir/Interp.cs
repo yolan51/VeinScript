@@ -22,7 +22,14 @@ public sealed class Interp
         public required string Name;
         public required VeinFirstClass Fc;                 // its unified runtime identity
         public readonly Dictionary<string, object?> State = new();
+        /// Set by `mute` and cleared by `unmute`, both at a commit (D18): none of its schedules or
+        /// handlers run while it is set. Its State is untouched, so `unmute` resumes where it left off.
+        public bool Muted;
     }
+
+    /// Each shard by the `@key` Lower stamped on it — `Author.Bundle.Name`, the name `mute` resolves to.
+    /// Not `Name`: the app linker renames a duplicated shard, and the key is what survives that.
+    private readonly Dictionary<string, Instance> _byKey = new(StringComparer.Ordinal);
 
     private sealed record Handler(Instance Owner, string BindName, IrBlock Body,
         IReadOnlyList<string> ReqShapes, IReadOnlyList<string> ReqMarks);
@@ -321,6 +328,7 @@ public sealed class Interp
             var (carriedShapes, carriedMarks) = AttrLists(shard.Attrs, "carries");
             var fc = _registry.Register(shard.Name, kind, carriedShapes, carriedMarks);
             var inst = new Instance { Name = shard.Name, Fc = fc };
+            if (shard.Attrs.FirstOrDefault(a => a.Name == "key") is { Args: [string key] }) _byKey[key] = inst;
             foreach (var f in shard.State)
                 inst.State[f.Name] = f.Default is { } init ? Eval(init, inst, new Dictionary<string, object?>()) : Default(f.Type.Name);
             foreach (var m in shard.Methods)
@@ -855,6 +863,7 @@ public sealed class Interp
     /// it emitted drain — the same shape as a frame, just triggered by the wall instead of a count.
     private void Fire(Schedule sched)
     {
+        if (sched.Owner.Muted) { _log.Add($"{sched.Owner.Fc} MUTED every {sched.Seconds}s"); return; }
         RunGuarded(sched.Body, sched.Owner,
                    new Dictionary<string, object?>(StringComparer.Ordinal), sched.Kind);
         CommitPhase();
@@ -980,7 +989,8 @@ public sealed class Interp
     private void RunPhase(string kind)
     {
         foreach (var sched in _schedules)
-            if (sched.Kind == kind)
+            if (sched.Kind == kind && sched.Owner.Muted) _log.Add($"{sched.Owner.Fc} MUTED {kind}");
+            else if (sched.Kind == kind)
                 RunGuarded(sched.Body, sched.Owner,
                            new Dictionary<string, object?>(StringComparer.Ordinal), kind);
     }
@@ -1261,7 +1271,10 @@ public sealed class Interp
             // a call that emitted into a queue nobody read, and printed nothing.
             //
             // So: a shard that hears it wins, and the console is the fallback rather than the default.
-            if (name == "DiagnosticRaised" && !_handlers.ContainsKey("DiagnosticRaised"))
+            // A MUTED collector hears nothing, so it does not count — muting the only one must not turn
+            // every diagnostic into silence.
+            if (name == "DiagnosticRaised"
+                && !(_handlers.TryGetValue("DiagnosticRaised", out var dh) && dh.Any(h => !h.Owner.Muted)))
             {
                 long severity = AsLong(payload.GetValueOrDefault("severity"));
                 if (severity >= 2) _faulted = true;   // an unheard ERROR fails the run: exit code 1
@@ -1273,6 +1286,8 @@ public sealed class Interp
             if (!_handlers.TryGetValue(name, out var hs)) continue;
             foreach (var h in hs)
             {
+                // Muted: the event is DROPPED for it, not held — `unmute` does not replay what it missed.
+                if (h.Owner.Muted) { _log.Add($"{h.Owner.Fc} MUTED @{name}"); continue; }
                 if (!AudiencePermits(h, payload))
                 {
                     var f = payload.GetValueOrDefault("from") as Dictionary<string, object?>;
@@ -2074,6 +2089,17 @@ public sealed class Interp
                 string mark = Str(Eval(rc.Args[1], self, locals));
                 bool add = rc.Name == "AddTag";
                 _commands.Add(() => { if (add) _store.AddTag(e, mark); else _store.RemoveTag(e, mark); });
+                return null;
+            }
+            // `mute X` / `unmute X` (D18). Queued like a mark, so it lands at the commit: the shard still
+            // finishes the event or phase in progress, whichever of the two runs first. A key with no
+            // shard — `mute` in an imported SF whose bundle is not linked — mutes nothing.
+            case "Mute":
+            case "Unmute":
+            {
+                bool mute = rc.Name == "Mute";
+                if (_byKey.TryGetValue(Str(Eval(rc.Args[0], self, locals)), out var target))
+                    _commands.Add(() => target.Muted = mute);
                 return null;
             }
             case "AddComponent":

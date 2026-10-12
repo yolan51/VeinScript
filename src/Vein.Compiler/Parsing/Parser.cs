@@ -748,6 +748,8 @@ public sealed class Parser
             case TokenKind.KwAttach: return ParseAttach(remove: false);
             case TokenKind.KwUnattach: return ParseAttach(remove: true);
             case TokenKind.KwChance: return ParseChance();
+            case TokenKind.KwMute: return ParseMute(unmute: false);
+            case TokenKind.KwUnmute: return ParseMute(unmute: true);
             case TokenKind.KwBring: return ParseBring();
             default: return ParseAssignOrExpr();
         }
@@ -1003,6 +1005,15 @@ public sealed class Parser
         try { target = ParseExpr(); } finally { _noStructLit = false; }
         IReadOnlyList<FieldInit>? init = Check(TokenKind.LBrace) ? ParseStructBody() : null;
         return new AttachStmt(false, shape, target, init, s);
+    }
+
+    // `mute Physics` / `unmute Physics` — a keyword and a bare shard name. A shard is declared with a
+    // plain identifier (ParseShard), so that is all a reference to one can be.
+    private MuteStmt ParseMute(bool unmute)
+    {
+        var s = Here; Advance();
+        var name = Expect(TokenKind.Ident, "shard name");
+        return new MuteStmt(unmute, name.Text, name.Span, s);
     }
 
     private ChanceStmt ParseChance()

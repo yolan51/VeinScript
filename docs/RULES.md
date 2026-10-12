@@ -479,6 +479,14 @@ cannot, and the call says which (SYNTAX-DECISIONS D15). Qualified, the `do` goes
 path: `do *Vein.Console.Io.print("hi")`. Forget it and **VS0341** names the fix, which the Workbench
 applies in one click; typing `do ` at the start of a line lists every SF you can call.
 
+**20d. `mute Game` lands at the NEXT COMMIT, so Game still finishes what it is doing.** Mute and unmute
+queue like `emit` (rule 21): Game still hears the event in progress, whether it is declared before the
+muting shard or after it. Muted from the next event or phase on, its handlers and schedules are skipped,
+events it misses are dropped (an `unmute` does not replay them), and its `var`s are kept. A mute written
+in a tick skips Game's `settled` in the same frame; a mute in `run once` means Game starts muted. The name
+must be a shard, ShardView or bridge of THIS bundle (**VS0350** otherwise, with a "did you mean"); typing
+`mute ` lists them in the Workbench. SYNTAX-DECISIONS D18.
+
 **21. `bring` and `emit` QUEUE — they do not write.** The queue drains only after every handler of the
 current event has finished. So a view that answered on `@Request` would always see an empty page, and an
 assembly trigger has to land *behind* the fragments. See `Kernel` in `samples/web_app/web_app.vein`.

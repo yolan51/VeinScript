@@ -723,6 +723,9 @@ internal sealed class EffectWalker
                     break;
 
                 case ChanceStmt c2: Blk(c2.Body); break;
+                // `mute X` changes WHICH units run from the next commit on, not any state a unit reads,
+                // so it adds no resource and no edge. Listed so the omission reads as decided.
+                case MuteStmt: break;
                 case LocalVarStmt lv: locals.Add(lv.Decl.Name); Rvalue(lv.Decl.Init); break;
                 case ExprStmt ex: Rvalue(ex.Expr); break;
                 case ReturnStmt rt: Rvalue(rt.Value); break;

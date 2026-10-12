@@ -294,7 +294,23 @@ public sealed class VeinWorld
 
     private readonly List<VeinSystem> _systems = new();
 
-    public void Register(VeinSystem system) { system.Attach(this); _systems.Add(system); system.Subscribe(); }
+    /// Each system by the key `mute` names it with — `Author.Bundle.Name`, from the shard's `@key`.
+    private readonly Dictionary<string, VeinSystem> _byKey = new(StringComparer.Ordinal);
+
+    public void Register(VeinSystem system, string? key = null)
+    {
+        system.Attach(this);
+        _systems.Add(system);
+        if (key is not null) _byKey[key] = system;
+        system.Subscribe();
+    }
+
+    /// `mute X` / `unmute X` (D18). Deferred to the commit, as `Interp` queues it: the system still
+    /// finishes the event or phase in progress, so which of the two is registered first never matters.
+    public void Mute(string key, bool mute)
+    {
+        if (_byKey.TryGetValue(key, out var system)) Defer(() => system.Muted = mute);
+    }
 
     /// `run once` builds the world before anything else, so a query in a later phase finds it.
     /// The transform hierarchy's composition pass, when the program has one (RULES 13c).
@@ -323,7 +339,7 @@ public sealed class VeinWorld
 
     public void Start()
     {
-        foreach (var s in _systems) s.Once();
+        foreach (var s in _systems) if (!s.Muted) s.Once();
         Commit();
         Compose?.Invoke();   // so the first `settled` reads a composed world
         Drain();   // Interp: RunOnce() then Drain() — events raised at boot are handled before frame 1
@@ -335,10 +351,10 @@ public sealed class VeinWorld
     /// frame rather than to the middle of this one.
     public void Frame()
     {
-        foreach (var s in _systems) s.Tick();
+        foreach (var s in _systems) if (!s.Muted) s.Tick();
         Commit();
         Compose?.Invoke();   // between the tick commit and `settled` — see the field
-        foreach (var s in _systems) s.Settled();
+        foreach (var s in _systems) if (!s.Muted) s.Settled();
         Commit();
         Drain();   // Interp.Frame: events from either phase are handled against a settled world
     }
@@ -362,14 +378,18 @@ public sealed class VeinWorld
     // a drain that committed once at the end would quietly break every program built on that.
 
     private readonly Queue<(string Name, object Payload)> _events = new();
-    private readonly Dictionary<string, List<Action<object>>> _handlers = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<(VeinSystem? Owner, Action<object> Handler)>> _handlers = new(StringComparer.Ordinal);
 
     /// Register a `hear` handler. Called from a system's `Subscribe`, before the first phase runs, so a
     /// `run once` that emits is never racing a handler that has not subscribed yet.
-    public void On(string @event, Action<object> handler)
+    public void On(string @event, Action<object> handler) => On(@event, null, handler);
+
+    /// The same, owned by `owner`: while it is muted the handler is skipped, and the event is dropped for
+    /// it rather than held — Interp's rule.
+    public void On(string @event, VeinSystem? owner, Action<object> handler)
     {
         if (!_handlers.TryGetValue(@event, out var list)) _handlers[@event] = list = new();
-        list.Add(handler);
+        list.Add((owner, handler));
     }
 
     /// `emit @E { … }`. Queued rather than dispatched, so an emit inside a handler is handled AFTER the
@@ -386,7 +406,8 @@ public sealed class VeinWorld
         {
             var (name, payload) = _events.Dequeue();
             if (_handlers.TryGetValue(name, out var hs))
-                foreach (var h in hs) h(payload);
+                foreach (var (owner, h) in hs)
+                    if (owner is not { Muted: true }) h(payload);
             Commit();
         }
     }
@@ -410,6 +431,10 @@ public abstract class VeinSystem
 {
     protected VeinWorld World = null!;
     internal void Attach(VeinWorld world) => World = world;
+
+    /// Set and cleared by `VeinWorld.Mute`, at a commit. While set, none of the phases below and none of
+    /// this system's `hear` handlers run; its fields keep their values.
+    public bool Muted { get; internal set; }
 
     /// Wire this system's `hear` handlers. Called by `Register`, so every subscription exists before any
     /// phase runs — a `run once` that emits must not outrun a handler that has not subscribed.

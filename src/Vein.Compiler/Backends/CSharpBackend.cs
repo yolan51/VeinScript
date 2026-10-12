@@ -687,7 +687,7 @@ public sealed class CSharpBackend : IVeinBackend
             sb.AppendLine("    public override void Subscribe()");
             sb.AppendLine("    {");
             foreach (var (m, ev) in hears)
-                sb.AppendLine($"        World.On(\"{ev}\", p => {Ident(m.Name)}(({EventType(ev!)})p));");
+                sb.AppendLine($"        World.On(\"{ev}\", this, p => {Ident(m.Name)}(({EventType(ev!)})p));");
             sb.AppendLine("    }");
         }
 
@@ -1324,6 +1324,11 @@ public sealed class CSharpBackend : IVeinBackend
             case "DestroyEntity":
                 return $"World.Destroy({Expr(c.Args[0])})";
 
+            // `mute X` (D18): the key Lower resolved, which `Main` registered the system under. Deferred
+            // inside VeinWorld.Mute, so it lands at the same commit the interpreter's does.
+            case "Mute" or "Unmute":
+                return $"World.Mute({Expr(c.Args[0])}, {(c.Name == "Mute" ? "true" : "false")})";
+
             case "Emit":
                 // @Print is the one bridged event: a program that cannot speak cannot be diffed against
                 // the interpreter. Every other event belongs to the reactive half.
@@ -1500,6 +1505,11 @@ public sealed class CSharpBackend : IVeinBackend
         return sb.ToString();
     }
 
+    /// The `@key` Lower stamped on a shard — what `mute` names it by. Falls back to the name for IR
+    /// built by hand, which has no key and no `mute` to resolve against it either.
+    private static string ShardKey(IrShard s) =>
+        s.Attrs.FirstOrDefault(a => a.Name == "key") is { Args: [string key] } ? key : s.Name;
+
     private static string Literal(IrLiteral l) => l.Kind switch
     {
         IrLiteralKind.String => "\"" + Escape(l.Value?.ToString() ?? "") + "\"",
@@ -1644,7 +1654,7 @@ public sealed class CSharpBackend : IVeinBackend
             sb.AppendLine("        world.Ticked = (f, d) => { world.Emit(\"Ticked\", new Events.Ticked { frame = f, delta = d }); world.Drain(); };");
 
         foreach (var s in module.Shards)
-            sb.AppendLine($"        world.Register(new {ShardIdent(s)}());");
+            sb.AppendLine($"        world.Register(new {ShardIdent(s)}(), \"{Escape(ShardKey(s))}\");");
         sb.AppendLine("        world.Start();");
         sb.AppendLine("        world.Run(ticks);");
         sb.AppendLine("    }");

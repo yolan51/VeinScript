@@ -63,7 +63,7 @@ a call, not a grep, which counts words in comments.
 turned out to be the way to discover that it *could not be called at all* — see section 4.
 
 **Language features: everything implemented is exercised**, following the `loops` sample. Note that
-`enum`, `mute`, `unmute` and `transform` are *lexed but have no implementation* — `enum Colour { Red }`
+`enum` and `transform` are *lexed but have no implementation* — `enum Colour { Red }`
 is `VS0102`. They are not sample gaps; they are language gaps, and `docs/KEYWORDS.md` lists them as
 reserved.
 

@@ -64,6 +64,7 @@ dialect. There is no general `class`.
 | `hear` | `hear @E as evt { … }` | react to a message | handler registration |
 | `destroy` | `destroy self` | remove an identity | `DestroyEntity(self)` |
 | `chance` | `chance 30% { … }` | probabilistic branch | `if random() < 0.30 { … }` |
+| `mute` `unmute` | `mute Game` · `unmute Game` | pause / resume a shard, ShardView or bridge of this bundle, BY NAME, from the next commit: its handlers and schedules stop, its `var`s are kept, events it misses are dropped. Unknown name **VS0350**; a shard and a bridge sharing the name **VS0351**. [SYNTAX-DECISIONS D18](SYNTAX-DECISIONS.md#mute) | `Mute("Author.Bundle.Name")` — queued like `AddTag` |
 | `sync` | `sync` | shard scheduling hint | `@sync` metadata |
 | `ShardView` | `ShardView N { … }` | a First-Class object that ASSEMBLES — hears fragments and emits the finished artifact | `IrShard` (kind `view`) |
 | `Index` | `Index` (in `target` / `repeat`) | the nearest loop's 0-based iteration counter, the way `Entity` is the nearest identity. Does NOT sort — it counts position in the order the loop already yields ([RULES.md 14c](RULES.md)) | `IrLoopIndexRef` → a loop counter |
@@ -90,7 +91,6 @@ Held so they aren't accidentally repurposed. Assign a meaning or cut before v1.0
 | `bridge` | interop / FFI boundary |
 | `bring` | instantiate a `builder` (`bring [N] Name(args)`), binding args positionally + emitting its output event |
 | `builder` | a reusable template: signature body (params + one `markup`/`code`/`css`/`line` output field), or a `mark` member making it an identity template |
-| `mute` `unmute` | disable / re-enable a shard or handler |
 | `transform` | AST macro / source transform, or Transform component sugar |
 
 ### Cut (gone from the lexer and the language)

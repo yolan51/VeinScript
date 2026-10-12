@@ -417,6 +417,46 @@ An `SF` still declares no result, under either spelling (VS0105): it emits.
 
 ---
 
+## D18 — `mute X` pauses a shard by name, from the next commit {#mute}
+
+> **Reported as `VS0350`** (no shard of that name in this bundle, with a "did you mean") and **`VS0351`**
+> (the name is both a shard and a bridge). *(D17 is held for named arguments — ROADMAP.)*
+
+**DECIDED.** `mute` and `unmute` are statements that take the name of a shard, ShardView or bridge of
+the same bundle, fragments included:
+
+```
+shard Menu {
+    hear *Vein.Console.Io.@Input as i {
+        if trim(i.text) == "p" { mute Game }
+        if trim(i.text) == "r" { unmute Game }
+    }
+}
+```
+
+While a shard is muted, none of its `hear` handlers and none of its `each tick`, `each frame`,
+`settled` or `every N` blocks run. An event that arrives meanwhile is **dropped** for it, not held:
+`unmute` does not replay what it missed. Its `var`s keep their values, so it resumes where it stopped.
+Muting a muted shard, or unmuting one that is not, does nothing.
+
+**Applied at the next commit, like `emit`** (RULES 21). The muted shard still finishes the event or phase
+in progress, whether it is declared before the muting shard or after it, so the outcome never depends on
+shard order or on fragment file names. A `mute` in `run once` lands before the boot event, so a shard can
+start muted.
+
+*Why.* A shard's name decided nothing at runtime. The only way to act on it was the string
+`e.from.name == "Combat"`, which a typo never matches and which an app link silently breaks by renaming a
+duplicated shard to `Bundle.Shard`. `mute` is checked when you compile, and it resolves to the shard's
+`Author.Bundle.Name` key, which the linker never renames. The two keywords were reserved for exactly this
+("disable / re-enable a shard", KEYWORDS.md); pausing physics while a menu is open, or switching between a
+Menu shard and a Game shard, previously needed an `if` at the top of every block.
+
+**Same bundle only.** Another bundle's shards are its own business; a bundle that wants to be pausable
+from outside can hear an event and mute itself. Inside an imported SF, the name is the exporting
+bundle's shard.
+
+---
+
 ## Reserved-word disposition
 
 Every keyword currently in [Lexer.cs](../src/Vein.Compiler/Lexing/Lexer.cs) `Keywords`, classified.
@@ -449,7 +489,8 @@ Full detail in [KEYWORDS.md](KEYWORDS.md).
 | `bridge` | **core (IOP)** | a shard-like that spans a boundary |
 | `fn` `type` `if` `while` `repeat` `break` `continue` `match` `enum` | **core** | general computation and control flow (D2, D11) |
 | `ShardView` | **core (IOP)** | a First-Class object that ASSEMBLES |
-| `on` `mute` `unmute` `transform` | **reserved** | genuinely unassigned: no parser case, no sample |
+| `mute` `unmute` | **core (IOP)** | pause / resume a shard by name, at the next commit (D18) |
+| `on` `transform` | **reserved** | genuinely unassigned: no parser case, no sample |
 
 The nine keywords this section once listed as **"to ADD in M2"** — `fn` `type` `enum` `if` `while`
 `repeat` `break` `continue` `match` — have all been in the lexer for some time; they are classified
@@ -460,7 +501,7 @@ sed -n '/Keywords = new/,/^    };/p' src/Vein.Compiler/Lexing/Lexer.cs | grep -o
 ```
 
 Still pending: tokens `LBracket`/`RBracket` if D9(a). **Never keywords:** `class`, `for`, `in`, `loop`
-(D3, D5); `!` (D12). **Added:** `do` (D15). **Cut:** `push` (D4).
+(D3, D5); `!` (D12). **Added:** `do` (D15). **Given a meaning:** `mute` `unmute` (D18). **Cut:** `push` (D4).
 
 ---
 
@@ -468,6 +509,7 @@ Still pending: tokens `LBracket`/`RBracket` if D9(a). **Never keywords:** `class
 
 - **D9** — brackets & list syntax: (a) vs (b). *(specs assume (a).)*
 - **D10** — user-defined generics timing. *(deferred.)*
-- **Reserved block** — `on`, `mute`, `unmute`, `transform`: assign a meaning or cut before v1.0.
-  *(The rest of what this list once held — `by`, `start`, `audience`, `bridge`, `bring`, `builder` —
+- **Reserved block** — `on`, `transform`: assign a meaning or cut before v1.0.
+  *(The rest of what this list once held — `by`, `start`, `audience`, `bridge`, `bring`, `builder`,
+  `mute`, `unmute` —
   all got meanings and are classified above.)*

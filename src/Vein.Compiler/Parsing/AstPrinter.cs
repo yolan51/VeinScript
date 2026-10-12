@@ -124,6 +124,7 @@ public static class AstPrinter
             case MarkStmt mk: Line(sb, ind, $"{(mk.Remove ? "unmark" : "mark")} {Ex(mk.Target)} #{mk.Mark}"); break;
             case EmitStmt em: Line(sb, ind, $"emit {EventText(em.EventPath, em.Event)} {{ {string.Join(", ", em.Fields.Select(f => f.Name + ": " + Ex(f.Value)).Append(em.FillRest ? "?" : null).Where(x => x is not null))} }}"); break;
             case DestroyStmt d: Line(sb, ind, $"destroy {Ex(d.Target)}"); break;
+            case MuteStmt mu: Line(sb, ind, $"{(mu.Unmute ? "unmute" : "mute")} {mu.Shard}"); break;
             case AttachStmt at: Line(sb, ind, $"{(at.Remove ? "unattach" : "attach")} ${at.Shape}"); break;
             case ChanceStmt c: Line(sb, ind, $"chance {c.Probability:P0}"); PrintBlock(sb, c.Body, ind + 1); break;
             case BringStmt br: Line(sb, ind, $"bring {(br.Count is null ? "" : Ex(br.Count) + " ")}{br.Builder}({string.Join(", ", br.Args.Select(Ex).Append(br.FillRest ? "?" : null).Where(x => x is not null))})"); break;

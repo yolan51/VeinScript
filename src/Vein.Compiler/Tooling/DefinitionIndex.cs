@@ -67,6 +67,15 @@ public sealed class DefinitionIndex
             if (!sites[i].IsDefinition && sites[i].Kind == SymbolKind.Fn && sfs.Contains(sites[i].Name) && !fns.Contains(sites[i].Name))
                 sites[i] = sites[i] with { Kind = SymbolKind.SF };
 
+        // The same for `mute X`: it is collected as Shard, but X may be a ShardView or a bridge.
+        var shardLike = sites.Where(s => s.IsDefinition && s.Kind is SymbolKind.Shard or SymbolKind.ShardView or SymbolKind.Bridge)
+                             .GroupBy(s => s.Name, StringComparer.Ordinal)
+                             .ToDictionary(g => g.Key, g => g.Select(s => s.Kind).ToList(), StringComparer.Ordinal);
+        for (int i = 0; i < sites.Count; i++)
+            if (!sites[i].IsDefinition && sites[i].Kind == SymbolKind.Shard
+                && shardLike.TryGetValue(sites[i].Name, out var kinds) && kinds is [var only] && only != SymbolKind.Shard)
+                sites[i] = sites[i] with { Kind = only };
+
         return new DefinitionIndex { Sites = sites };
     }
 
@@ -158,6 +167,8 @@ public sealed class DefinitionIndex
                 case AttachStmt a: Use(a.Shape, SymbolKind.Shape, a.Span); break;
                 case EmitStmt em: Use(em.Event, SymbolKind.Event, em.Span, SiteRole.Emit); foreach (var f in em.Fields) Ex(f.Value); break;
                 case BringStmt br: Use(br.Builder, SymbolKind.Builder, br.Span); foreach (var a in br.Args) Ex(a); break;
+                // `mute Physics` names a shard — at the NAME, so F12 on it lands and Shift+F12 lists it.
+                case MuteStmt mu: Use(mu.Shard, SymbolKind.Shard, mu.NameSpan); break;
                 case ExprStmt x: Ex(x.Expr); break;
             }
         }

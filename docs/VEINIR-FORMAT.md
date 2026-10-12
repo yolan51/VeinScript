@@ -60,7 +60,7 @@ Attributes are omitted entirely when empty/default.
 
 Structural kinds with children and no attrs: `Target`, `EachTick`, `Settled`, `Start`, `Emit`,
 `Mark`/`Unmark`, `Assign`, `If`/`Then`/`Else`/`Cond`, `While`/`Do`, `Match`/`When`, `Chance`,
-`Destroy`, `Attach`/`Unattach`.
+`Destroy`, `Attach`/`Unattach`. Leaves: `Mute`/`Unmute` (`= <shard name>`).
 
 Value-wrapper kinds (use `= <header>`): `Arg`, `Cond`, `Let`, `Body`.
 

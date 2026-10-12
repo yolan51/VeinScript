@@ -127,6 +127,12 @@ public static class DiagnosticGuide
 
         new("VS0345", "Nothing moved, so the call still passes each value where it did — but a name, a type or the count changed under it. Read what the bundle changed, then accept it; until then the lock keeps saying so.",
             "docs/RULES.md — rule 20a"),
+
+        new("VS0350", "`mute` is checked when you compile, because the string `e.from.name == \"Combat\"` was not: a typo there never matches and nothing says so. Only this bundle's shards can be muted — another bundle's shards are its own business.",
+            "docs/SYNTAX-DECISIONS.md — D18"),
+
+        new("VS0351", "A shard and a bridge may share a name (VS0320 keys the kinds apart), but `mute` takes a bare name and would have to guess which one stops. Renaming one is the only way to say.",
+            "docs/SYNTAX-DECISIONS.md — D18"),
     };
 
     private static readonly Dictionary<string, DiagnosticNote> ByCode =

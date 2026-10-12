@@ -197,6 +197,32 @@ public class MultiFileBundleTests : IDisposable
     }
 
     [Fact]
+    public void Mute_reaches_across_the_fragment_boundary_both_ways()
+    {
+        // Fragments lower BEFORE the main file, so the fragment's `mute Game` is lowered before
+        // `shard Game` is — the name table has to be collected up front, not as shards are lowered.
+        string main = Bundle("Mutes",
+            """
+            bundle Mutes by acme {
+                shard Game { each tick { emit *Vein.Console.Io.@Print { text: "game" } } }
+                shard Main { run once { mute Helper } }
+            }
+            """,
+            ("shards/Ctl.vein",
+             """
+             shard Ctl { run once { mute Game } }
+             shard Helper { each tick { emit *Vein.Console.Io.@Print { text: "helper" } } }
+             """));
+
+        var r = CompileFile(main);
+        Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
+
+        var sw = new StringWriter();
+        new Vein.Compiler.Ir.Interp { Ticks = 1 }.Run(r.Modules[0], new StringReader(""), sw);
+        Assert.Equal("", sw.ToString().Trim());   // both muted before the first tick
+    }
+
+    [Fact]
     public void Merged_member_order_is_deterministic()
     {
         string main = Bundle("Kit",
