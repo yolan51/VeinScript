@@ -1,0 +1,93 @@
+// shard_marks.vein — the marks a shard carries, used three ways: a group to pause, a ban to give at
+// runtime, and a question to ask in a handler.
+//
+//   veinc run samples/shard_marks.vein --ticks 5
+//
+// What it shows (SYNTAX-DECISIONS D20, RULES 17f and 20e):
+//   - `shard Physics #Gameplay` puts Physics in a GROUP. `mute #Gameplay` pauses every shard carrying the
+//     mark, as a standing rule, and `unmute #Gameplay` resumes them. Menu never names Physics or Enemies,
+//     so a new gameplay shard joins the pause just by carrying the mark.
+//   - `mark !Spammer #Banned` gives a shard a mark while the program runs. Chat already says
+//     `audience not #Banned`, so it stops hearing Spammer without being edited. The first "buy now" still
+//     arrives: it was SENT before the ban landed.
+//   - `c.from carries #Trusted` asks, inside a handler, what an `audience` could only admit or refuse.
+//   - All three queue to the commit, like `emit`, so the order the shards are declared in never matters.
+//
+// Not in tools/check-backend.sh: the C# backend runs the mutes and marks, but cannot answer `carries` on
+// a sender's `from`, and says so in a note.
+//
+// It prints:
+//   chat (friend): hello
+//   physics 1
+//   enemies 1
+//   chat: buy now
+//   menu opens
+//   physics 2
+//   enemies 2
+//   menu closes
+//   physics 3
+//   enemies 3
+
+bundle Arcade by you {
+    event @Chat { text: string }
+
+    // ---- a group to pause -------------------------------------------------------------------------
+
+    shard Menu {
+        var t: int = 0
+        each tick {
+            t += 1
+            if t == 2 {
+                emit *Vein.Console.Io.@Print { text: "menu opens" }
+                mute #Gameplay
+            }
+            if t == 4 {
+                emit *Vein.Console.Io.@Print { text: "menu closes" }
+                unmute #Gameplay
+            }
+        }
+    }
+
+    shard Physics #Gameplay {
+        var n: int = 0
+        each tick {
+            n += 1
+            emit *Vein.Console.Io.@Print { text: "physics " + n }
+        }
+    }
+
+    shard Enemies #Gameplay {
+        var n: int = 0
+        each tick {
+            n += 1
+            emit *Vein.Console.Io.@Print { text: "enemies " + n }
+        }
+    }
+
+    // ---- a ban given at runtime, and a question asked in a handler -------------------------------
+
+    shard Spammer {
+        each tick { emit @Chat { text: "buy now" } }
+    }
+
+    shard Friend #Trusted {
+        run once { emit @Chat { text: "hello" } }
+    }
+
+    shard Moderator {
+        hear @Chat as c audience !Spammer {
+            mark !Spammer #Banned
+        }
+    }
+
+    shard Chat {
+        hear @Chat as c audience not #Banned {
+            if c.from carries #Trusted {
+                emit *Vein.Console.Io.@Print { text: "chat (friend): " + c.text }
+            }
+            if not (c.from carries #Trusted) {
+                emit *Vein.Console.Io.@Print { text: "chat: " + c.text }
+            }
+        }
+    }
+}

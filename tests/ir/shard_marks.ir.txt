@@ -1,0 +1,73 @@
+VeinIR v1  file=samples/shard_marks.vein
+Bundle Arcade  author=you
+|--- Event @Chat
+|    `--- Field text: string
+|--- Shard Menu
+|    |--- Var t: int = Int 0
+|    `--- EachTick
+|         |--- Assign += t
+|         |    `--- Int 1
+|         |--- If
+|         |    |--- Cond = Binary ==
+|         |    |    |--- Ref t
+|         |    |    `--- Int 2
+|         |    `--- Then
+|         |         |--- Emit *Vein.Console.Io.@Print
+|         |         |    `--- Arg text = Str "menu opens"
+|         |         `--- Mute #Gameplay
+|         `--- If
+|              |--- Cond = Binary ==
+|              |    |--- Ref t
+|              |    `--- Int 4
+|              `--- Then
+|                   |--- Emit *Vein.Console.Io.@Print
+|                   |    `--- Arg text = Str "menu closes"
+|                   `--- Unmute #Gameplay
+|--- Shard Physics  carries=[#Gameplay]
+|    |--- Var n: int = Int 0
+|    `--- EachTick
+|         |--- Assign += n
+|         |    `--- Int 1
+|         `--- Emit *Vein.Console.Io.@Print
+|              `--- Arg text = Concat
+|                   |--- Str "physics "
+|                   `--- Ref n
+|--- Shard Enemies  carries=[#Gameplay]
+|    |--- Var n: int = Int 0
+|    `--- EachTick
+|         |--- Assign += n
+|         |    `--- Int 1
+|         `--- Emit *Vein.Console.Io.@Print
+|              `--- Arg text = Concat
+|                   |--- Str "enemies "
+|                   `--- Ref n
+|--- Shard Spammer
+|    `--- EachTick
+|         `--- Emit @Chat
+|              `--- Arg text = Str "buy now"
+|--- Shard Friend  carries=[#Trusted]
+|    `--- RunOnce
+|         `--- Emit @Chat
+|              `--- Arg text = Str "hello"
+|--- Shard Moderator
+|    `--- Hear @Chat as c  audience=[!Spammer]
+|         `--- Mark !Spammer #Banned
+`--- Shard Chat
+     `--- Hear @Chat as c  audience=[not #Banned]
+          |--- If
+          |    |--- Cond = Carries #Trusted
+          |    |    `--- Path c.from
+          |    `--- Then
+          |         `--- Emit *Vein.Console.Io.@Print
+          |              `--- Arg text = Concat
+          |                   |--- Str "chat (friend): "
+          |                   `--- Path c.text
+          `--- If
+               |--- Cond = Unary not
+               |    `--- Carries #Trusted
+               |         `--- Path c.from
+               `--- Then
+                    `--- Emit *Vein.Console.Io.@Print
+                         `--- Arg text = Concat
+                              |--- Str "chat: "
+                              `--- Path c.text
