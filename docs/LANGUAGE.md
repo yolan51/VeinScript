@@ -312,7 +312,7 @@ readable on a `hear` binding (`d.from.kind`, `d.cause`, …):
 | field | meaning |
 |-------|---------|
 | `id` | this event's own id |
-| `from` | the emitter (a First-Class object): `from.name` · `from.kind` · `from.identity` · `from.shapes` · `from.marks` |
+| `from` | the emitter (a First-Class object): `from.name` · `from.kind` · `from.identity` · `from.shapes` · `from.marks` — the last two are asked, not read: `d.from carries #Trusted` (D20) |
 | `origin` | the ECS **entity** that emitted, when inside a `target` (`null` outside one) |
 | `source` | the originating entity/context |
 | `bundle` | the emitting bundle |
@@ -659,7 +659,8 @@ exprStmt    = expr ;
 expr        = orExpr ;
 orExpr      = andExpr  { "or"  andExpr } ;
 andExpr     = cmpExpr  { "and" cmpExpr } ;
-cmpExpr     = addExpr  { ("==" | "<" | ">" | "<=" | ">=") addExpr } ;   (* no "!="; use `not (a == b)` *)
+cmpExpr     = addExpr  { ("==" | "<" | ">" | "<=" | ">=") addExpr | "carries" ( MARKREF | SHAPEREF ) } ;
+                                                       (* no "!="; use `not (a == b)`. `carries` is contextual, D20 *)
 addExpr     = mulExpr  { ("+" | "-") mulExpr } ;
 mulExpr     = unary    { ("*" | "/" | "%") unary } ;
 unary       = ("not" | "-") unary | postfix ;

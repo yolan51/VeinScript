@@ -356,6 +356,12 @@ carried, but listed `!` shards are ANY OF (a sender is one shard). A bare `!Name
 checked like `mute` (**VS0352**); another bundle's is `*Author.Bundle.!Name`, checked when the app links
 (**VS0353**). The C# backend does not enforce `audience` and notes it. SYNTAX-DECISIONS D19.
 
+**17f. `x carries #M` is how a body asks what a sender or an entity carries.** `if d.from carries #Trusted`
+branches where an `audience` could only refuse; `if u carries #Boss` tests an entity outside a `target #Boss`
+query. Write `not (x carries #M)` — `not x carries #M` negates `x` first (**VS0008**). A sender's answer is
+what it carried when it EMITTED. `carries` is a word only before a `#`/`$`, so it is still a legal name. The
+C# backend answers it for an entity, not for a `from` (it notes that). SYNTAX-DECISIONS D20.
+
 **17c. An IMPORTED `$Shape` becomes a real component here the moment something attaches it.** A
 qualified include (`builder Conn { *Vein.Rest.Db.$Connection  mark #Conn }`, or a stdlib builder you
 `bring`) used to expand FIELDS only, and a field access resolves to a component solely when the module

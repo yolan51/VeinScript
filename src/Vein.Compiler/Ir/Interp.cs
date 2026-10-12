@@ -2151,6 +2151,24 @@ public sealed class Interp
                     _commands.Add(() => target.Muted = mute);
                 return null;
             }
+            // `x carries #M` / `x carries $S` (D20). The subject says where to look: a sender's `from`
+            // carries what its shard carried when it emitted; a console's `from` is its address, which
+            // it carries as a mark (the audience rule); an entity id asks the store, which answers for
+            // the COMMITTED world like every other read. Anything else carries nothing.
+            case "Carries":
+            {
+                var subject = Eval(rc.Args[0], self, locals);
+                string name = Str(Eval(rc.Args[1], self, locals));
+                bool shape = rc.Args[2] is IrLiteral { Value: true };
+                return subject switch
+                {
+                    Dictionary<string, object?> from =>
+                        (from.GetValueOrDefault(shape ? "shapes" : "marks") as IEnumerable<object?>)?.Any(x => Str(x) == name) == true,
+                    string address => !shape && address == name,
+                    long or int or double => shape ? _store.Has(AsLong(subject), name) : _store.HasTag(AsLong(subject), name),
+                    _ => false,
+                };
+            }
             // `mute #M` / `unmute #M` (D20): the standing rule, queued like the rest.
             case "MuteMark":
             case "UnmuteMark":

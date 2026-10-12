@@ -62,6 +62,7 @@ dialect. There is no general `class`.
 | `to` `from` | (with attach/unattach) · `builder V from Base` | component target / source; a builder VARIANT's base (rule 7c) | operands |
 | `emit` | `emit @E { … }` | send a message | `Emit(E{…})` |
 | `hear` | `hear @E as evt { … }` | react to a message | handler registration |
+| `carries` *(contextual)* | `d.from carries #Trusted` · `u carries $Boss` | does a sender (as it was when it sent), a console address or an entity carry this mark / shape — a word only before `#`/`$`, so still a legal name (D20) | `Carries(x, M, isShape)` |
 | `audience` | `hear @E as e audience $S #M not #Banned !Ledger not *a.B.!Spy { … }` | who a `hear` admits: carries every required `$`/`#` and none after `not`; is one of the listed `!` shards and none of the excluded ones (D19). **Enforced** over `Vein.Net.Peer`, where a signed frame makes the sender provable ([RUNTIME.md §4.3.2](RUNTIME.md)); advisory over the local console pipe; not enforced by the C# backend | `@audience(…)` on the handler |
 | `destroy` | `destroy self` | remove an identity | `DestroyEntity(self)` |
 | `chance` | `chance 30% { … }` | probabilistic branch | `if random() < 0.30 { … }` |

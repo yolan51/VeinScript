@@ -288,7 +288,7 @@ closed it. `git log --grep` on the phrase finds the full account.
 
 | What | And the part worth remembering |
 |---|---|
-| A shard's marks did one thing | They are a group now (D20): `mute #Gameplay` is a standing rule over every shard carrying it, in any bundle, and `mark !Spammer #Banned` changes a shard's marks at runtime — both queued to the commit and agreed on by the interpreter and the C# backend. |
+| A shard's marks did one thing | They are a group now (D20): `mute #Gameplay` is a standing rule over every shard carrying it, in any bundle, and `mark !Spammer #Banned` changes a shard's marks at runtime — both queued to the commit and agreed on by the interpreter and the C# backend. `x carries #M` asks it in a body, for a sender or an entity (the backend answers the entity form only). |
 | `audience` could only admit, and never by sender | `!Name` is the shard sigil and `not` excludes any entry (D19): `audience not !Ledger not #Banned`. Shards match by key, checked at compile time (VS0352) or at link time for another bundle's (VS0353). Still open: the C# backend does not enforce `audience` at all — it now says so in a note. |
 | A shard's name decided nothing | `mute Game` / `unmute Game` (D18) pause a shard by name, checked at compile time (VS0350/VS0351). Queued to the next commit, so the outcome never depends on shard order; resolved to the `Author.Bundle.Name` key, so an app link renaming a duplicated shard cannot break it. |
 | A real tool, written in the language: apps/tasks | The first dogfood pilot: a task-tracker CLI with 20 golden cases, run by `dotnet test` (AppsTests). It forced everything in the next rows. apps/tasks/FRICTION.md is the log: what was tried, the workaround, the verdict. |

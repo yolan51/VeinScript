@@ -634,6 +634,7 @@ internal sealed class EffectWalker
                 case IndexExpr ix: Rvalue(ix.Receiver); Rvalue(ix.Index); return;
                 case BinaryExpr b2: Rvalue(b2.Left); Rvalue(b2.Right); return;
                 case UnaryExpr u: Rvalue(u.Operand); return;
+                case CarriesExpr c: Rvalue(c.Subject); return;
                 case StructLitExpr sl: foreach (var f in sl.Fields) Rvalue(f.Value); return;
                 case ListLitExpr li: foreach (var it in li.Items) Rvalue(it); return;
             }

@@ -51,6 +51,7 @@ public sealed class DependencyModel
                     case IndexExpr ix: Expr(ix.Receiver); Expr(ix.Index); return;
                     case BinaryExpr b: Expr(b.Left); Expr(b.Right); return;
                     case UnaryExpr u: Expr(u.Operand); return;
+                    case CarriesExpr c: Expr(c.Subject); return;
                     case StructLitExpr sl: foreach (var f in sl.Fields) Expr(f.Value); return;
                     case ListLitExpr li: foreach (var it in li.Items) Expr(it); return;
                 }

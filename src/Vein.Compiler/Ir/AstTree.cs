@@ -272,6 +272,7 @@ public sealed class AstTree
                 return ("Concat", "", FlattenAdd(b).Select(Expr).ToList());
             case BinaryExpr b: return ("Binary", OpSym(b.Op), new List<IrNode> { Expr(b.Left), Expr(b.Right) });
             case UnaryExpr u: return ("Unary", u.Op == UnOp.Neg ? "-" : "not", new List<IrNode> { Expr(u.Operand) });
+            case CarriesExpr c: return ("Carries", (c.IsShape ? "$" : "#") + c.Name, new List<IrNode> { Expr(c.Subject) });
             case CallExpr c: return ("Call", Callee(c.Callee), c.Args.Select(Expr).ToList());
             case StructLitExpr s: return ("New", (_shapes.Contains(s.TypeName) ? "$" : "") + s.TypeName, s.Fields.Select(ArgField).ToList());
             case ListLitExpr li: return ("List", "", li.Items.Select(Expr).ToList());

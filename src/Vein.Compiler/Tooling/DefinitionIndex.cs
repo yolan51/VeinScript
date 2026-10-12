@@ -128,6 +128,7 @@ public sealed class DefinitionIndex
 
                 case BinaryExpr b: Ex(b.Left); Ex(b.Right); break;
                 case UnaryExpr u: Ex(u.Operand); break;
+                case CarriesExpr c: Ex(c.Subject); Use(c.Name, c.IsShape ? SymbolKind.Shape : SymbolKind.Mark, c.Span); break;
                 case MemberExpr me: Ex(me.Receiver); break;
                 case CallExpr c:
                     if (c.Callee is NameExpr fn) Use(fn.Name, SymbolKind.Fn, fn.Span);

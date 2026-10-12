@@ -203,6 +203,7 @@ public static class AstPrinter
         CallExpr c => $"{Ex(c.Callee)}({string.Join(", ", c.Args.Select(Ex))})",
         BinaryExpr b => $"({b.Op} {Ex(b.Left)} {Ex(b.Right)})",
         UnaryExpr u => $"({u.Op} {Ex(u.Operand)})",
+        CarriesExpr c => $"({Ex(c.Subject)} carries {(c.IsShape ? "$" : "#")}{c.Name})",
         StructLitExpr sl => $"{sl.TypeName} {{ {string.Join(", ", sl.Fields.Select(f => f.Name + ": " + Ex(f.Value)))} }}",
         ListLitExpr li => $"[{string.Join(", ", li.Items.Select(Ex))}]",
         _ => e.GetType().Name

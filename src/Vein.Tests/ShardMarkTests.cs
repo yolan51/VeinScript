@@ -154,4 +154,104 @@ public class ShardMarkTests
         Assert.Contains("World.MuteMark(\"Gameplay\", true)", code);
         Assert.Contains("World.MarkShard(\"me.T.Physics\", \"Paused\", true)", code);
     }
+
+    // ---- x carries #M -------------------------------------------------------------------------
+
+    [Fact]
+    public void A_handler_can_branch_on_what_the_sender_carries()
+    {
+        var output = Run(
+            "  event @Hit { n: int }\n" +
+            "  shard Ally #Trusted { run once { emit @Hit { n: 1 } } }\n" +
+            "  shard Stranger      { run once { emit @Hit { n: 2 } } }\n" +
+            "  shard Ear { hear @Hit as h {\n" +
+            "    if h.from carries #Trusted { " + P("\"trusted \" + h.n") + " }\n" +
+            "    if not (h.from carries #Trusted) { " + P("\"stranger \" + h.n") + " }\n" +
+            "  } }");
+
+        Assert.Equal(new[] { "trusted 1", "stranger 2" }, output);
+    }
+
+    [Fact]
+    public void Carries_sees_a_mark_given_at_runtime()
+    {
+        var output = Run(
+            "  event @Hit { }\n" +
+            "  shard Ctl { run once { mark !Ally #Trusted } }\n" +
+            "  shard Ally { each tick { emit @Hit { } } }\n" +
+            "  shard Ear { hear @Hit as h { if h.from carries #Trusted { " + P("\"trusted\"") + " } } }",
+            ticks: 1);
+
+        Assert.Equal(new[] { "trusted" }, output);
+    }
+
+    [Fact]
+    public void Carries_a_shape_reads_the_senders_carried_shapes()
+    {
+        var output = Run(
+            "  shape $Session { id: int }\n  event @Hit { }\n" +
+            "  shard Logged $Session { run once { emit @Hit { } } }\n" +
+            "  shard Ear { hear @Hit as h { if h.from carries $Session { " + P("\"session\"") + " } } }");
+
+        Assert.Equal(new[] { "session" }, output);
+    }
+
+    [Fact]
+    public void A_runtime_sender_carries_nothing()
+    {
+        var output = Run(
+            "  event @Boot { }\n" +
+            "  shard Ear { hear @Boot as b {\n    if b.from carries #Trusted { " + P("\"yes\"") + " }\n" +
+            "    if not (b.from carries #Trusted) { " + P("\"no\"") + " }\n  } }\n" +
+            "  start @Boot { }");
+
+        Assert.Equal(new[] { "no" }, output);
+    }
+
+    [Fact]
+    public void An_entity_carries_its_marks_and_shapes()
+    {
+        var output = Run(
+            "  shape $H { hp: int }\n  shape $Boss { phase: int }\n" +
+            "  shard S {\n    run once {\n      let e = spawn()\n      attach $H to e { hp: 1 }\n      mark e #Elite\n    }\n" +
+            "    each tick { target $H as u {\n" +
+            "      if u carries #Elite { " + P("\"elite\"") + " }\n" +
+            "      if not (u carries $Boss) { " + P("\"no boss\"") + " }\n" +
+            "    } }\n  }",
+            ticks: 1);
+
+        Assert.Equal(new[] { "elite", "no boss" }, output);
+    }
+
+    [Fact]
+    public void Not_without_parentheses_before_carries_is_VS0008()
+    {
+        var d = Assert.Single(Diags("  event @Hit { }\n  shard Ear { hear @Hit as h { if not h.from carries #T { } } }"),
+                              x => x.Code == "VS0008");
+
+        Assert.Contains("not (x carries #M)", d.Message);
+    }
+
+    [Fact]
+    public void Carries_stays_usable_as_a_name()
+    {
+        // Contextual, like `ordered by`: a word only when a `#`/`$` follows it.
+        var output = Run("  shard S { run once {\n    let carries = 3\n    " + P("\"n=\" + carries") + "\n  } }");
+
+        Assert.Equal(new[] { "n=3" }, output);
+    }
+
+    [Fact]
+    public void The_backend_answers_carries_for_an_entity_and_refuses_it_for_a_sender()
+    {
+        var entity = new CSharpBackend().Emit(Module(
+            "  shape $H { hp: int }\n" +
+            "  shard S { each tick { target $H as u { if u carries #Elite { mark u #Seen } } } }"));
+        Assert.Contains("World.MarkedAs<Marks.Elite>(", entity.Files[0].Contents);
+        Assert.DoesNotContain(entity.Notes, n => n.Contains("carries"));
+
+        var sender = new CSharpBackend().Emit(Module(
+            "  event @Hit { }\n  shard Ear { hear @Hit as h { if h.from carries #Trusted { } } }"));
+        Assert.Contains(sender.Notes, n => n.Contains("carries #Trusted") && n.Contains("will not compile"));
+    }
 }

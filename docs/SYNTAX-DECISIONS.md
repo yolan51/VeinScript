@@ -540,6 +540,29 @@ to pause (a menu over everything that moves) and what a program needs to quarant
 sender, kept out of every listener that already says `not #Banned`), and both were otherwise an `if` at the
 top of every block.
 
+**`x carries #M` / `x carries $S` asks the question a barrier asks, inside the body.** An `audience` can
+only admit or refuse; a handler that wants to treat a trusted sender differently, rather than refuse the
+rest, had no way to ask:
+
+```
+hear @Damage as d {
+    if d.from carries #Trusted { … }
+    if not (d.from carries #Trusted) { … }      // parentheses: `not` binds tighter (VS0008)
+}
+target $Health as u { if u carries #Boss { … } }
+```
+
+On a sender's `from` it answers for the marks and shapes the shard carried when it SENT; on a console's
+`from` (an address) it is the audience rule, the address being the one mark a console carries; on an entity
+it asks the store — previously only a `target #M` query could. Anything else carries nothing. `carries` is
+a contextual word, not a keyword: it is one only when a `#` or `$` follows, so it stays a legal name. The
+raw `from.marks` / `from.shapes` lists stay unread on purpose — `carries` is the question, and the one a
+second runtime has to reproduce.
+
+**The C# backend** answers `carries` on an entity (`World.MarkedAs`, `World.Has`) and keeps every D20
+mute and mark in step with the interpreter. `carries` on a sender's `from` it cannot answer — the compiled
+`from` holds a name and a kind — so it emits a call that will not compile, with a note.
+
 ---
 
 ## Reserved-word disposition

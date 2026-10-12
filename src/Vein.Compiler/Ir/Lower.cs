@@ -1498,8 +1498,8 @@ public sealed partial class Lower
     /// `d.from.kind` without knowing anything the IR does not say.
     ///
     /// `name` and `kind` only. `Interp.FromOf` also carries `identity`, `shapes` and `marks`, and those
-    /// are the AUDIENCE barrier's inputs: `audience` is a declaration, not an expression, so no program
-    /// can read them. What a runtime must reproduce is what a program can observe.
+    /// are the AUDIENCE barrier's inputs. A program asks about marks and shapes with `d.from carries #M`
+    /// (D20) rather than reading the lists, and that question is what a runtime must reproduce.
     private static IrType ProvenanceDecl() => new(
         ProvenanceType, IrTypeKind.Struct,
         new[]
@@ -2755,6 +2755,12 @@ public sealed partial class Lower
                 return new IrCall(LowerExpr(c.Callee), c.Args.Select(LowerExpr).ToList());
             case BinaryExpr b: return new IrBinary(MapBin(b.Op), LowerExpr(b.Left), LowerExpr(b.Right));
             case UnaryExpr u: return new IrUnary(u.Op == UnOp.Neg ? IrUnOp.Neg : IrUnOp.Not, LowerExpr(u.Operand));
+            // `x carries #M` (D20). The third argument says which table to look in, since a shape and a
+            // mark may share a name (RULES 14e).
+            case CarriesExpr ce:
+                if (!ce.IsShape) UseMark(ce.Name, ce.Span);
+                return new IrRuntimeCall("Carries", new IrExpr[]
+                    { LowerExpr(ce.Subject), new IrTypeNameExpr(ce.Name), new IrLiteral(ce.IsShape, IrLiteralKind.Bool) });
             case StructLitExpr sl: return new IrStructInit(sl.TypeName, sl.Fields.Select(LowerFieldInit).ToList());
             case ListLitExpr ll: return new IrList(ll.Items.Select(LowerExpr).ToList());
             // Only reachable if `base` escaped a bring argument list — the one place the parser admits

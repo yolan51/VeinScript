@@ -1332,6 +1332,24 @@ public sealed class CSharpBackend : IVeinBackend
             case "DestroyEntity":
                 return $"World.Destroy({Expr(c.Args[0])})";
 
+            // `x carries #M` (D20). On an entity it is the store's own question. On a sender's `from` it
+            // cannot be answered here — the compiled `from` has a name and a kind, not marks — so the call
+            // is emitted as written and fails to compile, with a note: never a silent `false`.
+            case "Carries" when c.Args.Count > 2 && c.Args[1] is IrTypeNameExpr what:
+            {
+                bool shape = c.Args[2] is IrLiteral { Value: true };
+                if (c.Args[0] is IrFieldAccess { Field: "from" } || c.Args[0].ResolvedType?.Name == "VeinProvenance")
+                {
+                    _notes.Add($"`carries {(shape ? "$" : "#")}{what.Name}` on a sender's `from` has no C# emission — " +
+                               "the compiled `from` carries no marks or shapes, so this file will not compile. " +
+                               "Keep the program on `veinc run`.");
+                    return $"carries({Expr(c.Args[0])}, \"{Escape(what.Name)}\")";
+                }
+                return shape
+                    ? $"World.Has<{Ident(what.Name)}>({Expr(c.Args[0])})"
+                    : $"World.MarkedAs<Marks.{Ident(what.Name)}>({Expr(c.Args[0])})";
+            }
+
             // `mute X` (D18): the key Lower resolved, which `Main` registered the system under. Deferred
             // inside VeinWorld.Mute, so it lands at the same commit the interpreter's does.
             case "Mute" or "Unmute":

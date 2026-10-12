@@ -332,6 +332,7 @@ public sealed class Resolve
             or "Mute" or "Unmute" or "MuteMark" or "UnmuteMark" or "MarkShard" or "UnmarkShard"
             => IrTypeRef.Of("void"),
         "random" => IrTypeRef.Of("float"),
+        "Carries" => IrTypeRef.Of("bool"),
         _ => null,
     };
 

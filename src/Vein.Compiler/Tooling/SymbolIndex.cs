@@ -87,6 +87,7 @@ public static class SymbolIndex
                 case CallExpr c: Expr(c.Callee); foreach (var a in c.Args) Expr(a); break;
                 case BinaryExpr b: Expr(b.Left); Expr(b.Right); break;
                 case UnaryExpr u: Expr(u.Operand); break;
+                case CarriesExpr c: if (!c.IsShape) marks.Add(c.Name); Expr(c.Subject); break;
                 case StructLitExpr sl: foreach (var f in sl.Fields) Expr(f.Value); break;
                 case ListLitExpr li: foreach (var it in li.Items) Expr(it); break;
             }

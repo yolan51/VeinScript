@@ -343,6 +343,9 @@ public sealed record BinaryExpr(BinOp Op, Expr Left, Expr Right, SourceSpan Span
 
 public enum UnOp { Neg, Not }
 public sealed record UnaryExpr(UnOp Op, Expr Operand, SourceSpan Span) : Expr(Span);
+/// `x carries #M` / `x carries $S` (D20): does a sender (`d.from`), a console address or an entity carry
+/// this mark or shape? `carries` is a contextual word, not a keyword.
+public sealed record CarriesExpr(Expr Subject, bool IsShape, string Name, SourceSpan Span) : Expr(Span);
 
 public sealed record StructLitExpr(string TypeName, IReadOnlyList<FieldInit> Fields, SourceSpan Span) : Expr(Span);
 public sealed record ListLitExpr(IReadOnlyList<Expr> Items, SourceSpan Span) : Expr(Span);

@@ -210,4 +210,40 @@ public class VeinBuildTests
                                        assemblyName: null);
         Assert.True(result.Success, result.Report());
     }
+
+    [Fact]
+    public void Carries_on_an_entity_agrees_compiled_as_interpreted()
+    {
+        const string src = """
+            bundle T by you {
+                shape $H { hp: int }
+                mark #Elite
+                mark #Grunt
+                builder Grunt { $H   mark #Grunt }
+                builder Champion { $H   mark #Elite }
+                shard Make { run once {
+                    bring Grunt(1)
+                    bring Champion(2)
+                } }
+                shard Show {
+                    settled { target $H as u {
+                        if u carries #Elite { emit *Vein.Console.Io.@Print { text: "elite " + u.H.hp } }
+                        if not (u carries #Elite) { emit *Vein.Console.Io.@Print { text: "plain " + u.H.hp } }
+                    } }
+                }
+            }
+            """;
+
+        var module = Module(src);
+
+        var interpreted = new StringWriter();
+        new Vein.Compiler.Ir.Interp { Ticks = 1 }.Run(module, new StringReader(""), interpreted);
+
+        var compiled = VeinBuild.Compile(module);
+        Assert.True(compiled.Success, compiled.Report());
+
+        string expected = interpreted.ToString().Replace("\r\n", "\n").Trim();
+        Assert.Equal("plain 1\nelite 2", expected);
+        Assert.Equal(expected, RunCaptured(compiled.Assembly!, 1).Replace("\r\n", "\n").Trim());
+    }
 }

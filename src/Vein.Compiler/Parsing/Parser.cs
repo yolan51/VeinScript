@@ -1204,6 +1204,22 @@ public sealed class Parser
                 TokenKind.Lt => BinOp.Lt, TokenKind.Gt => BinOp.Gt,
                 TokenKind.Le => BinOp.Le, TokenKind.Ge => BinOp.Ge, _ => null
             };
+            // `x carries #M` / `x carries $S` (D20) — the comparison level, so `a carries #M and b` groups as
+            // it reads. CONTEXTUAL, like `ordered by`: `carries` is a word only when a `#`/`$` follows,
+            // so a program may still name a variable `carries`.
+            if (op is null && Cur.Kind == TokenKind.Ident && Cur.Text == "carries"
+                && Peek(1).Kind is TokenKind.MarkRef or TokenKind.ShapeRef)
+            {
+                var cs = Here;
+                if (e is UnaryExpr { Op: UnOp.Not })
+                    _diag.Warning("VS0008",
+                        "`not x carries #M` asks whether `not x` carries #M — `not` binds tighter than `carries`. " +
+                        "Write `not (x carries #M)` to negate the test.", cs);
+                Advance();
+                var what = Advance();
+                e = new CarriesExpr(e, what.Kind == TokenKind.ShapeRef, what.Text, cs);
+                continue;
+            }
             if (op is null) return e;
             var s = Here;
 
