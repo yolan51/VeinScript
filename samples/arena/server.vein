@@ -1,0 +1,144 @@
+// samples/arena/server.vein — the ARENA server: a shared board that every client moves on.
+//
+//   Terminal 1:  veinc run samples/arena/server.vein
+//   Terminal 2:  veinc run samples/arena/client.vein     ← type your name, then w/a/s/d + Enter
+//   Terminal 3:  veinc run samples/arena/client.vein     ← and a second player
+//
+// Phase 1 of the arena (a game of tag): players join, move, and see each other. The server is
+// AUTHORITATIVE — a client only ever sends what it wants to do ("move wwd"), and the board everyone
+// sees is the one the server drew. That is what lets the later phases add rules no client can skip.
+//
+// THE PIPELINE IS FOUR SHARDS, AND EACH HAND-OFF IS AN EVENT.
+//
+//   @Message ──Input──▶ @Step ──Rules──▶ @Changed ──Broadcast──▶ @Send to every client
+//
+// The events are not ceremony. A write is reconciled at the commit after the event that made it
+// (RULES 11/12b), so a shard that moved a player and then drew the board IN THE SAME HANDLER would draw
+// where the player was. Emitting @Changed puts the drawing in the next event, after the commit — the
+// one place the new position is readable. A join is the same story: `attach $Player` lands at the
+// commit, so the newcomer is drawn by the @Changed that follows it.
+//
+// `audience !Input` on @Step is the authority line. Rules moves a player only when the Input shard
+// asked, so nothing else in this program — or added to it later — can teleport someone by emitting a
+// @Step of its own (SYNTAX-DECISIONS D19).
+
+bundle ArenaServer by you {
+
+    // One row of the roster, and one piece on the board. `addr` is the client's network identity, and
+    // the name they typed — so it is also where the letter drawn for them comes from.
+    shape $Player { addr: string, x: int, y: int }
+
+    // One requested step, already parsed. `who` is the sender's address; dx/dy are -1, 0 or 1.
+    event @Step { who: string, dx: int, dy: int }
+
+    // Something on the board changed; draw it again.
+    event @Changed { }
+
+    fn Width()  return int { return 20 }
+    fn Height() return int { return 10 }
+
+    // Keep a coordinate on the board. A step into the wall is a step that does nothing.
+    fn clamp(v: int, lo: int, hi: int) return int {
+        if v < lo { return lo }
+        if v > hi { return hi }
+        return v
+    }
+
+    shard Boot {
+        run once {
+            emit *Vein.Net.Peer.@Listen { as: #Arena, at: 9701, key: "arena-secret" }
+            emit *Vein.Console.Io.@Print { text: "arena listening on 9701 — waiting for players" }
+        }
+    }
+
+    // Joining and leaving. The roster is the set of $Player entities, exactly as in samples/chat: a
+    // newcomer is spawned, a client that has gone is destroyed, and nothing else keeps a list.
+    shard Lobby {
+        hear *Vein.Net.Peer.@Message as m {
+            var known = false
+            var seats = 0
+            target $Player as p {
+                seats += 1
+                if p.Player.addr == m.from { known = true }
+            }
+            if not known {
+                // Spread the starting squares along the top row so two players never start stacked.
+                let e = spawn()
+                attach $Player to e { addr: m.from, x: (seats * 5) % Width(), y: 0 }
+                emit *Vein.Console.Io.@Print { text: "* " + m.from + " joined" }
+                emit @Changed { }
+            }
+        }
+
+        hear *Vein.Net.Peer.@Undelivered as u {
+            target $Player as p {
+                if p.Player.addr == u.to {
+                    destroy p
+                    emit *Vein.Console.Io.@Print { text: "* " + u.to + " left" }
+                    emit @Changed { }
+                }
+            }
+        }
+    }
+
+    // Turns a line of text into steps. "move wwd" is three steps; any other letter is ignored, so a
+    // typo moves nobody rather than faulting. One @Step per letter, in the order typed.
+    shard Input {
+        hear *Vein.Net.Peer.@Message as m {
+            let ws = words(lower(m.text))
+            if len(ws) > 1 {
+                if ws[0] == "move" {
+                    target chars(ws[1]) as c {
+                        if c == "w" { emit @Step { who: m.from, dx: 0,  dy: -1 } }
+                        if c == "s" { emit @Step { who: m.from, dx: 0,  dy: 1 } }
+                        if c == "a" { emit @Step { who: m.from, dx: -1, dy: 0 } }
+                        if c == "d" { emit @Step { who: m.from, dx: 1,  dy: 0 } }
+                    }
+                }
+            }
+        }
+    }
+
+    shard Rules {
+        hear @Step as s audience !Input {
+            target $Player as p {
+                if p.Player.addr == s.who {
+                    p.Player.x = clamp(p.Player.x + s.dx, 0, Width() - 1)
+                    p.Player.y = clamp(p.Player.y + s.dy, 0, Height() - 1)
+                }
+            }
+            emit @Changed { }
+        }
+    }
+
+    // Draws the board as text and sends it to every player. A player is the first letter of their
+    // name, upper-cased; an empty square is a dot. Two players on one square show whoever was spawned
+    // first (query order is spawn order, RULES 14b) — phase 2 makes that square a tag.
+    shard Broadcast {
+        hear @Changed as c {
+            var board = ""
+            repeat Height() as y {
+                var row = ""
+                repeat Width() as x {
+                    var cell = "."
+                    target $Player as p {
+                        if p.Player.x == x and p.Player.y == y {
+                            if cell == "." { cell = upper(substring(p.Player.addr, 0, 1)) }
+                        }
+                    }
+                    row = row + cell
+                }
+                board = board + row + "\n"
+            }
+
+            var legend = ""
+            target $Player as p {
+                legend = legend + "  " + upper(substring(p.Player.addr, 0, 1)) + " = " + p.Player.addr
+            }
+
+            target $Player as p {
+                emit *Vein.Net.Peer.@Send { to: p.Player.addr, text: "\n" + board + legend }
+            }
+        }
+    }
+}

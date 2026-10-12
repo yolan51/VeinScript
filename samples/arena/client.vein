@@ -1,0 +1,60 @@
+// samples/arena/client.vein — one ARENA player. Start samples/arena/server.vein first.
+//
+//   veinc run samples/arena/client.vein
+//
+//   > your name
+//   alice                      ← your network identity; the board draws you as A
+//   wwd                        ← w/a/s/d, any number of them, then Enter
+//
+// Built on samples/chat/client.vein, and the reasoning there holds: the name is typed rather than
+// configured, so the same file runs in every terminal; and only the client links, because the server
+// learns each client's route from the frame it sends.
+//
+// The client decides nothing. It forwards what you typed as "move …" and prints whatever board comes
+// back, so a client cannot move itself further than the server allows.
+//
+// One line per move, with Enter, because `veinc run` reads the console a line at a time — there is no
+// live key input yet (the arena plan's phase 4).
+
+bundle ArenaClient by you {
+
+    // The one place the address lives. Change it to the server machine's address for two machines.
+    fn ServerAddress() return string { return "127.0.0.1:9701" }
+
+    shard Session {
+        var joined: bool
+
+        run once {
+            emit *Vein.Console.Io.@Print { text: "your name:" }
+        }
+
+        hear *Vein.Console.Io.@Input as i {
+            // Read the state once: the branch below flips it, and the name must not also be sent as a move.
+            let first = not joined
+            let line = trim(i.text)
+
+            if first {
+                joined = true
+                emit *Vein.Net.Peer.@Listen { as: line, at: 0, key: "arena-secret" }
+                emit *Vein.Net.Peer.@Link { name: #Arena, at: ServerAddress(), key: "arena-secret" }
+                emit *Vein.Net.Peer.@Send { to: #Arena, text: "join" }
+                emit *Vein.Console.Io.@Print { text: "joined as " + line + " — move with w/a/s/d + Enter" }
+            }
+
+            if not first {
+                emit *Vein.Net.Peer.@Send { to: #Arena, text: "move " + line }
+            }
+        }
+
+        hear *Vein.Net.Peer.@Undelivered as u {
+            emit *Vein.Console.Io.@Print { text: "  (cannot reach " + ServerAddress() + " — is the server running?)" }
+        }
+    }
+
+    // Only the server draws the board; anything else that reaches this address is refused.
+    shard Incoming {
+        hear *Vein.Net.Peer.@Message as m audience #Arena {
+            emit *Vein.Console.Io.@Print { text: m.text }
+        }
+    }
+}

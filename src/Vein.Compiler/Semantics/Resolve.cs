@@ -212,7 +212,14 @@ public sealed class Resolve
 
             case IrBinary b: return Binary(b);
             case IrFieldAccess fa: return Field(fa);
-            case IrIndex ix: Expr(ix.Receiver); Expr(ix.Index); return null;
+            // `xs[i]` is an element, when the list says what its elements are. A bare `list` (mixed, or a
+            // `fromJson` result) stays unknown.
+            case IrIndex ix:
+            {
+                var rt = Expr(ix.Receiver);
+                Expr(ix.Index);
+                return rt is { Name: "list", Args.Count: 1 } ? rt.Args[0] : null;
+            }
 
             // `list<T>` when every item agrees, bare `list` when they do not. The element type is what
             // lets `target ranks as r { … r … }` type its binding, which in turn types everything read
@@ -347,9 +354,10 @@ public sealed class Resolve
     /// and a comma for a decimal point. The text built-ins were absent for a long time simply because
     /// no sample used them; samples/text_search.vein and text_split_join.vein are what surfaced it.
     ///
-    /// The list-returning four — `split`, `lines`, `words`, `chars` — are deliberately still null.
-    /// There is no list type to name: `ParseTypeRef` has nothing for one, and inventing a name here
-    /// that no type reference can spell would be worse than an honest "unknown".
+    /// The list-returning four — `split`, `lines`, `words`, `chars` — are `list<string>`, the same type
+    /// a list literal of strings gets above. No type reference can SPELL it yet (there is no `list<T>`
+    /// field type, D9), but every element is a string by construction, and knowing that is what types a
+    /// `target words(line) as w` binding and an `xs[0]` read.
     private static IrTypeRef? Builtin(string name) => name switch
     {
         "spawn" => IrTypeRef.Of("Entity"),
@@ -359,6 +367,7 @@ public sealed class Resolve
         "join" or "toJson" or "string" or "trim" or "upper" or "lower" or "now"
             or "substring" or "replace" or "chr" => IrTypeRef.Of("string"),
         "here" => IrTypeRef.Of("Mark"),
+        "split" or "lines" or "words" or "chars" => new IrTypeRef("list", new[] { IrTypeRef.Of("string") }, false),
         _ => null,
     };
 }
