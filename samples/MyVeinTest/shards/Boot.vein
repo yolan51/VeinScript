@@ -1,0 +1,24 @@
+// shards/Boot.vein — BEHAVIOUR. Everything in this folder is a shard, view, bridge or function.
+//
+// An API primitive here is VS0321: a shape or an event belongs in publicators/, where `shared` can
+// actually be applied to it. The folder declares the kind, which is why neither needs a keyword.
+//
+// Shards run in merged-file order, so the file name decides the order — `Boot.vein` before `Tick.vein`.
+
+shard Boot {
+    run once {
+        bring Unit(10, 10)
+        bring &Unit(
+            300,     // current: int   from $Gauge   optional — default 5
+            500)     // max: int   from $Gauge   optional — default 100
+    }
+
+    hear @Drained as d {
+        emit *Vein.Console.Io.@Print { text: "drained by " + d.amount }
+        	  // max: int   from $Gauge   REQUIRED — give it a value
+			        target $Gauge as ga{
+            	do print(string(ga.Gauge.max))
+				 }         	  
+    }  	
+
+}

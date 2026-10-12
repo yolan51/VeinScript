@@ -1,0 +1,147 @@
+// MyVeinTest.vein — a bundle: a reusable package of VeinScript primitives. Authored `by you`,
+// so its public API is reached as *you.MyVeinTest.<Publicator>.<member>.
+//
+
+//   veinc run MyVeinTest/MyVeinTest.vein --ticks 1
+//
+// A bundle is THIS file plus every fragment beside it, and this one is already split:
+//
+//   publicators/Shapes.vein     $Gauge     the data an identity carries
+//   publicators/Marks.vein      #Active   membership, with no data
+//   publicators/Events.vein     @Drained  how shards reach each other
+//   publicators/Builders.vein   &Unit     a template that makes an identity
+//   shards/Boot.vein            behaviour — brings a Unit and hears @Drained
+//
+// THE FOLDER DECIDES THE KIND. `publicators/` is API, where `shared("…")` is meaningful;
+// `shards/` is behaviour. A shape in shards/ is VS0321, which is why neither needs a keyword.
+//
+// EACH publicators/ FILE IS ONE PUBLICATOR, NAMED AFTER THE FILE. So `$Gauge` is reached as
+// *you.MyVeinTest.Shapes.$Gauge — rename the file and you rename the publicator. Grouped by
+// primitive kind here because that is a new bundle's question; group by concern (`Combat.vein`,
+// `Inventory.vein`) when the bundle has one.
+//
+// Nothing has to stay split. Declare anything here directly and delete the fragment — a small
+// bundle living entirely in this file is the normal case, not a shortcut.
+bundle MyVeinTest by you {
+    
+shard Game {
+        // Shard variables live for the whole run, so they hold the game's state.
+        var heroHp: int
+        var potions: int
+        var gold: int
+        var slimeHp: int
+        var over: bool
+  
+        run once {
+            heroHp = 30
+            potions = 2
+            gold = 0
+            slimeHp = 20
+            do print("=== VEIN QUEST ===")
+            do print("A wild Slime blocks the road!")
+            do showMenu()
+            repeat 5{
+                
+            emit @Drained{
+    					amount: 255      // required — int
+						}
+			}
+        }
+
+        // Fires once for every line you type.
+        hear *Vein.Console.Io.@Input as i {
+            if over {
+                do print("The adventure is over. Press Ctrl+D (Ctrl+Z on Windows) to quit.")
+            } else {
+                let choice = i.text
+                if choice == "1" {
+                    do attack()
+                } else if choice == "2" {
+                    do drinkPotion()
+                } else if choice == "3" {
+                    do showStats()
+                } else if choice == "4" {
+                    do runAway()
+                } else {
+                    do print("Pick 1, 2, 3 or 4.")
+                }
+                if not over { do showMenu() }
+            }
+        }
+    }
+ 
+    // --- helpers -------------------------------------------------------------
+ 
+    // An SF emits events (here, printed lines) and returns nothing.
+    SF print(msg: string) {
+        emit *Vein.Console.Io.@Print { text: msg }
+    }
+ 
+    SF showMenu() {
+        
+        do print("")
+        do print("Hero HP " + heroHp + " | Slime HP " + slimeHp)
+        do print("1) Attack   2) Potion (" + potions + " left)   3) Stats   4) Run")
+    }
+ 
+    // An fn computes and returns a value: a random whole number from lo to hi.
+    // `chance 50% { … }` runs its block half the time, so each step up is a coin flip.
+    fn roll(lo: int, hi: int) return int {
+        var total = lo
+        repeat hi - lo {
+            chance 50% { total = total + 1 }
+        }
+        return total
+    }
+ 
+    SF attack() {
+        let dmg = roll(3, 8)
+        slimeHp = slimeHp - dmg
+        do print("You swing your sword for " + dmg + " damage!")
+        if slimeHp <= 0 {
+            gold = gold + 15
+            over = true
+            do print("The Slime melts away. You win 15 gold!")
+        } else {
+            do slimeBites()
+        }
+    }
+ 
+    SF drinkPotion() {
+        if potions <= 0 {
+            do print("Your bag is empty!")
+        } else {
+            potions = potions - 1
+            heroHp = heroHp + 12
+            do print("Glug glug. You heal 12 HP.")
+            do slimeBites()
+        }
+    }
+ 
+    SF showStats() {
+        do print("HP " + heroHp + " | Potions " + potions + " | Gold " + gold)
+    }
+ 
+    SF runAway() {
+        var escaped = false
+        chance 50% { escaped = true }
+        if escaped {
+            over = true
+            do print("You flee back to town. Coward, but alive!")
+        } else {
+            do print("The Slime blocks your escape!")
+            do slimeBites()
+        }
+    }
+ 
+    SF slimeBites() {
+        let bite = roll(2, 6)
+        heroHp = heroHp - bite
+        do print("The Slime bites you for " + bite + ".")
+        if heroHp <= 0 {
+            over = true
+            do print("You collapse... GAME OVER.")
+        }
+    }
+
+}

@@ -1,0 +1,7 @@
+// publicators/Shapes.vein — DATA an identity can carry. This file becomes `publicator Shapes`.
+//
+// A shape is a component: fields with types, attached to an identity. It has no behaviour and no
+// methods — what happens to a $Gauge is decided by a shard that targets it.
+
+shared("Something with a current value and a ceiling — health, mana, fuel.")
+shape $Gauge { current: int =5, max: int =100}

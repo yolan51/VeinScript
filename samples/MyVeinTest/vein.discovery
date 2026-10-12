@@ -1,0 +1,18 @@
+# vein.discovery — controls what `*` wildcard discovery ENUMERATES (autocomplete / browsing).
+#
+#   silent = hidden from `*` discovery        expose = shown in `*` discovery
+#
+# `silent` controls DISCOVERY; `shared` still controls CONSUMPTION — an explicit
+# *Author.Bundle.Publicator.@member always resolves and runs even if silenced here.
+#
+# A path is Author | Author.Bundle | Author.Bundle.Publicator; most-specific wins.
+# With no directives (as shipped) everything is discoverable. Uncomment to narrow:
+
+# silent all                     # nothing in `*` unless exposed below
+# expose Vein.Console
+# expose Vein.Math
+
+# Importing a large dependency should not dump its whole tree into `*`. Name the front door and
+# its transitive tree is silenced in one line, then expose only what you actually consume:
+# silent transitive *MegaApp.PrincipalBundle
+# expose *MegaApp.Physics

@@ -1,0 +1,10 @@
+// publicators/Events.vein — MESSAGES. This file becomes `publicator Events`.
+//
+// Events are how shards reach each other: there are no calls between them, so an event is the control
+// flow. `emit @Drained { … }` from one shard, `hear @Drained as d { … }` in another — and the emitter
+// never learns who heard it, or whether anyone did.
+//
+// A failure is a message too. That is what this language has instead of `catch`.
+
+shared("A pool reached zero.")
+event @Drained { amount: int }
