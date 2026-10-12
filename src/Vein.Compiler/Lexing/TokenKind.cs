@@ -14,6 +14,7 @@ public enum TokenKind
     EventRef,       // @Damaged
     MarkRef,        // #Enemy
     BuilderRef,     // &Console
+    ShardRef,       // !Ledger — a shard by name (D19); only `audience` takes one
 
     // keywords
     KwAnd, KwAs, KwAttach, KwAudience, KwBuilder, KwBridge, KwBring, KwBundle,

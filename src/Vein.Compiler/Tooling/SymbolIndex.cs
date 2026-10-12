@@ -38,7 +38,7 @@ public static class SymbolIndex
             switch (n)
             {
                 case ScheduleBlock sc: Block(sc.Body); break;
-                case HearBlock hb: AddMarks(hb.AudienceMarks); Block(hb.Body); break;
+                case HearBlock hb: AddMarks(hb.AudienceMarks); AddMarks(hb.ExcludedMarks); Block(hb.Body); break;
                 case FuncDecl f: Block(f.Body); break;
                 case Stmt s: Stmt(s); break;
             }

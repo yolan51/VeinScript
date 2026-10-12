@@ -15,6 +15,7 @@
   <Color name="Mark"    foreground="#C586C0" />              <!-- # mauve  — a tag                -->
   <Color name="Event"   foreground="#DCDCAA" />              <!-- @ gold   — a message            -->
   <Color name="Builder" foreground="#E09B5A" />              <!-- & amber  — an identity template -->
+  <Color name="Shard"   foreground="#A9B8FF" />              <!-- ! periwinkle — a shard, by name (D19) -->
   <Color name="Sigil"   foreground="#4EC9B0" />
 
   <!-- PAINTED BY SemanticColorizer, not by a rule below: each needs the tokens around a name, which a
@@ -49,6 +50,7 @@
     <Rule color="Mark">[#][A-Za-z_][A-Za-z0-9_]*</Rule>
     <Rule color="Event">@[A-Za-z_][A-Za-z0-9_]*</Rule>
     <Rule color="Builder">&amp;[A-Za-z_][A-Za-z0-9_]*</Rule>
+    <Rule color="Shard">![A-Za-z_][A-Za-z0-9_]*</Rule>
 
     <!-- `?` fill-the-rest placeholder in emit/bring -->
     <Rule color="Sigil">\?</Rule>

@@ -104,7 +104,7 @@ public static class DiagnosticGuide
         new("VS0349", "Deliberate, not missing: an fn names its result after the WORD `return`, the same word its body gives it back with — `fn f(x: int) return int { … }`. VeinScript has no arrows and no lambdas; every function is declared and named.",
             "docs/SYNTAX-DECISIONS.md — D16"),
 
-        new("VS0006", "Deliberate, not missing: logic is spelled in words, so inequality is `not (a == b)` and negation is `not x`. `!` is kept unlexed for a future sigil. The lexer still hands the parser the token you meant, so this is one error rather than a cascade about braces.",
+        new("VS0006", "Deliberate, not missing: logic is spelled in words, so inequality is `not (a == b)` and negation is `not x`. `!` alone is still not an operator: `!Name` is the shard sigil (D19), which only an `audience` list takes. The lexer still hands the parser the token you meant, so this is one error rather than a cascade about braces.",
             "docs/SYNTAX-DECISIONS.md — D12"),
 
         new("VS0007", "Builders and events can include a `$Shape`; a shape body takes fields only, because components unify by bare name and an include would be a second definition of the same component. Put the include one level out, in the builder or event that carries this shape.",
@@ -131,8 +131,14 @@ public static class DiagnosticGuide
         new("VS0350", "`mute` is checked when you compile, because the string `e.from.name == \"Combat\"` was not: a typo there never matches and nothing says so. Only this bundle's shards can be muted — another bundle's shards are its own business.",
             "docs/SYNTAX-DECISIONS.md — D18"),
 
-        new("VS0351", "A shard and a bridge may share a name (VS0320 keys the kinds apart), but `mute` takes a bare name and would have to guess which one stops. Renaming one is the only way to say.",
+        new("VS0351", "A shard and a bridge may share a name (VS0320 keys the kinds apart), but `mute` and an `audience` `!` take a bare name and would have to guess which one is meant. Renaming one is the only way to say.",
             "docs/SYNTAX-DECISIONS.md — D18"),
+
+        new("VS0352", "An `audience` barrier that names a shard nobody declared is silent in the worst way: `not !Ledgr` blocks nothing, `!Ledgr` admits nobody, and both read like a barrier doing its job. A bare `!Name` is this bundle's shard; another bundle's is `*Author.Bundle.!Name`.",
+            "docs/SYNTAX-DECISIONS.md — D19"),
+
+        new("VS0353", "A qualified `*Author.Bundle.!Name` names another bundle's shard, which the bundle's own compile cannot see, so linking is the first place it can be checked. A name no linked bundle declares never matches.",
+            "docs/SYNTAX-DECISIONS.md — D19"),
     };
 
     private static readonly Dictionary<string, DiagnosticNote> ByCode =

@@ -687,7 +687,15 @@ public sealed class CSharpBackend : IVeinBackend
             sb.AppendLine("    public override void Subscribe()");
             sb.AppendLine("    {");
             foreach (var (m, ev) in hears)
+            {
                 sb.AppendLine($"        World.On(\"{ev}\", this, p => {Ident(m.Name)}(({EventType(ev!)})p));");
+                // Not enforced here: the compiled `from` has no carried shapes/marks or shard key to
+                // check. Said out loud (BACKEND-CONTRACT rule 4), because the handler compiles and simply
+                // hears everything — a barrier that silently admits all is the worst way to be missing.
+                if (m.Attrs.Any(a => a.Name == "audience"))
+                    _notes.Add($"{shard.Name}.{m.Name}: `audience` not enforced — the C# backend delivers " +
+                               "this event from every sender.");
+            }
             sb.AppendLine("    }");
         }
 

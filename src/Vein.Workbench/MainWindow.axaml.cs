@@ -3478,6 +3478,10 @@ public partial class MainWindow : Window
         if (e.Text == " " && JustTypedDo()) { ShowSfCompletion(); return; }   // `do ` — which SF? (D15)
         if (e.Text == " " && (JustTyped("emit") || JustTyped("hear"))) { ShowEventCompletionAfterKeyword(); return; }
         if (e.Text == " " && (JustTyped("mute") || JustTyped("unmute"))) { ShowShardCompletion(); return; }   // D18
+        // `!Shard` is taken only by an `audience` list (D19), so the list opens only on such a line —
+        // a `!` anywhere else is a VS0006 typo that a popup would only dress up as valid.
+        if (e.Text == "!" && _editor.Document.GetText(_editor.Document.GetLineByOffset(_editor.CaretOffset)).Contains("audience"))
+        { ShowShardCompletion(); return; }
         if (e.Text is not ("$" or "#" or "@")) return;
 
         (SymbolKind kind, string label) = e.Text switch

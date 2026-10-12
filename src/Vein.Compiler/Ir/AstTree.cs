@@ -112,7 +112,7 @@ public sealed class AstTree
     {
         ScheduleBlock sb => Node(ScheduleName(sb.Kind), ScheduleArg(sb), sb.Span, Block(sb.Body)),
         HearBlock hb => WithAttrs(Node("Hear", $"{AstPrinter.EventText(hb.EventPath, hb.Event)} as {hb.Bind}", hb.Span, Block(hb.Body)),
-                                  Audience(hb.AudienceShapes, hb.AudienceMarks)),
+                                  AstPrinter.AudienceText(hb) is { Length: > 0 } aud ? ("audience", "[" + aud + "]") : null),
         Decl d => Decl(d),
         Stmt s => Stmt(s),
         _ => Leaf(m.GetType().Name, "", m.Span)
@@ -310,9 +310,6 @@ public sealed class AstTree
 
     private (string, string)? Carries(IReadOnlyList<string> shapes, IReadOnlyList<string> marks)
         => shapes.Count + marks.Count == 0 ? null : ("carries", Bracket(shapes, marks));
-
-    private (string, string)? Audience(IReadOnlyList<string> shapes, IReadOnlyList<string> marks)
-        => shapes.Count + marks.Count == 0 ? null : ("audience", Bracket(shapes, marks));
 
     private static string Bracket(IReadOnlyList<string> shapes, IReadOnlyList<string> marks)
         => "[" + string.Join(" ", shapes.Select(s => "$" + s).Concat(marks.Select(m => "#" + m))) + "]";

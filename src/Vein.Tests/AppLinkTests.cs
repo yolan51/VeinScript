@@ -354,6 +354,44 @@ public class AppLinkTests : IDisposable
         Assert.Contains("b-physics", sw.ToString());
     }
 
+    // ---- D19: an `audience` naming another bundle's shard -------------------------------------
+
+    /// Two bundles each have a `Boot` that emits @Ping, so the linker renames both — and Ear, in a
+    /// third bundle, keeps out A's by key and still hears B's.
+    private void PingApp(string audience)
+    {
+        Write("A.vein", "bundle A by me {\n  event @Ping { who: string }\n  shard Boot { run once { emit @Ping { who: \"a\" } } }\n}");
+        Write("B.vein", "bundle B by me {\n  shard Boot { run once { emit *me.A.@Ping { who: \"b\" } } }\n}");
+        Write("C.vein", "bundle C by me {\n  shard Ear { hear *me.A.@Ping as p audience " + audience + " { " +
+                        P("\"heard \" + p.who") + " } }\n}");
+    }
+
+    [Fact]
+    public void Not_another_bundles_shard_blocks_it_by_key_after_the_rename()
+    {
+        PingApp("not *me.A.!Boot");
+        var app = Write("T.app.vein", "app T {\n load \"A.vein\"\n load \"B.vein\"\n load \"C.vein\"\n}");
+
+        var (output, diag) = Run(app);
+
+        Assert.DoesNotContain("heard a", output);
+        Assert.Contains("heard b", output);
+        Assert.DoesNotContain(diag.Items, d => d.Code == "VS0353");
+    }
+
+    [Fact]
+    public void A_qualified_shard_no_linked_bundle_declares_is_VS0353()
+    {
+        PingApp("not *me.A.!Boto");
+        var app = Write("T.app.vein", "app T {\n load \"A.vein\"\n load \"B.vein\"\n load \"C.vein\"\n}");
+
+        var (output, diag) = Run(app);
+
+        var d = Assert.Single(diag.Items, x => x.Code == "VS0353");
+        Assert.Contains("me.A.Boto", d.Message);
+        Assert.Contains("heard a", output);   // and it does what it says: blocks nothing
+    }
+
     [Fact]
     public void A_unique_shard_name_is_left_alone()
     {

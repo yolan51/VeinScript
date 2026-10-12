@@ -1594,22 +1594,61 @@ public sealed partial class Lower
         if (_importOwner is { } owner) return Call(owner + "." + mu.Shard);
 
         string verb = mu.Unmute ? "unmute" : "mute";
-        if (!_shardKinds.TryGetValue(mu.Shard, out var kinds))
+        return LocalShardKey(mu.Shard, mu.NameSpan, "VS0350", $"`{verb}` takes", $"{verb} {mu.Shard}") is { } key
+            ? Call(key)
+            : new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
+    }
+
+    /// The key of a shard, ShardView or bridge of THIS bundle, or null after reporting why there is none:
+    /// `unknownCode` when nothing has the name (with a "did you mean"), VS0351 when a shard and a bridge
+    /// both do. Shared by `mute` (VS0350) and `audience !Shard` (VS0352), which name shards the same way.
+    private string? LocalShardKey(string name, SourceSpan span, string unknownCode, string whoTakes, string written)
+    {
+        if (!_shardKinds.TryGetValue(name, out var kinds))
         {
-            string hint = Nearest(mu.Shard, _shardKinds.Keys) is { } near ? $" Did you mean '{near}'?" : "";
-            _diag.Error("VS0350",
-                $"No shard named '{mu.Shard}' in this bundle.{hint} `{verb}` takes the name of a shard, " +
-                "ShardView or bridge declared in this bundle or its `shards/` fragments.", mu.NameSpan);
-            return new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
+            string hint = Nearest(name, _shardKinds.Keys) is { } near ? $" Did you mean '{near}'?" : "";
+            _diag.Error(unknownCode,
+                $"No shard named '{name}' in this bundle.{hint} {whoTakes} the name of a shard, ShardView or " +
+                "bridge declared in this bundle or its `shards/` fragments.", span);
+            return null;
         }
         if (kinds.Count > 1)
         {
             _diag.Error("VS0351",
-                $"'{mu.Shard}' names both a {string.Join(" and a ", kinds)} in this bundle, so `{verb} " +
-                $"{mu.Shard}` could mean either. Rename one of them.", mu.NameSpan);
-            return new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
+                $"'{name}' names both a {string.Join(" and a ", kinds)} in this bundle, so `{written}` could " +
+                "mean either. Rename one of them.", span);
+            return null;
         }
-        return Call(ShardKey(mu.Shard));
+        return ShardKey(name);
+    }
+
+    /// The key an `audience` entry's `!Shard` matches (D19). Bare is this bundle's, checked here.
+    /// Qualified — `*you.Billing.!Invoicer`, or `*Alias.!Invoicer` through `need … as Alias` — is
+    /// another bundle's, whose shards this compilation cannot see; the app linker checks it (VS0353).
+    private string? AudienceShardKey(AudienceShard a)
+    {
+        string written = "!" + a.Name;
+        if (a.Path.Count == 0)
+            return LocalShardKey(a.Name, a.Span, "VS0352", "An `audience` `!` takes", written);
+
+        string? owner = a.Path.Count switch
+        {
+            1 when _aliases.TryGetValue(a.Path[0], out var aliased) => aliased,
+            2 => a.Path[0] + "." + a.Path[1],
+            _ => null,
+        };
+        if (owner is null)
+        {
+            _diag.Error("VS0352",
+                $"`*{string.Join(".", a.Path)}.!{a.Name}` is not a shard path. Another bundle's shard is " +
+                $"`*Author.Bundle.!{a.Name}`, or `*Alias.!{a.Name}` through `need \"Author.Bundle\" as Alias` — " +
+                "a shard is never inside a publicator.", a.Span);
+            return null;
+        }
+        // Qualifying this bundle's own shard is legal, and checked like the bare form.
+        return owner == _ownerKey
+            ? LocalShardKey(a.Name, a.Span, "VS0352", "An `audience` `!` takes", written)
+            : owner + "." + a.Name;
     }
 
     /// A schedule block becomes a shard method tagged with a `schedule` attr (once/tick/frame/every/
@@ -1706,9 +1745,17 @@ public sealed partial class Lower
         var attrs = new List<IrAttr> { IrAttr.Of("hear", EventKey(hb.EventPath, hb.Event)) };
         // An `audience #Mark` barrier names a mark too, and it is where a typo costs most: a misspelt
         // audience admits nobody, which reads exactly like a barrier doing its job.
-        foreach (var am in hb.AudienceMarks) UseMark(am, hb.Span);
-        if (hb.AudienceShapes.Count > 0 || hb.AudienceMarks.Count > 0)
-            attrs.Add(IrAttr.Of("audience", hb.AudienceShapes, hb.AudienceMarks));
+        foreach (var am in hb.AudienceMarks.Concat(hb.ExcludedMarks)) UseMark(am, hb.Span);
+        // D19: `not` entries and `!Shard` entries. The two shard lists are KEYS, so the app linker
+        // renaming a duplicated shard to `Bundle.Name` cannot make a barrier stop matching.
+        var shards = new List<string>();
+        var notShards = new List<string>();
+        foreach (var a in hb.AudienceShards)
+            if (AudienceShardKey(a) is { } key) (a.Exclude ? notShards : shards).Add(key);
+        if (hb.AudienceShapes.Count + hb.AudienceMarks.Count + hb.ExcludedShapes.Count + hb.ExcludedMarks.Count
+            + hb.AudienceShards.Count > 0)
+            attrs.Add(IrAttr.Of("audience", hb.AudienceShapes, hb.AudienceMarks,
+                hb.ExcludedShapes, hb.ExcludedMarks, (IReadOnlyList<string>)shards, (IReadOnlyList<string>)notShards));
 
         // A field the event no longer has reads as EMPTY, and the read is where the fix goes — so the
         // body is lowered knowing which fields vein.lock says drifted (CheckHearRead).

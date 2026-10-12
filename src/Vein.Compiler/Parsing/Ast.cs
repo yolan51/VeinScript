@@ -189,7 +189,19 @@ public sealed record HearBlock(
 {
     /// A `*Author.Bundle` qualifier on the event (`hear *studio.Core.@Boot`); empty = bare local event.
     public IReadOnlyList<string> EventPath { get; init; } = Array.Empty<string>();
+
+    /// `audience not $S not #M` — what the sender must NOT carry (D19). `AudienceShapes`/`AudienceMarks`
+    /// above stay the REQUIRED ones, all of which it must carry.
+    public IReadOnlyList<string> ExcludedShapes { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> ExcludedMarks { get; init; } = Array.Empty<string>();
+
+    /// `audience !Ledger not *you.Billing.!Invoicer` — senders named by shard (D19).
+    public IReadOnlyList<AudienceShard> AudienceShards { get; init; } = Array.Empty<AudienceShard>();
 }
+
+/// One `!Shard` in an `audience` list. `Path` is empty for a shard of this bundle, else `Author.Bundle`.
+/// `Exclude` is the `not` in front of it; `Span` covers the `!Name` token, for F12 and the squiggle.
+public sealed record AudienceShard(IReadOnlyList<string> Path, string Name, bool Exclude, SourceSpan Span);
 
 // ---- types --------------------------------------------------------------
 

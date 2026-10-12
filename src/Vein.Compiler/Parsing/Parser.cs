@@ -666,16 +666,53 @@ public sealed class Parser
         var (evPath, ev) = ParseEventRef("@EventName");
         Expect(TokenKind.KwAs, "'as'");
         string bind = Expect(TokenKind.Ident, "binding").Text;
-        // Optional audience barrier: only react to emitters carrying these shapes/marks.
+        // Optional audience barrier: only react to emitters carrying these shapes/marks, or sent by these
+        // shards — and `not` in front of any entry turns it into "must NOT" (D19).
         var audShapes = new List<string>();
         var audMarks = new List<string>();
+        var notShapes = new List<string>();
+        var notMarks = new List<string>();
+        var shards = new List<AudienceShard>();
         if (Match(TokenKind.KwAudience))
-            while (Check(TokenKind.ShapeRef) || Check(TokenKind.MarkRef))
+            while (true)
             {
-                if (Check(TokenKind.ShapeRef)) audShapes.Add(Advance().Text);
-                else audMarks.Add(Advance().Text);
+                int at = _i;
+                bool exclude = Match(TokenKind.KwNot);
+                if (Check(TokenKind.ShapeRef)) (exclude ? notShapes : audShapes).Add(Advance().Text);
+                else if (Check(TokenKind.MarkRef)) (exclude ? notMarks : audMarks).Add(Advance().Text);
+                else if (Check(TokenKind.ShardRef) || Check(TokenKind.Star)) shards.Add(ParseAudienceShard(exclude));
+                else if (exclude)
+                {
+                    // Reported, not thrown: the `{` that follows is the body, and parsing it keeps this to
+                    // one error rather than a cascade about the rest of the bundle.
+                    _diag.Error("VS0100", $"Expected $Shape, #Mark or !Shard after `not`, found {Cur.Kind} '{Cur.Text}'.", Here);
+                    break;
+                }
+                else { _i = at; break; }
             }
-        return new HearBlock(ev, bind, audShapes, audMarks, ParseBlock(), s) { EventPath = evPath };
+        return new HearBlock(ev, bind, audShapes, audMarks, ParseBlock(), s)
+        {
+            EventPath = evPath, ExcludedShapes = notShapes, ExcludedMarks = notMarks, AudienceShards = shards,
+        };
+    }
+
+    /// `!Ledger`, or `*you.Billing.!Invoicer` for another bundle's shard. A qualified `$`/`#` is not taken
+    /// here (RULES 17b): those are matched on what the sender carries, which has no owner to name.
+    private AudienceShard ParseAudienceShard(bool exclude)
+    {
+        if (!Check(TokenKind.Star))
+        {
+            var t = Advance();
+            return new AudienceShard(Array.Empty<string>(), t.Text, exclude, t.Span);
+        }
+        Advance();   // '*'
+        var path = new List<string> { ExpectName("qualified path after '*'").Text };
+        while (true)
+        {
+            Expect(TokenKind.Dot, "'.'");
+            if (Check(TokenKind.ShardRef)) { var t = Advance(); return new AudienceShard(path, t.Text, exclude, t.Span); }
+            path.Add(ExpectName("path segment or !Shard").Text);
+        }
     }
 
     // ---- statements -----------------------------------------------------
@@ -1198,6 +1235,16 @@ public sealed class Parser
     private Expr ParseUnary()
     {
         if (Check(TokenKind.KwNot)) { var s = Here; Advance(); return new UnaryExpr(UnOp.Not, ParseUnary(), s); }
+        // `!ready` lexes as a shard reference now (D19), so the D12 message moved here from the lexer:
+        // still one error naming the spelling, and still recovered as the `not` the author meant.
+        if (Check(TokenKind.ShardRef))
+        {
+            var t = Advance();
+            _diag.Error("VS0006",
+                $"VeinScript has no `!` — write `not {t.Text}`. Logic is spelled in words here; `!{t.Text}` " +
+                "names a shard, which only an `audience` list takes.", t.Span);
+            return new UnaryExpr(UnOp.Not, new NameExpr(t.Text, t.Span), t.Span);
+        }
         if (Check(TokenKind.Minus)) { var s = Here; Advance(); return new UnaryExpr(UnOp.Neg, ParseUnary(), s); }
         return ParsePostfix();
     }

@@ -237,6 +237,9 @@ It also removes a class of misreading that costs real time: `!` is one glyph, it
 term it inverts, and a dropped one turns a condition into its opposite while still compiling. `not ready`
 cannot be skimmed as `ready`.
 
+*Later (D19):* the sigil this kept free is now taken. `!` directly followed by a name is a SHARD
+(`audience not !Ledger`); `!` as an operator is still rejected, and `!x` in an expression is still VS0006.
+
 **This is the general rule, not a special case.** C-family syntax is not adopted on the strength of being
 familiar — it has to earn its place on its own merits. The same reasoning already produced D3 (no
 `for`/`in`/`loop`), D4 (no `push`), D5 (no general `class`) and D7 (no semicolons). "C does it" is not an
@@ -457,6 +460,48 @@ bundle's shard.
 
 ---
 
+## D19 — `!Name` is the shard sigil; `not` excludes an `audience` entry {#shardsigil}
+
+> **Reported as `VS0352`** (a `!Shard` this bundle does not declare, with a "did you mean", or a path
+> that is not `*Author.Bundle.!Name`) and **`VS0353`** (a warning at link time: a qualified `!Shard` that no
+> bundle in the app declares).
+
+**DECIDED.** `!` directly followed by a name is a reference to a shard, the fifth sigil next to `$` `#`
+`@` `&`. Only an `audience` list takes one today. In that list, `not` in front of any entry turns it from
+"must" into "must not":
+
+```
+hear @Test as t audience not !Ledger not !Billing { … }   // anyone except those two shards
+hear @Test as t audience !Ledger { … }                    // only Ledger
+hear @Chat as c audience $Session not #Banned { … }       // carries $Session, does not carry #Banned
+hear @Test as t audience not *you.Billing.!Invoicer { … } // another bundle's shard
+```
+
+The barrier admits a sender that carries **every** required `$`/`#`, carries **none** of the excluded
+ones, is **one of** the required `!` shards when any are listed (a sender is one shard, so "all of them"
+could never pass), and is **none** of the excluded shards. A runtime sender (the boot request, stdin, a
+device) and a console are no shard: a required `!` refuses them, an excluded one never matches them.
+
+A bare `!Ledger` is a shard of this bundle, checked at compile time like `mute`. Another bundle's shard is
+written qualified, `*Author.Bundle.!Name` (or `*Alias.!Name` through `need … as Alias`); a shard never
+sits in a publicator, so there is no third segment. Both match the sender's `Author.Bundle.Name` key, which
+the app linker never renames.
+
+*Why the sigil, and not `!` for "not".* D12 still holds: `!` is never an operator, and `not` is the word
+for negation everywhere, including here. D12 kept `!` unlexed "for a future sigil", and a shard was the one
+primitive written with none. Reading an entry as "the sender is/carries this" is the rule for `$` and `#`
+already; a `!` that meant "not" would have been the one entry in the list that excludes, and would have
+used up the sigil on a negation. `!x` in an expression is still VS0006, now naming `not x`.
+
+*Why it was needed.* The only way to tell senders apart by name was `if t.from.name == "Ledger"` inside
+the handler, which a typo never matches and an app link breaks by renaming a duplicated shard. A barrier
+can also only ADMIT today, so "everyone but Ledger" needed a mark on every other shard.
+
+**Not enforced by the C# backend**, which ignores `audience` entirely and now says so with a note per
+handler; the interpreter, `veinc run`, `serve` and the Workbench enforce it.
+
+---
+
 ## Reserved-word disposition
 
 Every keyword currently in [Lexer.cs](../src/Vein.Compiler/Lexing/Lexer.cs) `Keywords`, classified.
@@ -485,7 +530,7 @@ Full detail in [KEYWORDS.md](KEYWORDS.md).
 | `by` | **core** | `bundle N by author` — roots the qualified name |
 | `start` | **core** | a bundle's boot event |
 | `bring` `builder` | **core (IOP)** | build a thing; the output field's NAME picks the channel |
-| `audience` | **core (IOP)** | who a `hear` admits — enforced across machines |
+| `audience` | **core (IOP)** | who a `hear` admits — enforced across machines; `not` excludes an entry, `!Shard` names a sender (D19) |
 | `bridge` | **core (IOP)** | a shard-like that spans a boundary |
 | `fn` `type` `if` `while` `repeat` `break` `continue` `match` `enum` | **core** | general computation and control flow (D2, D11) |
 | `ShardView` | **core (IOP)** | a First-Class object that ASSEMBLES |
@@ -501,7 +546,7 @@ sed -n '/Keywords = new/,/^    };/p' src/Vein.Compiler/Lexing/Lexer.cs | grep -o
 ```
 
 Still pending: tokens `LBracket`/`RBracket` if D9(a). **Never keywords:** `class`, `for`, `in`, `loop`
-(D3, D5); `!` (D12). **Added:** `do` (D15). **Given a meaning:** `mute` `unmute` (D18). **Cut:** `push` (D4).
+(D3, D5); `!` as an operator (D12 — `!Name` is the shard sigil, D19). **Added:** `do` (D15). **Given a meaning:** `mute` `unmute` (D18). **Cut:** `push` (D4).
 
 ---
 

@@ -347,7 +347,14 @@ bundle-private, and a qualified reference to it does not resolve.
 **17b. The qualified `*A.B.P.$Shape` / `#Mark` form is for INCLUDES and DISCOVERY, not use sites.**
 `target`, `mark`/`unmark`, `audience` and `match` take a **bare** `$Shape`/`#Mark` — the qualified form
 parses there and resolves to nothing. Reach it by `use`ing the owning bundle instead. `veinc symbols`
-lists what is exported.
+lists what is exported. The one exception is a SHARD in an `audience` (17e): `*you.Billing.!Invoicer`.
+
+**17e. In an `audience`, `!Ledger` is a SHARD and `not` EXCLUDES — `!` never means "not".**
+`audience not !Ledger not !Billing` hears everyone except those two shards; `audience !Ledger` hears only
+Ledger. `not` works in front of `$`/`#` too: `audience $Session not #Banned`. Required `$`/`#` must ALL be
+carried, but listed `!` shards are ANY OF (a sender is one shard). A bare `!Name` is this bundle's shard,
+checked like `mute` (**VS0352**); another bundle's is `*Author.Bundle.!Name`, checked when the app links
+(**VS0353**). The C# backend does not enforce `audience` and notes it. SYNTAX-DECISIONS D19.
 
 **17c. An IMPORTED `$Shape` becomes a real component here the moment something attaches it.** A
 qualified include (`builder Conn { *Vein.Rest.Db.$Connection  mark #Conn }`, or a stdlib builder you

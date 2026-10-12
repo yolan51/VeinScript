@@ -27,6 +27,9 @@ public sealed class VeinFirstClass
     /// Shapes/marks this First-Class object carries; an `audience` barrier matches against these.
     public IReadOnlyList<string> CarriedShapes { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> CarriedMarks { get; init; } = Array.Empty<string>();
+    /// `Author.Bundle.Name` for a shard-like — what `mute` and an `audience !Shard` match (D18, D19). Null
+    /// for a runtime sender (request, stdin, device), which is no shard.
+    public string? Key { get; init; }
 
     public override string ToString() => $"{Kind}.{Name}";
 }
@@ -40,7 +43,7 @@ public sealed class VeinIdentityRegistry
     private readonly Dictionary<int, VeinFirstClass> _byHandle = new();
 
     public VeinFirstClass Register(string name, VeinKind kind,
-        IReadOnlyList<string>? carriedShapes = null, IReadOnlyList<string>? carriedMarks = null)
+        IReadOnlyList<string>? carriedShapes = null, IReadOnlyList<string>? carriedMarks = null, string? key = null)
     {
         int handle = ++_seq;
         var id = new VeinIdentity(handle, $"VF:{kind}:{name}#{handle}");
@@ -48,7 +51,8 @@ public sealed class VeinIdentityRegistry
         {
             Identity = id, Name = name, Kind = kind,
             CarriedShapes = carriedShapes ?? Array.Empty<string>(),
-            CarriedMarks = carriedMarks ?? Array.Empty<string>()
+            CarriedMarks = carriedMarks ?? Array.Empty<string>(),
+            Key = key
         };
         _all.Add(fc);
         _byHandle[handle] = fc;

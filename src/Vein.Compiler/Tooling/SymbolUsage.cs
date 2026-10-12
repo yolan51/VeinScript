@@ -326,8 +326,8 @@ public sealed class UsageMap
             {
                 case HearBlock hb:
                     Ref(SymbolKind.Event, hb.Event, hb.EventPath);
-                    Shapes(hb.AudienceShapes);
-                    Marks(hb.AudienceMarks);
+                    Shapes(hb.AudienceShapes); Shapes(hb.ExcludedShapes);
+                    Marks(hb.AudienceMarks); Marks(hb.ExcludedMarks);
                     foreach (var x in hb.Body.Statements) Stmt(x);
                     break;
                 case ScheduleBlock sc: foreach (var x in sc.Body.Statements) Stmt(x); break;

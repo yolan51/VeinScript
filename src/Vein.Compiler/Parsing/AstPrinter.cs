@@ -82,9 +82,7 @@ public static class AstPrinter
                 break;
             case HearBlock hb:
                 Line(sb, ind, $"hear {EventText(hb.EventPath, hb.Event)} as {hb.Bind}"
-                    + (hb.AudienceShapes.Count + hb.AudienceMarks.Count > 0
-                        ? " audience " + string.Join(" ", hb.AudienceShapes.Select(x => "$" + x).Concat(hb.AudienceMarks.Select(x => "#" + x)))
-                        : ""));
+                    + (AudienceText(hb) is { Length: > 0 } aud ? " audience " + aud : ""));
                 PrintBlock(sb, hb.Body, ind + 1);
                 break;
             case Decl d: PrintDecl(sb, d, ind); break;
@@ -164,6 +162,16 @@ public static class AstPrinter
     /// `@Event` (bare) or `*Author.Bundle.@Event` (qualified).
     public static string EventText(IReadOnlyList<string> path, string name) =>
         path.Count == 0 ? "@" + name : "*" + string.Join(".", path) + ".@" + name;
+
+    /// A `hear`'s `audience` entries as written: required, then `not` ones, then shards (D19). Empty
+    /// when it has none — which keeps every pre-D19 rendering exactly as it was.
+    public static string AudienceText(HearBlock hb) => string.Join(" ",
+        hb.AudienceShapes.Select(x => "$" + x)
+            .Concat(hb.AudienceMarks.Select(x => "#" + x))
+            .Concat(hb.ExcludedShapes.Select(x => "not $" + x))
+            .Concat(hb.ExcludedMarks.Select(x => "not #" + x))
+            .Concat(hb.AudienceShards.Select(a => (a.Exclude ? "not " : "") +
+                (a.Path.Count == 0 ? "!" : "*" + string.Join(".", a.Path) + ".!") + a.Name)));
 
     /// `*Author.Bundle.Publicator.@Event` canonical text.
     public static string StarText(StarRefExpr sr)

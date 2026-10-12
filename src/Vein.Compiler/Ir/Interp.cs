@@ -31,8 +31,20 @@ public sealed class Interp
     /// Not `Name`: the app linker renames a duplicated shard, and the key is what survives that.
     private readonly Dictionary<string, Instance> _byKey = new(StringComparer.Ordinal);
 
-    private sealed record Handler(Instance Owner, string BindName, IrBlock Body,
-        IReadOnlyList<string> ReqShapes, IReadOnlyList<string> ReqMarks);
+    private sealed record Handler(Instance Owner, string BindName, IrBlock Body, Audience Aud);
+
+    /// A `hear`'s `audience` barrier, read from its `@audience` attr. The sender must carry every
+    /// required shape and mark and none of the excluded ones; when `Shards` is non-empty it must BE one of
+    /// them (a sender is one shard, so "all of" could never pass), and it must be none of `NotShards`.
+    /// Shards are `Author.Bundle.Name` keys (D19).
+    private sealed record Audience(
+        IReadOnlyList<string> Shapes, IReadOnlyList<string> Marks,
+        IReadOnlyList<string> NotShapes, IReadOnlyList<string> NotMarks,
+        IReadOnlyList<string> Shards, IReadOnlyList<string> NotShards)
+    {
+        public bool IsEmpty => Shapes.Count + Marks.Count + NotShapes.Count + NotMarks.Count
+                               + Shards.Count + NotShards.Count == 0;
+    }
 
     private readonly Dictionary<string, List<Handler>> _handlers = new(StringComparer.Ordinal);
 
@@ -326,9 +338,10 @@ public sealed class Interp
                      : shard.Attrs.Any(a => a.Name == "bridge") ? VeinKind.Bridge
                      : VeinKind.Shard;
             var (carriedShapes, carriedMarks) = AttrLists(shard.Attrs, "carries");
-            var fc = _registry.Register(shard.Name, kind, carriedShapes, carriedMarks);
+            string? key = shard.Attrs.FirstOrDefault(a => a.Name == "key") is { Args: [string k] } ? k : null;
+            var fc = _registry.Register(shard.Name, kind, carriedShapes, carriedMarks, key);
             var inst = new Instance { Name = shard.Name, Fc = fc };
-            if (shard.Attrs.FirstOrDefault(a => a.Name == "key") is { Args: [string key] }) _byKey[key] = inst;
+            if (key is not null) _byKey[key] = inst;
             foreach (var f in shard.State)
                 inst.State[f.Name] = f.Default is { } init ? Eval(init, inst, new Dictionary<string, object?>()) : Default(f.Type.Name);
             foreach (var m in shard.Methods)
@@ -347,9 +360,8 @@ public sealed class Interp
                 if (hear is null) continue;
                 string ev = hear.Args.Count > 0 ? hear.Args[0]?.ToString() ?? "" : "";
                 string bind = m.Params.Count > 0 ? m.Params[0].Name : "_";
-                var (reqShapes, reqMarks) = AttrLists(m.Attrs, "audience");
                 _handlers.TryAdd(ev, new List<Handler>());
-                _handlers[ev].Add(new Handler(inst, bind, m.Body, reqShapes, reqMarks));
+                _handlers[ev].Add(new Handler(inst, bind, m.Body, AudienceOf(m.Attrs)));
             }
         }
     }
@@ -1320,6 +1332,7 @@ public sealed class Interp
     private static Dictionary<string, object?> FromOf(VeinFirstClass fc) => new(StringComparer.Ordinal)
     {
         ["name"] = fc.Name, ["kind"] = fc.Kind.ToString(), ["identity"] = fc.Identity.ToString(),
+        ["key"] = fc.Key,   // what an `audience !Shard` matches: the linker renames `name`, never this
         ["shapes"] = fc.CarriedShapes.Cast<object?>().ToList(),
         ["marks"] = fc.CarriedMarks.Cast<object?>().ToList()
     };
@@ -1333,7 +1346,18 @@ public sealed class Interp
                 a.Args[1] as IReadOnlyList<string> ?? Array.Empty<string>());
     }
 
-    /// The audience barrier: the emitter must carry ALL required shapes/marks.
+    /// `@audience(shapes, marks, notShapes, notMarks, shards, notShards)`. IR from before D19 has only
+    /// the first two lists, and reads as nothing excluded and no shard named.
+    private static Audience AudienceOf(IReadOnlyList<IrAttr> attrs)
+    {
+        var a = attrs.FirstOrDefault(x => x.Name == "audience");
+        IReadOnlyList<string> Arg(int i) =>
+            a is not null && a.Args.Count > i ? a.Args[i] as IReadOnlyList<string> ?? Array.Empty<string>() : Array.Empty<string>();
+        return new Audience(Arg(0), Arg(1), Arg(2), Arg(3), Arg(4), Arg(5));
+    }
+
+    /// The audience barrier: the emitter must carry ALL required shapes/marks, NONE of the excluded ones,
+    /// be one of the named shards when any are named, and be none of the excluded shards (D19).
     ///
     /// A message that crossed the console bus carries a bare address as its `from` rather than the
     /// structured emitter of an in-process event — deliberately, because `m.from` is a value programs
@@ -1349,20 +1373,32 @@ public sealed class Interp
     /// a hostile process on the same machine.
     private static bool AudiencePermits(Handler h, Dictionary<string, object?> payload)
     {
-        if (h.ReqShapes.Count == 0 && h.ReqMarks.Count == 0) return true;
+        var aud = h.Aud;
+        if (aud.IsEmpty) return true;
 
+        HashSet<string> haveShapes, haveMarks;
+        string? key;
         var raw = payload.GetValueOrDefault("from");
         if (raw is string address)
         {
-            // Exactly the rule below, over a mark set of one: the console's own address.
-            var carried = new HashSet<string>(StringComparer.Ordinal) { address };
-            return h.ReqShapes.Count == 0 && h.ReqMarks.All(carried.Contains);
+            // The same rule, over a mark set of one: the console's own address. A console is no shard,
+            // so it has no key — a named shard refuses it, an excluded one never matches it.
+            haveShapes = new HashSet<string>(StringComparer.Ordinal);
+            haveMarks = new HashSet<string>(StringComparer.Ordinal) { address };
+            key = null;
+        }
+        else
+        {
+            var from = raw as Dictionary<string, object?>;
+            haveShapes = (from?.GetValueOrDefault("shapes") as IEnumerable<object?>)?.Select(Str).ToHashSet() ?? new();
+            haveMarks = (from?.GetValueOrDefault("marks") as IEnumerable<object?>)?.Select(Str).ToHashSet() ?? new();
+            key = from?.GetValueOrDefault("key") as string;
         }
 
-        var from = raw as Dictionary<string, object?>;
-        var haveShapes = (from?.GetValueOrDefault("shapes") as IEnumerable<object?>)?.Select(Str).ToHashSet() ?? new();
-        var haveMarks = (from?.GetValueOrDefault("marks") as IEnumerable<object?>)?.Select(Str).ToHashSet() ?? new();
-        return h.ReqShapes.All(haveShapes.Contains) && h.ReqMarks.All(haveMarks.Contains);
+        return aud.Shapes.All(haveShapes.Contains) && aud.Marks.All(haveMarks.Contains)
+            && !aud.NotShapes.Any(haveShapes.Contains) && !aud.NotMarks.Any(haveMarks.Contains)
+            && (aud.Shards.Count == 0 || (key is not null && aud.Shards.Contains(key)))
+            && !(key is not null && aud.NotShards.Contains(key));
     }
 
     private void Emit(string ev, Dictionary<string, object?> payload)

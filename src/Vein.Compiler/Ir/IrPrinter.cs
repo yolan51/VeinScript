@@ -150,11 +150,13 @@ public static class IrPrinter
             var tags = a.Args[1] as IReadOnlyList<string> ?? new List<string>();
             return $"@query(components=[{string.Join(",", comps)}], tags=[{string.Join(",", tags)}], bind={a.Args[2]})";
         }
-        if ((a.Name == "audience" || a.Name == "carries") && a.Args.Count == 2)
+        if ((a.Name == "audience" || a.Name == "carries") && a.Args.Count is 2 or 6)
         {
-            var shapes = a.Args[0] as IReadOnlyList<string> ?? new List<string>();
-            var marks = a.Args[1] as IReadOnlyList<string> ?? new List<string>();
-            var items = shapes.Select(x => "$" + x).Concat(marks.Select(x => "#" + x));
+            IReadOnlyList<string> L(int i) => a.Args.Count > i ? a.Args[i] as IReadOnlyList<string> ?? new List<string>() : new List<string>();
+            // @audience's last four lists (D19): excluded shapes/marks, then shard keys, admitted/excluded.
+            var items = L(0).Select(x => "$" + x).Concat(L(1).Select(x => "#" + x))
+                .Concat(L(2).Select(x => "not $" + x)).Concat(L(3).Select(x => "not #" + x))
+                .Concat(L(4).Select(x => "!" + x)).Concat(L(5).Select(x => "not !" + x));
             return $"@{a.Name}({string.Join(" ", items)})";
         }
         return $"@{a.Name}({string.Join(", ", a.Args)})";

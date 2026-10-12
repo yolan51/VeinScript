@@ -198,6 +198,21 @@ public static class AppLinker
                     $"reacting to events others emit.", span);
         }
 
+        // `audience not *you.Billing.!Invoicer` names another bundle's shard, which no single bundle's
+        // compile can see — so this is the first place a misspelt one CAN be caught. Unchecked, it is the
+        // silent kind of wrong: an excluded shard that matches nothing excludes nothing (D19).
+        var keys = shards.Select(s => s.Attrs.FirstOrDefault(a => a.Name == "key")?.Args.FirstOrDefault() as string)
+                         .OfType<string>().ToHashSet(StringComparer.Ordinal);
+        foreach (var (name, module, load) in modules)
+            foreach (var m in module.Shards.SelectMany(s => s.Methods))
+                if (m.Attrs.FirstOrDefault(a => a.Name == "audience") is { Args.Count: 6 } aud)
+                    foreach (var key in ((IReadOnlyList<string>)aud.Args[4]!).Concat((IReadOnlyList<string>)aud.Args[5]!))
+                        if (!keys.Contains(key))
+                            diag.Warning("VS0353",
+                                $"bundle '{name}' names shard `{key}` in an `audience`, but no bundle in app " +
+                                $"'{appName}' declares it — so it never matches. Check the spelling, or `load` " +
+                                "the bundle that declares it.", load.Span);
+
         var principalModule = modules.First(m => string.Equals(m.Name, principal, StringComparison.Ordinal)).Module;
 
         return new IrModule(

@@ -62,6 +62,7 @@ dialect. There is no general `class`.
 | `to` `from` | (with attach/unattach) · `builder V from Base` | component target / source; a builder VARIANT's base (rule 7c) | operands |
 | `emit` | `emit @E { … }` | send a message | `Emit(E{…})` |
 | `hear` | `hear @E as evt { … }` | react to a message | handler registration |
+| `audience` | `hear @E as e audience $S #M not #Banned !Ledger not *a.B.!Spy { … }` | who a `hear` admits: carries every required `$`/`#` and none after `not`; is one of the listed `!` shards and none of the excluded ones (D19). **Enforced** over `Vein.Net.Peer`, where a signed frame makes the sender provable ([RUNTIME.md §4.3.2](RUNTIME.md)); advisory over the local console pipe; not enforced by the C# backend | `@audience(…)` on the handler |
 | `destroy` | `destroy self` | remove an identity | `DestroyEntity(self)` |
 | `chance` | `chance 30% { … }` | probabilistic branch | `if random() < 0.30 { … }` |
 | `mute` `unmute` | `mute Game` · `unmute Game` | pause / resume a shard, ShardView or bridge of this bundle, BY NAME, from the next commit: its handlers and schedules stop, its `var`s are kept, events it misses are dropped. Unknown name **VS0350**; a shard and a bridge sharing the name **VS0351**. [SYNTAX-DECISIONS D18](SYNTAX-DECISIONS.md#mute) | `Mute("Author.Bundle.Name")` — queued like `AddTag` |
@@ -87,7 +88,6 @@ Held so they aren't accidentally repurposed. Assign a meaning or cut before v1.0
 | Keyword | Leaning / candidate use |
 |---------|-------------------------|
 | `on` | event/UI handler sugar (`on click { … }`) — desktop domain |
-| `audience` | networking/replication scope (who sees an identity/event) — **enforced** over `Vein.Net.Peer`, where a signed frame makes the sender's mark provable ([RUNTIME.md §4.3.2](RUNTIME.md)); advisory over the local console pipe |
 | `bridge` | interop / FFI boundary |
 | `bring` | instantiate a `builder` (`bring [N] Name(args)`), binding args positionally + emitting its output event |
 | `builder` | a reusable template: signature body (params + one `markup`/`code`/`css`/`line` output field), or a `mark` member making it an identity template |

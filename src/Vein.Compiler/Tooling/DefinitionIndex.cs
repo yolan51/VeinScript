@@ -176,7 +176,13 @@ public sealed class DefinitionIndex
         foreach (var n in members)
             switch (n)
             {
-                case HearBlock hb: Use(hb.Event, SymbolKind.Event, hb.Span, SiteRole.Hear); Stm(hb.Body); break;
+                case HearBlock hb:
+                    Use(hb.Event, SymbolKind.Event, hb.Span, SiteRole.Hear);
+                    // A bare `audience !Ledger` names this bundle's shard (D19); a qualified one is another
+                    // bundle's, which this index never declares, so it is left for the linker.
+                    foreach (var a in hb.AudienceShards.Where(a => a.Path.Count == 0)) Use(a.Name, SymbolKind.Shard, a.Span);
+                    Stm(hb.Body);
+                    break;
                 case ScheduleBlock sc: Stm(sc.Body); break;
                 case FuncDecl f: Stm(f.Body); break;
                 case Stmt st: Stm(st); break;

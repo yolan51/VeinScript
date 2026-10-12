@@ -12,9 +12,11 @@ is no general `class`. Domains (game/web/desktop) are libraries written in this 
 Fully implemented in [Lexer.cs](../src/Vein.Compiler/Lexing/Lexer.cs). Three rules are load-bearing:
 
 - **Sigils fold into the token.** `$Health` → one `ShapeRef(Text="Health")`, `@Damaged` →
-  `EventRef`, `#Enemy` → `MarkRef`, `&Console` → `BuilderRef`. The sigil is never a standalone token.
-  Sigils are **core IOP syntax**: they mark the four kinds of identity reference (shape / event / mark /
-  builder). `&Builder` is used by `bring` — including cross-bundle: `bring *Vein.Console.Io.&Console(…)`.
+  `EventRef`, `#Enemy` → `MarkRef`, `&Console` → `BuilderRef`, `!Ledger` → `ShardRef` (D19). The sigil is never a
+  standalone token; a `!` NOT followed by a name is still VS0006 (`!=`, `! x`).
+  Sigils are **core IOP syntax**: they mark the five kinds of identity reference (shape / event / mark /
+  builder / shard). `&Builder` is used by `bring` — including cross-bundle: `bring *Vein.Console.Io.&Console(…)`;
+  `!Shard` only by an `audience` list.
 - **`30%` is one token** (`Percent`), scanned before an `Int` can be emitted, so it never collides
   with modulo. Its value is the fraction `0.30` (a `double`).
 - **Newline is a virtual terminator.** A `Term` is emitted at `\n` only when the previous token can
@@ -319,7 +321,9 @@ readable on a `hear` binding (`d.from.kind`, `d.cause`, …):
 
 `from` is the answer to "who emitted this?" and is always populated; `origin` is the entity id (live
 once the ECS runtime executes `target`/tick). `veinc events` prints this envelope so it's visible. The
-`audience` barrier (§4) filters on the emitter's `from.shapes` / `from.marks`.
+`audience` barrier (§4) filters on the emitter's `from.shapes` / `from.marks`, and on WHICH shard sent it: `!Ledger`
+admits only Ledger, and `not` in front of any entry excludes it — `audience not !Ledger not #Banned`
+([SYNTAX-DECISIONS D19](SYNTAX-DECISIONS.md#shardsigil)).
 
 A message that arrived from **another console** carries a bare address as its `from` (so `m.from` is a
 value you can print and reply to). The barrier reads it the same way regardless: a console is an identity
@@ -577,7 +581,7 @@ Precedence, lowest → highest (one parser method per level):
 | Unary | `not  -` | prefix |
 | Primary | literals, names, `( )`, call `f(…)`, member `a.b`, index `a[i]`, sigil refs, struct/shape/event literal | — |
 
-There is no `!=` operator — inequality is written `not (a == b)` (`!` is reserved/free for a future sigil).
+There is no `!=` operator — inequality is written `not (a == b)`. `!` is never an operator: `!Name` is the shard sigil (D19).
 
 `and`/`or` short-circuit. Struct/shape literals: `Vec2 { x: 1.0, y: 2.0 }`; event literals appear in
 `emit @E { … }`. Indexing `a[i]` needs `[` `]` tokens ([D9](SYNTAX-DECISIONS.md#d9)).
@@ -619,7 +623,8 @@ shardDecl   = "shard" IDENT "{" { TERM } { shardMember { TERM } } "}" ;
 shardMember = varDecl | funcDecl | schedule | hearBlock ;
 schedule    = ("run" "once" | "each" ("tick" | "frame") | "every" NUMBER | "settled") block ;
 queryStmt   = "target" { SHAPEREF | MARKREF } "as" IDENT block ;   (* a statement, inside a schedule *)
-hearBlock   = "hear" EVENTREF "as" IDENT block ;
+hearBlock   = "hear" EVENTREF "as" IDENT [ "audience" audEntry { audEntry } ] block ;
+audEntry    = [ "not" ] ( SHAPEREF | MARKREF | SHARDREF | "*" IDENT { "." IDENT } "." SHARDREF ) ;  (* D19 *)
 
 funcDecl    = sfDecl | fnDecl ;
 sfDecl      = "SF" IDENT "(" [ params ] ")" block ;              (* emits; no result type, no `return` *)

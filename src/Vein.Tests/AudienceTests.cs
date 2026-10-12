@@ -121,4 +121,142 @@ public class AudienceTests
 
         Assert.Equal("", output.Trim());
     }
+
+    // ---- D19: `not` excludes, and `!Shard` names the sender ------------------------------------
+
+    /// Three shards emit @Test; listeners filter them by NAME. Ledger is declared first, so if a
+    /// barrier let the wrong one through, the first line would say so.
+    private const string Senders = @"
+  event @Test { n: int }
+  shard Ledger  { run once { emit @Test { n: 1 } } }
+  shard Billing { run once { emit @Test { n: 2 } } }
+  shard Other   { run once { emit @Test { n: 3 } } }
+";
+
+    private static string[] RunLines(string body)
+    {
+        var sw = new StringWriter();
+        new Interp().Run(Module(body), new StringReader(""), sw);
+        return sw.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => l.Trim()).ToArray();
+    }
+
+    [Fact]
+    public void Not_a_shard_blocks_what_that_shard_emits()
+    {
+        var output = RunLines(Senders +
+            "  shard Ear { hear @Test as t audience not !Ledger not !Billing { " + P("\"saw \" + t.n") + " } }");
+
+        Assert.Equal(new[] { "saw 3" }, output);
+    }
+
+    [Fact]
+    public void A_named_shard_is_the_only_sender_admitted()
+    {
+        var output = RunLines(Senders +
+            "  shard Ear { hear @Test as t audience !Ledger !Other { " + P("\"saw \" + t.n") + " } }");
+
+        // Any ONE of the named shards: a sender is one shard, so "all of them" could never pass.
+        Assert.Equal(new[] { "saw 1", "saw 3" }, output);
+    }
+
+    [Fact]
+    public void Not_works_on_a_mark_the_sender_carries()
+    {
+        var output = RunLines(Carriers +
+            "  shard Auditor { hear @Damage as d audience not #Trusted { " + P("\"saw \" + d.amount") + " } }");
+
+        Assert.Equal(new[] { "saw 99" }, output);   // the carrier of #Trusted is the one kept out
+    }
+
+    [Fact]
+    public void Not_works_on_a_shape_and_mixes_with_a_required_entry()
+    {
+        var output = RunLines(Carriers +
+            "  shard Auditor { hear @Damage as d audience #Trusted not $Session { " + P("\"saw \" + d.amount") + " } }");
+
+        // Trusted carries #Trusted but also $Session; Sneaky carries neither. Nobody gets through.
+        Assert.Empty(output);
+    }
+
+    [Fact]
+    public void A_runtime_sender_is_no_shard()
+    {
+        // @Boot comes from the runtime, which has no shard key: an excluded shard cannot match it, and a
+        // required one refuses it.
+        var output = RunLines(
+            "  event @Boot { }\n  shard Ledger { }\n" +
+            "  shard A { hear @Boot as b audience not !Ledger { " + P("\"a heard\"") + " } }\n" +
+            "  shard B { hear @Boot as b audience !Ledger { " + P("\"b heard\"") + " } }\n" +
+            "  start @Boot { }");
+
+        Assert.Equal(new[] { "a heard" }, output);
+    }
+
+    [Fact]
+    public void Not_on_a_console_address_blocks_that_console()
+    {
+        var output = Deliver(Listener("audience not #Alpha "), ("Alpha", "x"), ("Beta", "y"));
+
+        Assert.Equal("Beta: y", output.Trim());
+    }
+
+    private static IReadOnlyList<Vein.Compiler.Diagnostics.Diagnostic> Errors(string body) =>
+        new VeinCompilerService().Compile(new CompileRequest("t.vein", "bundle T by me {\n" + body + "\n}"))
+            .Diagnostics.Where(d => d.Severity == Vein.Compiler.Diagnostics.Severity.Error).ToList();
+
+    [Fact]
+    public void An_unknown_shard_in_an_audience_is_VS0352_with_a_suggestion()
+    {
+        var d = Assert.Single(Errors(Senders + "  shard Ear { hear @Test as t audience not !Ledgr { } }"));
+
+        Assert.Equal("VS0352", d.Code);
+        Assert.Contains("Did you mean 'Ledger'?", d.Message);
+    }
+
+    [Fact]
+    public void A_shard_path_with_a_publicator_in_it_is_VS0352()
+    {
+        var d = Assert.Single(Errors(Senders + "  shard Ear { hear @Test as t audience not *a.B.Pub.!X { } }"));
+
+        Assert.Equal("VS0352", d.Code);
+        Assert.Contains("never inside a publicator", d.Message);
+    }
+
+    [Fact]
+    public void Not_with_nothing_after_it_says_what_it_wanted()
+    {
+        var d = Assert.Single(Errors(Senders + "  shard Ear { hear @Test as t audience not { } }"));
+
+        Assert.Equal("VS0100", d.Code);
+        Assert.Contains("!Shard after `not`", d.Message);
+    }
+
+    [Fact]
+    public void Another_bundles_shard_is_named_by_its_key_unchecked_until_linking()
+    {
+        var m = Module(Senders + "  shard Ear { hear @Test as t audience not *you.Billing.!Invoicer !Ledger { } }");
+
+        var aud = m.Shards.Single(s => s.Name == "Ear").Methods[0].Attrs.Single(a => a.Name == "audience");
+        Assert.Equal(new[] { "me.T.Ledger" }, (IReadOnlyList<string>)aud.Args[4]!);
+        Assert.Equal(new[] { "you.Billing.Invoicer" }, (IReadOnlyList<string>)aud.Args[5]!);
+    }
+
+    [Fact]
+    public void A_bare_shard_in_an_audience_is_a_reference_for_F12()
+    {
+        var unit = new VeinCompilerService().Compile(new CompileRequest("t.vein",
+            "bundle T by me {\n" + Senders + "  shard Ear { hear @Test as t audience not !Ledger { } }\n}")).Ast!;
+        var ix = Vein.Compiler.Tooling.DefinitionIndex.Analyze(unit);
+
+        Assert.Equal(2, ix.All("Ledger", Vein.Compiler.Project.SymbolKind.Shard).Count);
+    }
+
+    [Fact]
+    public void The_C_sharp_backend_says_it_does_not_enforce_an_audience()
+    {
+        var result = new Vein.Compiler.Backends.CSharpBackend().Emit(Module(Senders +
+            "  shard Ear { hear @Test as t audience not !Ledger { } }"));
+
+        Assert.Contains(result.Notes, n => n.Contains("`audience` not enforced"));
+    }
 }

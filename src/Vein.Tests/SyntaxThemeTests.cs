@@ -31,6 +31,7 @@ public class SyntaxThemeTests
     [InlineData("Mark")]
     [InlineData("Event")]
     [InlineData("Builder")]
+    [InlineData("Shard")]
     [InlineData("Keyword")]
     [InlineData("String")]
     [InlineData("Comment")]
@@ -42,18 +43,18 @@ public class SyntaxThemeTests
     }
 
     [Fact]
-    public void The_four_sigils_are_four_different_colours()
+    public void The_five_sigils_are_five_different_colours()
     {
         // THE POINT of the exercise. One shared colour made a file read as an undifferentiated wall —
         // and since a shape and a mark may legally share a name (RULES 14e), the colour is often the
         // only thing on the line that says which one you are looking at.
         var colours = Theme().Descendants(Ns + "Color")
-            .Where(c => (string?)c.Attribute("name") is "Shape" or "Mark" or "Event" or "Builder")
+            .Where(c => (string?)c.Attribute("name") is "Shape" or "Mark" or "Event" or "Builder" or "Shard")
             .Select(c => (string)c.Attribute("foreground")!)
             .ToList();
 
-        Assert.Equal(4, colours.Count);
-        Assert.Equal(4, colours.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(5, colours.Count);
+        Assert.Equal(5, colours.Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }
 
     [Theory]
@@ -61,6 +62,7 @@ public class SyntaxThemeTests
     [InlineData("Mark", "#")]
     [InlineData("Event", "@")]
     [InlineData("Builder", "&")]
+    [InlineData("Shard", "!")]
     public void Each_sigil_has_a_rule_that_matches_it(string colour, string sigil)
     {
         // `&Builder` had no rule at all and rendered as plain text.

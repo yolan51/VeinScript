@@ -288,6 +288,7 @@ closed it. `git log --grep` on the phrase finds the full account.
 
 | What | And the part worth remembering |
 |---|---|
+| `audience` could only admit, and never by sender | `!Name` is the shard sigil and `not` excludes any entry (D19): `audience not !Ledger not #Banned`. Shards match by key, checked at compile time (VS0352) or at link time for another bundle's (VS0353). Still open: the C# backend does not enforce `audience` at all — it now says so in a note. |
 | A shard's name decided nothing | `mute Game` / `unmute Game` (D18) pause a shard by name, checked at compile time (VS0350/VS0351). Queued to the next commit, so the outcome never depends on shard order; resolved to the `Author.Bundle.Name` key, so an app link renaming a duplicated shard cannot break it. |
 | A real tool, written in the language: apps/tasks | The first dogfood pilot: a task-tracker CLI with 20 golden cases, run by `dotnet test` (AppsTests). It forced everything in the next rows. apps/tasks/FRICTION.md is the log: what was tried, the workaround, the verdict. |
 | A console tool could not be written | There was no `args()`, no way to quit or set an exit code, no end-of-input signal, no stderr, and no clock. Now there are `args()`, `quit(code)`, `@InputEnded`, `printError`, `now()` (RULES 28f/28g), plus `printInline`, `slice`, `padLeft`/`padRight` and `env` (28h/28i). An unheard runtime error goes to stderr and exits 1, where it used to print to stdout and exit 0. |
