@@ -1,0 +1,54 @@
+// mute.vein — pausing a shard by its NAME: a game that stops while a menu is open.
+//
+//   veinc run samples/mute.vein --ticks 7
+//
+// `mute Game` stops every block of the shard named Game — its `each tick`, its `hear`s — and
+// `unmute Game` starts them again. Game's `var`s are kept, so it picks up where it stopped.
+//
+// What it shows (SYNTAX-DECISIONS D18, RULES 20d):
+//   - The name is checked when you compile. `mute Gmae` is VS0350, "Did you mean 'Game'?" — where
+//     `if e.from.name == "Gmae"` would compile and quietly never match.
+//   - The mute lands at the NEXT COMMIT, like `emit`. Menu is declared before Game, and Game still
+//     plays frame 3, the tick the menu opened in. Swap the two shards and the output is the same.
+//   - An event a muted shard misses is DROPPED, not replayed: @Paused is handled after the tick
+//     commits, Game is already muted by then, and "game heard the pause" never prints.
+//
+// It prints:
+//   play frame 1
+//   play frame 2
+//   menu opens
+//   play frame 3
+//   menu closes
+//   play frame 4
+//   play frame 5
+
+bundle Pausing by you {
+    event @Paused { }
+
+    shard Menu {
+        var t: int = 0
+        each tick {
+            t += 1
+            if t == 3 {
+                emit *Vein.Console.Io.@Print { text: "menu opens" }
+                mute Game
+                emit @Paused { }
+            }
+            if t == 5 {
+                emit *Vein.Console.Io.@Print { text: "menu closes" }
+                unmute Game
+            }
+        }
+    }
+
+    shard Game {
+        var frame: int = 0
+        each tick {
+            frame += 1
+            emit *Vein.Console.Io.@Print { text: "play frame " + frame }
+        }
+        hear @Paused as p {
+            emit *Vein.Console.Io.@Print { text: "game heard the pause" }
+        }
+    }
+}

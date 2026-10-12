@@ -1,0 +1,37 @@
+VeinIR v1  file=samples/mute.vein
+Bundle Pausing  author=you
+|--- Event @Paused
+|--- Shard Menu
+|    |--- Var t: int = Int 0
+|    `--- EachTick
+|         |--- Assign += t
+|         |    `--- Int 1
+|         |--- If
+|         |    |--- Cond = Binary ==
+|         |    |    |--- Ref t
+|         |    |    `--- Int 3
+|         |    `--- Then
+|         |         |--- Emit *Vein.Console.Io.@Print
+|         |         |    `--- Arg text = Str "menu opens"
+|         |         |--- Mute Game
+|         |         `--- Emit @Paused
+|         `--- If
+|              |--- Cond = Binary ==
+|              |    |--- Ref t
+|              |    `--- Int 5
+|              `--- Then
+|                   |--- Emit *Vein.Console.Io.@Print
+|                   |    `--- Arg text = Str "menu closes"
+|                   `--- Unmute Game
+`--- Shard Game
+     |--- Var frame: int = Int 0
+     |--- EachTick
+     |    |--- Assign += frame
+     |    |    `--- Int 1
+     |    `--- Emit *Vein.Console.Io.@Print
+     |         `--- Arg text = Concat
+     |              |--- Str "play frame "
+     |              `--- Ref frame
+     `--- Hear @Paused as p
+          `--- Emit *Vein.Console.Io.@Print
+               `--- Arg text = Str "game heard the pause"
