@@ -165,7 +165,8 @@ public sealed class AstTree
             ? WithAttrs(Node("Emit", AstPrinter.EventText(em.EventPath, em.Event), em.Span, em.Fields.Select(ArgField)), ("fill", "?"))
             : Node("Emit", AstPrinter.EventText(em.EventPath, em.Event), em.Span, em.Fields.Select(ArgField)),
         DestroyStmt d => Leaf("Destroy", Path(d.Target), d.Span),
-        MuteStmt mu => Leaf(mu.Unmute ? "Unmute" : "Mute", mu.Shard, mu.Span),
+        MuteStmt mu => Leaf(mu.Unmute ? "Unmute" : "Mute", (mu.ByMark ? "#" : "") + mu.Shard, mu.Span),
+        MarkShardStmt ms => Leaf(ms.Remove ? "Unmark" : "Mark", $"!{ms.Shard} #{ms.Mark}", ms.Span),
         AttachStmt at => AttachNode(at),
         ChanceStmt c => Node("Chance", Pct(c.Probability), c.Span, Block(c.Body)),
         BringStmt br => Bring(br),

@@ -136,6 +136,52 @@ public class VeinBuildTests
     }
 
     [Fact]
+    public void Mute_a_mark_and_mark_a_shard_agree_compiled_as_interpreted()
+    {
+        // D20: `mute #Gameplay` is a standing rule, so Particles — not #Gameplay until tick 2 — goes
+        // silent when it gains the mark, and both resume at the group's unmute.
+        const string src = """
+            bundle T by you {
+                shard Ctl {
+                    var t: int = 0
+                    each tick {
+                        t += 1
+                        if t == 1 { mute #Gameplay }
+                        if t == 2 { mark !Particles #Gameplay }
+                        if t == 4 { unmute #Gameplay }
+                    }
+                }
+                shard Physics #Gameplay {
+                    var n: int = 0
+                    each tick {
+                        n += 1
+                        emit *Vein.Console.Io.@Print { text: "physics " + n }
+                    }
+                }
+                shard Particles {
+                    var n: int = 0
+                    each tick {
+                        n += 1
+                        emit *Vein.Console.Io.@Print { text: "particles " + n }
+                    }
+                }
+            }
+            """;
+
+        var module = Module(src);
+
+        var interpreted = new StringWriter();
+        new Vein.Compiler.Ir.Interp { Ticks = 6 }.Run(module, new StringReader(""), interpreted);
+
+        var compiled = VeinBuild.Compile(module);
+        Assert.True(compiled.Success, compiled.Report());
+
+        string expected = interpreted.ToString().Replace("\r\n", "\n").Trim();
+        Assert.Equal("physics 1\nparticles 1\nparticles 2\nphysics 2\nparticles 3\nphysics 3\nparticles 4", expected);
+        Assert.Equal(expected, RunCaptured(compiled.Assembly!, 6).Replace("\r\n", "\n").Trim());
+    }
+
+    [Fact]
     public void A_module_the_backend_cannot_emit_fails_with_the_source_in_hand()
     {
         // When generated C# does not compile, the errors name lines in a file nobody wrote and cannot

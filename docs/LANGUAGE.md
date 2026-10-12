@@ -459,6 +459,8 @@ shard Drain {
 | `destroy self` | remove the identity |
 | `chance 30% { … }` | run the block with 30% probability |
 | `mute Game` / `unmute Game` | pause / resume a shard of this bundle by name, from the next commit — its handlers and schedules stop, its `var`s are kept (D18) |
+| `mute #Gameplay` / `unmute #Gameplay` | a standing rule: every shard carrying the mark, in any bundle, is paused while it holds (D20) |
+| `mark !Spammer #Banned` / `unmark !Spammer #Banned` | add / remove a mark on a SHARD of this bundle, from the next commit (D20) |
 | `sync` | scheduling hint (ordering/parallelism) on the shard |
 
 A shard may also hold private state fields (`var`/`let`) and call functions.
@@ -648,7 +650,8 @@ iopStmt     = "mark" expr MARKREF | "unmark" expr MARKREF
             | "emit" EVENTREF structBody | "destroy" expr
             | "attach" SHAPEREF "to" expr [ structBody ] | "unattach" SHAPEREF "from" expr
             | "chance" PERCENT block
-            | "mute" IDENT | "unmute" IDENT ;              (* a shard of this bundle; D18 *)
+            | "mute" ( IDENT | MARKREF ) | "unmute" ( IDENT | MARKREF )   (* a shard of this bundle, or a group; D18 D20 *)
+            | "mark" SHARDREF MARKREF | "unmark" SHARDREF MARKREF ;     (* a shard's own marks; D20 *)
 
 assignStmt  = lvalue ("=" | "+=" | "-=" | "*=" | "/=") expr ;
 exprStmt    = expr ;

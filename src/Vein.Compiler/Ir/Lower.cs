@@ -93,6 +93,19 @@ public sealed partial class Lower
     /// its body names a shard of THAT bundle, not of the one importing it.
     private string? _importOwner;
 
+    /// Marks a shard of this bundle can carry: declared on it (`shard P #Gameplay`), given by a
+    /// `mark !S #M`, or named by an `audience` — what VS0354 checks a `mute #M` against.
+    private readonly HashSet<string> _shardMarks = new(StringComparer.Ordinal);
+
+    /// Every `mute #M` / `unmute #M`, checked once all bodies are lowered (a `mark !S #M` may come later).
+    private readonly List<(string Mark, SourceSpan Span)> _mutedMarkUses = new();
+
+    private void HeardWithAudience(HearBlock hb)
+    {
+        _heardEvents.Add(hb.Event);
+        _shardMarks.UnionWith(hb.AudienceMarks.Concat(hb.ExcludedMarks));
+    }
+
     private void ShardKind(string name, string kind)
     {
         if (!_shardKinds.TryGetValue(name, out var kinds)) _shardKinds[name] = kinds = new List<string>();
@@ -201,14 +214,20 @@ public sealed partial class Lower
                 // collected up front because fragments lower first, so a fragment's `mute Kernel` is
                 // lowered before the main file's `shard Kernel` is.
                 case ShardDecl sh:
-                    foreach (var hb in sh.Members.OfType<HearBlock>()) _heardEvents.Add(hb.Event);
+                    foreach (var hb in sh.Members.OfType<HearBlock>()) HeardWithAudience(hb);
                     ShardKind(sh.Name, "shard");
+                    _shardMarks.UnionWith(sh.CarriedMarks);
                     break;
                 case ViewDecl vw:
-                    foreach (var hb in vw.Members.OfType<HearBlock>()) _heardEvents.Add(hb.Event);
+                    foreach (var hb in vw.Members.OfType<HearBlock>()) HeardWithAudience(hb);
                     ShardKind(vw.Name, "ShardView");
+                    _shardMarks.UnionWith(vw.CarriedMarks);
                     break;
-                case BridgeDecl br: ShardKind(br.Name, "bridge"); break;
+                case BridgeDecl br:
+                    foreach (var hb in br.Members.OfType<HearBlock>()) _shardMarks.UnionWith(hb.AudienceMarks.Concat(hb.ExcludedMarks));
+                    ShardKind(br.Name, "bridge");
+                    _shardMarks.UnionWith(br.CarriedMarks);
+                    break;
             }
     }
 
@@ -291,6 +310,7 @@ public sealed partial class Lower
         foreach (var declared in _declaredMarks) _tags.Add(declared);
 
         CheckDeclaredMarks();
+        CheckMutedMarks();
         CheckShapeConvergence(bundle);
 
         // Marks discovered while lowering become Tag types, deduped BY KIND AS WELL AS NAME.
@@ -505,6 +525,21 @@ public sealed partial class Lower
                 && ResolveUsed(Index.Marks, "#", name, span) is null)
                 _diag.Warning("VS0218",
                     $"Mark #{name} is not declared in this bundle. known: {known}", span);
+    }
+
+    /// VS0354: `mute #M` where nothing in this bundle could ever carry #M — a misspelt group mutes nothing
+    /// and says nothing. In an app the carriers may live in another bundle; declaring `mark #M` here says
+    /// so, and silences this.
+    private void CheckMutedMarks()
+    {
+        foreach (var (mark, span) in _mutedMarkUses)
+            if (!_shardMarks.Contains(mark) && !_declaredMarks.Contains(mark))
+            {
+                string hint = Nearest(mark, _shardMarks) is { } near ? $" Did you mean #{near}?" : "";
+                _diag.Warning("VS0354",
+                    $"No shard in this bundle carries #{mark}, so `mute #{mark}` mutes nothing here.{hint} " +
+                    $"If another bundle's shards carry it, declare `mark #{mark}` to say so.", span);
+            }
     }
 
     private void CheckConsoleAddresses(BundleDecl bundle)
@@ -1585,6 +1620,16 @@ public sealed partial class Lower
     /// whichever of the two is declared first.
     private IrStmt LowerMute(MuteStmt mu)
     {
+        // `mute #Gameplay` (D20): a standing rule over a MARK, not a shard — every shard in the program
+        // carrying it, whichever bundle declared it, because carrying the mark is the opt-in.
+        if (mu.ByMark)
+        {
+            UseMark(mu.Shard, mu.NameSpan);
+            _mutedMarkUses.Add((mu.Shard, mu.NameSpan));
+            return new IrExprStmt(new IrRuntimeCall(mu.Unmute ? "UnmuteMark" : "MuteMark",
+                new IrExpr[] { new IrLiteral(mu.Shard, IrLiteralKind.String) }));
+        }
+
         string fn = mu.Unmute ? "Unmute" : "Mute";
         IrStmt Call(string key) =>
             new IrExprStmt(new IrRuntimeCall(fn, new IrExpr[] { new IrLiteral(key, IrLiteralKind.String) }));
@@ -1597,6 +1642,23 @@ public sealed partial class Lower
         return LocalShardKey(mu.Shard, mu.NameSpan, "VS0350", $"`{verb}` takes", $"{verb} {mu.Shard}") is { } key
             ? Call(key)
             : new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
+    }
+
+    /// `mark !Spammer #Banned` → `call MarkShard("me.Chat.Spammer", "Banned")` (D20). Same bundle and same
+    /// check as `mute`, and queued the same way: the shard keeps the marks it had until the commit.
+    private IrStmt LowerMarkShard(MarkShardStmt ms)
+    {
+        UseMark(ms.Mark, ms.Span);
+        _shardMarks.Add(ms.Mark);
+        string fn = ms.Remove ? "UnmarkShard" : "MarkShard";
+        string verb = ms.Remove ? "unmark" : "mark";
+        string? key = _importOwner is { } owner
+            ? owner + "." + ms.Shard
+            : LocalShardKey(ms.Shard, ms.NameSpan, "VS0350", $"`{verb} !…` takes", $"{verb} !{ms.Shard} #{ms.Mark}");
+        return key is null
+            ? new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int))
+            : new IrExprStmt(new IrRuntimeCall(fn, new IrExpr[]
+                { new IrLiteral(key, IrLiteralKind.String), new IrLiteral(ms.Mark, IrLiteralKind.String) }));
     }
 
     /// The key of a shard, ShardView or bridge of THIS bundle, or null after reporting why there is none:
@@ -1948,6 +2010,7 @@ public sealed partial class Lower
             case DestroyStmt d:
                 return new IrExprStmt(new IrRuntimeCall("DestroyEntity", new[] { LowerExpr(d.Target) }));
             case MuteStmt mu: return LowerMute(mu);
+            case MarkShardStmt ms: return LowerMarkShard(ms);
             case AttachStmt at:
             {
                 // Detaching takes the shape's marks off with it: the mark says the identity carries this

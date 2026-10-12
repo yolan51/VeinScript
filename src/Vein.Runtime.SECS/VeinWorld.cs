@@ -297,11 +297,12 @@ public sealed class VeinWorld
     /// Each system by the key `mute` names it with — `Author.Bundle.Name`, from the shard's `@key`.
     private readonly Dictionary<string, VeinSystem> _byKey = new(StringComparer.Ordinal);
 
-    public void Register(VeinSystem system, string? key = null)
+    public void Register(VeinSystem system, string? key = null, params string[] marks)
     {
         system.Attach(this);
         _systems.Add(system);
         if (key is not null) _byKey[key] = system;
+        system.Marks.UnionWith(marks);   // `shard X #M` — the marks it starts out carrying (D20)
         system.Subscribe();
     }
 
@@ -311,6 +312,23 @@ public sealed class VeinWorld
     {
         if (_byKey.TryGetValue(key, out var system)) Defer(() => system.Muted = mute);
     }
+
+    /// Marks under a standing `mute #M` (D20): any system carrying one is silent, whenever it got it.
+    private readonly HashSet<string> _mutedMarks = new(StringComparer.Ordinal);
+
+    /// `mute #M` / `unmute #M` (D20), deferred like `Mute`.
+    public void MuteMark(string mark, bool mute) =>
+        Defer(() => { if (mute) _mutedMarks.Add(mark); else _mutedMarks.Remove(mark); });
+
+    /// `mark !X #M` / `unmark !X #M` (D20), deferred like `Mute`.
+    public void MarkShard(string key, string mark, bool add)
+    {
+        if (_byKey.TryGetValue(key, out var system))
+            Defer(() => { if (add) system.Marks.Add(mark); else system.Marks.Remove(mark); });
+    }
+
+    /// Interp.IsMuted, line for line: muted by name, or carrying a muted mark.
+    private bool IsMuted(VeinSystem s) => s.Muted || (_mutedMarks.Count > 0 && s.Marks.Overlaps(_mutedMarks));
 
     /// `run once` builds the world before anything else, so a query in a later phase finds it.
     /// The transform hierarchy's composition pass, when the program has one (RULES 13c).
@@ -339,7 +357,7 @@ public sealed class VeinWorld
 
     public void Start()
     {
-        foreach (var s in _systems) if (!s.Muted) s.Once();
+        foreach (var s in _systems) if (!IsMuted(s)) s.Once();
         Commit();
         Compose?.Invoke();   // so the first `settled` reads a composed world
         Drain();   // Interp: RunOnce() then Drain() — events raised at boot are handled before frame 1
@@ -351,10 +369,10 @@ public sealed class VeinWorld
     /// frame rather than to the middle of this one.
     public void Frame()
     {
-        foreach (var s in _systems) if (!s.Muted) s.Tick();
+        foreach (var s in _systems) if (!IsMuted(s)) s.Tick();
         Commit();
         Compose?.Invoke();   // between the tick commit and `settled` — see the field
-        foreach (var s in _systems) if (!s.Muted) s.Settled();
+        foreach (var s in _systems) if (!IsMuted(s)) s.Settled();
         Commit();
         Drain();   // Interp.Frame: events from either phase are handled against a settled world
     }
@@ -407,7 +425,7 @@ public sealed class VeinWorld
             var (name, payload) = _events.Dequeue();
             if (_handlers.TryGetValue(name, out var hs))
                 foreach (var (owner, h) in hs)
-                    if (owner is not { Muted: true }) h(payload);
+                    if (owner is null || !IsMuted(owner)) h(payload);
             Commit();
         }
     }
@@ -435,6 +453,9 @@ public abstract class VeinSystem
     /// Set and cleared by `VeinWorld.Mute`, at a commit. While set, none of the phases below and none of
     /// this system's `hear` handlers run; its fields keep their values.
     public bool Muted { get; internal set; }
+
+    /// The marks this system carries now — `shard X #M`, then any `mark !X #M` (D20).
+    public HashSet<string> Marks { get; } = new(StringComparer.Ordinal);
 
     /// Wire this system's `hear` handlers. Called by `Register`, so every subscription exists before any
     /// phase runs — a `run once` that emits must not outrun a handler that has not subscribed.

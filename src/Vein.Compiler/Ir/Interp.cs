@@ -25,11 +25,21 @@ public sealed class Interp
         /// Set by `mute` and cleared by `unmute`, both at a commit (D18): none of its schedules or
         /// handlers run while it is set. Its State is untouched, so `unmute` resumes where it left off.
         public bool Muted;
+        /// The marks it carries NOW: seeded from `shard X #M`, changed by `mark !X #M` at a commit (D20).
+        /// What `audience`, `carries` and `mute #M` read — `Fc.CarriedMarks` is only where it started.
+        public readonly HashSet<string> Marks = new(StringComparer.Ordinal);
     }
 
     /// Each shard by the `@key` Lower stamped on it — `Author.Bundle.Name`, the name `mute` resolves to.
     /// Not `Name`: the app linker renames a duplicated shard, and the key is what survives that.
     private readonly Dictionary<string, Instance> _byKey = new(StringComparer.Ordinal);
+
+    /// Marks under a standing `mute #M` (D20). A shard carrying any of them is silent, including one that
+    /// gains the mark after the rule was made; `unmute #M` lifts the rule, not anyone's own `mute`.
+    private readonly HashSet<string> _mutedMarks = new(StringComparer.Ordinal);
+
+    /// D18 + D20: muted by name, or carrying a muted mark. Every skip asks this, never `Muted` alone.
+    private bool IsMuted(Instance inst) => inst.Muted || (_mutedMarks.Count > 0 && inst.Marks.Overlaps(_mutedMarks));
 
     private sealed record Handler(Instance Owner, string BindName, IrBlock Body, Audience Aud);
 
@@ -341,6 +351,7 @@ public sealed class Interp
             string? key = shard.Attrs.FirstOrDefault(a => a.Name == "key") is { Args: [string k] } ? k : null;
             var fc = _registry.Register(shard.Name, kind, carriedShapes, carriedMarks, key);
             var inst = new Instance { Name = shard.Name, Fc = fc };
+            inst.Marks.UnionWith(carriedMarks);
             if (key is not null) _byKey[key] = inst;
             foreach (var f in shard.State)
                 inst.State[f.Name] = f.Default is { } init ? Eval(init, inst, new Dictionary<string, object?>()) : Default(f.Type.Name);
@@ -875,7 +886,7 @@ public sealed class Interp
     /// it emitted drain — the same shape as a frame, just triggered by the wall instead of a count.
     private void Fire(Schedule sched)
     {
-        if (sched.Owner.Muted) { _log.Add($"{sched.Owner.Fc} MUTED every {sched.Seconds}s"); return; }
+        if (IsMuted(sched.Owner)) { _log.Add($"{sched.Owner.Fc} MUTED every {sched.Seconds}s"); return; }
         RunGuarded(sched.Body, sched.Owner,
                    new Dictionary<string, object?>(StringComparer.Ordinal), sched.Kind);
         CommitPhase();
@@ -1001,7 +1012,7 @@ public sealed class Interp
     private void RunPhase(string kind)
     {
         foreach (var sched in _schedules)
-            if (sched.Kind == kind && sched.Owner.Muted) _log.Add($"{sched.Owner.Fc} MUTED {kind}");
+            if (sched.Kind == kind && IsMuted(sched.Owner)) _log.Add($"{sched.Owner.Fc} MUTED {kind}");
             else if (sched.Kind == kind)
                 RunGuarded(sched.Body, sched.Owner,
                            new Dictionary<string, object?>(StringComparer.Ordinal), kind);
@@ -1286,7 +1297,7 @@ public sealed class Interp
             // A MUTED collector hears nothing, so it does not count — muting the only one must not turn
             // every diagnostic into silence.
             if (name == "DiagnosticRaised"
-                && !(_handlers.TryGetValue("DiagnosticRaised", out var dh) && dh.Any(h => !h.Owner.Muted)))
+                && !(_handlers.TryGetValue("DiagnosticRaised", out var dh) && dh.Any(h => !IsMuted(h.Owner))))
             {
                 long severity = AsLong(payload.GetValueOrDefault("severity"));
                 if (severity >= 2) _faulted = true;   // an unheard ERROR fails the run: exit code 1
@@ -1299,7 +1310,7 @@ public sealed class Interp
             foreach (var h in hs)
             {
                 // Muted: the event is DROPPED for it, not held — `unmute` does not replay what it missed.
-                if (h.Owner.Muted) { _log.Add($"{h.Owner.Fc} MUTED @{name}"); continue; }
+                if (IsMuted(h.Owner)) { _log.Add($"{h.Owner.Fc} MUTED @{name}"); continue; }
                 if (!AudiencePermits(h, payload))
                 {
                     var f = payload.GetValueOrDefault("from") as Dictionary<string, object?>;
@@ -1329,12 +1340,14 @@ public sealed class Interp
 
     /// A `from` value exposes the emitter's name/kind, its opaque identity (display only), and the
     /// shapes/marks it carries (so an `audience` barrier can filter on them).
-    private static Dictionary<string, object?> FromOf(VeinFirstClass fc) => new(StringComparer.Ordinal)
+    private static Dictionary<string, object?> FromOf(VeinFirstClass fc, IEnumerable<string>? marks = null) => new(StringComparer.Ordinal)
     {
         ["name"] = fc.Name, ["kind"] = fc.Kind.ToString(), ["identity"] = fc.Identity.ToString(),
         ["key"] = fc.Key,   // what an `audience !Shard` matches: the linker renames `name`, never this
         ["shapes"] = fc.CarriedShapes.Cast<object?>().ToList(),
-        ["marks"] = fc.CarriedMarks.Cast<object?>().ToList()
+        // A shard's CURRENT marks (D20), snapshotted at the emit: a `mark !X #M` later does not rewrite
+        // the provenance of what X already sent.
+        ["marks"] = (marks ?? fc.CarriedMarks).Cast<object?>().ToList()
     };
 
     /// Read a two-list attribute (e.g. @audience(shapes, marks) / @carries(shapes, marks)).
@@ -2107,7 +2120,7 @@ public sealed class Interp
                     // Auto provenance. Two layers kept separate:
                     //   from   = the First-Class object that emitted (runtime identity)
                     //   origin = the ECS entity, when emitted inside a `target` (null outside one)
-                    payload["from"] = FromOf(self.Fc);
+                    payload["from"] = FromOf(self.Fc, self.Marks);
                     payload["origin"] = _currentEntity == 0 ? null : _currentEntity;
                     payload["bundle"] = _bundle;
                     _edges.Add(new GraphEdge(self.Fc.Name, self.Fc.Kind.ToString(), si.TypeName));
@@ -2136,6 +2149,26 @@ public sealed class Interp
                 bool mute = rc.Name == "Mute";
                 if (_byKey.TryGetValue(Str(Eval(rc.Args[0], self, locals)), out var target))
                     _commands.Add(() => target.Muted = mute);
+                return null;
+            }
+            // `mute #M` / `unmute #M` (D20): the standing rule, queued like the rest.
+            case "MuteMark":
+            case "UnmuteMark":
+            {
+                bool mute = rc.Name == "MuteMark";
+                string mark = Str(Eval(rc.Args[0], self, locals));
+                _commands.Add(() => { if (mute) _mutedMarks.Add(mark); else _mutedMarks.Remove(mark); });
+                return null;
+            }
+            // `mark !S #M` / `unmark !S #M` (D20): a shard's own marks, read by `audience`, `carries` and
+            // `mute #M` from the commit on.
+            case "MarkShard":
+            case "UnmarkShard":
+            {
+                bool add = rc.Name == "MarkShard";
+                string mark = Str(Eval(rc.Args[1], self, locals));
+                if (_byKey.TryGetValue(Str(Eval(rc.Args[0], self, locals)), out var target))
+                    _commands.Add(() => { if (add) target.Marks.Add(mark); else target.Marks.Remove(mark); });
                 return null;
             }
             case "AddComponent":

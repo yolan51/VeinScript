@@ -950,9 +950,17 @@ public sealed class Parser
         return new MatchStmt(subject, arms, els, s);
     }
 
-    private MarkStmt ParseMark(bool remove)
+    private Stmt ParseMark(bool remove)
     {
         var s = Here; Advance();
+        // `mark !Spammer #Banned` marks a SHARD (D20). Checked before ParseExpr, where a `!Name` is the
+        // VS0006 "write `not`" error.
+        if (Check(TokenKind.ShardRef))
+        {
+            var shard = Advance();
+            string m = Expect(TokenKind.MarkRef, "#Mark").Text;
+            return new MarkShardStmt(remove, shard.Text, shard.Span, m, s);
+        }
         var target = ParseExpr();
         string mark = Expect(TokenKind.MarkRef, "#Mark").Text;
         return new MarkStmt(remove, target, mark, s);
@@ -1045,11 +1053,17 @@ public sealed class Parser
     }
 
     // `mute Physics` / `unmute Physics` — a keyword and a bare shard name. A shard is declared with a
-    // plain identifier (ParseShard), so that is all a reference to one can be.
+    // plain identifier (ParseShard), so that is all a reference to one can be. `mute #Gameplay` mutes
+    // every shard carrying the mark instead (D20).
     private MuteStmt ParseMute(bool unmute)
     {
         var s = Here; Advance();
-        var name = Expect(TokenKind.Ident, "shard name");
+        if (Check(TokenKind.MarkRef))
+        {
+            var mark = Advance();
+            return new MuteStmt(unmute, mark.Text, mark.Span, s) { ByMark = true };
+        }
+        var name = Expect(TokenKind.Ident, "shard name or #Mark");
         return new MuteStmt(unmute, name.Text, name.Span, s);
     }
 

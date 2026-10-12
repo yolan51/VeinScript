@@ -502,6 +502,46 @@ handler; the interpreter, `veinc run`, `serve` and the Workbench enforce it.
 
 ---
 
+## D20 — A shard's marks are a group: `mute #Gameplay`, and `mark !Spammer #Banned` {#shardmarks}
+
+> **Reported as `VS0354`** (a warning: `mute #M` where nothing in this bundle carries, marks or declares
+> #M, so it mutes nothing). An unknown shard in `mark !S #M` is **`VS0350`**, as for `mute`.
+
+**DECIDED.** The marks a shard carries (`shard Physics #Gameplay { … }`) are no longer only what an
+`audience` reads:
+
+```
+shard Physics #Gameplay { each tick { … } }
+shard Enemies #Gameplay { each tick { … } }
+shard Menu {
+    hear @Open as o  { mute #Gameplay }            // every #Gameplay shard, wherever it is declared
+    hear @Close as c { unmute #Gameplay }
+}
+shard Moderator {
+    hear @Report as r { mark !Spammer #Banned }    // `audience not #Banned` now keeps Spammer out
+}
+```
+
+- **`mute #M` is a standing rule**, not a list of shards taken once: while #M is muted, ANY shard carrying
+  it is silent, including one that gains #M later. `unmute #M` lifts the rule. A shard runs only when it
+  is neither muted by name (D18) nor carrying a muted mark, so `unmute Physics` does not override a muted
+  group.
+- **`mute #M` reaches every bundle** in the program. `mute Name` stops at its own bundle (D18) because one
+  bundle should not reach into another's shards by name; carrying a mark is the other shard's own
+  OPT-IN. In an app whose carriers are all elsewhere, declare `mark #M`, which also silences VS0354.
+- **`mark !S #M` / `unmark !S #M`** change the marks of a shard of THIS bundle — the same reach and the
+  same check (VS0350) as `mute S`. A `#Mark` after `mark e` is still an entity's.
+- **All four queue to the next commit**, like D18, so the outcome never depends on shard order.
+- **An event's `from` is what was true when it was SENT.** A message emitted before `mark !S #Banned`
+  landed passes `audience not #Banned`; one emitted after it does not.
+
+*Why.* Marks on shards had parsed since the first commit and done one thing. A group is what a game needs
+to pause (a menu over everything that moves) and what a program needs to quarantine (one misbehaving
+sender, kept out of every listener that already says `not #Banned`), and both were otherwise an `if` at the
+top of every block.
+
+---
+
 ## Reserved-word disposition
 
 Every keyword currently in [Lexer.cs](../src/Vein.Compiler/Lexing/Lexer.cs) `Keywords`, classified.

@@ -265,7 +265,15 @@ public sealed record AttachStmt(bool Remove, string Shape, Expr Target, IReadOnl
 public sealed record ChanceStmt(double Probability, Block Body, SourceSpan Span) : Stmt(Span);
 /// `mute Physics` / `unmute Physics` — pause or resume a shard of this bundle by name (D18). Queued
 /// until the next commit, like `emit`. `NameSpan` covers just the name, for F12 and the squiggle.
-public sealed record MuteStmt(bool Unmute, string Shard, SourceSpan NameSpan, SourceSpan Span) : Stmt(Span);
+public sealed record MuteStmt(bool Unmute, string Shard, SourceSpan NameSpan, SourceSpan Span) : Stmt(Span)
+{
+    /// `mute #Gameplay` (D20): `Shard` holds the MARK, and every shard carrying it is muted while the
+    /// rule stands — wherever it is declared, including one that gains the mark later.
+    public bool ByMark { get; init; }
+}
+/// `mark !Spammer #Banned` / `unmark !Spammer #Banned` (D20) — a mark on a SHARD of this bundle, not on an
+/// entity. Queued to the commit; it changes what `audience`, `carries` and `mute #M` see from then on.
+public sealed record MarkShardStmt(bool Remove, string Shard, SourceSpan NameSpan, string Mark, SourceSpan Span) : Stmt(Span);
 /// `ordered by k { … }` — run the brings inside sorted by one of their arguments, rather than in the
 /// order they were reached.
 ///

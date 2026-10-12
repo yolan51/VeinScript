@@ -52,6 +52,8 @@ public static class SymbolIndex
             {
                 case Block b: Block(b); break;
                 case MarkStmt mk: marks.Add(mk.Mark); Expr(mk.Target); break;
+                case MarkShardStmt ms: marks.Add(ms.Mark); break;
+                case MuteStmt { ByMark: true } mu: marks.Add(mu.Shard); break;
                 case IfStmt i:
                     Expr(i.Cond); Block(i.Then);
                     if (i.Else is Block eb) Block(eb); else if (i.Else is IfStmt ei) Stmt(ei);

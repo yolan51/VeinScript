@@ -128,7 +128,7 @@ public static class DiagnosticGuide
         new("VS0345", "Nothing moved, so the call still passes each value where it did — but a name, a type or the count changed under it. Read what the bundle changed, then accept it; until then the lock keeps saying so.",
             "docs/RULES.md — rule 20a"),
 
-        new("VS0350", "`mute` is checked when you compile, because the string `e.from.name == \"Combat\"` was not: a typo there never matches and nothing says so. Only this bundle's shards can be muted — another bundle's shards are its own business.",
+        new("VS0350", "`mute X` and `mark !X #M` are checked when you compile, because the string `e.from.name == \"Combat\"` was not: a typo there never matches and nothing says so. Only this bundle's shards can be named this way — another bundle's shards are its own business (a group is reached with `mute #Mark` instead).",
             "docs/SYNTAX-DECISIONS.md — D18"),
 
         new("VS0351", "A shard and a bridge may share a name (VS0320 keys the kinds apart), but `mute` and an `audience` `!` take a bare name and would have to guess which one is meant. Renaming one is the only way to say.",
@@ -137,7 +137,10 @@ public static class DiagnosticGuide
         new("VS0352", "An `audience` barrier that names a shard nobody declared is silent in the worst way: `not !Ledgr` blocks nothing, `!Ledgr` admits nobody, and both read like a barrier doing its job. A bare `!Name` is this bundle's shard; another bundle's is `*Author.Bundle.!Name`.",
             "docs/SYNTAX-DECISIONS.md — D19"),
 
-        new("VS0353", "A qualified `*Author.Bundle.!Name` names another bundle's shard, which the bundle's own compile cannot see, so linking is the first place it can be checked. A name no linked bundle declares never matches.",
+        new("VS0354", "`mute #M` is a standing rule over whoever carries #M, so a misspelt mark is a rule over nobody — the menu opens and the game keeps running. Only a warning, because in an app the carriers may be another bundle's; `mark #M` declares that they exist.",
+            "docs/SYNTAX-DECISIONS.md — D20"),
+
+        new("VS0353","A qualified `*Author.Bundle.!Name` names another bundle's shard, which the bundle's own compile cannot see, so linking is the first place it can be checked. A name no linked bundle declares never matches.",
             "docs/SYNTAX-DECISIONS.md — D19"),
     };
 

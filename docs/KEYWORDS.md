@@ -55,7 +55,7 @@ dialect. There is no general `class`.
 | `settled` | `settled { … }` | shard schedule: once after a tick's folds reconcile | shard `settled()` |
 | *(contextual)* `run once`, `every N` | `run once { … }` · `every 1.0 { … }` | shard schedules: once at start; every N seconds. `run`/`once`/`every` are contextual words, not reserved | — |
 | `folds` | (in `shape`) `f: T folds sum` | concurrent-write reducer | `@fold(f, sum)` |
-| `mark` `unmark` | `mark self #T` | add / remove a tag | `AddTag` / `RemoveTag` |
+| `mark` `unmark` | `mark self #T` · `mark !Spammer #Banned` | add / remove a tag — on an identity, or on a SHARD of this bundle (D20), from the next commit | `AddTag` / `RemoveTag` · `MarkShard` / `UnmarkShard` |
 | `mark` (declaration) | `mark #Enemy` at bundle/publicator level | DECLARES the mark, so the name is checked rather than merely typed. Opt-in per bundle: declare one and an undeclared mark used there is **VS0218**; declare none and nothing changes. [LANGUAGE.md §3.6](LANGUAGE.md) | an `IrTypeKind.Tag`, emitted used or not |
 | `mark` (in a `builder`) | `mark #T` | no target — the marks the identity this builder BUILDS will wear. Its presence is what makes the builder an **identity template**: `bring Unit(10, 6)` spawns, attaches each included `$Shape`, then marks. [LANGUAGE.md §3.9](LANGUAGE.md) | `spawn` + `AddComponent`… + `AddTag`… |
 | `attach` `unattach` | `attach $C to self { … }` | add / remove a component | `AddComponent` / `RemoveComponent` |
@@ -65,7 +65,7 @@ dialect. There is no general `class`.
 | `audience` | `hear @E as e audience $S #M not #Banned !Ledger not *a.B.!Spy { … }` | who a `hear` admits: carries every required `$`/`#` and none after `not`; is one of the listed `!` shards and none of the excluded ones (D19). **Enforced** over `Vein.Net.Peer`, where a signed frame makes the sender provable ([RUNTIME.md §4.3.2](RUNTIME.md)); advisory over the local console pipe; not enforced by the C# backend | `@audience(…)` on the handler |
 | `destroy` | `destroy self` | remove an identity | `DestroyEntity(self)` |
 | `chance` | `chance 30% { … }` | probabilistic branch | `if random() < 0.30 { … }` |
-| `mute` `unmute` | `mute Game` · `unmute Game` | pause / resume a shard, ShardView or bridge of this bundle, BY NAME, from the next commit: its handlers and schedules stop, its `var`s are kept, events it misses are dropped. Unknown name **VS0350**; a shard and a bridge sharing the name **VS0351**. [SYNTAX-DECISIONS D18](SYNTAX-DECISIONS.md#mute) | `Mute("Author.Bundle.Name")` — queued like `AddTag` |
+| `mute` `unmute` | `mute Game` · `unmute Game` · `mute #Gameplay` | pause / resume a shard, ShardView or bridge of this bundle, BY NAME — or, with a `#Mark`, every shard in the program carrying it, as a standing rule (D20) — from the next commit: its handlers and schedules stop, its `var`s are kept, events it misses are dropped. Unknown name **VS0350**; a shard and a bridge sharing the name **VS0351**. [SYNTAX-DECISIONS D18](SYNTAX-DECISIONS.md#mute) | `Mute("Author.Bundle.Name")` — queued like `AddTag` |
 | `sync` | `sync` | shard scheduling hint | `@sync` metadata |
 | `ShardView` | `ShardView N { … }` | a First-Class object that ASSEMBLES — hears fragments and emits the finished artifact | `IrShard` (kind `view`) |
 | `Index` | `Index` (in `target` / `repeat`) | the nearest loop's 0-based iteration counter, the way `Entity` is the nearest identity. Does NOT sort — it counts position in the order the loop already yields ([RULES.md 14c](RULES.md)) | `IrLoopIndexRef` → a loop counter |

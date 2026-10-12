@@ -393,6 +393,27 @@ public class AppLinkTests : IDisposable
     }
 
     [Fact]
+    public void Mute_a_mark_reaches_another_bundles_shard_that_carries_it()
+    {
+        // D20: carrying #Gameplay is the opt-in, so a Menu bundle can pause a Physics bundle it has never
+        // heard of — where `mute Physics` (D18) stops at its own bundle. Menu declares `mark #Gameplay`
+        // to say the carriers live elsewhere, which also keeps VS0354 quiet.
+        Write("Menu.vein", "bundle Menu by me {\n  mark #Gameplay\n  shard Pause { run once { mute #Gameplay } }\n}");
+        Write("Physics.vein", "bundle Physics by me {\n  shard Step #Gameplay { each tick { " + P("\"step\"") + " } }\n}");
+        Write("Hud.vein", "bundle Hud by me {\n  shard Draw { each tick { " + P("\"draw\"") + " } }\n}");
+        var app = Write("T.app.vein", "app T {\n load \"Menu.vein\"\n load \"Physics.vein\"\n load \"Hud.vein\"\n}");
+
+        var diag = new DiagnosticBag();
+        var linked = AppLinker.Link(app, File.ReadAllText(app), diag)!;
+        var sw = new StringWriter();
+        new Interp { Ticks = 2 }.Run(linked.Module, new StringReader(""), sw);
+
+        Assert.DoesNotContain("step", sw.ToString());
+        Assert.Contains("draw", sw.ToString());
+        Assert.DoesNotContain(diag.Items, d => d.Code == "VS0354");
+    }
+
+    [Fact]
     public void A_unique_shard_name_is_left_alone()
     {
         // Qualifying everything would churn provenance output for the common case.

@@ -284,6 +284,8 @@ public sealed class UsageMap
                     if (at.Init is not null) foreach (var f in at.Init) Expr(f.Value);
                     break;
                 case MarkStmt mk: Ref(SymbolKind.Mark, mk.Mark); Expr(mk.Target); break;
+                case MarkShardStmt ms: Ref(SymbolKind.Mark, ms.Mark); break;
+                case MuteStmt { ByMark: true } mu: Ref(SymbolKind.Mark, mu.Shard); break;
                 case EmitStmt em:
                     Ref(SymbolKind.Event, em.Event, em.EventPath);
                     foreach (var f in em.Fields) Expr(f.Value);

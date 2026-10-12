@@ -494,6 +494,14 @@ in a tick skips Game's `settled` in the same frame; a mute in `run once` means G
 must be a shard, ShardView or bridge of THIS bundle (**VS0350** otherwise, with a "did you mean"); typing
 `mute ` lists them in the Workbench. SYNTAX-DECISIONS D18.
 
+**20e. `mute #Gameplay` is a STANDING RULE over a mark, and reaches every bundle.** While it holds, any
+shard carrying #Gameplay is silent — including one that gains the mark later through `mark !S #Gameplay`.
+`unmute #Gameplay` lifts it; `unmute Physics` does not, because a shard runs only when it is neither muted
+by name nor carrying a muted mark. `mark !Spammer #Banned` changes a shard's own marks (this bundle's,
+VS0350 otherwise), queued like `mute`, and an event's `from` keeps the marks it was SENT with. `mute #M`
+where nothing here carries #M is **VS0354**; declare `mark #M` when the carriers are another bundle's.
+SYNTAX-DECISIONS D20.
+
 **21. `bring` and `emit` QUEUE — they do not write.** The queue drains only after every handler of the
 current event has finished. So a view that answered on `@Request` would always see an empty page, and an
 assembly trigger has to land *behind* the fragments. See `Kernel` in `samples/web_app/web_app.vein`.

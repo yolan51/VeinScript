@@ -1336,6 +1336,11 @@ public sealed class CSharpBackend : IVeinBackend
             // inside VeinWorld.Mute, so it lands at the same commit the interpreter's does.
             case "Mute" or "Unmute":
                 return $"World.Mute({Expr(c.Args[0])}, {(c.Name == "Mute" ? "true" : "false")})";
+            // D20: a standing rule over a mark, and a shard's own marks — both deferred inside VeinWorld.
+            case "MuteMark" or "UnmuteMark":
+                return $"World.MuteMark({Expr(c.Args[0])}, {(c.Name == "MuteMark" ? "true" : "false")})";
+            case "MarkShard" or "UnmarkShard":
+                return $"World.MarkShard({Expr(c.Args[0])}, {Expr(c.Args[1])}, {(c.Name == "MarkShard" ? "true" : "false")})";
 
             case "Emit":
                 // @Print is the one bridged event: a program that cannot speak cannot be diffed against
@@ -1518,6 +1523,12 @@ public sealed class CSharpBackend : IVeinBackend
     private static string ShardKey(IrShard s) =>
         s.Attrs.FirstOrDefault(a => a.Name == "key") is { Args: [string key] } ? key : s.Name;
 
+    /// `, "Gameplay", "Boss"` — the marks a shard is declared carrying, for `Register` (D20).
+    private static string CarriedMarksArgs(IrShard s) =>
+        s.Attrs.FirstOrDefault(a => a.Name == "carries") is { Args.Count: >= 2 } c && c.Args[1] is IReadOnlyList<string> { Count: > 0 } marks
+            ? string.Concat(marks.Select(m => $", \"{Escape(m)}\""))
+            : "";
+
     private static string Literal(IrLiteral l) => l.Kind switch
     {
         IrLiteralKind.String => "\"" + Escape(l.Value?.ToString() ?? "") + "\"",
@@ -1662,7 +1673,7 @@ public sealed class CSharpBackend : IVeinBackend
             sb.AppendLine("        world.Ticked = (f, d) => { world.Emit(\"Ticked\", new Events.Ticked { frame = f, delta = d }); world.Drain(); };");
 
         foreach (var s in module.Shards)
-            sb.AppendLine($"        world.Register(new {ShardIdent(s)}(), \"{Escape(ShardKey(s))}\");");
+            sb.AppendLine($"        world.Register(new {ShardIdent(s)}(), \"{Escape(ShardKey(s))}\"{CarriedMarksArgs(s)});");
         sb.AppendLine("        world.Start();");
         sb.AppendLine("        world.Run(ticks);");
         sb.AppendLine("    }");
