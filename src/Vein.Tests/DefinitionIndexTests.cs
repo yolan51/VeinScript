@@ -160,4 +160,47 @@ public class DefinitionIndexTests
         Assert.Equal(2, ix.All("twice", SymbolKind.Fn).Count);
         Assert.Equal(2, ix.All("shout", SymbolKind.SF).Count);
     }
+
+    // ---- what a shard carries, and who a listener admits (D19, D20) ----------------------------
+
+    [Fact]
+    public void A_shard_declaration_carries_its_marks_and_shapes_as_detail()
+    {
+        var ix = Index("    shape $Session { id: int }\n    shard Physics $Session #Gameplay #Core { }");
+
+        var shard = ix.Define("Physics", SymbolKind.Shard)!;
+        Assert.Equal("$Session #Gameplay #Core", shard.Detail);
+        Assert.Equal(new[] { "Gameplay", "Core" }, shard.Marks);
+    }
+
+    [Fact]
+    public void Shards_are_grouped_by_the_marks_they_carry()
+    {
+        var ix = Index(
+            "    shard Physics #Gameplay { }\n" +
+            "    shard Hud { }\n" +
+            "    bridge Net #Core { }\n" +
+            "    shard Enemies #Gameplay #Core { }");
+
+        var groups = ix.ShardsByMark();
+
+        Assert.Equal(new[] { "Core", "Gameplay" }, groups.Select(g => g.Mark));
+        Assert.Equal(new[] { "Net", "Enemies" }, groups[0].Shards.Select(s => s.Name));
+        Assert.Equal(new[] { "Physics", "Enemies" }, groups[1].Shards.Select(s => s.Name));
+    }
+
+    [Fact]
+    public void A_hear_site_carries_its_audience_as_detail()
+    {
+        var ix = Index(
+            "    event @Chat { }\n" +
+            "    shard Ledger { }\n" +
+            "    shard A { hear @Chat as c audience not #Banned not !Ledger { } }\n" +
+            "    shard B { hear @Chat as c { } }");
+
+        var hears = ix.All("Chat", SymbolKind.Event).Where(s => s.Role == SiteRole.Hear).ToList();
+
+        Assert.Equal("audience not #Banned not !Ledger", hears.Single(h => h.Owner == "A").Detail);
+        Assert.Equal("", hears.Single(h => h.Owner == "B").Detail);
+    }
 }

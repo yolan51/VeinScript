@@ -59,9 +59,34 @@ internal sealed class OutlinePanel : UserControl
 
             foreach (var d in group) _body.Children.Add(Entry(d));
         }
+
+        // The groups `mute #M` acts on (D20): each mark a shard carries, then the shards carrying it. The
+        // kinds above answer "what is declared"; this answers "what pauses together".
+        var byMark = index.ShardsByMark();
+        if (byMark.Count == 0) return;
+        _body.Children.Add(new TextBlock
+        {
+            Text = "Shards by mark",
+            FontWeight = FontWeight.Bold,
+            FontSize = 12,
+            Foreground = Brushes.Gray,
+            Margin = new Avalonia.Thickness(0, 8, 0, 2)
+        });
+        foreach (var (mark, shards) in byMark)
+        {
+            _body.Children.Add(new TextBlock
+            {
+                Text = "#" + mark,
+                FontFamily = new FontFamily("Cascadia Code,Consolas,monospace"),
+                Foreground = new SolidColorBrush(Color.Parse("#C586C0")),   // the Mark colour (VeinScript.xshd)
+                Margin = new Avalonia.Thickness(6, 2, 0, 0)
+            });
+            foreach (var s in shards)
+                _body.Children.Add(Entry(s, withDetail: false, indent: 16));
+        }
     }
 
-    private Control Entry(SymbolSite d)
+    private Control Entry(SymbolSite d, bool withDetail = true, double indent = 0)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
 
@@ -87,6 +112,14 @@ internal sealed class OutlinePanel : UserControl
             Text = Sigil(d.Kind) + d.Name,
             FontFamily = new FontFamily("Cascadia Code,Consolas,monospace")
         });
+        // What a shard carries (`$Session #Gameplay`), as the declaration writes it after the name.
+        if (withDetail && d.Detail.Length > 0)
+            row.Children.Add(new TextBlock
+            {
+                Text = d.Detail, Foreground = Brushes.Gray, FontSize = 11,
+                FontFamily = new FontFamily("Cascadia Code,Consolas,monospace"),
+                VerticalAlignment = VerticalAlignment.Center
+            });
         row.Children.Add(new TextBlock
         {
             Text = d.Span.Line.ToString(), Foreground = Brushes.DimGray, FontSize = 11,
@@ -97,7 +130,7 @@ internal sealed class OutlinePanel : UserControl
         {
             Background = Brushes.Transparent,
             BorderThickness = new Avalonia.Thickness(0),
-            Padding = new Avalonia.Thickness(6, 2),
+            Padding = new Avalonia.Thickness(6 + indent, 2, 6, 2),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Left,
             Content = row

@@ -17,6 +17,13 @@ public enum SiteRole { Declaration, Emit, Hear, Reference }
 public sealed record SymbolSite(string Name, SymbolKind Kind, SourceSpan Span, SiteRole Role, string Owner)
 {
     public bool IsDefinition => Role == SiteRole.Declaration;
+
+    /// A short annotation for display: the `$S #M` a shard-like declaration carries, or the `audience`
+    /// of a `hear` site. Empty when there is nothing to add.
+    public string Detail { get; init; } = "";
+
+    /// The marks a shard-like declaration carries — what `mute #M` groups by (D20). Empty otherwise.
+    public IReadOnlyList<string> Marks { get; init; } = Array.Empty<string>();
 }
 
 // WHY: `SymbolIndex` gives completion a list of NAMES, with no positions, so nothing could answer "where
@@ -49,6 +56,17 @@ public sealed class DefinitionIndex
     public IReadOnlyList<SymbolSite> All(string name, SymbolKind kind) =>
         Sites.Where(s => s.Kind == kind && string.Equals(s.Name, name, StringComparison.Ordinal))
              .OrderBy(s => s.Span.Line).ThenBy(s => s.Span.Col).ToList();
+
+    /// Each mark some shard-like declaration carries, with those declarations — the groups `mute #M`
+    /// acts on (D20). Ordered by mark, then by source line. Marks given only at runtime (`mark !S #M`)
+    /// are not here: a declaration is what the Outline can point at.
+    public IReadOnlyList<(string Mark, IReadOnlyList<SymbolSite> Shards)> ShardsByMark() =>
+        Definitions.Where(d => d.Marks.Count > 0)
+            .SelectMany(d => d.Marks.Select(m => (Mark: m, Site: d)))
+            .GroupBy(x => x.Mark, StringComparer.Ordinal)
+            .OrderBy(g => g.Key, StringComparer.Ordinal)
+            .Select(g => (g.Key, (IReadOnlyList<SymbolSite>)g.Select(x => x.Site).OrderBy(s => s.Span.Line).ToList()))
+            .ToList();
 
     /// The symbol whose span covers `line`/`col`, if any — what the caret is sitting on.
     public SymbolSite? At(int line, int col) =>
@@ -96,9 +114,9 @@ public sealed class DefinitionIndex
                     Collect(d.Members, d.Name, sites);
                     break;
 
-                case ShardDecl d: Def(d.Name, SymbolKind.Shard, d.Span); Uses(d.Members, d.Name, sites); break;
-                case ViewDecl d: Def(d.Name, SymbolKind.ShardView, d.Span); Uses(d.Members, d.Name, sites); break;
-                case BridgeDecl d: Def(d.Name, SymbolKind.Bridge, d.Span); Uses(d.Members, d.Name, sites); break;
+                case ShardDecl d: Carrier(d.Name, SymbolKind.Shard, d.Span, d.CarriedShapes, d.CarriedMarks); Uses(d.Members, d.Name, sites); break;
+                case ViewDecl d: Carrier(d.Name, SymbolKind.ShardView, d.Span, d.CarriedShapes, d.CarriedMarks); Uses(d.Members, d.Name, sites); break;
+                case BridgeDecl d: Carrier(d.Name, SymbolKind.Bridge, d.Span, d.CarriedShapes, d.CarriedMarks); Uses(d.Members, d.Name, sites); break;
                 // `IsPure` is the parser's `isSf` — true for SF. This read it the other way round, which filed
                 // every SF under "Functions" in the Outline and every `fn` under "Shard functions".
                 case FuncDecl d: Def(d.Name, d.IsPure ? SymbolKind.SF : SymbolKind.Fn, d.Span); Uses(new Node[] { d }, owner, sites); break;
@@ -106,6 +124,14 @@ public sealed class DefinitionIndex
 
         void Def(string name, SymbolKind kind, SourceSpan span) =>
             sites.Add(new SymbolSite(name, kind, span, SiteRole.Declaration, owner));
+
+        // A shard-like declaration, with what it carries — the Outline shows it and groups by the marks.
+        void Carrier(string name, SymbolKind kind, SourceSpan span, IReadOnlyList<string> shapes, IReadOnlyList<string> marks) =>
+            sites.Add(new SymbolSite(name, kind, span, SiteRole.Declaration, owner)
+            {
+                Detail = string.Join(" ", shapes.Select(s => "$" + s).Concat(marks.Select(m => "#" + m))),
+                Marks = marks,
+            });
     }
 
     /// Uses inside a body: the sigilled references that a jump should be able to start from.
@@ -181,7 +207,9 @@ public sealed class DefinitionIndex
             switch (n)
             {
                 case HearBlock hb:
-                    Use(hb.Event, SymbolKind.Event, hb.Span, SiteRole.Hear);
+                    // The barrier rides on the hear site, so the Events tab can say who each listener admits.
+                    sites.Add(new SymbolSite(hb.Event, SymbolKind.Event, hb.Span, SiteRole.Hear, owner)
+                        { Detail = AstPrinter.AudienceText(hb) is { Length: > 0 } aud ? "audience " + aud : "" });
                     // A bare `audience !Ledger` names this bundle's shard (D19); a qualified one is another
                     // bundle's, which this index never declares, so it is left for the linker.
                     foreach (var a in hb.AudienceShards.Where(a => a.Path.Count == 0)) Use(a.Name, SymbolKind.Shard, a.Span);

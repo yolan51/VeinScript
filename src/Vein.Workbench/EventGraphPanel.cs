@@ -95,6 +95,15 @@ internal sealed class EventGraphPanel : UserControl
                 }
             }
         };
+        // Who this listener admits (`audience not #Banned !Ledger`, D19): "hears" alone would claim it
+        // hears every emitter listed above, which a barrier makes untrue.
+        if (site.Detail.Length > 0 && button.Content is StackPanel row)
+            row.Children.Add(new TextBlock
+            {
+                Text = site.Detail, Foreground = Brushes.Gray, FontSize = 11,
+                FontFamily = new FontFamily("Cascadia Code,Consolas,monospace"),
+                VerticalAlignment = VerticalAlignment.Center
+            });
         button.Click += (_, _) => Navigate?.Invoke(site.Span.Line, site.Span.Col);
         return button;
     }
