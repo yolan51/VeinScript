@@ -60,6 +60,8 @@ The vocabulary is the standard library's; nothing in it is engine-specific.
 | `*Vein.Transform.Spatial.$Position { x, y, z }` | where to put the node |
 | `*Vein.UI.Widgets.$Image { source }` | the texture to draw there (`e.Image`) |
 | `*Vein.Transform.Spatial.$World` | where it really is after its parents — `e.Placement` prefers it to `$Position` |
+| the place's `z` | **draw order** in 2D: higher on top, equal keeps creation order (`d.Z`, `e.Depth`) |
+| `*Vein.UI.Surface.$Camera { zoom }` | the view is centred on that identity's place, zoomed (`game.Camera`); none = the top-left corner |
 | `*Vein.Transform.Spatial.$Rotation` (radians, `z` in 2D), `$Scale` | `e.Rotation`, `e.Scale` |
 | `*Vein.UI.Widgets.$Text { content }` | words to draw at the placement (`e.Caption`) |
 | `*Vein.Console.Io.@Quit { code }` | seen through `Emitted`; `game.Running` turns false — close the game |

@@ -156,6 +156,29 @@ public sealed class VeinGame
     /// `$Position`; rotation `$Rotation.z` (0 without one); scale `$Scale` ((1, 1) without one).
     public IReadOnlyList<VeinDrawable> Drawables => _drawables ??= BuildDrawables();
 
+    /// Where the view is centred and how far it is zoomed: the identity carrying `*Vein.UI.Surface.$Camera`
+    /// (the lowest id, if several do) at its place — `$World` when it has one, else `$Position`. Null when
+    /// nothing carries `$Camera` or the camera has no place: the host shows the world's top-left corner.
+    /// Read fresh each call; it is one identity, not a list.
+    public VeinCamera? Camera
+    {
+        get
+        {
+            if (_interp is null) return null;
+            var store = _interp.World;
+            if (!store.Declared("Camera")) return null;
+            foreach (long id in store.Query(new[] { "Camera", "Position" }, Array.Empty<string>()))
+            {
+                string place = store.Declared("World") && store.Has(id, "World") ? "World" : "Position";
+                double Num(string shape, string field, double fallback) =>
+                    store.Read(id, shape, field) switch { long l => l, int i => i, double d => d, float f => f, _ => fallback };
+                double zoom = Num("Camera", "zoom", 1);
+                return new VeinCamera(id, Num(place, "x", 0), Num(place, "y", 0), zoom > 0 ? zoom : 1);
+            }
+            return null;
+        }
+    }
+
     private IReadOnlyList<VeinDrawable> BuildDrawables()
     {
         if (_interp is null) return Array.Empty<VeinDrawable>();
@@ -178,7 +201,7 @@ public sealed class VeinGame
             string place = hasWorld && store.Has(id, "World") ? "World" : "Position";
             list.Add(new VeinDrawable(
                 id,
-                Num(id, place, "x", 0), Num(id, place, "y", 0),
+                Num(id, place, "x", 0), Num(id, place, "y", 0), Num(id, place, "z", 0),
                 hasRotation && store.Has(id, "Rotation") ? Num(id, "Rotation", "z", 0) : 0,
                 hasScale && store.Has(id, "Scale") ? Num(id, "Scale", "x", 1) : 1,
                 hasScale && store.Has(id, "Scale") ? Num(id, "Scale", "y", 1) : 1,

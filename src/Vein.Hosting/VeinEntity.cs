@@ -39,6 +39,9 @@ public sealed record VeinEntity(
     public (double X, double Y)? Placement =>
         Has("World") ? (Number("World", "x"), Number("World", "y")) : Position;
 
+    /// The place's z — `$World.z`, else `$Position.z`. A 2D host draws a higher z on top.
+    public double Depth => Has("World") ? Number("World", "z") : Number("Position", "z");
+
     /// `$Rotation.z` in radians — the 2D angle. Null when it carries no `$Rotation`.
     public double? Rotation => Has("Rotation") ? Number("Rotation", "z") : null;
 
@@ -51,5 +54,9 @@ public sealed record VeinEntity(
 
 /// One thing to draw this frame (VeinGame.Drawables): where, turned and scaled how, showing what. A value,
 /// cheap to make every frame — the lean path a host's draw loop reads instead of `Entities`.
+/// `Z` is the place's z — a 2D host's DRAW ORDER: higher is drawn on top, equal keeps creation order.
 public readonly record struct VeinDrawable(
-    long Id, double X, double Y, double Rotation, double ScaleX, double ScaleY, string? Image, string? Caption);
+    long Id, double X, double Y, double Z, double Rotation, double ScaleX, double ScaleY, string? Image, string? Caption);
+
+/// The view's centre and zoom (VeinGame.Camera), from the identity carrying `*Vein.UI.Surface.$Camera`.
+public readonly record struct VeinCamera(long Id, double X, double Y, double Zoom);

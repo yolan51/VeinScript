@@ -65,6 +65,15 @@ bundle UI by Vein {
         // rather than a cast.
         shared("The surface being drawn on, in pixels. The host keeps this current; a program reads it.")
         shape $View { width: float, height: float }
+
+        // WHICH PART OF THE WORLD IS SHOWN — the other direction: the PROGRAM says, the host reads. The
+        // view is centred on the place of the identity carrying `$Camera` ($World when it has a parent,
+        // else $Position). Attach it to the player and the view follows the player; give it its own
+        // identity with a `*Vein.Core.Relations.$Parent` and it follows at that offset. `zoom` 2.0 shows
+        // everything twice as big. With no `$Camera` the view is the world's top-left corner, as before.
+        // One camera is used: the lowest id carrying it.
+        shared("Centres the view on this identity's place; zoom 2.0 shows things twice as big.")
+        shape $Camera { zoom: float = 1.0 }
     }
 
     // Interaction occurrences carry the target Entity, so any bundle can react to a specific widget.

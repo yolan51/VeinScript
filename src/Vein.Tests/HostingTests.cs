@@ -353,4 +353,57 @@ public class HostingTests : IDisposable
             Assert.Equal(e.Caption, d.Caption);
         }
     }
+
+    [Fact]
+    public void Z_is_the_draw_order_a_2D_host_reads()
+    {
+        var game = VeinGame.Load(Write("z.vein", """
+            bundle Z by me {
+                need "Vein.Transform"
+                need "Vein.UI"
+                shard Start { run once {
+                    let back = spawn()
+                    attach $Position to back { x: 0.0, y: 0.0, z: -1.0 }
+                    attach $Image to back { source: "back.png" }
+                    let front = spawn()
+                    attach $Position to front { x: 0.0, y: 0.0, z: 5.0 }
+                    attach $Image to front { source: "front.png" }
+                } }
+            }
+            """));
+
+        Assert.Equal(-1.0, game.Drawables.Single(d => d.Image == "back.png").Z);
+        Assert.Equal(5.0, game.Drawables.Single(d => d.Image == "front.png").Z);
+        Assert.Equal(5.0, game.Entities.Single(e => e.Image == "front.png").Depth);
+    }
+
+    [Fact]
+    public void The_camera_is_the_identity_carrying_Camera_and_it_follows_it()
+    {
+        string path = Write("camera.vein", """
+            bundle Cam by me {
+                need "Vein.Transform"
+                need "Vein.UI"
+                mark #Hero
+                shard Start { run once {
+                    let hero = spawn()
+                    attach $Position to hero { x: 100.0, y: 50.0, z: 0.0 }
+                    attach $Camera to hero { zoom: 2.0 }
+                    mark hero #Hero
+                } }
+                shard Walk { each tick { target $Position #Hero as h { h.Position.x += 10.0 } } }
+            }
+            """);
+        var game = VeinGame.Load(path);
+
+        Assert.Equal((100.0, 50.0, 2.0), (game.Camera!.Value.X, game.Camera.Value.Y, game.Camera.Value.Zoom));
+        game.Step(1.0 / 60);
+        Assert.Equal(110.0, game.Camera!.Value.X);   // it follows the identity it is attached to
+    }
+
+    [Fact]
+    public void No_Camera_means_no_camera()
+    {
+        Assert.Null(VeinGame.Load(Write("nocam.vein", Game())).Camera);
+    }
 }
