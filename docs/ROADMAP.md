@@ -194,7 +194,7 @@ and writing `$View`, that draws `$World` positions.
 ### Tier 6 — runtime and platform
 
 - **`veinc run --compiled` through `Vein.Jit` (M).** It exists, and only its tests call it. The catch:
-  `veinc` is net8 and `Vein.Jit` is net9.
+  (`Vein.Jit` was net9 and `veinc` net8; both are net8 now, so nothing blocks it.)
 - **Host additions (S–M).**
   - `now()` and `env(name)` exist, both PULLED as documented exceptions (RULES 28f, 28i).
   - `dataDir("app")`: the per-user data folder by each OS's convention, so an installed tool needs no
@@ -327,7 +327,7 @@ Four, and they guard different things:
 
 | Check | Guards |
 |---|---|
-| `dotnet test src/Vein.Tests` | behaviour — ~1,500 tests (plus `src/Vein.Jit.Tests`, net9) |
+| `dotnet test src/Vein.Tests` | behaviour — ~1,500 tests (plus `src/Vein.Jit.Tests`) |
 | `bash tools/check-ir.sh` | the IR's *shape* — 11 golden trees, so lowering regressions surface |
 | `bash tools/check-backend.sh` | the backend's *meaning* — emitted C# is compiled, run, and diffed against the interpreter, on 38 programs |
 | `bash tools/check-perf.sh` | the backend's *speed* — the number M5 is judged on, re-derived rather than remembered |

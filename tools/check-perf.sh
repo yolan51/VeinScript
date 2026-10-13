@@ -62,7 +62,7 @@ cat > "$out/gen.csproj" <<EOF
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
     <Nullable>disable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>${name}_gen</AssemblyName>
@@ -79,7 +79,7 @@ if ! dotnet build "$out/gen.csproj" -c Release -v quiet --nologo >"$out/build.lo
     echo "FAIL: generated C# does not compile (see $out/build.log)"
     exit 1
 fi
-GEN="$out/bin/Release/net9.0/${name}_gen.dll"
+GEN="$out/bin/Release/net8.0/${name}_gen.dll"
 
 # ---- timing --------------------------------------------------------------------------------------
 

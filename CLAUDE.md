@@ -28,13 +28,12 @@ ask the user first.** Losing a useful file is far worse than leaving a temp fold
   by getting it wrong; reading it costs a minute and saves re-deriving them.
 - **OS/shell:** Windows 11 + PowerShell (`$null`, `$env:VAR`, backtick line-continuation). Bash tool also
   available for POSIX scripts.
-- **Frameworks:** net8 (`Vein.Compiler`, `Vein.Cli`, `Vein.Workbench`, `Vein.Tests`) + net9
-  (`Vein.Runtime.SECS` and the vendored `ShardECS.SECS` / `ShardECS.Contracts`). net9 can reference net8,
-  not vice-versa.
+- **Frameworks:** net8 everywhere — including `Vein.Runtime.SECS`, the vendored `ShardECS.SECS` /
+  `ShardECS.Contracts` and `Vein.Jit` (they were net9 until 2026-10-13; nothing used a net9 API, and an
+  engine host such as Godot 4.7 builds on net8). Engines consume them as packages (`tools/pack.sh`).
 - **Build:** `dotnet build VeinScript.sln`
 - **Tests:** `dotnet test src/Vein.Tests`   ·   **Golden IR:** `bash tools/check-ir.sh`   ·   **Backend equivalence:** `bash tools/check-backend.sh`   ·   **Backend speed:** `bash tools/check-perf.sh`
-- **JIT tests:** `dotnet test src/Vein.Jit.Tests` — a second suite because it is **net9** and
-  `Vein.Tests` is net8, which cannot reference it. Only `Vein.Jit` needs running there.
+- **JIT tests:** `dotnet test src/Vein.Jit.Tests` — a second suite, so the main one does not carry Roslyn.
 - **CLI (`veinc`):** `src/Vein.Cli` — run via `dotnet run --project src/Vein.Cli -- <cmd>` or the wrapper
   `.\veinc.cmd <cmd>`. Commands: `new check lock tokens ast ir render serve run build emit graph events scaffold symbols exec`.
   `run`/`render`/`serve`/`build` also add lines to a project's `vein.lock` (RULES 20a); `lock` accepts a change.

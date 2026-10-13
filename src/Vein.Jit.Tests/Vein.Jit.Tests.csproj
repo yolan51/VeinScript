@@ -1,13 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- NET9, AND THAT IS WHY IT IS A SEPARATE PROJECT. Vein.Tests is net8 — it holds the compiler's
-       1100+ tests and the compiler is net8 — and net8 cannot reference net9. Vein.Jit must be net9
-       because the runtime it compiles against is. So the JIT gets its own suite rather than the main
-       one being retargeted around it.
+  <!-- A separate suite for the JIT: it carries Roslyn and compiles programs in memory, which the main
+       compiler suite has no reason to pay for. Everything is net8 now (it was net9 while the vendored SECS
+       core was), so an engine host on net8 can use the compiled path.
 
        Run with: dotnet test src/Vein.Jit.Tests -->
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>

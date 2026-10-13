@@ -217,7 +217,7 @@ not per generated file. Nailing that adapter down is the first task of M5 (see
 
 The abstract surface above (`World.Query().With()`, `Contribute()`, `SystemBase`) was **aspirational**.
 The concrete C# runtime is **ShardECS SECS** (`ShardECS.SECS.Secs`), referenced from the new
-`src/Vein.Runtime.SECS/` project (net9.0, a relative `ProjectReference` to
+`src/Vein.Runtime.SECS/` project (net8.0, a relative `ProjectReference` to
 `VeinEngine/ShardECS/SECS/SECS.csproj`). SECS is a pure-C# entity/component runtime — no file / network /
 console / UI / serialization yet. Its real API is the **SECS** column each HIR node binds to:
 
@@ -234,16 +234,14 @@ console / UI / serialization yet. Its real API is the **SECS** column each HIR n
 | `hear @E as e { … }` | (registration) | `secs.Subscribe<E>(e => { … })` |
 | `IrAssign` to a folded field | `self.Contribute<C>(h => h.f += Δ)` | a per-tick contribution buffer, reconciled by the reducer (fold plumbing, §2.4) |
 
-The `src/Vein.Runtime.SECS/SecsRuntime.cs` skeleton establishes this build linkage today (a net9 library
+The `src/Vein.Runtime.SECS/SecsRuntime.cs` skeleton establishes this build linkage today (a library
 that references both `Vein.Compiler` and `ShardECS.SECS`); the actual **IrModule → live `Secs`** lowering
 (components, events, queries, schedules, folds) is the next task.
 
-> **net8 ↔ net9:** SECS targets net9, the rest of the toolchain net8. A net8 project can't reference a
-> net9 one, so `Vein.Runtime.SECS` is net9 (it *can* reference the net8 `Vein.Compiler`). The net8
-> `veinc` CLI therefore can't invoke this runtime directly — *running* on SECS needs a net9 host (a small
-> net9 runner, or bumping the CLI), a follow-on. Also: `dotnet build VeinScript.sln` now compiles the
-> net9 project + SECS, so the full-solution build requires the ShardECS repo at the sibling path;
-> `dotnet test src/Vein.Tests` is unaffected (net8 only).
+> **All net8 now.** SECS, `Vein.Runtime.SECS` and `Vein.Jit` were net9 (inherited from the vendored SECS) until
+> 2026-10-13, which kept the net8 CLI and any net8 engine host (Godot 4.7 .NET) away from the compiled
+> path. None of them used a net9-only API; they are net8 now, and `tools/check-backend.sh` builds the
+> generated programs as net8.
 
 ### 2.4 Fold reconciliation (`@fold`)
 

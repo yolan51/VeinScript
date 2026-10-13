@@ -1,8 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- net9.0 so it can reference the ShardECS SECS core (net9) AND the net8 Vein.Compiler. -->
+  <!-- net8.0, like everything here, so an ENGINE host on net8 (Godot 4.7 .NET) can reference it. It was
+       net9 only because the vendored SECS core was; nothing in either uses a net9-only API. -->
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Vein.Runtime.SECS</RootNamespace>

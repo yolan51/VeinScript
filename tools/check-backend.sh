@@ -34,7 +34,7 @@ for case in "${CASES[@]}"; do
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
     <Nullable>disable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>${name}_gen</AssemblyName>
@@ -52,7 +52,7 @@ EOF
     fi
 
     dotnet "$CLI" run "$REPO/$src" --ticks "$ticks" </dev/null >"$out/interp.txt" 2>/dev/null
-    dotnet "$out/bin/Debug/net9.0/${name}_gen.dll" --ticks "$ticks" >"$out/secs.txt" 2>&1
+    dotnet "$out/bin/Debug/net8.0/${name}_gen.dll" --ticks "$ticks" >"$out/secs.txt" 2>&1
 
     if diff -q "$out/interp.txt" "$out/secs.txt" >/dev/null; then
         echo "ok: $name (${ticks} frames) — backend output matches the interpreter"
