@@ -104,8 +104,9 @@ Everything above — Drawables, Camera, Entities, events, sound, quit — answer
 runtime: `src/Vein.Tests/RuntimeParityTests.cs` plays the same games on both, with the same inputs and
 uneven frame times, and compares every frame. Two differences remain, said plainly: compiled `@Print`
 writes when its handler runs while the interpreter's writes when the queue drains (so prints and events
-may interleave differently), and `Emitted` from the compiled runtime shows the program's own and its
-stdlib data events, not the transport (`@Print`, `@PlaySound`) or an unheard clock tick.
+may interleave differently — `Emitted` reports the transport events, `@Print` `@PrintError` `@PlaySound`
+`@Quit`, in the same order on both, but not always at the same place among queued events), and the
+compiled runtime does not report a clock tick or device event that nothing hears.
 
 Compiled mode carries Roslyn (tens of MB) with the game, and compiles in about a second the first time;
 `game.ReloadInBackground()` does that on a worker thread and swaps the new rules in on the next `Step`

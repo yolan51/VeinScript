@@ -12,6 +12,9 @@ namespace Vein.Tests;
 // What is compared, and what is deliberately not:
 //   - printed lines and events are compared as two separate sequences: compiled @Print writes when the
 //     handler runs, the interpreter's when the queue drains, so their INTERLEAVING may differ;
+//   - transport events (Print, PrintError, PlaySound, Quit) are a third sequence: both runtimes report
+//     each through Emitted, but compiled code performs them when the handler runs, so they are compared
+//     in order among themselves rather than among the queued events;
 //   - events are the program's own and the stdlib's data events, without the envelope (from, id,
 //     cause, trail, bundle): the interpreter observes transport (Print, PlaySound), the clock and device
 //     events whether or not anything hears them, the compiled runtime only what the program declares.
@@ -31,23 +34,26 @@ public class RuntimeParityTests : IDisposable
 
     private static readonly HashSet<string> NotCompared = new(StringComparer.Ordinal)
     {
-        "Print", "PrintError", "PrintInline", "PlaySound", "Quit", "Ticked",
+        "PrintInline", "Ticked",
         "KeyDown", "KeyUp", "TextInput", "MouseDown", "MouseUp", "MouseMove", "SoundEnded", "AnimationEnded",
     };
     private static readonly HashSet<string> Envelope = new(StringComparer.Ordinal) { "from", "origin", "source", "bundle", "id", "cause", "trail" };
 
-    private sealed record Run(List<string> Frames, List<string> Prints, List<string> Events, string Runtime, string Note);
+    private static readonly HashSet<string> Transport = new(StringComparer.Ordinal) { "Print", "PrintError", "PlaySound", "Quit" };
+
+    private sealed record Run(List<string> Frames, List<string> Prints, List<string> Events, List<string> Transported, string Runtime, string Note);
 
     private static Run Play(string path, VeinRuntime mode, int frames, Action<VeinGame, int>? script = null)
     {
         var game = VeinGame.Open(path, mode);
         var prints = new List<string>();
         var events = new List<string>();
+        var transported = new List<string>();
         game.Printed += (line, error) => prints.Add((error ? "error: " : "") + line);
         game.Emitted += (name, payload) =>
         {
             if (NotCompared.Contains(name)) return;
-            events.Add(name + " " + string.Join(" ", payload.Where(kv => !Envelope.Contains(kv.Key))
+            (Transport.Contains(name) ? transported : events).Add(name + " " + string.Join(" ", payload.Where(kv => !Envelope.Contains(kv.Key))
                                                             .OrderBy(kv => kv.Key, StringComparer.Ordinal)
                                                             .Select(kv => $"{kv.Key}={Fmt(kv.Value)}")));
         };
@@ -61,7 +67,7 @@ public class RuntimeParityTests : IDisposable
             game.Step(deltas[i % deltas.Length]);
             states.Add(State(game));
         }
-        return new Run(states, prints, events, game.Runtime, game.RuntimeNote);
+        return new Run(states, prints, events, transported, game.Runtime, game.RuntimeNote);
     }
 
     private static string State(VeinGame g)
@@ -97,6 +103,7 @@ public class RuntimeParityTests : IDisposable
                 $"frame {i} differs\n--- interpreter\n{interpreted.Frames[i]}\n--- compiled\n{compiled.Frames[i]}");
         Assert.Equal(interpreted.Prints, compiled.Prints);
         Assert.Equal(interpreted.Events, compiled.Events);
+        Assert.Equal(interpreted.Transported, compiled.Transported);
     }
 
     // ---- the games -------------------------------------------------------------------------------

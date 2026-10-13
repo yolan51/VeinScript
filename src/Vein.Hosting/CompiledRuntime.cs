@@ -25,13 +25,24 @@ internal sealed class CompiledRuntime : IGameRuntime
         _program = program;
         _sinks = sinks;
         _world = program.Create();
-        _world.Out = new LineWriter(line => sinks.Printed(line, false));
-        _world.Err = new LineWriter(line => sinks.Printed(line, true));
-        _world.Sound = (source, volume) => sinks.Sound(source, volume);
-        _world.Quitting = code =>
+        // The transport events never pass through the compiled queue (VeinWorld.Observed says so); the
+        // interpreter's Emitted sees each of them, so they are reported here as it would report them.
+        _world.Out = new LineWriter(line =>
         {
-            if (sinks.WantsEvents()) sinks.Emitted("Quit", new Dictionary<string, object?> { ["code"] = (long)code });
+            sinks.Printed(line, false);
+            Transport("Print", ("text", line));
+        });
+        _world.Err = new LineWriter(line =>
+        {
+            sinks.Printed(line, true);
+            Transport("PrintError", ("text", line));
+        });
+        _world.Sound = (source, volume) =>
+        {
+            sinks.Sound(source, volume);
+            Transport("PlaySound", ("source", source), ("volume", volume));
         };
+        _world.Quitting = code => Transport("Quit", ("code", (long)code));
         _world.Observed = (key, payload) =>
         {
             if (sinks.WantsEvents()) sinks.Emitted(Interp.EventName(key), Fields(payload));
@@ -95,6 +106,14 @@ internal sealed class CompiledRuntime : IGameRuntime
         _program.Publish(_world, (int)id, shape, field, value);
 
     public long Spawn() => _world.Spawn();
+
+    private void Transport(string name, params (string Field, object? Value)[] fields)
+    {
+        if (!_sinks.WantsEvents()) return;
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var (field, value) in fields) payload[field] = value;
+        _sinks.Emitted(name, payload);
+    }
 
     /// The interpreter catches a fault per unit and the game goes on; compiled code throws out of the
     /// frame. Reported the same way an unheard fault is (an error line), and the next frame runs.
