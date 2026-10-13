@@ -197,27 +197,44 @@ public static class VeinBuild
                 if (path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) && seen.Add(path) && File.Exists(path))
                     refs.Add(MetadataReference.CreateFromFile(path));
 
-        foreach (var type in new[] { typeof(Vein.Runtime.SECS.VeinWorld), typeof(object) })
-            if (type.Assembly.Location is { Length: > 0 } loc && seen.Add(loc))
-                refs.Add(MetadataReference.CreateFromFile(loc));
+        var runtime = typeof(Vein.Runtime.SECS.VeinWorld).Assembly;
+        foreach (var assembly in new[] { runtime, typeof(object).Assembly })
+            if (FileOf(assembly.GetName(), assembly) is { } file && seen.Add(file))
+                refs.Add(MetadataReference.CreateFromFile(file));
 
         // The contracts SECS implements — reached through the runtime rather than named, so this file
         // does not have to know the assembly's name.
-        foreach (var referenced in typeof(Vein.Runtime.SECS.VeinWorld).Assembly.GetReferencedAssemblies())
+        foreach (var referenced in runtime.GetReferencedAssemblies())
         {
+            Assembly? loaded = null;
             try
             {
                 // Through the runtime's own load context, not the default one: under an engine (Godot)
                 // ShardECS is not on the default probing path, and Assembly.Load would not find it.
-                var context = System.Runtime.Loader.AssemblyLoadContext.GetLoadContext(typeof(Vein.Runtime.SECS.VeinWorld).Assembly)
+                var context = System.Runtime.Loader.AssemblyLoadContext.GetLoadContext(runtime)
                               ?? System.Runtime.Loader.AssemblyLoadContext.Default;
-                string? loc = context.LoadFromAssemblyName(referenced).Location;
-                if (loc is { Length: > 0 } && seen.Add(loc)) refs.Add(MetadataReference.CreateFromFile(loc));
+                loaded = context.LoadFromAssemblyName(referenced);
             }
             catch (Exception) { /* a framework facade with no file — the TPA set already covers those */ }
+            if (FileOf(referenced, loaded) is { } file && seen.Add(file)) refs.Add(MetadataReference.CreateFromFile(file));
         }
 
         return refs;
+    }
+
+    /// The file an assembly lives in. Its `Location` when it has one — but an engine may load assemblies
+    /// FROM MEMORY: under Godot every game assembly, Vein.Runtime.SECS and ShardECS included, has an empty
+    /// Location, so the references went missing and every program failed (CS0246) and fell back to the
+    /// interpreter — found by VeinGodot's stress test. The host still keeps the files beside its own
+    /// (Godot's .godot/mono/temp/bin/<config>, which is AppContext.BaseDirectory there), so they are
+    /// looked for by name: next to the runtime if it has a location, then in the app's base directory.
+    private static string? FileOf(AssemblyName name, Assembly? loaded)
+    {
+        if (loaded?.Location is { Length: > 0 } location) return location;
+        foreach (string? dir in new[] { Path.GetDirectoryName(typeof(Vein.Runtime.SECS.VeinWorld).Assembly.Location), AppContext.BaseDirectory })
+            if (dir is { Length: > 0 } && Path.Combine(dir, name.Name + ".dll") is var candidate && File.Exists(candidate))
+                return candidate;
+        return null;
     }
 
     /// A bundle name as a legal assembly name. Bundle names are identifiers already, so this only has
