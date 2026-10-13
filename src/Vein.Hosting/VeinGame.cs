@@ -31,6 +31,11 @@ public sealed class VeinGame
     /// True while a program is loaded and running.
     public bool Running => _interp is not null && !_interp.Stopped;
 
+    /// Marks under a standing `mute #M` right now (D20), and the keys of every shard currently silent —
+    /// by `mute Name` or by carrying a muted mark. For a debugger's "what is paused" line.
+    public IReadOnlyList<string> MutedMarks => _interp?.MutedMarks.OrderBy(m => m, StringComparer.Ordinal).ToList() ?? new List<string>();
+    public IReadOnlyList<string> MutedShards => _interp?.MutedShards ?? Array.Empty<string>();
+
     /// Frames stepped since the program booted.
     public int Tick => _interp?.Tick ?? 0;
 

@@ -41,6 +41,11 @@ public sealed class Interp
     /// D18 + D20: muted by name, or carrying a muted mark. Every skip asks this, never `Muted` alone.
     private bool IsMuted(Instance inst) => inst.Muted || (_mutedMarks.Count > 0 && inst.Marks.Overlaps(_mutedMarks));
 
+    /// What is paused right now, for a host's debugger: the marks under a standing `mute #M`, and the keys
+    /// (`Author.Bundle.Name`) of every shard currently silent — by name or by carrying a muted mark.
+    public IReadOnlyCollection<string> MutedMarks => _mutedMarks;
+    public IReadOnlyList<string> MutedShards => _byKey.Where(kv => IsMuted(kv.Value)).Select(kv => kv.Key).ToList();
+
     private sealed record Handler(Instance Owner, string BindName, IrBlock Body, Audience Aud);
 
     /// A `hear`'s `audience` barrier, read from its `@audience` attr. The sender must carry every

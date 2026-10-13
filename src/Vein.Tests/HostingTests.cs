@@ -406,4 +406,24 @@ public class HostingTests : IDisposable
     {
         Assert.Null(VeinGame.Load(Write("nocam.vein", Game())).Camera);
     }
+
+    [Fact]
+    public void A_host_can_see_what_is_muted()
+    {
+        var game = VeinGame.Open(Write("muted.vein", """
+            bundle M by me {
+                shard Physics #Gameplay { }
+                shard Hud { }
+                shard Menu { run once {
+                    mute #Gameplay
+                    mute Hud
+                } }
+            }
+            """));
+        Assert.Empty(game.MutedMarks);
+        game.Start();
+
+        Assert.Equal(new[] { "Gameplay" }, game.MutedMarks);
+        Assert.Equal(new[] { "me.M.Hud", "me.M.Physics" }, game.MutedShards.OrderBy(k => k));
+    }
 }
