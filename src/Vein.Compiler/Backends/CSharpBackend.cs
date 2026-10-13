@@ -1827,6 +1827,16 @@ public sealed class CSharpBackend : IVeinBackend
         sb.AppendLine("    }");
         sb.AppendLine();
 
+        sb.AppendLine("    public bool Carries(VeinWorld w, int id, string mark)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        switch (mark)");
+        sb.AppendLine("        {");
+        foreach (var m in marks.DistinctBy(m => m.Name)) sb.AppendLine($"            case {Q(m.Name)}: return w.MarkedAs<global::Vein.Generated.{Ident(module.Name)}.Marks.{Ident(m.Name)}>(id);");
+        sb.AppendLine("            default: return false;");
+        sb.AppendLine("        }");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+
         // Bare name or key, first match — Interp.FireHost's rule. Declared defaults fill what the host left
         // out, and `from` names the runtime sender, as Interp.FireDevice / FireHost do.
         sb.AppendLine("    public bool Raise(VeinWorld w, string name, IReadOnlyDictionary<string, object?> fields, string sender)");

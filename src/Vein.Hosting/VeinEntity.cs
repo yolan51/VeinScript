@@ -55,8 +55,14 @@ public sealed record VeinEntity(
 /// One thing to draw this frame (VeinGame.Drawables): where, turned and scaled how, showing what. A value,
 /// cheap to make every frame — the lean path a host's draw loop reads instead of `Entities`.
 /// `Z` is the place's z — a 2D host's DRAW ORDER: higher is drawn on top, equal keeps creation order.
+/// The looks (*Vein.Graphics.Looks): `Tint*` multiplies the picture (white, opaque without `$Tint`), `Flip*`
+/// mirrors it, `Hidden` (`#Hidden`) means keep it but draw it nowhere. `Animation` is the clip `$Animation`
+/// names, for an `$Image` that is a set of animated frames rather than one picture.
 public readonly record struct VeinDrawable(
-    long Id, double X, double Y, double Z, double Rotation, double ScaleX, double ScaleY, string? Image, string? Caption);
+    long Id, double X, double Y, double Z, double Rotation, double ScaleX, double ScaleY, string? Image, string? Caption,
+    double TintR = 1, double TintG = 1, double TintB = 1, double TintA = 1,
+    bool FlipX = false, bool FlipY = false, bool Hidden = false,
+    string? Animation = null, double AnimationSpeed = 1);
 
 /// The view's centre and zoom (VeinGame.Camera), from the identity carrying `*Vein.UI.Surface.$Camera`.
 /// A 2D host reads X, Y and Zoom. A 3D host also reads Z and the camera identity's `$Rotation` (radians,
@@ -78,4 +84,4 @@ public readonly record struct VeinModel(
     double X, double Y, double Z,
     double RotationX, double RotationY, double RotationZ,
     double ScaleX, double ScaleY, double ScaleZ,
-    string? Animation, double AnimationSpeed);
+    string? Animation, double AnimationSpeed, bool Hidden = false);

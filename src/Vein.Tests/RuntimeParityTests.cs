@@ -456,4 +456,56 @@ public class RuntimeParityTests : IDisposable
             Assert.Single(game.Entities, e => e.Has("View"));
         }
     }
+
+    [Fact]
+    public void Tint_flip_hidden_and_a_sprite_clip_agree()
+    {
+        string path = Write("looks.vein", """
+            bundle Looks by me {
+                need "Vein.Transform"
+                need "Vein.UI"
+                need "Vein.Graphics"
+                mark #Coin
+                mark #Ghost
+                shard Start { run once {
+                    let c = spawn()
+                    attach $Position to c { x: 10.0, y: 10.0, z: 0.0 }
+                    attach $Image to c { source: "coin.tres" }
+                    attach $Animation to c { name: "spin", speed: 2.0 }
+                    attach $Tint to c { r: 1.0, g: 0.5, b: 0.25 }
+                    mark c #Coin
+                    let g = spawn()
+                    attach $Position to g { x: 30.0, y: 10.0, z: 0.0 }
+                    attach $Image to g { source: "ghost.png" }
+                    attach $Flip to g { x: true }
+                    attach $Model to g { source: "ghost.glb" }
+                    mark g #Ghost
+                } }
+                shard Fade { each tick { target $Tint #Coin as c { c.Tint.a -= 0.25 } } }
+                shard Blink { each tick { target $Flip #Ghost as g {
+                    g.Flip.y = not g.Flip.y
+                } } }
+                event @Hide { }
+                event @Show { }
+                shard Toggle {
+                    hear @Hide as h { target $Position #Ghost as g { mark g #Hidden } }
+                    hear @Show as s { target $Position #Ghost as g { unmark g #Hidden } }
+                }
+            }
+            """);
+
+        Same(path, 6, (g, i) =>
+        {
+            if (i == 1) Assert.True(g.Emit("Hide"));
+            if (i == 2)
+            {
+                var coin = g.Drawables.Single(d => d.Image == "coin.tres");
+                Assert.Equal((0.5, 0.25, 0.5, "spin", 2.0), (coin.TintG, coin.TintB, coin.TintA, coin.Animation, coin.AnimationSpeed));
+                var ghost = g.Drawables.Single(d => d.Image == "ghost.png");
+                Assert.True(ghost.FlipX && ghost.Hidden);
+                Assert.True(g.Models.Single().Hidden);
+            }
+            if (i == 3) Assert.True(g.Emit("Show"));
+        });
+    }
 }

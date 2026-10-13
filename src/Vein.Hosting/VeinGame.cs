@@ -307,7 +307,8 @@ public sealed class VeinGame
                 scaled ? Num(r, id, "Scale", "y", 1) : 1,
                 scaled ? Num(r, id, "Scale", "z", 1) : 1,
                 animated ? r.Read(id, "Animation", "name")?.ToString() : null,
-                animated ? Num(r, id, "Animation", "speed", 1) : 1));
+                animated ? Num(r, id, "Animation", "speed", 1) : 1,
+                r.Carries(id, "Hidden")));
         }
         return list;
     }
@@ -325,6 +326,7 @@ public sealed class VeinGame
         bool hasImage = r.Declared("Image"), hasText = r.Declared("Text");
         if (!hasImage && !hasText) return Array.Empty<VeinDrawable>();
         bool hasRotation = r.Declared("Rotation"), hasScale = r.Declared("Scale");
+        bool hasTint = r.Declared("Tint"), hasFlip = r.Declared("Flip"), hasAnimation = r.Declared("Animation");
 
         var list = new List<VeinDrawable>();
         foreach (long id in r.Ids("Position"))
@@ -335,13 +337,25 @@ public sealed class VeinGame
 
             string place = hasWorld && r.Has(id, "World") ? "World" : "Position";
             bool scaled = hasScale && r.Has(id, "Scale");
+            bool tinted = hasTint && r.Has(id, "Tint");
+            bool flipped = hasFlip && r.Has(id, "Flip");
+            bool animated = hasAnimation && r.Has(id, "Animation");
             list.Add(new VeinDrawable(
                 id,
                 Num(r, id, place, "x", 0), Num(r, id, place, "y", 0), Num(r, id, place, "z", 0),
                 hasRotation && r.Has(id, "Rotation") ? Num(r, id, "Rotation", "z", 0) : 0,
                 scaled ? Num(r, id, "Scale", "x", 1) : 1,
                 scaled ? Num(r, id, "Scale", "y", 1) : 1,
-                image, caption));
+                image, caption,
+                tinted ? Num(r, id, "Tint", "r", 1) : 1,
+                tinted ? Num(r, id, "Tint", "g", 1) : 1,
+                tinted ? Num(r, id, "Tint", "b", 1) : 1,
+                tinted ? Num(r, id, "Tint", "a", 1) : 1,
+                flipped && r.Read(id, "Flip", "x") is true,
+                flipped && r.Read(id, "Flip", "y") is true,
+                r.Carries(id, "Hidden"),
+                animated ? r.Read(id, "Animation", "name")?.ToString() : null,
+                animated ? Num(r, id, "Animation", "speed", 1) : 1));
         }
         return list;
     }

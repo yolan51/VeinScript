@@ -43,6 +43,7 @@ internal interface IGameRuntime
     bool Declared(string shape);
     IReadOnlyList<long> Ids(string shape);
     bool Has(long id, string shape);
+    bool Carries(long id, string mark);
     object? Read(long id, string shape, string field);
     IReadOnlyList<VeinEntity> Snapshot();
 

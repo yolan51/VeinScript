@@ -78,6 +78,7 @@ internal sealed class InterpRuntime : IGameRuntime
     public bool Declared(string shape) => _interp.World.Declared(shape);
     public IReadOnlyList<long> Ids(string shape) => _interp.World.Query(new[] { shape }, Array.Empty<string>());
     public bool Has(long id, string shape) => _interp.World.Has(id, shape);
+    public bool Carries(long id, string mark) => _interp.World.HasTag(id, mark);
     public object? Read(long id, string shape, string field) => _interp.World.Read(id, shape, field);
 
     public IReadOnlyList<VeinEntity> Snapshot() =>

@@ -31,6 +31,10 @@ public interface IVeinCompiledProgram
     /// The marks an identity carries, by name.
     IReadOnlyList<string> Marks(VeinWorld world, int id);
 
+    /// Whether an identity carries one mark, by name — `Marks` without building a list, for a host that
+    /// asks one question of every identity every frame (`#Hidden`). False for a mark the program lacks.
+    bool Carries(VeinWorld world, int id, string mark);
+
     /// Raise one of the program's events — by bare name (`KeyDown`, `Paused`) or by key — from
     /// `sender` (a runtime identity: "device" for input, "host" for the engine's own), then drain.
     /// False when the program has no such event: a misspelt name is reported, never delivered to nobody.

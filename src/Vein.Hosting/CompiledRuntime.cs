@@ -76,6 +76,7 @@ internal sealed class CompiledRuntime : IGameRuntime
     public bool Declared(string shape) => _program.Shapes.Contains(shape);
     public IReadOnlyList<long> Ids(string shape) => _program.Ids(_world, shape).Select(i => (long)i).ToList();
     public bool Has(long id, string shape) => _program.Has(_world, (int)id, shape);
+    public bool Carries(long id, string mark) => _program.Carries(_world, (int)id, mark);
     public object? Read(long id, string shape, string field) => _program.Read(_world, (int)id, shape, field);
 
     /// EntityStore.Snapshot's shape: every identity carrying any shape, ascending; its shapes (by name)

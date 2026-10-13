@@ -1,6 +1,7 @@
 // stdlib/Graphics.vein — VeinScript Standard Library : Vein.Graphics
 // What an identity LOOKS like, as data a host draws. `*Vein.UI.Widgets.$Image` is a flat picture; this
-// bundle is for what a 2D picture cannot say: a 3D model, and which of its animations is playing.
+// bundle is for what a flat picture cannot say on its own: a 3D model, which animation is playing, a
+// tint, a mirror, and whether it is shown at all.
 //
 // THE SPLIT, settled with the first engine host (Godot): the ENGINE owns how an animation looks — its
 // keyframes, blending, bones, timing curves, all authored in the engine's own editor. The PROGRAM owns
@@ -19,6 +20,22 @@ bundle Graphics by Vein {
         // `*Vein.Transform.Spatial` shapes: `$World` (else `$Position`), `$Rotation` in radians, `$Scale`.
         shared("A 3D model to show at this identity's place. `source` is a path or asset name the host resolves.")
         shape $Model { source: string }
+    }
+
+    // How a picture is shown, beyond where: colour, mirroring, and whether at all. Each is a shape (or a
+    // mark) on the identity, so a rule changes it like any other field — a fade is `t.Tint.a -= dt`.
+    publicator Looks {
+        // Multiplied into the picture: white (all 1.0) leaves it as drawn, `a` below 1 makes it see-through.
+        shared("Colour this identity's picture: each channel 0..1 multiplies it; `a` is opacity.")
+        shape $Tint { r: float = 1.0, g: float = 1.0, b: float = 1.0, a: float = 1.0 }
+
+        shared("Mirror this identity's picture: `x` left-right, `y` upside down.")
+        shape $Flip { x: bool = false, y: bool = false }
+
+        // A mark rather than `$Tint { a: 0 }`: a hidden identity keeps its colour for when it comes back, and
+        // `target … not #Hidden` finds what the player can see.
+        shared("Wear this to be drawn nowhere. Unmark to show it again, as it was.")
+        mark #Hidden
     }
 
     publicator Animations {

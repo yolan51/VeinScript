@@ -99,7 +99,7 @@ current language feature — a naming/`use` follow-on, §6.)
 Vein.Core     — Lifecycle, Meta/Identity, Quantity(folds), (later) Math, Time, Collections
 Vein.Input    — Mouse/Keyboard/Touch as EVENTS (platform-independent identities)
 Vein.UI       — View/Panel/Text/Button as SHAPES + @Click etc.; backends render them
-Vein.Graphics — $Model, $Animation, @AnimationEnded (stdlib/Graphics.vein); sprites/tint next
+Vein.Graphics — $Model, $Animation, @AnimationEnded, $Tint, $Flip, #Hidden (stdlib/Graphics.vein)
 Vein.Physics  — #Collidable, CollisionShape, @Collisioned, CollisionDetection shard
 Vein.Web      — Http events + html BUILDERS (web is where markup/builders legitimately live)
 Vein.WebTheme — the LOOK: palettes, foundation, components (a separate `use`, so channels ≠ taste)
