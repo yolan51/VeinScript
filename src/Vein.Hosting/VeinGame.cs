@@ -143,8 +143,10 @@ public sealed class VeinGame
     private void Boot(IGameRuntime runtime)
     {
         _runtime = runtime;
+        _viewId = -1;   // a new world: the old one's identity is gone with it
         Changed();
         runtime.Start();
+        PublishView();
     }
 
     /// One frame: the clock event first (`*Vein.Time.Clock.@Ticked`, with `delta` in seconds), then every
@@ -176,6 +178,43 @@ public sealed class VeinGame
 
     /// The clip `name` reached its end on `entity` — the host owns the clock it ran on (*Vein.Graphics).
     public void AnimationEnded(long entity, string name) => Device("AnimationEnded", ("entity", entity), ("name", name));
+
+    /// A named action began — `strength` 1 for a key or button, partial for a stick or trigger
+    /// (*Vein.Input.Actions). Which inputs make an action is the host's input map.
+    public void ActionPressed(string action, double strength = 1) => Device("ActionPressed", ("action", action), ("strength", strength));
+    public void ActionReleased(string action) => Device("ActionReleased", ("action", action));
+
+    /// A gamepad button by its common-layout name ("A", "Start", "DpadUp"; *Vein.Input.Gamepad).
+    public void ButtonDown(int device, string button) => Device("ButtonDown", ("device", (long)device), ("button", button));
+    public void ButtonUp(int device, string button) => Device("ButtonUp", ("device", (long)device), ("button", button));
+
+    /// A stick ("LeftX", -1..1) or trigger ("TriggerLeft", 0..1) moved. Drop the jitter around rest
+    /// before calling, and report the return to rest as 0.
+    public void AxisMoved(int device, string axis, double value) => Device("AxisMoved", ("device", (long)device), ("axis", axis), ("value", value));
+
+    // ---- the window: *Vein.UI.Surface.$View ------------------------------------------------------
+
+    private (double Width, double Height)? _view;
+    private long _viewId = -1;
+
+    /// The size of what the player sees, in the units the rules place things in. Written to
+    /// `*Vein.UI.Surface.$View { width, height }` on an identity the host owns — immediately, and again
+    /// after every reload — so rules that centre or clamp to the screen read it rather than guess. Call it
+    /// at start and whenever the window is resized. Programs that declare no `$View` are left alone.
+    public void SetView(double width, double height)
+    {
+        _view = (width, height);
+        PublishView();
+    }
+
+    private void PublishView()
+    {
+        if (_view is not { } v || _runtime is not { } r || !r.Declared("View")) return;
+        if (_viewId < 0) _viewId = r.Spawn();
+        r.Publish(_viewId, "View", "width", v.Width);
+        r.Publish(_viewId, "View", "height", v.Height);
+        Changed();
+    }
 
     /// Raise one of the PROGRAM'S events (`Emit("Paused")`, `Emit("Buy", new() { ["item"] = "sword" })`).
     /// False when the program declares no such event — a misspelt name is reported, not delivered to

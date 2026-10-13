@@ -36,6 +36,7 @@ public class RuntimeParityTests : IDisposable
     {
         "PrintInline", "Ticked",
         "KeyDown", "KeyUp", "TextInput", "MouseDown", "MouseUp", "MouseMove", "SoundEnded", "AnimationEnded",
+        "ActionPressed", "ActionReleased", "ButtonDown", "ButtonUp", "AxisMoved",
     };
     private static readonly HashSet<string> Envelope = new(StringComparer.Ordinal) { "from", "origin", "source", "bundle", "id", "cause", "trail" };
 
@@ -376,5 +377,83 @@ public class RuntimeParityTests : IDisposable
             if (i == 3) g.AnimationEnded(g.Models[0].Id, "walk");
             if (i == 4) Assert.Equal("idle", g.Models[0].Animation);
         });
+    }
+
+    [Fact]
+    public void Actions_gamepads_and_the_window_size_agree()
+    {
+        string path = Write("pad.vein", """
+            bundle Pad by me {
+                need "Vein.Transform"
+                need "Vein.UI"
+                mark #Hero
+                shape $Stick { x: float = 0.0, jumps: int = 0, fire: int = 0 }
+                shard Start { run once {
+                    let h = spawn()
+                    attach $Position to h { x: 0.0, y: 0.0, z: 0.0 }
+                    attach $Stick to h { }
+                    mark h #Hero
+                } }
+                shard Act {
+                    hear *Vein.Input.Actions.@ActionPressed as a { target $Stick #Hero as h {
+                        if a.action == "jump" { h.Stick.jumps += 1 }
+                    } }
+                    hear *Vein.Input.Actions.@ActionReleased as a {
+                        emit *Vein.Console.Io.@Print { text: "released " + a.action }
+                    }
+                }
+                shard Pads {
+                    hear *Vein.Input.Gamepad.@ButtonDown as b { target $Stick #Hero as h {
+                        if b.button == "A" and b.device == 1 { h.Stick.fire = 1 }
+                    } }
+                    hear *Vein.Input.Gamepad.@ButtonUp as b { target $Stick #Hero as h { h.Stick.fire = 0 } }
+                    hear *Vein.Input.Gamepad.@AxisMoved as m { target $Stick #Hero as h {
+                        if m.axis == "LeftX" { h.Stick.x = m.value }
+                    } }
+                }
+                shard Centre { each tick { target $View as v { target $Position #Hero as h {
+                    h.Position.x = v.View.width / 2.0
+                    h.Position.y = v.View.height / 2.0
+                } } } }
+            }
+            """);
+
+        Same(path, 8, (g, i) =>
+        {
+            if (i == 0) g.SetView(640, 480);
+            if (i == 1) { g.ActionPressed("jump"); g.ActionPressed("jump", 0.5); g.ActionReleased("jump"); }
+            if (i == 2) { g.ButtonDown(1, "A"); g.AxisMoved(0, "LeftX", -0.75); }
+            if (i == 4) { g.ButtonUp(1, "A"); g.SetView(1280, 720); }
+            if (i == 6)
+            {
+                var hero = g.Entities.Single(e => e.Carries("Hero"));
+                Assert.Equal((640.0, 360.0), (hero.Number("Position", "x"), hero.Number("Position", "y")));
+                Assert.Equal((2.0, -0.75), (hero.Number("Stick", "jumps"), hero.Number("Stick", "x")));
+            }
+        });
+    }
+
+    [Fact]
+    public void The_view_is_published_again_after_a_reload()
+    {
+        string path = Write("view.vein", """
+            bundle V by me {
+                need "Vein.UI"
+                shard Say { each tick { target $View as v { emit *Vein.Console.Io.@Print { text: "w " + v.View.width } } } }
+            }
+            """);
+        foreach (var mode in new[] { VeinRuntime.Interpreter, VeinRuntime.Compiled })
+        {
+            var game = VeinGame.Open(path, mode);
+            var prints = new List<string>();
+            game.Printed += (line, _) => prints.Add(line);
+            Assert.True(game.Start());
+            game.SetView(800, 600);
+            game.Step(0.016);
+            Assert.True(game.Reload());
+            game.Step(0.016);
+            Assert.Equal(new[] { "w 800", "w 800" }, prints);
+            Assert.Single(game.Entities, e => e.Has("View"));
+        }
     }
 }

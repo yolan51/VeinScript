@@ -504,6 +504,26 @@ public sealed class Interp
     public void FireAnimationEnded(long entity, string name) =>
         FireDevice("AnimationEnded", ("entity", entity), ("name", name));
 
+    /// `*Vein.Input.Actions.@ActionPressed { action, strength }` — a named action began. Which inputs
+    /// trigger it is the host's setting (an engine's input map), so the rules never name a key.
+    public void FireActionPressed(string action, double strength) =>
+        FireDevice("ActionPressed", ("action", action), ("strength", strength));
+
+    /// `*Vein.Input.Actions.@ActionReleased { action }`.
+    public void FireActionReleased(string action) => FireDevice("ActionReleased", ("action", action));
+
+    /// `*Vein.Input.Gamepad.@ButtonDown { device, button }` — the button by its common-layout name ("A").
+    public void FireButtonDown(int device, string button) =>
+        FireDevice("ButtonDown", ("device", (long)device), ("button", button));
+
+    /// `*Vein.Input.Gamepad.@ButtonUp { device, button }`.
+    public void FireButtonUp(int device, string button) =>
+        FireDevice("ButtonUp", ("device", (long)device), ("button", button));
+
+    /// `*Vein.Input.Gamepad.@AxisMoved { device, axis, value }` — a stick (-1..1) or trigger (0..1).
+    public void FireAxisMoved(int device, string axis, double value) =>
+        FireDevice("AxisMoved", ("device", (long)device), ("axis", axis), ("value", value));
+
     /// One device occurrence, with the provenance envelope every event carries.
     ///
     /// The sender is a registered runtime identity named `device`, the way stdin is registered as
@@ -1885,6 +1905,7 @@ public sealed class Interp
             "Request", "Response", "DiagnosticRaised", "Failed", "Fetched",
             "FileLoaded", "FileMissing", "FileWritten", "Input", "Message", "Undelivered",
             "KeyDown", "KeyUp", "TextInput", "MouseDown", "MouseUp", "MouseMove",
+            "ActionPressed", "ActionReleased", "ButtonDown", "ButtonUp", "AxisMoved",
             "Ticked", "SoundEnded", "AnimationEnded", "InputEnded",
         };
 

@@ -69,6 +69,10 @@ The vocabulary is the standard library's; nothing in it is engine-specific.
 | `*Vein.Console.Io.@Print`, `@PrintError` | `game.Printed += (line, isError) => …` |
 | `*Vein.Input.Keyboard.@KeyDown` / `@KeyUp` / `@TextInput` | raised by `game.KeyDown(…)` etc. |
 | `*Vein.Input.Mouse.@MouseDown` / `@MouseUp` / `@MouseMove` | raised by `game.MouseDown(…)` etc. |
+| `*Vein.Input.Actions.@ActionPressed { action, strength }` / `@ActionReleased { action }` | raised by `game.ActionPressed("jump")` etc. — the engine's input map decides which keys and buttons make an action |
+| `*Vein.Input.Gamepad.@ButtonDown` / `@ButtonUp { device, button }` | raised by `game.ButtonDown(0, "A")` etc.; buttons by common-layout name (A B X Y Start DpadUp …) |
+| `*Vein.Input.Gamepad.@AxisMoved { device, axis, value }` | raised by `game.AxisMoved(0, "LeftX", -0.5)`; drop jitter near rest, report rest as 0 |
+| `*Vein.UI.Surface.$View { width, height }` | **written by the host**: `game.SetView(w, h)` at start and on every resize; kept across reloads |
 | `*Vein.Audio.Sound.@SoundEnded { track }` | raise it with `game.SoundEnded(track)` |
 | `*Vein.Graphics.Models.$Model { source }` | **3D**: the model to show at the place (`game.Models`: xyz, rotation xyz in radians, scale xyz) |
 | `*Vein.Graphics.Animations.$Animation { name, speed }` | which clip the engine plays on that identity's model (`m.Animation`); how the clip looks is the engine's |
