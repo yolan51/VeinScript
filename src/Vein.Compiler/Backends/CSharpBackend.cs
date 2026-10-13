@@ -497,8 +497,12 @@ public sealed class CSharpBackend : IVeinBackend
         {
             sb.AppendLine($"    public sealed class {Ident(e.Name)}");
             sb.AppendLine("    {");
+            // The DECLARED default when there is one: `emit @Shake { }` against `strength: int = 3` must carry
+            // 3, as the interpreter's Emit fills it — it carried 0 here, and no sample read a defaulted
+            // event field, so check-backend never saw it (found by Vein.Hosting's runtime parity tests).
+            // An `emit` that names the field still overrides it, in the object initialiser.
             foreach (var f in e.Fields)
-                sb.AppendLine($"        public {Cs(f.Type)} {Ident(f.Name)} = {ZeroOf(f.Type)};");
+                sb.AppendLine($"        public {Cs(f.Type)} {Ident(f.Name)} = {(f.Default is { } d ? Expr(d) : ZeroOf(f.Type))};");
             sb.AppendLine("    }");
         }
         sb.AppendLine("}");
@@ -600,6 +604,12 @@ public sealed class CSharpBackend : IVeinBackend
         sb.AppendLine("/// inputs as parameters and returns a value.");
         sb.AppendLine("public static class Fns");
         sb.AppendLine("{");
+        // THE WORLD AN SF ACTS ON. An `SF` emits — `quit(code)`, `print(text)`, every stdlib SF does — and
+        // the emit compiles to `World.…`, which a static class did not have: CS0103, so any program calling
+        // one fell back to the interpreter. Program.Create sets it; each compiled program is its own
+        // assembly, so this static belongs to exactly one game.
+        sb.AppendLine("    public static VeinWorld World = null!;");
+        sb.AppendLine();
         foreach (var f in module.Functions)
         {
             _bound.Clear();
@@ -1368,6 +1378,23 @@ public sealed class CSharpBackend : IVeinBackend
                     var text = p.Fields.FirstOrDefault(f => f.Field == "text").Value;
                     return $"World.Print({Str(text)})";
                 }
+                // The other transport events a GAME uses, bridged the same way: each is an effect only the
+                // host can have, and the host takes it through VeinWorld's hooks (Sound, Err, Quit) as
+                // the interpreter's does (AudioOut.Hook, ErrorOutput, the exit code). These were notes and
+                // compiled to nothing — a compiled game was silent and could not end.
+                if (c.Args.Count > 0 && c.Args[0] is IrStructInit { TypeName: "PrintError" } pe)
+                    return $"World.PrintError({Str(pe.Fields.FirstOrDefault(f => f.Field == "text").Value)})";
+                if (c.Args.Count > 0 && c.Args[0] is IrStructInit { TypeName: "PlaySound" } ps)
+                {
+                    var source = ps.Fields.FirstOrDefault(f => f.Field == "source").Value;
+                    var volume = ps.Fields.FirstOrDefault(f => f.Field == "volume").Value;
+                    return $"World.PlaySound({Str(source)}, {(volume is null ? "1.0" : $"(double)({Expr(volume)})")})";
+                }
+                if (c.Args.Count > 0 && c.Args[0] is IrStructInit { TypeName: "Quit" } q)
+                {
+                    var code = q.Fields.FirstOrDefault(f => f.Field == "code").Value;
+                    return $"World.Quit({(code is null ? "0" : $"(int)({Expr(code)})")})";
+                }
                 // Any other event this module DECLARES becomes a queued emit. `Print` stays bridged
                 // above rather than going through the queue, because it is the one event with no
                 // handler to dispatch to — the world writes it.
@@ -1671,7 +1698,20 @@ public sealed class CSharpBackend : IVeinBackend
         sb.AppendLine("            if (args[i] == \"--ticks\" && i + 1 < args.Length) int.TryParse(args[++i], out ticks);");
         sb.AppendLine("            else if (args[i].StartsWith(\"--ticks=\")) int.TryParse(args[i].Substring(8), out ticks);");
         sb.AppendLine();
+        sb.AppendLine("        var world = Create();");
+        sb.AppendLine("        world.Start();");
+        sb.AppendLine("        world.Run(ticks);");
+        sb.AppendLine("        Environment.ExitCode = world.ExitCode ?? 0;   // `quit(code)`, as `veinc run` returns it");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+        // THE STEPPABLE HALF. Everything Main did except start and run, so a HOST (an engine, through
+        // Vein.Hosting and __Host) can hold the world and drive it frame by frame with its own clock.
+        sb.AppendLine("    /// The world with every shard registered and its hooks set — not started. Main starts and runs it;");
+        sb.AppendLine("    /// a host (an engine, via __Host) starts it and steps it with its own clock.");
+        sb.AppendLine("    public static VeinWorld Create()");
+        sb.AppendLine("    {");
         sb.AppendLine("        var world = new VeinWorld();");
+        if (module.Functions.Count > 0) sb.AppendLine("        Fns.World = world;   // what an SF emits into");
 
         // THE TRANSFORM HIERARCHY, emitted only when this program has one. The interpreter composes in
         // `Interp.ComposeWorld`; this is the same rule in generated code, and it has to be, or a parented
@@ -1692,12 +1732,159 @@ public sealed class CSharpBackend : IVeinBackend
 
         foreach (var s in module.Shards)
             sb.AppendLine($"        world.Register(new {ShardIdent(s)}(), \"{Escape(ShardKey(s))}\"{CarriedMarksArgs(s)});");
-        sb.AppendLine("        world.Start();");
-        sb.AppendLine("        world.Run(ticks);");
+        sb.AppendLine("        return world;");
         sb.AppendLine("    }");
 
         if (_components.Contains("Position") && _components.Contains("World")) EmitCompose(sb);
 
+        sb.AppendLine("}");
+        sb.AppendLine();
+        EmitHost(sb, module);
+    }
+
+    /// `__Host : IVeinCompiledProgram` — what an engine needs to drive and READ this program without
+    /// reflecting per frame: Create, then switches over this program's own component, mark and event
+    /// types. The interpreter's equivalents are EntityStore (Snapshot, Read, Publish) and Interp.FireHost;
+    /// values cross in the interpreter's representation (int → long, float → double, Entity → long).
+    private void EmitHost(StringBuilder sb, IrModule module)
+    {
+        var components = module.Types.Where(t => t.Kind == IrTypeKind.Component).ToList();
+        var marks = module.Types.Where(t => t.Kind == IrTypeKind.Tag).ToList();
+        var events = module.Types.Where(t => t.Kind == IrTypeKind.Message && _events.Contains(t.Name)).ToList();
+
+        string Q(string s) => "\"" + Escape(s) + "\"";
+        // object → a field's C# type, the forgiving way a host's values need (a Godot int arrives as long).
+        string Conv(IrTypeRef type, string value) => Cs(type) switch
+        {
+            "long" => $"__L({value})",
+            "double" => $"__D({value})",
+            "string" => $"__S({value})",
+            "bool" => $"__B({value})",
+            "int" => $"(int)__L({value})",
+            var other => $"({value} is {other} __v ? __v : default({other}))",
+        };
+        // A field read, boxed the interpreter's way: an Entity (int here) widens to long.
+        string Box(IrTypeRef type, string read) => Cs(type) == "int" ? $"(object)(long){read}" : $"(object){read}";
+
+        sb.AppendLine("/// The host's way in (Vein.Runtime.SECS.IVeinCompiledProgram). Generated: do not edit.");
+        sb.AppendLine("public sealed class __Host : IVeinCompiledProgram");
+        sb.AppendLine("{");
+        sb.AppendLine("    public VeinWorld Create() => Program.Create();");
+        sb.AppendLine();
+        sb.AppendLine($"    public IReadOnlyList<string> Shapes {{ get; }} = new string[] {{ {string.Join(", ", components.Select(c => Q(c.Name)))} }};");
+        sb.AppendLine();
+
+        sb.AppendLine("    public IReadOnlyList<string> Fields(string shape) => shape switch");
+        sb.AppendLine("    {");
+        foreach (var c in components)
+            sb.AppendLine($"        {Q(c.Name)} => new string[] {{ {string.Join(", ", c.Fields.Select(f => Q(f.Name)))} }},");
+        sb.AppendLine("        _ => Array.Empty<string>(),");
+        sb.AppendLine("    };");
+        sb.AppendLine();
+
+        sb.AppendLine("    public IReadOnlyList<int> Ids(VeinWorld w, string shape) => shape switch");
+        sb.AppendLine("    {");
+        foreach (var c in components) sb.AppendLine($"        {Q(c.Name)} => w.Query<{Ident(c.Name)}>(),");
+        sb.AppendLine("        _ => Array.Empty<int>(),");
+        sb.AppendLine("    };");
+        sb.AppendLine();
+
+        sb.AppendLine("    public bool Has(VeinWorld w, int id, string shape) => shape switch");
+        sb.AppendLine("    {");
+        foreach (var c in components) sb.AppendLine($"        {Q(c.Name)} => w.Has<{Ident(c.Name)}>(id),");
+        sb.AppendLine("        _ => false,");
+        sb.AppendLine("    };");
+        sb.AppendLine();
+
+        sb.AppendLine("    public object? Read(VeinWorld w, int id, string shape, string field)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        switch (shape)");
+        sb.AppendLine("        {");
+        foreach (var c in components)
+        {
+            string type = Ident(c.Name);
+            sb.AppendLine($"            case {Q(c.Name)}:");
+            sb.AppendLine("            {");
+            sb.AppendLine($"                if (!w.Has<{type}>(id)) return null;");
+            sb.AppendLine($"                var c = w.Get<{type}>(id);");
+            sb.AppendLine("                return field switch");
+            sb.AppendLine("                {");
+            foreach (var f in c.Fields) sb.AppendLine($"                    {Q(f.Name)} => {Box(f.Type, "c." + Ident(f.Name))},");
+            sb.AppendLine("                    _ => null,");
+            sb.AppendLine("                };");
+            sb.AppendLine("            }");
+        }
+        sb.AppendLine("            default: return null;");
+        sb.AppendLine("        }");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+
+        sb.AppendLine("    public IReadOnlyList<string> Marks(VeinWorld w, int id)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        var marks = new List<string>();");
+        foreach (var m in marks) sb.AppendLine($"        if (w.MarkedAs<global::Vein.Generated.{Ident(module.Name)}.Marks.{Ident(m.Name)}>(id)) marks.Add({Q(m.Name)});");
+        sb.AppendLine("        return marks;");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+
+        // Bare name or key, first match — Interp.FireHost's rule. Declared defaults fill what the host left
+        // out, and `from` names the runtime sender, as Interp.FireDevice / FireHost do.
+        sb.AppendLine("    public bool Raise(VeinWorld w, string name, IReadOnlyDictionary<string, object?> fields, string sender)");
+        sb.AppendLine("    {");
+        foreach (var e in events)
+        {
+            string type = EventType(e.Name);
+            sb.AppendLine($"        if (name == {Q(e.Name)} || {Q(e.Name)}.EndsWith(\".\" + name, StringComparison.Ordinal))");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            var e = new {type}();");
+            foreach (var f in e.Fields)
+            {
+                if (f.Name is "origin" or "source") continue;
+                if (f.Name == "from" && f.Type.Name == Lower.ProvenanceType)
+                {
+                    sb.AppendLine($"            e.from = new {Ident(Lower.ProvenanceType)} {{ name = sender, kind = \"Runtime\" }};");
+                    continue;
+                }
+                string fallback = f.Default is { } d ? Expr(d) : ZeroOf(f.Type);
+                sb.AppendLine($"            e.{Ident(f.Name)} = fields.TryGetValue({Q(f.Name)}, out var __{Ident(f.Name)}) ? {Conv(f.Type, "__" + Ident(f.Name))} : {fallback};");
+            }
+            sb.AppendLine($"            w.Emit({Q(e.Name)}, e);");
+            sb.AppendLine("            w.Drain();");
+            sb.AppendLine("            return true;");
+            sb.AppendLine("        }");
+        }
+        sb.AppendLine("        return false;");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+
+        sb.AppendLine("    public bool Publish(VeinWorld w, int id, string shape, string field, object? value)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        switch (shape)");
+        sb.AppendLine("        {");
+        foreach (var c in components)
+        {
+            string type = Ident(c.Name);
+            sb.AppendLine($"            case {Q(c.Name)}:");
+            sb.AppendLine("            {");
+            sb.AppendLine($"                var c = w.Has<{type}>(id) ? w.Get<{type}>(id) : default;");
+            sb.AppendLine("                switch (field)");
+            sb.AppendLine("                {");
+            foreach (var f in c.Fields) sb.AppendLine($"                    case {Q(f.Name)}: c.{Ident(f.Name)} = {Conv(f.Type, "value")}; break;");
+            sb.AppendLine("                    default: return false;");
+            sb.AppendLine("                }");
+            sb.AppendLine("                w.Publish(id, c);");
+            sb.AppendLine("                return true;");
+            sb.AppendLine("            }");
+        }
+        sb.AppendLine("            default: return false;");
+        sb.AppendLine("        }");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+
+        sb.AppendLine("    private static long __L(object? v) => v switch { long l => l, int i => i, double d => (long)d, float f => (long)f, bool b => b ? 1 : 0, string s when long.TryParse(s, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var r) => r, _ => 0 };");
+        sb.AppendLine("    private static double __D(object? v) => v switch { double d => d, long l => l, int i => i, float f => f, string s when double.TryParse(s, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var r) => r, _ => 0 };");
+        sb.AppendLine("    private static string __S(object? v) => v switch { null => \"\", string s => s, IFormattable f => f.ToString(null, System.Globalization.CultureInfo.InvariantCulture), _ => v.ToString() ?? \"\" };");
+        sb.AppendLine("    private static bool __B(object? v) => v switch { bool b => b, long l => l != 0, int i => i != 0, string s => s == \"true\", _ => false };");
         sb.AppendLine("}");
     }
 

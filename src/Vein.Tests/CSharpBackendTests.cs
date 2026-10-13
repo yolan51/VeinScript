@@ -197,7 +197,10 @@ public class CSharpBackendTests
         Assert.Contains("public static class Marks", code);
         Assert.Contains("public readonly struct Live : IIdentityTag { }", code);
         Assert.Contains("World.Defer(() => World.UnmarkAs<Marks.Live>(__e0))", code);
-        Assert.DoesNotContain("\"Live\"", code);   // no mark survives as a string
+        // No mark survives as a string in the PROGRAM. The generated __Host names marks by string on
+        // purpose — that is how a host reads them (IVeinCompiledProgram.Marks) — so it is left out here.
+        string program = code[..code.IndexOf("public sealed class __Host", StringComparison.Ordinal)];
+        Assert.DoesNotContain("\"Live\"", program);
     }
 
     [Fact]

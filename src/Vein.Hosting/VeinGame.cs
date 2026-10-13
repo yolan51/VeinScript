@@ -1,25 +1,40 @@
-using System.Text;
 using Vein.Compiler.Diagnostics;
 using Vein.Compiler.Ir;
 using Vein.Compiler.Project;
 using Vein.Compiler.Service;
+using Vein.Jit;
 
 namespace Vein.Hosting;
 
 /// A VeinScript program run by an engine: the engine owns the window, the frame clock, input, drawing and
 /// sound; the program owns the rules. See docs/HOSTING.md for the per-frame contract.
 ///
-/// Built from seams the interpreter already had — `Boot`/`Frame` for stepping, `FireTicked` for the clock,
-/// the `Fire*` device inputs, `World.Snapshot()` for what to draw, `AudioOut` for sound — plus
-/// `Interp.FireHost`/`Observed` for the program's own events. Single-threaded, like the interpreter:
-/// call it from the engine's main thread.
+/// Two runtimes behind one API (IGameRuntime): the interpreter, which runs the whole language, and the
+/// rules compiled to C# — ~14–25× faster — when the whole program compiles with nothing missing
+/// (VeinRuntime.Auto, the default). Every answer below (Drawables, Camera, Entities, …) is computed the
+/// same way from either, which is what keeps them giving the same answers. Single-threaded, like the
+/// interpreter: call it from the engine's main thread (ReloadInBackground compiles on a worker, and swaps
+/// on the caller's next Step).
 public sealed class VeinGame
 {
-    private Interp? _interp;
+    private IGameRuntime? _runtime;       // running
+    private IGameRuntime? _pending;       // opened, not started
+    private Prepared? _prepared;          // a background reload, waiting for the next Step to swap in
     private IReadOnlyList<VeinEntity>? _entities;
     private IReadOnlyList<VeinDrawable>? _drawables;
+    private readonly VeinRuntime _mode;
+    private readonly RuntimeSinks _sinks;
 
-    private VeinGame(string path) => Path = System.IO.Path.GetFullPath(path);
+    private VeinGame(string path, VeinRuntime mode)
+    {
+        Path = System.IO.Path.GetFullPath(path);
+        _mode = mode;
+        _sinks = new RuntimeSinks(
+            (line, isError) => Printed?.Invoke(line, isError),
+            (source, volume) => Sound?.Invoke(source, volume),
+            (name, payload) => Emitted?.Invoke(name, payload),
+            () => Emitted is not null);
+    }
 
     /// The `.vein` file or `app` manifest this game runs.
     public string Path { get; }
@@ -28,16 +43,25 @@ public sealed class VeinGame
     /// program running and puts its errors here.
     public IReadOnlyList<Diagnostic> Diagnostics { get; private set; } = Array.Empty<Diagnostic>();
 
+    /// "compiled" or "interpreter" — which runtime runs the rules (or will, once started); "none" before
+    /// anything compiled.
+    public string Runtime => (_runtime ?? _pending)?.Name ?? "none";
+
+    /// Why the rules are NOT compiled, when compiling was asked for (Auto or Compiled) and they could not
+    /// be without losing behaviour — e.g. "`every N` needs a wall clock". Empty when they are compiled, or
+    /// when the interpreter was asked for.
+    public string RuntimeNote { get; private set; } = "";
+
     /// True while a program is loaded and running.
-    public bool Running => _interp is not null && !_interp.Stopped;
+    public bool Running => _runtime?.Running ?? false;
 
     /// Marks under a standing `mute #M` right now (D20), and the keys of every shard currently silent —
     /// by `mute Name` or by carrying a muted mark. For a debugger's "what is paused" line.
-    public IReadOnlyList<string> MutedMarks => _interp?.MutedMarks.OrderBy(m => m, StringComparer.Ordinal).ToList() ?? new List<string>();
-    public IReadOnlyList<string> MutedShards => _interp?.MutedShards ?? Array.Empty<string>();
+    public IReadOnlyList<string> MutedMarks => _runtime?.MutedMarks ?? Array.Empty<string>();
+    public IReadOnlyList<string> MutedShards => _runtime?.MutedShards ?? Array.Empty<string>();
 
     /// Frames stepped since the program booted.
-    public int Tick => _interp?.Tick ?? 0;
+    public int Tick => _runtime?.Tick ?? 0;
 
     /// A line the program printed (`@Print`), and whether it was an error (`@PrintError`, or a runtime
     /// fault nobody heard).
@@ -50,33 +74,38 @@ public sealed class VeinGame
     /// printing (`@ShowMenu`, `@ShakeCamera`). The payload belongs to the program; read, don't keep.
     public event Action<string, IReadOnlyDictionary<string, object?>>? Emitted;
 
-    private IrModule? _pending;
+    /// A background reload (ReloadInBackground) was swapped in at the start of a Step: the rules restarted
+    /// from their boot, with fresh identity ids.
+    public event Action? Reloaded;
 
     /// Compile and boot. Never throws for a bad program: check `Running` and `Diagnostics`. A host that
     /// wants what the program prints or emits WHILE BOOTING (a score's first value, a welcome line) uses
     /// `Open`, subscribes, then `Start` — here the boot has already happened by the time `Load` returns.
-    public static VeinGame Load(string path)
+    public static VeinGame Load(string path, VeinRuntime runtime = VeinRuntime.Auto)
     {
-        var game = Open(path);
+        var game = Open(path, runtime);
         game.Start();
         return game;
     }
 
     /// Compile without booting, so the host can subscribe to `Printed`, `Sound` and `Emitted` first.
-    /// `Diagnostics` is filled; nothing runs until `Start`.
-    public static VeinGame Open(string path)
+    /// `Diagnostics`, `Runtime` and `RuntimeNote` are filled; nothing runs until `Start`.
+    public static VeinGame Open(string path, VeinRuntime runtime = VeinRuntime.Auto)
     {
-        var game = new VeinGame(path);
-        (game._pending, game.Diagnostics) = Compile(game.Path);
+        var game = new VeinGame(path, runtime);
+        var prepared = game.Prepare();
+        game.Diagnostics = prepared.Diagnostics;
+        game.RuntimeNote = prepared.Note;
+        game._pending = prepared.Runtime;
         return game;
     }
 
     /// Boot what `Open` compiled. False when it did not compile (see `Diagnostics`) or already started.
     public bool Start()
     {
-        if (_pending is not { } module) return false;
+        if (_pending is not { } runtime) return false;
         _pending = null;
-        Boot(module);
+        Boot(runtime);
         return true;
     }
 
@@ -85,51 +114,64 @@ public sealed class VeinGame
     /// the running program is KEPT and the errors are in `Diagnostics`: a typo must not stop the game.
     public bool Reload()
     {
-        var (module, diagnostics) = Compile(Path);
-        Diagnostics = diagnostics;
-        if (module is null) return false;
+        var prepared = Prepare();
+        Diagnostics = prepared.Diagnostics;
+        if (prepared.Runtime is null) return false;
+        RuntimeNote = prepared.Note;
         _pending = null;
-        Boot(module);
+        Boot(prepared.Runtime);
         return true;
     }
 
-    private void Boot(IrModule module)
+    /// `Reload`, with the compiling done on a worker thread — compiled rules can take a second to build,
+    /// and a game should not freeze for it. The new rules are swapped in at the start of the next `Step`
+    /// (on the caller's thread, like everything else), and `Reloaded` fires then. The task's result is
+    /// whether it compiled; when it did not, the running rules are kept and `Diagnostics` says why.
+    public Task<bool> ReloadInBackground() => Task.Run(() =>
     {
-        var interp = new Interp
+        var prepared = Prepare();
+        if (prepared.Runtime is null)
         {
-            BaseDirectory = System.IO.Path.GetDirectoryName(Path),
-            Output = new LineWriter(line => Printed?.Invoke(line, false)),
-            ErrorOutput = new LineWriter(line => Printed?.Invoke(line, true)),
-        };
-        interp.Observed = (name, payload) => Emitted?.Invoke(name, payload);
-        _interp = interp;
+            Diagnostics = prepared.Diagnostics;
+            return false;
+        }
+        Interlocked.Exchange(ref _prepared, prepared);
+        return true;
+    });
+
+    private void Boot(IGameRuntime runtime)
+    {
+        _runtime = runtime;
         _entities = null; _drawables = null;
-        using (Enter()) interp.Boot(module);
+        runtime.Start();
     }
 
     /// One frame: the clock event first (`*Vein.Time.Clock.@Ticked`, with `delta` in seconds), then every
-    /// `each tick`/`frame`/`settled` block — the order `veinc run --ticks` uses.
+    /// `each tick`/`frame`/`settled` block — the order `veinc run --ticks` uses — then any `every N` whose
+    /// seconds have passed on this clock.
     public void Step(double delta)
     {
-        if (!Running) return;
-        using (Enter())
+        if (Interlocked.Exchange(ref _prepared, null) is { Runtime: { } next } swap)
         {
-            _interp!.FireTicked(_interp.Tick + 1, delta);
-            _interp.Frame();
-            _interp.AdvanceEvery(delta);   // `every N` runs on the HOST's clock — there is no timer thread here
+            Diagnostics = swap.Diagnostics;
+            RuntimeNote = swap.Note;
+            Boot(next);
+            Reloaded?.Invoke();
         }
+        if (!Running) return;
+        _runtime!.Step(delta);
         _entities = null; _drawables = null;
     }
 
     // ---- input: the stdlib's *Vein.Input events -------------------------------------------------
 
-    public void KeyDown(string key) => Fire(i => i.FireKeyDown(key));
-    public void KeyUp(string key) => Fire(i => i.FireKeyUp(key));
-    public void TextInput(string text) => Fire(i => i.FireTextInput(text));
-    public void MouseDown(double x, double y, int button) => Fire(i => i.FireMouseDown(x, y, button));
-    public void MouseUp(double x, double y, int button) => Fire(i => i.FireMouseUp(x, y, button));
-    public void MouseMove(double x, double y) => Fire(i => i.FireMouseMove(x, y));
-    public void SoundEnded(long track) => Fire(i => i.FireSoundEnded(track));
+    public void KeyDown(string key) => Device("KeyDown", ("key", key));
+    public void KeyUp(string key) => Device("KeyUp", ("key", key));
+    public void TextInput(string text) => Device("TextInput", ("text", text));
+    public void MouseDown(double x, double y, int button) => Device("MouseDown", ("x", x), ("y", y), ("button", (long)button));
+    public void MouseUp(double x, double y, int button) => Device("MouseUp", ("x", x), ("y", y), ("button", (long)button));
+    public void MouseMove(double x, double y) => Device("MouseMove", ("x", x), ("y", y));
+    public void SoundEnded(long track) => Device("SoundEnded", ("track", track));
 
     /// Raise one of the PROGRAM'S events (`Emit("Paused")`, `Emit("Buy", new() { ["item"] = "sword" })`).
     /// False when the program declares no such event — a misspelt name is reported, not delivered to
@@ -137,20 +179,25 @@ public sealed class VeinGame
     public bool Emit(string eventName, IReadOnlyDictionary<string, object?>? fields = null)
     {
         if (!Running) return false;
-        bool ok;
-        using (Enter()) ok = _interp!.FireHost(eventName, fields);
+        bool ok = _runtime!.Raise(eventName, fields);
         _entities = null; _drawables = null;
         return ok;
+    }
+
+    private void Device(string name, params (string Field, object? Value)[] fields)
+    {
+        if (!Running) return;
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var (field, value) in fields) payload[field] = value;
+        _runtime!.Device(name, payload);
+        _entities = null; _drawables = null;
     }
 
     // ---- what to draw ---------------------------------------------------------------------------
 
     /// Every live identity, as committed at the end of the last step or input — the world a frame
     /// should draw. Snapshotted once per change, so reading it many times in a frame is free.
-    public IReadOnlyList<VeinEntity> Entities =>
-        _entities ??= _interp is null
-            ? Array.Empty<VeinEntity>()
-            : _interp.World.Snapshot().Select(s => new VeinEntity(s.Entity, s.Marks, s.Components)).ToList();
+    public IReadOnlyList<VeinEntity> Entities => _entities ??= _runtime?.Snapshot() ?? Array.Empty<VeinEntity>();
 
     /// Just what a 2D host draws, for every identity with a place and an `$Image` and/or `$Text` — the
     /// per-frame path. `Entities` copies every component of every identity; this reads the handful of
@@ -169,16 +216,13 @@ public sealed class VeinGame
     {
         get
         {
-            if (_interp is null) return null;
-            var store = _interp.World;
-            if (!store.Declared("Camera")) return null;
-            foreach (long id in store.Query(new[] { "Camera", "Position" }, Array.Empty<string>()))
+            if (_runtime is not { } r || !r.Declared("Camera")) return null;
+            foreach (long id in r.Ids("Camera"))
             {
-                string place = store.Declared("World") && store.Has(id, "World") ? "World" : "Position";
-                double Num(string shape, string field, double fallback) =>
-                    store.Read(id, shape, field) switch { long l => l, int i => i, double d => d, float f => f, _ => fallback };
-                double zoom = Num("Camera", "zoom", 1);
-                return new VeinCamera(id, Num(place, "x", 0), Num(place, "y", 0), zoom > 0 ? zoom : 1);
+                if (!r.Has(id, "Position")) continue;
+                string place = r.Declared("World") && r.Has(id, "World") ? "World" : "Position";
+                double zoom = Num(r, id, "Camera", "zoom", 1);
+                return new VeinCamera(id, Num(r, id, place, "x", 0), Num(r, id, place, "y", 0), zoom > 0 ? zoom : 1);
             }
             return null;
         }
@@ -186,56 +230,58 @@ public sealed class VeinGame
 
     private IReadOnlyList<VeinDrawable> BuildDrawables()
     {
-        if (_interp is null) return Array.Empty<VeinDrawable>();
-        var store = _interp.World;
-        bool hasWorld = store.Declared("World");
-        bool hasImage = store.Declared("Image"), hasText = store.Declared("Text");
+        if (_runtime is not { } r) return Array.Empty<VeinDrawable>();
+        bool hasWorld = r.Declared("World");
+        bool hasImage = r.Declared("Image"), hasText = r.Declared("Text");
         if (!hasImage && !hasText) return Array.Empty<VeinDrawable>();
-        bool hasRotation = store.Declared("Rotation"), hasScale = store.Declared("Scale");
-
-        double Num(long id, string shape, string field, double fallback) =>
-            store.Read(id, shape, field) switch { long l => l, int i => i, double d => d, float f => f, _ => fallback };
+        bool hasRotation = r.Declared("Rotation"), hasScale = r.Declared("Scale");
 
         var list = new List<VeinDrawable>();
-        foreach (long id in store.Query(new[] { "Position" }, Array.Empty<string>()))
+        foreach (long id in r.Ids("Position"))
         {
-            string? image = hasImage && store.Has(id, "Image") ? store.Read(id, "Image", "source")?.ToString() : null;
-            string? caption = hasText && store.Has(id, "Text") ? store.Read(id, "Text", "content")?.ToString() : null;
+            string? image = hasImage && r.Has(id, "Image") ? r.Read(id, "Image", "source")?.ToString() : null;
+            string? caption = hasText && r.Has(id, "Text") ? r.Read(id, "Text", "content")?.ToString() : null;
             if (image is null && caption is null) continue;
 
-            string place = hasWorld && store.Has(id, "World") ? "World" : "Position";
+            string place = hasWorld && r.Has(id, "World") ? "World" : "Position";
+            bool scaled = hasScale && r.Has(id, "Scale");
             list.Add(new VeinDrawable(
                 id,
-                Num(id, place, "x", 0), Num(id, place, "y", 0), Num(id, place, "z", 0),
-                hasRotation && store.Has(id, "Rotation") ? Num(id, "Rotation", "z", 0) : 0,
-                hasScale && store.Has(id, "Scale") ? Num(id, "Scale", "x", 1) : 1,
-                hasScale && store.Has(id, "Scale") ? Num(id, "Scale", "y", 1) : 1,
+                Num(r, id, place, "x", 0), Num(r, id, place, "y", 0), Num(r, id, place, "z", 0),
+                hasRotation && r.Has(id, "Rotation") ? Num(r, id, "Rotation", "z", 0) : 0,
+                scaled ? Num(r, id, "Scale", "x", 1) : 1,
+                scaled ? Num(r, id, "Scale", "y", 1) : 1,
                 image, caption));
         }
         return list;
     }
 
-    // ---- plumbing -------------------------------------------------------------------------------
+    private static double Num(IGameRuntime r, long id, string shape, string field, double fallback) =>
+        r.Read(id, shape, field) switch { long l => l, int i => i, double d => d, float f => f, _ => fallback };
 
-    private void Fire(Action<Interp> input)
-    {
-        if (!Running) return;
-        using (Enter()) input(_interp!);
-        _entities = null; _drawables = null;
-    }
+    // ---- compiling --------------------------------------------------------------------------------
 
-    /// `AudioOut.Hook` is process-wide, so it points at THIS game only while this game runs code — two
-    /// games in one host (an editor preview and a play window) each hear their own sounds.
-    private IDisposable Enter()
-    {
-        var previous = AudioOut.Hook;
-        AudioOut.Hook = (source, volume) => Sound?.Invoke(source, volume);
-        return new Restore(() => AudioOut.Hook = previous);
-    }
+    /// A compiled program and the runtime chosen for it — or, when it did not compile, only diagnostics.
+    private sealed record Prepared(IGameRuntime? Runtime, IReadOnlyList<Diagnostic> Diagnostics, string Note);
 
-    private sealed class Restore(Action undo) : IDisposable
+    /// Front end, then the runtime: compiled when asked (Auto or Compiled) and the whole program compiles
+    /// with no backend note; otherwise the interpreter, and the note says why.
+    private Prepared Prepare()
     {
-        public void Dispose() => undo();
+        var (module, diagnostics) = Compile(Path);
+        if (module is null) return new Prepared(null, diagnostics, "");
+
+        string baseDirectory = System.IO.Path.GetDirectoryName(Path)!;
+        if (_mode == VeinRuntime.Interpreter)
+            return new Prepared(new InterpRuntime(module, baseDirectory, _sinks), diagnostics, "");
+
+        HostBuild build;
+        try { build = VeinBuild.CompileForHost(module); }
+        catch (Exception ex) { build = new HostBuild(null, Array.Empty<string>(), new[] { $"{ex.GetType().Name}: {ex.Message}" }, ""); }
+
+        return build.Program is { } program
+            ? new Prepared(new CompiledRuntime(program, _sinks), diagnostics, "")
+            : new Prepared(new InterpRuntime(module, baseDirectory, _sinks), diagnostics, "not compiled: " + build.Reason);
     }
 
     /// The same front end `veinc run` uses: an `app` manifest is linked into one module, anything else
@@ -260,25 +306,5 @@ public sealed class VeinGame
             System.IO.Path.GetFileName(path), source,
             ProjectDir: System.IO.Path.GetDirectoryName(path), SourcePath: path));
         return (result.Success ? result.Entry : null, result.Diagnostics);
-    }
-
-    /// A TextWriter that hands each finished line to the host.
-    private sealed class LineWriter(Action<string> line) : TextWriter
-    {
-        private readonly StringBuilder _buffer = new();
-        public override Encoding Encoding => Encoding.UTF8;
-
-        public override void Write(char value)
-        {
-            if (value == '\n') { line(_buffer.ToString().TrimEnd('\r')); _buffer.Clear(); }
-            else _buffer.Append(value);
-        }
-
-        public override void Flush()
-        {
-            if (_buffer.Length == 0) return;
-            line(_buffer.ToString());
-            _buffer.Clear();
-        }
     }
 }

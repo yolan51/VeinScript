@@ -84,17 +84,39 @@ The vocabulary is the standard library's; nothing in it is engine-specific.
 So menus and HUDs are built in the engine's own editor and talk to the rules through events, which is
 where VeinScript's model already sits. A pause button emits `@Paused`; a shard answers `mute #Gameplay`.
 
+## Two runtimes: compiled when it can, the interpreter when it must
+
+`VeinGame.Open(path)` uses `VeinRuntime.Auto`: the rules are **compiled to C#** (~14–25× the
+interpreter) when the whole program compiles with nothing missing, and run on the **interpreter** (the
+whole language) otherwise. `game.Runtime` says which ("compiled" / "interpreter"); `game.RuntimeNote`
+says why not compiled, e.g. `not compiled: … every N needs a wall clock`. Ask for one with
+`Open(path, VeinRuntime.Interpreter)` or `VeinRuntime.Compiled` — a program that cannot be compiled
+without losing behaviour still runs, on the interpreter: a game never refuses to start.
+
+Not compiled yet, so these send a program to the interpreter: `every N`, `audience`, `carries` on a
+sender's `from`, and the built-ins `here pick toJson fromJson args now remove sort slice env`.
+
+Everything above — Drawables, Camera, Entities, events, sound, quit — answers the same from either
+runtime: `src/Vein.Tests/RuntimeParityTests.cs` plays the same games on both, with the same inputs and
+uneven frame times, and compares every frame. Two differences remain, said plainly: compiled `@Print`
+writes when its handler runs while the interpreter's writes when the queue drains (so prints and events
+may interleave differently), and `Emitted` from the compiled runtime shows the program's own and its
+stdlib data events, not the transport (`@Print`, `@PlaySound`) or an unheard clock tick.
+
+Compiled mode carries Roslyn (tens of MB) with the game, and compiles in about a second the first time;
+`game.ReloadInBackground()` does that on a worker thread and swaps the new rules in on the next `Step`
+(`game.Reloaded` fires then).
+
 ## Hot reload
 
 `game.Reload()` recompiles from disk and boots the new program **from its own boot**. State is not
 carried across an edit. If the edit does not compile, the running program is **kept** and the errors are
-in `game.Diagnostics`, so a typo never stops the game. A host watches the `.vein` files and calls it.
+in `game.Diagnostics`, so a typo never stops the game. A host watches the `.vein` files and calls it —
+or `ReloadInBackground()`, which compiles off the main thread and swaps on the next `Step`.
 
 ## Limits, said plainly
 
-- **Interpreter only, for now.** That covers the whole language (`audience`, `every`, `carries`, …) on
-  net8, which is what engine .NET runtimes load. The C# backend is ~18× faster but covers a subset; it can
-  later become a switch behind the same `VeinGame` API.
+- **Compiled covers most, not all.** See "Two runtimes" above for what still falls back.
 - **Single-threaded.** Call `VeinGame` from the engine's main thread, like any engine object.
 - **`AudioOut` is process-wide.** `VeinGame` points it at itself only while it runs code, so two games in
   one process (an editor preview and a play window) each hear their own sounds.

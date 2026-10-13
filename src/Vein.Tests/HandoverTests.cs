@@ -162,18 +162,20 @@ public class HandoverTests
     }
 
     [Fact]
-    public void The_backend_refuses_PlaySound_with_the_transport_note()
+    public void The_backend_bridges_PlaySound_to_the_host_rather_than_dropping_it()
     {
-        // The difference between "silent in a terminal" and "silent once built": the first is honest,
-        // the second would be a game that compiles, runs and never makes a sound.
+        // It used to be refused with a note — honest, but a compiled game was then silent. Now the backend
+        // emits `World.PlaySound`, which a host takes through VeinWorld.Sound (Vein.Hosting does), exactly
+        // as the interpreter's goes to AudioOut.Hook. No note: nothing is lost.
         var module = Module("""
             bundle T by you {
-                shard S { run once { emit *Vein.Audio.Sound.@PlaySound { source: "x.wav" } } }
+                shard S { run once { emit *Vein.Audio.Sound.@PlaySound { source: "x.wav", volume: 0.5 } } }
             }
             """);
         var emitted = new CSharpBackend().Emit(module);
 
-        Assert.Contains(emitted.Notes, n => n.Contains("@PlaySound") && n.Contains("transport lives on the interpreter"));
+        Assert.Contains("World.PlaySound(__VeinText.S(\"x.wav\"), (double)(0.5))", emitted.Files[0].Contents);
+        Assert.DoesNotContain(emitted.Notes, n => n.Contains("PlaySound"));
     }
 
     // ---- A shape cannot include a shape — now said, not discovered -----------------------------------

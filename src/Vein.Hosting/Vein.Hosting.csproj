@@ -16,6 +16,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Vein.Compiler\Vein.Compiler.csproj" />
+    <!-- The compiled path (VeinRuntime.Auto/Compiled): Roslyn and the SECS runtime come with it. -->
+    <ProjectReference Include="..\Vein.Jit\Vein.Jit.csproj" />
   </ItemGroup>
 
   <!-- The standard library travels INSIDE the dll and is unpacked once per version (StdlibCache), so a

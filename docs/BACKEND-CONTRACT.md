@@ -21,8 +21,14 @@ and no cost on the hot path.
 rule, and the `run once` / `each tick` / `settled` phases. That is the half worth compiling, because it
 is the half that runs per-entity per-frame. The reactive half (`emit`/`hear`, `@Response`, console,
 network, `every N`) stays on the interpreter, where the work is I/O-bound and interpretation costs
-nothing measurable. `@Print` is the one bridged event, so a generated program can be diffed against the
-interpreter at all. Anything outside the subset emits a **note**, never silent wrong code (rule 4).
+nothing measurable. The transport a GAME needs is bridged to the host through VeinWorld hooks: `@Print`
+(so a generated program can be diffed against the interpreter at all), and since 2026-10-13 `@PlaySound`
+(`VeinWorld.Sound`), `@PrintError` (`Err`) and `@Quit` (`ExitCode`, `Quitting`) — they were notes, and a
+compiled game was silent and could not end. Every program also gets `Program.Create()` (the world, not
+started) and a generated `__Host : IVeinCompiledProgram`, through which an engine (Vein.Hosting) steps and
+reads it with no reflection per frame; `src/Vein.Tests/RuntimeParityTests.cs` holds it to the interpreter.
+Anything outside the subset emits a **note**, never silent wrong code (rule 4) — and a host treats any
+note as "run this on the interpreter" (`VeinBuild.CompileForHost`).
 
 **Equivalence is the specification.** A backend's real spec is the runtime that already exists, so
 [tools/check-backend.sh](../tools/check-backend.sh) emits, compiles, runs, and **diffs against

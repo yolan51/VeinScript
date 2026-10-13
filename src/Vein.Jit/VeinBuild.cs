@@ -20,6 +20,20 @@ public sealed record JitResult(
     public string Report() => Errors.Count == 0 ? "ok" : string.Join("\n", Errors);
 }
 
+/// A program compiled for a host (VeinBuild.CompileForHost): its `__Host`, or the reason there is none —
+/// backend notes (a behaviour the compiled code would lack) or C# errors.
+public sealed record HostBuild(
+    Vein.Runtime.SECS.IVeinCompiledProgram? Program,
+    IReadOnlyList<string> Notes,
+    IReadOnlyList<string> Errors,
+    string Source)
+{
+    public bool Compiled => Program is not null;
+
+    /// Why it is not compiled, in one line ("" when it is) — the first note or error.
+    public string Reason => Compiled ? "" : (Notes.FirstOrDefault() ?? Errors.FirstOrDefault() ?? "not compiled");
+}
+
 /// Compiling a lowered VeinScript module to a real assembly, in memory.
 ///
 /// WHY THIS EXISTS. `veinc build` emits `.cs` files and shells out to `dotnet build` — correct for
@@ -83,6 +97,69 @@ public static class VeinBuild
         return new JitResult(true, Assembly.Load(peStream.ToArray()), Array.Empty<string>(), source);
     }
 
+    /// Compile `module` for a HOST that drives it frame by frame (Vein.Hosting): the program's generated
+    /// `__Host`, ready to `Create()` a world — or why it was not compiled.
+    ///
+    /// NOTES REFUSE IT. A note is the backend saying "this compiles, but a behaviour is missing" (`every N`
+    /// not scheduled, an `audience` not enforced, a built-in left on the interpreter). `Compile` ignores
+    /// them because a test wants the assembly anyway; a host must not run a game that silently does less
+    /// than its source says, so it gets the notes back and runs the interpreter instead.
+    ///
+    /// LOADED BESIDE THE RUNTIME THE HOST ALREADY HAS. An engine (Godot) loads its game assemblies into
+    /// its own load context. `Assembly.Load(bytes)` would let the generated code bind to a second copy of
+    /// Vein.Runtime.SECS — and the `VeinWorld` it returns would not be the type the host holds. The
+    /// program goes into a collectible context that resolves every reference from the context
+    /// `VeinWorld` was loaded into, so there is one copy, and a reload can be unloaded.
+    public static HostBuild CompileForHost(IrModule module, bool optimize = true)
+    {
+        var emitted = new CSharpBackend().Emit(module);
+        if (!emitted.Success || emitted.Files.Count == 0)
+            return new HostBuild(null, Array.Empty<string>(), new[] { "the backend produced no file for this module" }, "");
+
+        string source = emitted.Files[0].Contents;
+        if (emitted.Notes.Count > 0) return new HostBuild(null, emitted.Notes, Array.Empty<string>(), source);
+
+        var compilation = CSharpCompilation.Create(
+            "vein_" + Sanitize(module.Name) + "_" + Guid.NewGuid().ToString("N")[..8],   // unique per reload
+            new[] { CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest)) },
+            References(),
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                optimizationLevel: optimize ? OptimizationLevel.Release : OptimizationLevel.Debug,
+                nullableContextOptions: NullableContextOptions.Disable));
+
+        using var pe = new MemoryStream();
+        var result = compilation.Emit(pe);
+        if (!result.Success)
+            return new HostBuild(null, Array.Empty<string>(),
+                result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()).ToList(), source);
+
+        pe.Seek(0, SeekOrigin.Begin);
+        var assembly = new ProgramLoadContext().LoadFromStream(pe);
+        var hostType = assembly.GetTypes().FirstOrDefault(t => typeof(Vein.Runtime.SECS.IVeinCompiledProgram).IsAssignableFrom(t) && !t.IsAbstract);
+        if (hostType is null)
+            return new HostBuild(null, Array.Empty<string>(), new[] { "the compiled program has no __Host — regenerate it with this backend" }, source);
+        return new HostBuild((Vein.Runtime.SECS.IVeinCompiledProgram)Activator.CreateInstance(hostType)!, Array.Empty<string>(), Array.Empty<string>(), source);
+    }
+
+    /// Where a compiled program lives: collectible, and resolving every reference — Vein.Runtime.SECS,
+    /// ShardECS — from the load context the host's own `VeinWorld` came from (see CompileForHost).
+    private sealed class ProgramLoadContext : System.Runtime.Loader.AssemblyLoadContext
+    {
+        private static System.Runtime.Loader.AssemblyLoadContext Runtime =>
+            GetLoadContext(typeof(Vein.Runtime.SECS.VeinWorld).Assembly) ?? Default;
+
+        public ProgramLoadContext() : base("vein-program", isCollectible: true) { }
+
+        protected override Assembly? Load(AssemblyName name)
+        {
+            foreach (var loaded in Runtime.Assemblies)
+                if (AssemblyName.ReferenceMatchesDefinition(name, loaded.GetName())) return loaded;
+            try { return Runtime.LoadFromAssemblyName(name); }
+            catch (Exception) { return null; }   // the framework, from the default context
+        }
+    }
+
     /// Run a compiled program's entry point for `ticks` frames.
     ///
     /// The generated file carries its own `Program.Main(string[])` that reads `--ticks`, so this passes
@@ -130,7 +207,11 @@ public static class VeinBuild
         {
             try
             {
-                string? loc = Assembly.Load(referenced).Location;
+                // Through the runtime's own load context, not the default one: under an engine (Godot)
+                // ShardECS is not on the default probing path, and Assembly.Load would not find it.
+                var context = System.Runtime.Loader.AssemblyLoadContext.GetLoadContext(typeof(Vein.Runtime.SECS.VeinWorld).Assembly)
+                              ?? System.Runtime.Loader.AssemblyLoadContext.Default;
+                string? loc = context.LoadFromAssemblyName(referenced).Location;
                 if (loc is { Length: > 0 } && seen.Add(loc)) refs.Add(MetadataReference.CreateFromFile(loc));
             }
             catch (Exception) { /* a framework facade with no file — the TPA set already covers those */ }

@@ -367,8 +367,12 @@ public sealed class VeinWorld
     /// commits, and only THEN does `settled` run — so a death check reads an hp every system has finished
     /// subtracting from. It commits again afterwards, so a mark made in `settled` is visible to the NEXT
     /// frame rather than to the middle of this one.
+    /// Frames run since Start — Interp.Tick's counterpart, which a host reads to number its clock events.
+    public int Tick { get; private set; }
+
     public void Frame()
     {
+        Tick++;
         foreach (var s in _systems) if (!IsMuted(s)) s.Tick();
         Commit();
         Compose?.Invoke();   // between the tick commit and `settled` — see the field
@@ -379,7 +383,7 @@ public sealed class VeinWorld
 
     public void Run(int frames)
     {
-        for (int i = 0; i < frames; i++)
+        for (int i = 0; i < frames && !Stopped; i++)   // `quit` stops the run, as Interp.RunFrames does
         {
             Ticked?.Invoke(i + 1, 1.0 / 60.0);   // before the frame, as Interp.RunFrames does
             Frame();
@@ -387,6 +391,41 @@ public sealed class VeinWorld
     }
 
     public void Print(string text) => Out.WriteLine(text);
+
+    // ---- the host's side of the transport events (Interp.HostEvents) ------------------------------
+    //
+    // `@Print` was the one bridged; `@PlaySound`, `@PrintError` and `@Quit` were refused with a note and
+    // compiled to nothing, so a compiled game was silent, and could not end. Each now reaches the host the
+    // way the interpreter's does: sound through a hook (AudioOut.Hook there), errors to Err, and quit
+    // to an exit code the run loop stops on.
+
+    /// `@PlaySound { source, volume }`. Null — a console run — drops it, as `veinc run` does.
+    public Action<string, double>? Sound;
+    public void PlaySound(string source, double volume) => Sound?.Invoke(source, Math.Clamp(double.IsFinite(volume) ? volume : 1.0, 0.0, 1.0));
+
+    /// `@PrintError { text }` — stderr unless a host redirects it.
+    public TextWriter Err { get; set; } = Console.Error;
+    public void PrintError(string text) => Err.WriteLine(text);
+
+    /// `@Quit { code }`: the first code wins, as `Interp`'s `_quitCode ??=` does.
+    public int? ExitCode { get; private set; }
+    public bool Stopped => ExitCode is not null;
+    public Action<int>? Quitting;
+    public void Quit(int code)
+    {
+        if (ExitCode is not null) return;
+        ExitCode = code;
+        Quitting?.Invoke(code);
+    }
+
+    /// What is paused right now — Interp.MutedMarks/MutedShards, for a host'"'"'s debugger.
+    public IReadOnlyCollection<string> MutedMarks => _mutedMarks;
+    public IReadOnlyList<string> MutedShards => _byKey.Where(kv => IsMuted(kv.Value)).Select(kv => kv.Key).ToList();
+
+    /// Every event as Drain hands it out, by key, with its payload — Interp.Observed'"'"'s counterpart, for a
+    /// host that acts on events the program emits for it. Transport events (Print, PlaySound, …) do not
+    /// pass through the queue here; they reach the host through the hooks above.
+    public Action<string, object>? Observed;
 
     // ---- the reactive half ------------------------------------------------
     //
@@ -423,6 +462,7 @@ public sealed class VeinWorld
         while (_events.Count > 0 && guard++ < 10_000)
         {
             var (name, payload) = _events.Dequeue();
+            Observed?.Invoke(name, payload);
             if (_handlers.TryGetValue(name, out var hs))
                 foreach (var (owner, h) in hs)
                     if (owner is null || !IsMuted(owner)) h(payload);
