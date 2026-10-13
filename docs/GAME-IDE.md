@@ -1,5 +1,12 @@
 # VeinScript for 2D/3D games, and the IDE that would make it one
 
+> **Superseded again (2026-10-13): borrow an engine, don't build one.** Both engine routes below stalled
+> in the same place — rendering and UI — and neither was a language problem. VeinScript now runs only the
+> RULES inside an existing engine (Godot 4 .NET chosen), through the engine-neutral `Vein.Hosting` seam:
+> [HOSTING.md](HOSTING.md). The engine project lives in its own repo and takes VeinScript as versioned
+> packages (`tools/pack.sh`), never a project reference, so neither solution inherits the other's
+> problems. §2's language gaps still apply to games.
+
 > **§1's recommendation is withdrawn, and §4–§5 with it.** This document argued for consolidating into
 > `VeinEngine/ShardECS` and keeping its Avalonia editor. That was reasoned from a file count; the
 > Avalonia editor had *already been tried* — 3D rendering was buggy, extensive prompting and

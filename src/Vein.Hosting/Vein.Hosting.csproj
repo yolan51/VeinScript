@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The seam an ENGINE drives: load a program, step it, feed it input, read what to draw.
+       Engine-neutral on purpose (docs/HOSTING.md): nothing here may reference Godot, MonoGame or any
+       other host. A host consumes this as a versioned package (tools/pack.sh), never as source. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Vein.Hosting</RootNamespace>
+    <Version>0.1.0</Version>
+    <Authors>Yohann</Authors>
+    <Description>Run VeinScript game rules inside any .NET host: load, step, input, entities to draw.</Description>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Vein.Compiler\Vein.Compiler.csproj" />
+  </ItemGroup>
+
+  <!-- The standard library travels INSIDE the dll and is unpacked once per version (StdlibCache), so a
+       host needs no folder layout and no copy step: the package is the whole dependency. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\stdlib\**\*.vein" LogicalName="stdlib/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

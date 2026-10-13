@@ -8,6 +8,9 @@ namespace Vein.Tests;
 
 // The game editor's second handover, found by building things with the editor rather than by reading
 // the compiler. Each entry arrived with a reproduction that failed; each test here is that reproduction.
+// Serialised with the other tests that set process-wide hooks — `AudioOut.Hook` is one, and Vein.Hosting's
+// HostingTests set it too.
+[Collection(ConsoleRuntime.Name)]
 public class HandoverTests
 {
     private static CompilationResult Compile(string src) =>

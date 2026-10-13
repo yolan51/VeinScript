@@ -498,6 +498,41 @@ public sealed class Interp
     /// The sender is a registered runtime identity named `device`, the way stdin is registered as
     /// `stdin` — so `d.from.name` tells a program the key came from the host rather than from another
     /// bundle emitting it, and the audience barrier has something real to test.
+    /// A host raises one of the PROGRAM'S OWN events — a Godot pause button sending `@Paused`, a menu
+    /// sending `@StartGame` — and the queue drains, as for device input.
+    ///
+    /// The "bigger question" `FireSoundEnded` deferred, answered narrowly: only an event the program
+    /// DECLARES (or imports) can be raised, matched by its bare name (`Paused`) or its key
+    /// (`me.Game.Paused`). An unknown name is refused — false — rather than invented, because a host that
+    /// misspells an event would otherwise deliver to nobody and never find out. Omitted fields take the
+    /// declaration's defaults. The sender is the runtime's `host`, which carries no shard key and no marks.
+    public bool FireHost(string eventName, IReadOnlyDictionary<string, object?>? fields = null)
+    {
+        string? key = _events.ContainsKey(eventName) ? eventName
+            : _events.Keys.FirstOrDefault(k => k.EndsWith("." + eventName, StringComparison.Ordinal));
+        if (key is null) return false;
+
+        var host = _registry.Register("host", VeinKind.Runtime);
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["from"] = FromOf(host), ["origin"] = null, ["bundle"] = _bundle
+        };
+        foreach (var fld in _events[key].Fields)
+            if (fld.Name is not ("from" or "origin" or "source") && fld.Default is not null)
+                payload[fld.Name] = Eval(fld.Default, new Instance { Name = "host", Fc = host }, new Dictionary<string, object?>());
+        if (fields is not null)
+            foreach (var (f, v) in fields) payload[f] = v;
+
+        Emit(key, payload);
+        Drain();
+        return true;
+    }
+
+    /// Every event as it is handled — the readable name (`Paused`, not `me.Game.Paused`) and its payload.
+    /// For a host that acts on events the program emits for it (`@ShowMenu`, `@ShakeCamera`) beyond the
+    /// built-in transport ones (`@PlaySound` goes to `AudioOut`). Read-only: the payload is the program's.
+    public Action<string, IReadOnlyDictionary<string, object?>>? Observed;
+
     private void FireDevice(string name, params (string Field, object? Value)[] fields)
     {
         var device = _registry.Register("device", VeinKind.Runtime);
@@ -1235,6 +1270,7 @@ public sealed class Interp
         {
             var (name, payload) = _queue.Dequeue();
             _current = payload;   // emits inside handlers inherit this event's id into their trail
+            Observed?.Invoke(EventName(name), payload);
             if (name == "Response") { _responseBody = Str(payload.GetValueOrDefault("body")); _responseStatus = AsLong(payload.GetValueOrDefault("status")); continue; }
             if (name == "Print") { _out?.WriteLine(Str(payload.GetValueOrDefault("text"))); continue; }
             // `@PrintError` — stderr when the host gave one (`veinc run`, a built exe, `veinc test`), else
