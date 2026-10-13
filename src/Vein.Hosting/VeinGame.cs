@@ -44,12 +44,34 @@ public sealed class VeinGame
     /// printing (`@ShowMenu`, `@ShakeCamera`). The payload belongs to the program; read, don't keep.
     public event Action<string, IReadOnlyDictionary<string, object?>>? Emitted;
 
-    /// Compile and boot. Never throws for a bad program: check `Running` and `Diagnostics`.
+    private IrModule? _pending;
+
+    /// Compile and boot. Never throws for a bad program: check `Running` and `Diagnostics`. A host that
+    /// wants what the program prints or emits WHILE BOOTING (a score's first value, a welcome line) uses
+    /// `Open`, subscribes, then `Start` — here the boot has already happened by the time `Load` returns.
     public static VeinGame Load(string path)
     {
-        var game = new VeinGame(path);
-        game.Reload();
+        var game = Open(path);
+        game.Start();
         return game;
+    }
+
+    /// Compile without booting, so the host can subscribe to `Printed`, `Sound` and `Emitted` first.
+    /// `Diagnostics` is filled; nothing runs until `Start`.
+    public static VeinGame Open(string path)
+    {
+        var game = new VeinGame(path);
+        (game._pending, game.Diagnostics) = Compile(game.Path);
+        return game;
+    }
+
+    /// Boot what `Open` compiled. False when it did not compile (see `Diagnostics`) or already started.
+    public bool Start()
+    {
+        if (_pending is not { } module) return false;
+        _pending = null;
+        Boot(module);
+        return true;
     }
 
     /// Recompile from disk and boot afresh — what a host calls when a `.vein` file changes. The new
@@ -60,7 +82,13 @@ public sealed class VeinGame
         var (module, diagnostics) = Compile(Path);
         Diagnostics = diagnostics;
         if (module is null) return false;
+        _pending = null;
+        Boot(module);
+        return true;
+    }
 
+    private void Boot(IrModule module)
+    {
         var interp = new Interp
         {
             BaseDirectory = System.IO.Path.GetDirectoryName(Path),
@@ -71,7 +99,6 @@ public sealed class VeinGame
         _interp = interp;
         _entities = null;
         using (Enter()) interp.Boot(module);
-        return true;
     }
 
     /// One frame: the clock event first (`*Vein.Time.Clock.@Ticked`, with `delta` in seconds), then every

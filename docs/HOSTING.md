@@ -29,7 +29,9 @@ The standard library travels inside `Vein.Hosting.dll` and is unpacked once per 
 ## Each frame
 
 ```csharp
-var game = VeinGame.Load("res/vein/game.vein");   // a .vein file or an `app` manifest
+var game = VeinGame.Open("res/vein/game.vein");   // a .vein file or an `app` manifest — compiled, not booted
+game.Printed += …;  game.Emitted += …;            // subscribe FIRST, to hear what the boot says
+game.Start();                                      // (VeinGame.Load = Open + Start, for a host that does not care)
 foreach (var d in game.Diagnostics) Log(d);        // never throws for a bad program — check game.Running
 
 // input, as it happens (the stdlib's *Vein.Input events):

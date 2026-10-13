@@ -111,6 +111,33 @@ public class HostingTests : IDisposable
     }
 
     [Fact]
+    public void Open_then_Start_lets_the_host_hear_what_the_program_says_while_booting()
+    {
+        // A HUD's first score is emitted at boot. With Load, the boot is over before the host can
+        // subscribe, so the label would sit empty until the first coin.
+        string path = Write("boot.vein", """
+            bundle Boot by me {
+                event @Score { value: int }
+                shard Start { run once {
+                    emit *Vein.Console.Io.@Print { text: "hello" }
+                    emit @Score { value: 0 }
+                } }
+            }
+            """);
+
+        var game = VeinGame.Open(path);
+        Assert.False(game.Running);   // compiled, not booted
+        var heard = new List<string>();
+        game.Printed += (line, _) => heard.Add("print " + line);
+        game.Emitted += (name, payload) => { if (name == "Score") heard.Add("score " + payload["value"]); };
+
+        Assert.True(game.Start());
+        Assert.True(game.Running);
+        Assert.Equal(new[] { "print hello", "score 0" }, heard);
+        Assert.False(game.Start());   // once
+    }
+
+    [Fact]
     public void Raising_an_event_the_program_does_not_declare_is_refused()
     {
         var game = VeinGame.Load(Write("game.vein", Game()));
