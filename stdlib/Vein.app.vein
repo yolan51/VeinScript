@@ -19,4 +19,6 @@ app Vein {
     load "Net.vein"
     load "Rest.vein"
     load "Files.vein"
+    load "Audio.vein"
+    load "Graphics.vein"
 }

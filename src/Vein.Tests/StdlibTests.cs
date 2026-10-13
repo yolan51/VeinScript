@@ -422,4 +422,28 @@ public class StdlibTests
         Assert.Contains("PlaySound", Interp.HostEvents);
         Assert.DoesNotContain("SoundEnded", Interp.HostEvents);
     }
+
+    [Fact]
+    public void AnimationEnded_is_raised_by_the_host_and_heard_with_its_entity_and_clip()
+    {
+        // *Vein.Graphics: the program says WHICH clip plays ($Animation); only the host knows when it ends.
+        var r = CompileSrc("""
+            bundle T by me {
+                need "Vein.Graphics"
+                shard Ended { hear *Vein.Graphics.Animations.@AnimationEnded as e {
+                    emit *Vein.Console.Io.@Print { text: "ended " + e.name + " on " + e.entity } } }
+            }
+            """);
+        Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
+
+        var sw = new StringWriter();
+        var interp = new Interp { Output = sw };
+
+        interp.Boot(r.Modules[0]);
+        interp.FireAnimationEnded(3, "jump");
+
+        Assert.Contains("ended jump on 3", sw.ToString());
+        Assert.Contains("AnimationEnded", Interp.RuntimeEvents);
+        Assert.DoesNotContain("AnimationEnded", Interp.HostEvents);
+    }
 }

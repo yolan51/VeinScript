@@ -70,6 +70,10 @@ The vocabulary is the standard library's; nothing in it is engine-specific.
 | `*Vein.Input.Keyboard.@KeyDown` / `@KeyUp` / `@TextInput` | raised by `game.KeyDown(…)` etc. |
 | `*Vein.Input.Mouse.@MouseDown` / `@MouseUp` / `@MouseMove` | raised by `game.MouseDown(…)` etc. |
 | `*Vein.Audio.Sound.@SoundEnded { track }` | raise it with `game.SoundEnded(track)` |
+| `*Vein.Graphics.Models.$Model { source }` | **3D**: the model to show at the place (`game.Models`: xyz, rotation xyz in radians, scale xyz) |
+| `*Vein.Graphics.Animations.$Animation { name, speed }` | which clip the engine plays on that identity's model (`m.Animation`); how the clip looks is the engine's |
+| `*Vein.Graphics.Animations.@AnimationEnded { entity, name }` | raise it with `game.AnimationEnded(id, clip)` when a non-looping clip finishes |
+| the camera identity's `z` and `$Rotation` | **3D**: the camera's place and turn (`c.Z`, `c.RotationX/Y/Z`); `c.FieldOfView` is 70° ÷ zoom |
 
 **The program's own events** connect it to the engine's UI, in both directions:
 

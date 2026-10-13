@@ -498,6 +498,12 @@ public sealed class Interp
     /// `HostEvents` and the C# backend compiles it like any other event.
     public void FireSoundEnded(long track) => FireDevice("SoundEnded", ("track", track));
 
+    /// `*Vein.Graphics.Animations.@AnimationEnded { entity, name }` — the clip `name` that `entity`'s
+    /// `$Animation` asked for reached its end. The same reasoning as `FireSoundEnded`: only the host owns
+    /// the clock the clip ran on, and the event is pure data.
+    public void FireAnimationEnded(long entity, string name) =>
+        FireDevice("AnimationEnded", ("entity", entity), ("name", name));
+
     /// One device occurrence, with the provenance envelope every event carries.
     ///
     /// The sender is a registered runtime identity named `device`, the way stdin is registered as
@@ -1879,7 +1885,7 @@ public sealed class Interp
             "Request", "Response", "DiagnosticRaised", "Failed", "Fetched",
             "FileLoaded", "FileMissing", "FileWritten", "Input", "Message", "Undelivered",
             "KeyDown", "KeyUp", "TextInput", "MouseDown", "MouseUp", "MouseMove",
-            "Ticked", "SoundEnded", "InputEnded",
+            "Ticked", "SoundEnded", "AnimationEnded", "InputEnded",
         };
 
     /// The names `Prebuilt` below answers to. Declared as a set because `Lower` needs the same list: a

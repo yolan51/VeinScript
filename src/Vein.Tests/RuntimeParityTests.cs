@@ -32,7 +32,7 @@ public class RuntimeParityTests : IDisposable
     private static readonly HashSet<string> NotCompared = new(StringComparer.Ordinal)
     {
         "Print", "PrintError", "PrintInline", "PlaySound", "Quit", "Ticked",
-        "KeyDown", "KeyUp", "TextInput", "MouseDown", "MouseUp", "MouseMove", "SoundEnded",
+        "KeyDown", "KeyUp", "TextInput", "MouseDown", "MouseUp", "MouseMove", "SoundEnded", "AnimationEnded",
     };
     private static readonly HashSet<string> Envelope = new(StringComparer.Ordinal) { "from", "origin", "source", "bundle", "id", "cause", "trail" };
 
@@ -71,6 +71,7 @@ public class RuntimeParityTests : IDisposable
             lines.Add($"#{e.Id} {string.Join(",", e.Marks)} " + string.Join(" ", e.Shapes.Select(s =>
                 $"${s.Key}{{{string.Join(",", s.Value.OrderBy(f => f.Key, StringComparer.Ordinal).Select(f => $"{f.Key}={Fmt(f.Value)}"))}}}")));
         foreach (var d in g.Drawables) lines.Add($"draw {d}");
+        foreach (var m in g.Models) lines.Add($"model {m}");
         lines.Add($"camera {g.Camera}");
         return string.Join("\n", lines);
     }
@@ -324,5 +325,49 @@ public class RuntimeParityTests : IDisposable
         Assert.Contains("every", game.RuntimeNote);
         Assert.Equal("interpreter", VeinGame.Open(path, VeinRuntime.Compiled).Runtime);   // never refuses to run
         Assert.Equal("", VeinGame.Open(path, VeinRuntime.Interpreter).RuntimeNote);
+    }
+
+    [Fact]
+    public void Models_their_clips_and_a_3D_camera_agree()
+    {
+        string path = Write("stage.vein", """
+            bundle Stage by me {
+                need "Vein.Transform"
+                need "Vein.Graphics"
+                need "Vein.UI"
+                mark #Robot
+                shard Start { run once {
+                    let r = spawn()
+                    attach $Position to r { x: 1.0, y: 0.0, z: -3.0 }
+                    attach $Model to r { source: "res://robot.glb" }
+                    attach $Rotation to r { x: 0.0, y: 0.5, z: 0.0 }
+                    attach $Scale to r { x: 2.0, y: 2.0, z: 2.0 }
+                    attach $Animation to r { name: "walk" }
+                    mark r #Robot
+                    let cam = spawn()
+                    attach $Position to cam { x: 0.0, y: 2.0, z: 5.0 }
+                    attach $Rotation to cam { x: -0.3, y: 0.0, z: 0.0 }
+                    attach $Camera to cam { zoom: 2.0 }
+                } }
+                shard Turn { each tick { target $Rotation #Robot as r { r.Rotation.y += 0.1 } } }
+                shard Clips { hear *Vein.Graphics.Animations.@AnimationEnded as a {
+                    target $Animation #Robot as r { if a.name == "walk" { r.Animation.name = "idle" } }
+                    emit *Vein.Console.Io.@Print { text: "ended " + a.name + " on " + a.entity }
+                } }
+            }
+            """);
+
+        Same(path, 6, (g, i) =>
+        {
+            if (i == 0)
+            {
+                var robot = Assert.Single(g.Models);
+                Assert.Equal(("res://robot.glb", "walk", -3.0, 2.0), (robot.Source, robot.Animation, robot.Z, robot.ScaleZ));
+                var cam = g.Camera!.Value;
+                Assert.Equal((5.0, -0.3, 35.0), (cam.Z, cam.RotationX, cam.FieldOfView));
+            }
+            if (i == 3) g.AnimationEnded(g.Models[0].Id, "walk");
+            if (i == 4) Assert.Equal("idle", g.Models[0].Animation);
+        });
     }
 }

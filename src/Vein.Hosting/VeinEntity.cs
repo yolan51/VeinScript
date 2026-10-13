@@ -59,4 +59,23 @@ public readonly record struct VeinDrawable(
     long Id, double X, double Y, double Z, double Rotation, double ScaleX, double ScaleY, string? Image, string? Caption);
 
 /// The view's centre and zoom (VeinGame.Camera), from the identity carrying `*Vein.UI.Surface.$Camera`.
-public readonly record struct VeinCamera(long Id, double X, double Y, double Zoom);
+/// A 2D host reads X, Y and Zoom. A 3D host also reads Z and the camera identity's `$Rotation` (radians,
+/// 0 without one), and narrows the field of view as it zooms: `FieldOfView` is 70° at zoom 1.
+public readonly record struct VeinCamera(
+    long Id, double X, double Y, double Zoom,
+    double Z = 0, double RotationX = 0, double RotationY = 0, double RotationZ = 0)
+{
+    public const double BaseFieldOfView = 70;
+
+    /// Degrees, for a 3D host: 70 / zoom, kept between 1° and 179°.
+    public double FieldOfView => Math.Clamp(BaseFieldOfView / Zoom, 1, 179);
+}
+
+/// One model to show this frame (VeinGame.Models): which, where, turned and sized how, playing what.
+/// Rotation is radians about each axis; `Animation` is the clip `$Animation` names, or null without one.
+public readonly record struct VeinModel(
+    long Id, string Source,
+    double X, double Y, double Z,
+    double RotationX, double RotationY, double RotationZ,
+    double ScaleX, double ScaleY, double ScaleZ,
+    string? Animation, double AnimationSpeed);

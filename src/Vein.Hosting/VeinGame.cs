@@ -22,6 +22,7 @@ public sealed class VeinGame
     private Prepared? _prepared;          // a background reload, waiting for the next Step to swap in
     private IReadOnlyList<VeinEntity>? _entities;
     private IReadOnlyList<VeinDrawable>? _drawables;
+    private IReadOnlyList<VeinModel>? _models;
     private readonly VeinRuntime _mode;
     private readonly RuntimeSinks _sinks;
 
@@ -142,7 +143,7 @@ public sealed class VeinGame
     private void Boot(IGameRuntime runtime)
     {
         _runtime = runtime;
-        _entities = null; _drawables = null;
+        Changed();
         runtime.Start();
     }
 
@@ -160,7 +161,7 @@ public sealed class VeinGame
         }
         if (!Running) return;
         _runtime!.Step(delta);
-        _entities = null; _drawables = null;
+        Changed();
     }
 
     // ---- input: the stdlib's *Vein.Input events -------------------------------------------------
@@ -173,6 +174,9 @@ public sealed class VeinGame
     public void MouseMove(double x, double y) => Device("MouseMove", ("x", x), ("y", y));
     public void SoundEnded(long track) => Device("SoundEnded", ("track", track));
 
+    /// The clip `name` reached its end on `entity` — the host owns the clock it ran on (*Vein.Graphics).
+    public void AnimationEnded(long entity, string name) => Device("AnimationEnded", ("entity", entity), ("name", name));
+
     /// Raise one of the PROGRAM'S events (`Emit("Paused")`, `Emit("Buy", new() { ["item"] = "sword" })`).
     /// False when the program declares no such event — a misspelt name is reported, not delivered to
     /// nobody.
@@ -180,7 +184,7 @@ public sealed class VeinGame
     {
         if (!Running) return false;
         bool ok = _runtime!.Raise(eventName, fields);
-        _entities = null; _drawables = null;
+        Changed();
         return ok;
     }
 
@@ -190,7 +194,7 @@ public sealed class VeinGame
         var payload = new Dictionary<string, object?>(StringComparer.Ordinal);
         foreach (var (field, value) in fields) payload[field] = value;
         _runtime!.Device(name, payload);
-        _entities = null; _drawables = null;
+        Changed();
     }
 
     // ---- what to draw ---------------------------------------------------------------------------
@@ -222,10 +226,57 @@ public sealed class VeinGame
                 if (!r.Has(id, "Position")) continue;
                 string place = r.Declared("World") && r.Has(id, "World") ? "World" : "Position";
                 double zoom = Num(r, id, "Camera", "zoom", 1);
-                return new VeinCamera(id, Num(r, id, place, "x", 0), Num(r, id, place, "y", 0), zoom > 0 ? zoom : 1);
+                bool turned = r.Declared("Rotation") && r.Has(id, "Rotation");
+                return new VeinCamera(id, Num(r, id, place, "x", 0), Num(r, id, place, "y", 0), zoom > 0 ? zoom : 1,
+                    Num(r, id, place, "z", 0),
+                    turned ? Num(r, id, "Rotation", "x", 0) : 0,
+                    turned ? Num(r, id, "Rotation", "y", 0) : 0,
+                    turned ? Num(r, id, "Rotation", "z", 0) : 0);
             }
             return null;
         }
+    }
+
+    /// What a 3D host shows, for every identity with a place and a `*Vein.Graphics.Models.$Model` — the
+    /// 3D counterpart of `Drawables`, read the same lean way. Placed at `$World` (else `$Position`), all
+    /// three axes; turned by `$Rotation` (radians, all three; 0 without one); sized by `$Scale` ((1, 1, 1)
+    /// without one); and the clip its `*Vein.Graphics.Animations.$Animation` asks for, if it carries one.
+    public IReadOnlyList<VeinModel> Models => _models ??= BuildModels();
+
+    private IReadOnlyList<VeinModel> BuildModels()
+    {
+        if (_runtime is not { } r || !r.Declared("Model")) return Array.Empty<VeinModel>();
+        bool hasWorld = r.Declared("World"), hasRotation = r.Declared("Rotation"), hasScale = r.Declared("Scale");
+        bool hasAnimation = r.Declared("Animation");
+
+        var list = new List<VeinModel>();
+        foreach (long id in r.Ids("Model"))
+        {
+            if (!r.Has(id, "Position")) continue;
+            string source = r.Read(id, "Model", "source")?.ToString() ?? "";
+            string place = hasWorld && r.Has(id, "World") ? "World" : "Position";
+            bool turned = hasRotation && r.Has(id, "Rotation");
+            bool scaled = hasScale && r.Has(id, "Scale");
+            bool animated = hasAnimation && r.Has(id, "Animation");
+            list.Add(new VeinModel(
+                id, source,
+                Num(r, id, place, "x", 0), Num(r, id, place, "y", 0), Num(r, id, place, "z", 0),
+                turned ? Num(r, id, "Rotation", "x", 0) : 0,
+                turned ? Num(r, id, "Rotation", "y", 0) : 0,
+                turned ? Num(r, id, "Rotation", "z", 0) : 0,
+                scaled ? Num(r, id, "Scale", "x", 1) : 1,
+                scaled ? Num(r, id, "Scale", "y", 1) : 1,
+                scaled ? Num(r, id, "Scale", "z", 1) : 1,
+                animated ? r.Read(id, "Animation", "name")?.ToString() : null,
+                animated ? Num(r, id, "Animation", "speed", 1) : 1));
+        }
+        return list;
+    }
+
+    /// Everything read from the world is stale once rules have run.
+    private void Changed()
+    {
+        _entities = null; _drawables = null; _models = null;
     }
 
     private IReadOnlyList<VeinDrawable> BuildDrawables()

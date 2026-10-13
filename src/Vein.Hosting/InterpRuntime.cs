@@ -60,6 +60,7 @@ internal sealed class InterpRuntime : IGameRuntime
                 case "MouseUp": _interp.FireMouseUp(Num(f, "x"), Num(f, "y"), (int)Num(f, "button")); break;
                 case "MouseMove": _interp.FireMouseMove(Num(f, "x"), Num(f, "y")); break;
                 case "SoundEnded": _interp.FireSoundEnded((long)Num(f, "track")); break;
+                case "AnimationEnded": _interp.FireAnimationEnded((long)Num(f, "entity"), Text(f, "name")); break;
                 default: throw new ArgumentException($"not a device event: {name}", nameof(name));
             }
     }
