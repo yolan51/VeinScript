@@ -32,4 +32,19 @@ public sealed record VeinEntity(
 
     /// `*Vein.UI.Widgets.$Image { source }` — what a 2D host draws there.
     public string? Image => Text("Image", "source");
+
+    /// Where to DRAW it: `$World` (where it actually is, after its parents — written by the runtime) when
+    /// the program has one, else `$Position`. A child drawn at its `$Position` would sit at its offset from
+    /// the origin instead of from its parent.
+    public (double X, double Y)? Placement =>
+        Has("World") ? (Number("World", "x"), Number("World", "y")) : Position;
+
+    /// `$Rotation.z` in radians — the 2D angle. Null when it carries no `$Rotation`.
+    public double? Rotation => Has("Rotation") ? Number("Rotation", "z") : null;
+
+    /// `$Scale` (x, y). Null when it carries no `$Scale`, which a host reads as (1, 1).
+    public (double X, double Y)? Scale => Has("Scale") ? (Number("Scale", "x", 1), Number("Scale", "y", 1)) : null;
+
+    /// `*Vein.UI.Widgets.$Text { content }` — words to draw at its placement.
+    public string? Caption => Text("Text", "content");
 }

@@ -39,11 +39,12 @@ game.KeyDown("Left");   game.KeyUp("Left");   game.TextInput("a");
 game.MouseDown(x, y, 1);   game.MouseUp(x, y, 1);   game.MouseMove(x, y);
 
 // once per frame:
-game.Step(delta);       // fires *Vein.Time.Clock.@Ticked { frame, delta }, then each tick/frame/settled
+game.Step(delta);       // fires *Vein.Time.Clock.@Ticked { frame, delta }, then each tick/frame/settled,
+                        // then every `every N` block whose N seconds of THIS clock have passed
 
 // then draw what is there:
 foreach (var e in game.Entities)
-    if (e.Position is { } p && e.Image is { } image) Draw(e.Id, image, p.X, p.Y);
+    if (e.Placement is { } p && e.Image is { } image) Draw(e.Id, image, p.X, p.Y, e.Rotation ?? 0, e.Scale ?? (1, 1));
 ```
 
 `Entities` is the world as committed after the last step or input: an id that never changes for an
@@ -58,7 +59,10 @@ The vocabulary is the standard library's; nothing in it is engine-specific.
 |---|---|
 | `*Vein.Transform.Spatial.$Position { x, y, z }` | where to put the node |
 | `*Vein.UI.Widgets.$Image { source }` | the texture to draw there (`e.Image`) |
-| `*Vein.Transform.Spatial.$Rotation`, `$Scale` | read from `e.Shapes` when the host supports them |
+| `*Vein.Transform.Spatial.$World` | where it really is after its parents — `e.Placement` prefers it to `$Position` |
+| `*Vein.Transform.Spatial.$Rotation` (radians, `z` in 2D), `$Scale` | `e.Rotation`, `e.Scale` |
+| `*Vein.UI.Widgets.$Text { content }` | words to draw at the placement (`e.Caption`) |
+| `*Vein.Console.Io.@Quit { code }` | seen through `Emitted`; `game.Running` turns false — close the game |
 | `*Vein.Audio.Sound.@PlaySound { source, volume }` | `game.Sound += (source, volume) => …` |
 | `*Vein.Console.Io.@Print`, `@PrintError` | `game.Printed += (line, isError) => …` |
 | `*Vein.Input.Keyboard.@KeyDown` / `@KeyUp` / `@TextInput` | raised by `game.KeyDown(…)` etc. |
@@ -92,3 +96,11 @@ in `game.Diagnostics`, so a typo never stops the game. A host watches the `.vein
 - **Single-threaded.** Call `VeinGame` from the engine's main thread, like any engine object.
 - **`AudioOut` is process-wide.** `VeinGame` points it at itself only while it runs code, so two games in
   one process (an editor preview and a play window) each hear their own sounds.
+
+## Colouring `.vein` in an engine's editor
+
+`VeinSyntax.Classify(line)` splits one line into coloured runs (`Keyword`, `Comment`, `String`, `Number`,
+`Shape`, `Mark`, `Event`, `Builder`, `Shard`) using the compiler's own lexer, so an editor's colours never
+disagree with what the language parses. A host maps the kinds to colours, e.g. the Workbench's
+(`src/Vein.Workbench/Assets/VeinScript.xshd`). `VeinGame.Open(path).Diagnostics` is the matching "problems"
+list: it compiles without running anything.

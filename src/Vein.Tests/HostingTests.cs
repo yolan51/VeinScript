@@ -213,4 +213,99 @@ public class HostingTests : IDisposable
         Assert.Contains("hud saw pause", printed);
         Assert.Single(game.Entities, e => e.Carries("Player"));
     }
+
+    // ---- what the addon pass added ----------------------------------------------------------
+
+    [Fact]
+    public void Every_blocks_run_on_the_hosts_clock_each_at_its_own_interval()
+    {
+        // Under a host there is no timer thread: before AdvanceEvery, these never fired at all.
+        var game = VeinGame.Open(Write("every.vein", """
+            bundle Timers by me {
+                shard Fast { every 0.5 { emit *Vein.Console.Io.@Print { text: "fast" } } }
+                shard Slow { every 1.0 { emit *Vein.Console.Io.@Print { text: "slow" } } }
+            }
+            """));
+        var printed = new List<string>();
+        game.Printed += (line, _) => printed.Add(line);
+        game.Start();
+
+        for (int i = 0; i < 8; i++) game.Step(0.25);   // two seconds
+
+        Assert.Equal(4, printed.Count(p => p == "fast"));
+        Assert.Equal(2, printed.Count(p => p == "slow"));
+    }
+
+    [Fact]
+    public void Quit_stops_the_game_and_the_host_hears_it()
+    {
+        var game = VeinGame.Open(Write("quit.vein", """
+            bundle Q by me {
+                shard S { each tick { do *Vein.Console.Io.quit(3) } }
+            }
+            """));
+        var events = new List<string>();
+        game.Emitted += (name, payload) => events.Add(name + " " + payload.GetValueOrDefault("code"));
+        game.Start();
+
+        game.Step(1.0 / 60);
+
+        Assert.Contains("Quit 3", events);
+        Assert.False(game.Running);
+    }
+
+    [Fact]
+    public void An_entity_says_where_and_how_to_draw_it()
+    {
+        var game = VeinGame.Load(Write("draw.vein", """
+            bundle Draw by me {
+                builder Sign {
+                    *Vein.Transform.Spatial.$Position
+                    *Vein.Transform.Spatial.$Rotation
+                    *Vein.Transform.Spatial.$Scale
+                    *Vein.UI.Widgets.$Text
+                    mark #Sign
+                }
+                mark #Sign
+                shard Start { run once { bring Sign(10.0, 20.0, 0.0,  0.0, 0.0, 1.5,  2.0, 3.0, 1.0,  "hello") } }
+            }
+            """));
+
+        var sign = Assert.Single(game.Entities, e => e.Carries("Sign"));
+        Assert.Equal((10.0, 20.0), sign.Placement);
+        Assert.Equal(1.5, sign.Rotation);
+        Assert.Equal((2.0, 3.0), sign.Scale);
+        Assert.Equal("hello", sign.Caption);
+        Assert.Null(sign.Image);
+    }
+
+    [Fact]
+    public void A_line_is_coloured_by_the_compilers_own_lexer()
+    {
+        const string line = "    hear @Chat as c audience not !Spammer #Banned $S { emit @X { n: 3 } }   // \"not a string\"";
+        var tokens = VeinSyntax.Classify(line);
+        string Text(VeinToken t) => line.Substring(t.Column, t.Length);
+
+        Assert.Contains(tokens, t => t.Kind == VeinTokenKind.Keyword && Text(t) == "hear");
+        Assert.Contains(tokens, t => t.Kind == VeinTokenKind.Keyword && Text(t) == "audience");
+        Assert.Contains(tokens, t => t.Kind == VeinTokenKind.Event && Text(t) == "@Chat");
+        Assert.Contains(tokens, t => t.Kind == VeinTokenKind.Shard && Text(t) == "!Spammer");
+        Assert.Contains(tokens, t => t.Kind == VeinTokenKind.Mark && Text(t) == "#Banned");
+        Assert.Contains(tokens, t => t.Kind == VeinTokenKind.Shape && Text(t) == "$S");
+        Assert.Contains(tokens, t => t.Kind == VeinTokenKind.Number && Text(t) == "3");
+        // The quote inside the comment is comment, not a string.
+        var comment = Assert.Single(tokens, t => t.Kind == VeinTokenKind.Comment);
+        Assert.StartsWith("//", Text(comment));
+        Assert.DoesNotContain(tokens, t => t.Kind == VeinTokenKind.String);
+    }
+
+    [Fact]
+    public void A_slash_slash_inside_a_string_is_not_a_comment()
+    {
+        const string line = "emit @Go { url: \"http://x\" }";
+        var tokens = VeinSyntax.Classify(line);
+
+        Assert.Contains(tokens, t => t.Kind == VeinTokenKind.String && line.Substring(t.Column, t.Length) == "\"http://x\"");
+        Assert.DoesNotContain(tokens, t => t.Kind == VeinTokenKind.Comment);
+    }
 }

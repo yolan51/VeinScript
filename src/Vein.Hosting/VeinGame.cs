@@ -110,6 +110,7 @@ public sealed class VeinGame
         {
             _interp!.FireTicked(_interp.Tick + 1, delta);
             _interp.Frame();
+            _interp.AdvanceEvery(delta);   // `every N` runs on the HOST's clock — there is no timer thread here
         }
         _entities = null;
     }

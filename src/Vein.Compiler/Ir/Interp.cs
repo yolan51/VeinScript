@@ -917,6 +917,30 @@ public sealed class Interp
             if (sched.Kind == "every") Fire(sched);
     }
 
+    /// Seconds each `every N` block has been waiting, for a host that owns the clock (AdvanceEvery).
+    private readonly Dictionary<Schedule, double> _everyWaited = new();
+
+    /// Let `seconds` of a HOST'S clock pass: each `every N` block fires once per whole N elapsed, in
+    /// declaration order, keeping the remainder. The timer threads `Run` starts are the wall-clock way;
+    /// an engine stepping frames has no such thread, and without this its `every` blocks never ran at all.
+    /// `FireEvery` stays as it is — "fire them all once" is what its tests mean.
+    public void AdvanceEvery(double seconds)
+    {
+        if (!(seconds > 0)) return;
+        foreach (var sched in _schedules)
+        {
+            if (sched.Kind != "every" || !(sched.Seconds > 0)) continue;
+            double waited = _everyWaited.GetValueOrDefault(sched) + seconds;
+            // Bounded, so a host that stalls for a minute does not fire a 0.1 s block six hundred times.
+            for (int fired = 0; waited >= sched.Seconds && fired < 8 && !Stopped; fired++)
+            {
+                waited -= sched.Seconds;
+                Fire(sched);
+            }
+            _everyWaited[sched] = Math.Min(waited, sched.Seconds);
+        }
+    }
+
     /// One firing of an `every N` block: it contributes like a tick, the phase commits, and the events
     /// it emitted drain — the same shape as a frame, just triggered by the wall instead of a count.
     private void Fire(Schedule sched)
