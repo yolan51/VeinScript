@@ -17,6 +17,7 @@ public sealed class VeinGame
 {
     private Interp? _interp;
     private IReadOnlyList<VeinEntity>? _entities;
+    private IReadOnlyList<VeinDrawable>? _drawables;
 
     private VeinGame(string path) => Path = System.IO.Path.GetFullPath(path);
 
@@ -97,7 +98,7 @@ public sealed class VeinGame
         };
         interp.Observed = (name, payload) => Emitted?.Invoke(name, payload);
         _interp = interp;
-        _entities = null;
+        _entities = null; _drawables = null;
         using (Enter()) interp.Boot(module);
     }
 
@@ -112,7 +113,7 @@ public sealed class VeinGame
             _interp.Frame();
             _interp.AdvanceEvery(delta);   // `every N` runs on the HOST's clock — there is no timer thread here
         }
-        _entities = null;
+        _entities = null; _drawables = null;
     }
 
     // ---- input: the stdlib's *Vein.Input events -------------------------------------------------
@@ -133,7 +134,7 @@ public sealed class VeinGame
         if (!Running) return false;
         bool ok;
         using (Enter()) ok = _interp!.FireHost(eventName, fields);
-        _entities = null;
+        _entities = null; _drawables = null;
         return ok;
     }
 
@@ -146,13 +147,53 @@ public sealed class VeinGame
             ? Array.Empty<VeinEntity>()
             : _interp.World.Snapshot().Select(s => new VeinEntity(s.Entity, s.Marks, s.Components)).ToList();
 
+    /// Just what a 2D host draws, for every identity with a place and an `$Image` and/or `$Text` — the
+    /// per-frame path. `Entities` copies every component of every identity; this reads the handful of
+    /// fields a sprite needs straight from the committed world, which the addon stress test measured as
+    /// the larger half of a frame at 1000 moving identities.
+    ///
+    /// Same answers as the VeinEntity helpers: placed at `$World` when the program has it, else
+    /// `$Position`; rotation `$Rotation.z` (0 without one); scale `$Scale` ((1, 1) without one).
+    public IReadOnlyList<VeinDrawable> Drawables => _drawables ??= BuildDrawables();
+
+    private IReadOnlyList<VeinDrawable> BuildDrawables()
+    {
+        if (_interp is null) return Array.Empty<VeinDrawable>();
+        var store = _interp.World;
+        bool hasWorld = store.Declared("World");
+        bool hasImage = store.Declared("Image"), hasText = store.Declared("Text");
+        if (!hasImage && !hasText) return Array.Empty<VeinDrawable>();
+        bool hasRotation = store.Declared("Rotation"), hasScale = store.Declared("Scale");
+
+        double Num(long id, string shape, string field, double fallback) =>
+            store.Read(id, shape, field) switch { long l => l, int i => i, double d => d, float f => f, _ => fallback };
+
+        var list = new List<VeinDrawable>();
+        foreach (long id in store.Query(new[] { "Position" }, Array.Empty<string>()))
+        {
+            string? image = hasImage && store.Has(id, "Image") ? store.Read(id, "Image", "source")?.ToString() : null;
+            string? caption = hasText && store.Has(id, "Text") ? store.Read(id, "Text", "content")?.ToString() : null;
+            if (image is null && caption is null) continue;
+
+            string place = hasWorld && store.Has(id, "World") ? "World" : "Position";
+            list.Add(new VeinDrawable(
+                id,
+                Num(id, place, "x", 0), Num(id, place, "y", 0),
+                hasRotation && store.Has(id, "Rotation") ? Num(id, "Rotation", "z", 0) : 0,
+                hasScale && store.Has(id, "Scale") ? Num(id, "Scale", "x", 1) : 1,
+                hasScale && store.Has(id, "Scale") ? Num(id, "Scale", "y", 1) : 1,
+                image, caption));
+        }
+        return list;
+    }
+
     // ---- plumbing -------------------------------------------------------------------------------
 
     private void Fire(Action<Interp> input)
     {
         if (!Running) return;
         using (Enter()) input(_interp!);
-        _entities = null;
+        _entities = null; _drawables = null;
     }
 
     /// `AudioOut.Hook` is process-wide, so it points at THIS game only while this game runs code — two

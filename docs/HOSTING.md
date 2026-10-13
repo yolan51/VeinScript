@@ -42,9 +42,9 @@ game.MouseDown(x, y, 1);   game.MouseUp(x, y, 1);   game.MouseMove(x, y);
 game.Step(delta);       // fires *Vein.Time.Clock.@Ticked { frame, delta }, then each tick/frame/settled,
                         // then every `every N` block whose N seconds of THIS clock have passed
 
-// then draw what is there:
-foreach (var e in game.Entities)
-    if (e.Placement is { } p && e.Image is { } image) Draw(e.Id, image, p.X, p.Y, e.Rotation ?? 0, e.Scale ?? (1, 1));
+// then draw what is there — `Drawables` is the lean per-frame list (`Entities` copies every component):
+foreach (var d in game.Drawables)
+    Draw(d.Id, d.Image, d.Caption, d.X, d.Y, d.Rotation, d.ScaleX, d.ScaleY);
 ```
 
 `Entities` is the world as committed after the last step or input: an id that never changes for an

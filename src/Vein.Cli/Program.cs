@@ -103,6 +103,19 @@ switch (command)
     // This runs Lower over every bundle so the same diagnostics an editor shows are what you get here.
     case "check":
     {
+        // AN APP MANIFEST IS CHECKED BY LINKING IT, as `run` runs it. It declares `load`s, not bundles, so
+        // the bundle path below found nothing to lower and said "ok" — for an app whose fragment held a
+        // VS0321 error that `check` on the bundle itself reported. Linking loads every bundle with its
+        // `publicators/` and `shards/` and lowers each, so their diagnostics land here.
+        if (AppLinker.Link(path, source, diagnostics) is not null)
+        {
+            foreach (var d in diagnostics.Items) Console.Error.WriteLine(d);
+            int appErrors = diagnostics.Items.Count(d => d.Severity == Severity.Error);
+            int appWarnings = diagnostics.Items.Count(d => d.Severity == Severity.Warning);
+            Console.Error.WriteLine(appErrors == 0 && appWarnings == 0 ? "ok" : $"{appErrors} error(s), {appWarnings} warning(s)");
+            return appErrors == 0 ? 0 : 1;
+        }
+
         var unit = BundleLoader.Load(path, diagnostics, editing: (path, source));
         if (!diagnostics.HasErrors)
         {

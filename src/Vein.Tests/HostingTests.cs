@@ -308,4 +308,49 @@ public class HostingTests : IDisposable
         Assert.Contains(tokens, t => t.Kind == VeinTokenKind.String && line.Substring(t.Column, t.Length) == "\"http://x\"");
         Assert.DoesNotContain(tokens, t => t.Kind == VeinTokenKind.Comment);
     }
+
+    [Fact]
+    public void Drawables_is_the_lean_draw_list_and_agrees_with_Entities()
+    {
+        var game = VeinGame.Load(Write("drawables.vein", """
+            bundle D by me {
+                need "Vein.Transform"
+                need "Vein.Core"
+                need "Vein.UI"
+                mark #Plain
+                shard Start { run once {
+                    let a = spawn()
+                    attach $Position to a { x: 1.0, y: 2.0, z: 0.0 }
+                    attach $Image to a { source: "a.png" }
+                    attach $Rotation to a { x: 0.0, y: 0.0, z: 0.5 }
+                    attach $Scale to a { x: 2.0, y: 3.0, z: 1.0 }
+                    let b = spawn()
+                    attach $Position to b { x: 10.0, y: 20.0, z: 0.0 }
+                    attach $Parent to b { of: a }
+                    attach $Text to b { content: "hi" }
+                    let hidden = spawn()
+                    attach $Position to hidden { x: 9.0, y: 9.0, z: 0.0 }
+                    mark hidden #Plain
+                } }
+                shard Where { settled { target $World as w { } } }
+            }
+            """));
+
+        var draw = game.Drawables;
+
+        Assert.Equal(2, draw.Count);   // `hidden` has a place but nothing to show
+        var a = draw.Single(d => d.Image == "a.png");
+        Assert.Equal((1.0, 2.0, 0.5, 2.0, 3.0), (a.X, a.Y, a.Rotation, a.ScaleX, a.ScaleY));
+        var b = draw.Single(d => d.Caption == "hi");
+        Assert.Equal((11.0, 22.0), (b.X, b.Y));   // its $World: parent + offset
+        Assert.Equal((1.0, 1.0, 0.0), (b.ScaleX, b.ScaleY, b.Rotation));
+
+        foreach (var d in draw)
+        {
+            var e = game.Entities.Single(x => x.Id == d.Id);
+            Assert.Equal(e.Placement, (d.X, d.Y));
+            Assert.Equal(e.Image, d.Image);
+            Assert.Equal(e.Caption, d.Caption);
+        }
+    }
 }

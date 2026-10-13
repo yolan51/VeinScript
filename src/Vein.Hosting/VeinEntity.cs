@@ -48,3 +48,8 @@ public sealed record VeinEntity(
     /// `*Vein.UI.Widgets.$Text { content }` — words to draw at its placement.
     public string? Caption => Text("Text", "content");
 }
+
+/// One thing to draw this frame (VeinGame.Drawables): where, turned and scaled how, showing what. A value,
+/// cheap to make every frame — the lean path a host's draw loop reads instead of `Entities`.
+public readonly record struct VeinDrawable(
+    long Id, double X, double Y, double Rotation, double ScaleX, double ScaleY, string? Image, string? Caption);
