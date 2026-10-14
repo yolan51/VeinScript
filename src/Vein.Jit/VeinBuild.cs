@@ -34,6 +34,17 @@ public sealed record HostBuild(
     public string Reason => Compiled ? "" : (Notes.FirstOrDefault() ?? Errors.FirstOrDefault() ?? "not compiled");
 }
 
+/// A program compiled to assembly bytes for a host (VeinBuild.CompileImageForHost), or why not — the
+/// ahead-of-time half, kept so a game can ship the bytes and load them without a compiler.
+public sealed record HostImage(
+    byte[]? Image,
+    IReadOnlyList<string> Notes,
+    IReadOnlyList<string> Errors,
+    string Source)
+{
+    public string Reason => Image is not null ? "" : (Notes.FirstOrDefault() ?? Errors.FirstOrDefault() ?? "not compiled");
+}
+
 /// Compiling a lowered VeinScript module to a real assembly, in memory.
 ///
 /// WHY THIS EXISTS. `veinc build` emits `.cs` files and shells out to `dotnet build` — correct for
@@ -112,12 +123,23 @@ public static class VeinBuild
     /// `VeinWorld` was loaded into, so there is one copy, and a reload can be unloaded.
     public static HostBuild CompileForHost(IrModule module, bool optimize = true)
     {
+        var image = CompileImageForHost(module, optimize);
+        if (image.Image is not { } bytes) return new HostBuild(null, image.Notes, image.Errors, image.Source);
+        var loaded = LoadForHost(bytes);
+        return loaded with { Source = image.Source };
+    }
+
+    /// The first half of CompileForHost: the program as assembly BYTES, or why there are none (backend
+    /// notes refuse it exactly as there). For compiling AHEAD of time — at a game's export — so the game
+    /// itself only ever calls LoadForHost and never runs a compiler.
+    public static HostImage CompileImageForHost(IrModule module, bool optimize = true)
+    {
         var emitted = new CSharpBackend().Emit(module);
         if (!emitted.Success || emitted.Files.Count == 0)
-            return new HostBuild(null, Array.Empty<string>(), new[] { "the backend produced no file for this module" }, "");
+            return new HostImage(null, Array.Empty<string>(), new[] { "the backend produced no file for this module" }, "");
 
         string source = emitted.Files[0].Contents;
-        if (emitted.Notes.Count > 0) return new HostBuild(null, emitted.Notes, Array.Empty<string>(), source);
+        if (emitted.Notes.Count > 0) return new HostImage(null, emitted.Notes, Array.Empty<string>(), source);
 
         var compilation = CSharpCompilation.Create(
             "vein_" + Sanitize(module.Name) + "_" + Guid.NewGuid().ToString("N")[..8],   // unique per reload
@@ -131,15 +153,23 @@ public static class VeinBuild
         using var pe = new MemoryStream();
         var result = compilation.Emit(pe);
         if (!result.Success)
-            return new HostBuild(null, Array.Empty<string>(),
+            return new HostImage(null, Array.Empty<string>(),
                 result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()).ToList(), source);
+        return new HostImage(pe.ToArray(), Array.Empty<string>(), Array.Empty<string>(), source);
+    }
 
-        pe.Seek(0, SeekOrigin.Begin);
-        var assembly = new ProgramLoadContext().LoadFromStream(pe);
+    /// The second half: a program's bytes (from CompileImageForHost, now or at export) loaded beside the
+    /// host's runtime, ready to `Create()` a world. Touches no Roslyn type — a game that only loads never
+    /// loads the compiler.
+    public static HostBuild LoadForHost(byte[] image)
+    {
+        Assembly assembly;
+        try { assembly = new ProgramLoadContext().LoadFromStream(new MemoryStream(image)); }
+        catch (BadImageFormatException ex) { return new HostBuild(null, Array.Empty<string>(), new[] { "not a compiled program: " + ex.Message }, ""); }
         var hostType = assembly.GetTypes().FirstOrDefault(t => typeof(Vein.Runtime.SECS.IVeinCompiledProgram).IsAssignableFrom(t) && !t.IsAbstract);
         if (hostType is null)
-            return new HostBuild(null, Array.Empty<string>(), new[] { "the compiled program has no __Host — regenerate it with this backend" }, source);
-        return new HostBuild((Vein.Runtime.SECS.IVeinCompiledProgram)Activator.CreateInstance(hostType)!, Array.Empty<string>(), Array.Empty<string>(), source);
+            return new HostBuild(null, Array.Empty<string>(), new[] { "the compiled program has no __Host — regenerate it with this backend" }, "");
+        return new HostBuild((Vein.Runtime.SECS.IVeinCompiledProgram)Activator.CreateInstance(hostType)!, Array.Empty<string>(), Array.Empty<string>(), "");
     }
 
     /// Where a compiled program lives: collectible, and resolving every reference — Vein.Runtime.SECS,

@@ -92,15 +92,44 @@ public sealed class VeinGame
 
     /// Compile without booting, so the host can subscribe to `Printed`, `Sound` and `Emitted` first.
     /// `Diagnostics`, `Runtime` and `RuntimeNote` are filled; nothing runs until `Start`.
-    public static VeinGame Open(string path, VeinRuntime runtime = VeinRuntime.Auto)
+    public static VeinGame Open(string path, VeinRuntime runtime = VeinRuntime.Auto) => Open(path, runtime, null);
+
+    /// `Open`, with the rules already compiled AHEAD OF TIME (`Precompile`, run by a game's export): the
+    /// bytes are loaded instead of compiling at start — no compiler runs, nothing waits a second. The source
+    /// is still compiled by the front end (diagnostics, and the interpreter if the bytes do not load or the
+    /// interpreter was asked for). Used once: a reload compiles afresh from the source.
+    public static VeinGame Open(string path, VeinRuntime runtime, byte[]? precompiled)
     {
-        var game = new VeinGame(path, runtime);
+        var game = new VeinGame(path, runtime) { _precompiled = precompiled };
         var prepared = game.Prepare();
+        game._precompiled = null;
         game.Diagnostics = prepared.Diagnostics;
         game.RuntimeNote = prepared.Note;
         game._pending = prepared.Runtime;
         return game;
     }
+
+    /// The rules of `path` compiled to assembly bytes for `Open(path, runtime, bytes)` — what an engine's
+    /// export step ships so the game never compiles at start. Null, with the reason, when they cannot be
+    /// compiled without losing behaviour (the same notes that send `Auto` to the interpreter) or do not
+    /// compile at all; the game then runs them on the interpreter, as it would have anyway.
+    public static byte[]? Precompile(string path, out string reason)
+    {
+        var (module, diagnostics) = Compile(System.IO.Path.GetFullPath(path));
+        if (module is null)
+        {
+            reason = diagnostics.FirstOrDefault(d => d.Severity == Severity.Error)?.ToString() ?? "does not compile";
+            return null;
+        }
+        var image = VeinBuild.CompileImageForHost(module);
+        reason = image.Reason;
+        return image.Image;
+    }
+
+    /// True when the running rules were loaded from precompiled bytes rather than compiled at start.
+    public bool Precompiled { get; private set; }
+
+    private byte[]? _precompiled;
 
     /// Boot what `Open` compiled. False when it did not compile (see `Diagnostics`) or already started.
     public bool Start()
@@ -412,6 +441,15 @@ public sealed class VeinGame
         string baseDirectory = System.IO.Path.GetDirectoryName(Path)!;
         if (_mode == VeinRuntime.Interpreter)
             return new Prepared(new InterpRuntime(module, baseDirectory, _sinks), diagnostics, "");
+
+        // Compiled ahead of time (an exported game): load the bytes, no compiler. Bytes that do not load —
+        // built by an older backend — fall through to compiling here, as if there were none.
+        if (_precompiled is { } image && VeinBuild.LoadForHost(image) is { Program: { } ready })
+        {
+            Precompiled = true;
+            return new Prepared(new CompiledRuntime(ready, _sinks), diagnostics, "");
+        }
+        Precompiled = false;
 
         HostBuild build;
         try { build = VeinBuild.CompileForHost(module); }

@@ -45,9 +45,9 @@ public class RuntimeParityTests : IDisposable
 
     private sealed record Run(List<string> Frames, List<string> Prints, List<string> Events, List<string> Transported, string Runtime, string Note);
 
-    private static Run Play(string path, VeinRuntime mode, int frames, Action<VeinGame, int>? script = null)
+    private static Run Play(string path, VeinRuntime mode, int frames, Action<VeinGame, int>? script = null, byte[]? precompiled = null)
     {
-        var game = VeinGame.Open(path, mode);
+        var game = VeinGame.Open(path, mode, precompiled);
         var prints = new List<string>();
         var events = new List<string>();
         var transported = new List<string>();
@@ -559,5 +559,46 @@ public class RuntimeParityTests : IDisposable
                 Assert.Equal((0.0, 1.0, (double)g.Colliders[1].Id), (hits.Number("Hits", "touching"), hits.Number("Hits", "total"), hits.Number("Hits", "last")));
             }
         });
+    }
+
+    [Fact]
+    public void Rules_compiled_ahead_of_time_load_without_compiling_and_play_the_same()
+    {
+        // What a game's export does: compile once, ship the bytes; the game loads them, no compiler.
+        string path = Write("ahead.vein", """
+            bundle Ahead by me {
+                need "Vein.Transform"
+                need "Vein.UI"
+                mark #Dot
+                shard Start { run once { repeat 3 as i {
+                    let d = spawn()
+                    attach $Position to d { x: i * 10.0, y: 0.0, z: 0.0 }
+                    attach $Image to d { source: "dot.png" }
+                    mark d #Dot
+                } } }
+                shard Move { each tick { target $Position #Dot as d { d.Position.y += 1.5 } } }
+            }
+            """);
+
+        byte[]? image = VeinGame.Precompile(path, out string reason);
+        Assert.True(image is { Length: > 0 }, reason);
+
+        var game = VeinGame.Open(path, VeinRuntime.Auto, image);
+        Assert.True(game.Precompiled);
+        Assert.Equal("compiled", game.Runtime);
+
+        var ahead = Play(path, VeinRuntime.Auto, 5, precompiled: image);
+        var atStart = Play(path, VeinRuntime.Compiled, 5);
+        Assert.Equal(atStart.Frames, ahead.Frames);
+
+        // Bytes that are not a program fall back to compiling at start — never a game that will not run.
+        var garbage = VeinGame.Open(path, VeinRuntime.Auto, new byte[] { 1, 2, 3 });
+        Assert.False(garbage.Precompiled);
+        Assert.Equal("compiled", garbage.Runtime);
+
+        // A program the backend would run with less behaviour gets no bytes, and says why.
+        string every = Write("every2.vein", "bundle E by me { shard S { every 0.5 { emit *Vein.Console.Io.@Print { text: \"t\" } } } }");
+        Assert.Null(VeinGame.Precompile(every, out string why));
+        Assert.Contains("every", why);
     }
 }

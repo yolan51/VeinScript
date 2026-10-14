@@ -121,6 +121,12 @@ Compiled mode carries Roslyn (tens of MB) with the game, and compiles in about a
 `game.ReloadInBackground()` does that on a worker thread and swaps the new rules in on the next `Step`
 (`game.Reloaded` fires then).
 
+**Compiled ahead of time.** A shipped game should not compile at all. `VeinGame.Precompile(path, out
+reason)` returns the rules as assembly bytes (null, with the reason, when they would need the
+interpreter); an engine's export step stores them beside the source, and the game opens with
+`VeinGame.Open(path, runtime, bytes)` — the bytes are loaded, no compiler runs (`game.Precompiled` is
+true). Bytes that do not load fall back to compiling at start; a reload always compiles from source.
+
 ## Hot reload
 
 `game.Reload()` recompiles from disk and boots the new program **from its own boot**. State is not
