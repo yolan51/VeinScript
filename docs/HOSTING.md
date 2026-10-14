@@ -145,6 +145,20 @@ across the edit instead of rebooting:
 - mutes stay as they were (a paused game stays paused);
 - neither `run once` nor the boot event runs again, so nothing made at start is made twice.
 
+## Libraries: reusable VeinScript as packages
+
+A library (VeinKit) is a .NET assembly whose `.vein` files are embedded resources named `vein/<Bundle>/…`
+(`<EmbeddedResource Include="bundles/**/*.vein" LogicalName="vein/%(RecursiveDir)%(Filename)%(Extension)" />`).
+A game references the package; its build puts the assembly beside the game's, and Vein.Hosting finds it
+there by reading each `.dll` as a file (`VeinLibraries`, no assembly loaded), unpacks it once per build to
+`%LOCALAPPDATA%/VeinHosting/libs/<assembly>/<mvid>/`, and searches it on every compile. An exported game
+carries its libraries inside the assembly, like the stdlib.
+
+- `VeinGame.Libraries` — each library's name, version, unpacked root and files: a host's "Libraries" UI.
+- `VeinLibraries.WriteProjectList(projectDir)` — writes `.vein/libraries`, so `veinc` and the Workbench,
+  which run no host, resolve the same `need`s (and F12 into a library's source).
+- A game that `need`s a library runs the library's shards (RULES 18), on both runtimes.
+
 ## Limits, said plainly
 
 - **Compiled covers most, not all.** See "Two runtimes" above for what still falls back.

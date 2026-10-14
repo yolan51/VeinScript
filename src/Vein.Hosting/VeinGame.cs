@@ -140,6 +140,10 @@ public sealed class VeinGame
     /// True when the running rules were loaded from precompiled bytes rather than compiled at start.
     public bool Precompiled { get; private set; }
 
+    /// The VeinScript libraries (packages such as VeinKit) found beside the app and searched by `need` — for
+    /// a host's UI that lists them, and opens their bundles read-only.
+    public static IReadOnlyList<VeinLibraries.Library> Libraries => VeinLibraries.All;
+
     private byte[]? _precompiled;
 
     /// Boot what `Open` compiled. False when it did not compile (see `Diagnostics`) or already started.
@@ -554,9 +558,15 @@ public sealed class VeinGame
         }
 
         using var _ = BundleSearch.Scope(StdlibCache.Root);
+        using var __ = BundleSearch.WithLibraries(VeinLibraries.Roots);   // VeinKit & co., beside the game
         var diag = new DiagnosticBag();
         if (AppLinker.Link(path, source, diag) is { } app)
             return (diag.HasErrors ? null : app.Module, diag.Items);
+
+        // A `need` LINKS (RULES 18): a game that needs a library runs that library's shards too. From disk
+        // only — `Check` passes the editor's unsaved text, and diagnostics need no linking.
+        if (text is null && AppLinker.LinkNeeds(path, source, diag) is { } linked)
+            return (diag.HasErrors ? null : linked.Module, diag.Items);
 
         var result = new VeinCompilerService().Compile(new CompileRequest(
             System.IO.Path.GetFileName(path), source,

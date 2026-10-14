@@ -77,6 +77,13 @@ public sealed class BundleIndex
     public static bool IsStdlibRoot(string root) =>
         string.Equals(Path.GetFileName(root.TrimEnd('\\', '/')), "stdlib", StringComparison.OrdinalIgnoreCase);
 
+    /// The marker a library root carries (VeinLibraries writes it when it unpacks a package): installed
+    /// bundles, but not this project's `bundles/`.
+    public const string LibraryMarker = ".vein-library";
+
+    public static bool IsLibraryRoot(string root) =>
+        File.Exists(Path.Combine(root, LibraryMarker));
+
     public static BundleIndex For(string? startDir) => For(SearchRoots(startDir));
 
     public static BundleIndex For(IReadOnlyList<string> roots)
@@ -115,7 +122,9 @@ public sealed class BundleIndex
             symbols.AddRange(folder.Symbols);
 
             bool stdlib = IsStdlibRoot(root);
-            if (!stdlib) installedRoot ??= root;
+            // A LIBRARY is installed (linked, locked) but is not the project's own `bundles/`: the lock never
+            // lives beside it — see SignatureLock.PathFor.
+            if (!stdlib && !IsLibraryRoot(root)) installedRoot ??= root;
             foreach (var (bundle, file) in folder.Owners)
                 if (owners.TryGetValue(bundle, out var first)) duplicates.Add((bundle, first, file));
                 else
@@ -146,7 +155,40 @@ public sealed class BundleIndex
         if (LocateNamed(seed, "bundles") is { } bundles && !roots.Contains(bundles, StringComparer.OrdinalIgnoreCase))
             roots.Add(bundles);
 
+        // LIBRARIES — reusable bundles shipped as packages and unpacked OUTSIDE the project, so a game's
+        // folder holds only its own code. Last, so neither the stdlib nor a project's own `bundles/` can be
+        // shadowed by something downloaded (a `bundles/` copy of a library bundle wins, and is VS0310).
+        // From a host (`BundleSearch.WithLibraries`), and from the project's `.vein/libraries` list —
+        // which a host writes, so `veinc` and the Workbench resolve `need "kit.Cameras"` as the game does.
+        foreach (string library in BundleSearch.Libraries.Concat(ListedLibraries(seed)))
+            if (Directory.Exists(library) && !roots.Contains(library, StringComparer.OrdinalIgnoreCase))
+                roots.Add(library);
+
         return roots;
+    }
+
+    /// The project file listing library roots, one folder per line: `.vein/libraries`, the nearest one
+    /// walking up from the seed.
+    public const string LibrariesFile = ".vein/libraries";
+
+    private static IEnumerable<string> ListedLibraries(string? seed)
+    {
+        foreach (var start in new[] { seed, Directory.GetCurrentDirectory() })
+        {
+            if (string.IsNullOrEmpty(start)) continue;
+            string full;
+            try { full = Path.GetFullPath(start); } catch { continue; }
+            for (var d = new DirectoryInfo(full); d is not null; d = d.Parent)
+            {
+                string file = Path.Combine(d.FullName, LibrariesFile);
+                if (!File.Exists(file)) continue;
+                string[] lines;
+                try { lines = File.ReadAllLines(file); } catch { yield break; }
+                foreach (string line in lines.Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith('#')))
+                    yield return line;
+                yield break;
+            }
+        }
     }
 
     /// Walk up from the seed (then the CWD and the app base dir) for a folder of the given name holding
@@ -331,15 +373,29 @@ public sealed class BundleIndex
 public static class BundleSearch
 {
     private static readonly AsyncLocal<string?> _dir = new();
+    private static readonly AsyncLocal<IReadOnlyList<string>?> _libraries = new();
 
     public static string? Current => _dir.Value;
 
+    /// Library roots a HOST supplies — folders of bundles shipped as packages and unpacked outside the
+    /// project (Vein.Hosting's VeinLibraries). Searched after the stdlib and the project's `bundles/`.
+    public static IReadOnlyList<string> Libraries => _libraries.Value ?? Array.Empty<string>();
+
     public static IDisposable Scope(string? dir) => new Restore(dir);
+
+    public static IDisposable WithLibraries(IReadOnlyList<string> roots) => new RestoreLibraries(roots);
 
     private sealed class Restore : IDisposable
     {
         private readonly string? _previous;
         public Restore(string? dir) { _previous = _dir.Value; _dir.Value = dir; }
         public void Dispose() => _dir.Value = _previous;
+    }
+
+    private sealed class RestoreLibraries : IDisposable
+    {
+        private readonly IReadOnlyList<string>? _previous;
+        public RestoreLibraries(IReadOnlyList<string> roots) { _previous = _libraries.Value; _libraries.Value = roots; }
+        public void Dispose() => _libraries.Value = _previous;
     }
 }

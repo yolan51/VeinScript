@@ -395,6 +395,18 @@ manifest and the game is the principal. The standard library is the one exceptio
 shards, so a `need` on it resolves names and links nothing, and its every shape stays out of the app's
 shared table (where a game's own `$Counter` beside `Vein.Core.Quantity.$Counter` would be VS0332).
 
+**Without a manifest too.** A single bundle run on its own (`veinc run game.vein`, a game in an engine)
+links the same way when it needs a bundle INSTALLED beside it — the project's `bundles/`, or a library
+package (below): it runs as the principal of an implicit `app Game { load "game.vein" }`, so
+`need "kit.Cameras"` brings the camera library's shards, not only its shapes. (Before 2026-10-14 it only
+imported declarations, and a kit's behaviour silently stayed behind.)
+
+**Libraries** are bundles shipped as packages — an assembly carrying `.vein` files as `vein/…` resources
+(VeinKit). A host unpacks them outside the project and searches them after the stdlib and `bundles/`
+(a `bundles/` copy of one wins, VS0310), and writes their folders to `.vein/libraries` so `veinc` and the
+Workbench resolve them too. They are installed bundles: linked, and pinned in `vein.lock` — which sits
+beside the program when a project has libraries but no `bundles/` of its own.
+
 The **author is part of the name**, and that is why it is a quoted string rather than a bare word. The
 retired `use N` matched on the bundle segment alone, so `use Combat` matched every author's `Combat` at
 once: two were indistinguishable and collapsed into VS0216, after which the reference resolved to

@@ -55,7 +55,8 @@ int programExit = 0;           // what a program that RAN asked to exit with (`@
 static AppLinker.LinkedApp? LinkApp(string file, string src, DiagnosticBag diag, out int reported)
 {
     reported = 0;
-    var linked = AppLinker.Link(file, src, diag);
+    // A manifest, or — RULES 18, a need links — one bundle that needs installed bundles (AppLinker.LinkNeeds).
+    var linked = AppLinker.Link(file, src, diag) ?? AppLinker.LinkNeeds(file, src, diag);
     if (linked is null) return null;
 
     // Print link diagnostics NOW, not at exit. They are known before a single event fires, and
@@ -107,7 +108,7 @@ switch (command)
         // the bundle path below found nothing to lower and said "ok" — for an app whose fragment held a
         // VS0321 error that `check` on the bundle itself reported. Linking loads every bundle with its
         // `publicators/` and `shards/` and lowers each, so their diagnostics land here.
-        if (AppLinker.Link(path, source, diagnostics) is not null)
+        if ((AppLinker.Link(path, source, diagnostics) ?? AppLinker.LinkNeeds(path, source, diagnostics)) is not null)
         {
             foreach (var d in diagnostics.Items) Console.Error.WriteLine(d);
             int appErrors = diagnostics.Items.Count(d => d.Severity == Severity.Error);

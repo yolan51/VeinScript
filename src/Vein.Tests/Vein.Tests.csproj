@@ -13,6 +13,12 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>
 
+  <!-- A VeinScript library packaged the way VeinKit is: .vein files embedded as `vein/…` resources, found and
+       unpacked by Vein.Hosting's VeinLibraries (HostingTests). -->
+  <ItemGroup>
+    <EmbeddedResource Include="TestLibrary\**\*.vein" LogicalName="vein/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Vein.Compiler\Vein.Compiler.csproj" />
     <ProjectReference Include="..\Vein.Cloud\Vein.Cloud.csproj" />

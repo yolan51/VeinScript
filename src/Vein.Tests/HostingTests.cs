@@ -440,4 +440,94 @@ public class HostingTests : IDisposable
         Assert.Empty(VeinGame.Check(path, File.ReadAllText(path)));           // the saved file is clean
         Assert.DoesNotContain("Gameplaysss", File.ReadAllText(path));           // and was not written
     }
+
+    [Fact]
+    public void A_library_shipped_inside_an_assembly_is_found_and_unpacked()
+    {
+        // This test assembly embeds TestLibrary/Hello/Hello.vein as `vein/Hello/Hello.vein`, as VeinKit does.
+        var library = Assert.Single(VeinGame.Libraries, l => l.Name == "Vein.Tests");
+        Assert.Contains("Hello/Hello.vein", library.Files);
+        Assert.True(File.Exists(Path.Combine(library.Root, "Hello", "Hello.vein")));
+    }
+
+    [Theory]
+    [InlineData(VeinRuntime.Interpreter)]
+    [InlineData(VeinRuntime.Compiled)]
+    public void A_game_that_needs_a_library_runs_the_library_s_shards_too(VeinRuntime mode)
+    {
+        // RULES 18: a need LINKS. The game attaches the library's shape; the library's own shard prints it.
+        string path = Write($"greet-{mode}.vein", """
+            bundle Greet by me {
+                need "testkit.Hello"
+                shard Start { run once {
+                    let e = spawn()
+                    attach $Greeting to e { text: "from the game" }
+                } }
+            }
+            """);
+        var game = VeinGame.Open(path, mode);
+        var printed = new List<string>();
+        game.Printed += (line, _) => printed.Add(line);
+        Assert.True(game.Start(), string.Join("\n", game.Diagnostics));
+        Assert.Equal(mode == VeinRuntime.Compiled ? "compiled" : "interpreter", game.Runtime);
+        game.Step(0.016);
+        Assert.Contains("greeting: from the game", printed);
+    }
+
+    [Fact]
+    public void A_project_s_library_list_lets_tools_that_run_no_game_resolve_its_libraries()
+    {
+        // veinc and the Workbench run no host, so they learn the libraries from `.vein/libraries`.
+        string library = Path.Combine(_dir, "unpacked-lib");
+        Directory.CreateDirectory(library);
+        File.WriteAllText(Path.Combine(library, "Lib.vein"),
+            "bundle Lib by tk {\n    publicator P {\n        shared(\"A thing.\")\n        shape $Thing { n: int = 1 }\n    }\n}\n");
+        string project = Path.Combine(_dir, "project");
+        Directory.CreateDirectory(project);
+        string game = Path.Combine(project, "game.vein");
+        const string source = "bundle G by me {\n    need \"tk.Lib\"\n    shard S { run once {\n        let e = spawn()\n        attach $Thing to e { n: 2 }\n    } }\n}\n";
+        File.WriteAllText(game, source);
+
+        Assert.Contains(VeinGame.Check(game, source), d => d.Code == "VS0340");       // not listed: unknown
+        Directory.CreateDirectory(Path.Combine(project, ".vein"));
+        File.WriteAllText(Path.Combine(project, ".vein", "libraries"), "# written by a host\n" + library + "\n");
+        Assert.DoesNotContain(VeinGame.Check(game, source), d => d.Severity == Vein.Compiler.Diagnostics.Severity.Error);
+    }
+
+    [Fact]
+    public void LinkNeeds_links_an_installed_bundle_and_leaves_a_stdlib_only_program_alone()
+    {
+        string root = Path.Combine(_dir, "kitproject");
+        Directory.CreateDirectory(Path.Combine(root, "bundles"));
+        File.WriteAllText(Path.Combine(root, "bundles", "Kit.vein"),
+            "bundle Kit by kt {\n    shard Tick { each tick { emit *Vein.Console.Io.@Print { text: \"kit ticks\" } } }\n}\n");
+        string withKit = Path.Combine(root, "game.vein");
+        File.WriteAllText(withKit, "bundle Game by me {\n    need \"kt.Kit\"\n}\n");
+        string plain = Path.Combine(root, "plain.vein");
+        File.WriteAllText(plain, "bundle Plain by me {\n    need \"Vein.Math\"\n}\n");
+
+        var linked = Vein.Compiler.Ir.AppLinker.LinkNeeds(withKit, File.ReadAllText(withKit), new Vein.Compiler.Diagnostics.DiagnosticBag());
+        Assert.NotNull(linked);
+        Assert.Equal(new[] { "Game", "Kit" }, linked!.Bundles);
+        Assert.Null(Vein.Compiler.Ir.AppLinker.LinkNeeds(plain, File.ReadAllText(plain), new Vein.Compiler.Diagnostics.DiagnosticBag()));
+    }
+
+    [Fact]
+    public void A_project_using_only_libraries_keeps_its_lock_beside_the_program()
+    {
+        // A library root is installed (locked) but is not the project's bundles/ — the lock must not follow
+        // it out of the project (nor switch itself off, as it did when the first installed root lay outside).
+        string library = Path.Combine(_dir, "lib-root");
+        Directory.CreateDirectory(library);
+        File.WriteAllText(Path.Combine(library, Vein.Compiler.Project.BundleIndex.LibraryMarker), "test");
+        File.WriteAllText(Path.Combine(library, "Lib.vein"), "bundle Lib by tk {\n    publicator P {\n        shared(\"A thing.\")\n        shape $Thing { n: int = 1 }\n    }\n}\n");
+        string project = Path.Combine(_dir, "lib-project");
+        Directory.CreateDirectory(Path.Combine(project, ".vein"));
+        File.WriteAllText(Path.Combine(project, ".vein", "libraries"), library + "\n");
+
+        var index = Vein.Compiler.Project.BundleIndex.For(project);
+        Assert.Contains("tk.Lib", index.Installed);
+        Assert.Null(index.InstalledRoot);
+        Assert.Equal(Path.Combine(project, "vein.lock"), Vein.Compiler.Project.SignatureLock.PathFor(index, project));
+    }
 }

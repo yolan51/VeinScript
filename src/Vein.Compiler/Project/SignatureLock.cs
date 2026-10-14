@@ -163,7 +163,18 @@ public sealed class SignatureLock
     /// THAT game's `bundles/` — and without this, would record into that game's lock.
     public static string? PathFor(BundleIndex index, string? projectDir)
     {
-        if (index.InstalledRoot is not { } root || string.IsNullOrEmpty(projectDir)) return null;
+        if (string.IsNullOrEmpty(projectDir)) return null;
+
+        // A project that installs bundles only as LIBRARIES (unpacked outside it, no `bundles/` of its own)
+        // still pins what it uses: its lock sits beside the program. Before libraries this case could not
+        // arise, and a library root taken for "the folder holding bundles/" silently disabled the lock.
+        if (index.InstalledRoot is null)
+        {
+            if (index.Installed.Count == 0) return null;
+            try { return System.IO.Path.Combine(System.IO.Path.GetFullPath(projectDir), FileName); }
+            catch (Exception) { return null; }
+        }
+        string root = index.InstalledRoot;
 
         string? folder;
         string anchor;

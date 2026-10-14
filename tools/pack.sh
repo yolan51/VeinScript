@@ -21,10 +21,10 @@ VERSION="${1:-0.1.0-dev.$(date +%Y%m%d%H%M%S)}"
 FEED="${VEIN_FEED:-$HOME/VeinFeed}"
 mkdir -p "$FEED"
 
-for project in ShardECS.Contracts/Contracts ShardECS.SECS/SECS Vein.Compiler/Vein.Compiler Vein.Runtime.SECS/Vein.Runtime.SECS Vein.Jit/Vein.Jit Vein.Hosting/Vein.Hosting; do
+for project in ShardECS.Contracts/Contracts ShardECS.SECS/SECS Vein.Compiler/Vein.Compiler Vein.Runtime.SECS/Vein.Runtime.SECS Vein.Jit/Vein.Jit Vein.Hosting/Vein.Hosting Vein.Cli/Vein.Cli; do
   echo "packing $project $VERSION…"
   dotnet pack "$REPO/src/$project.csproj" -c Release -p:Version="$VERSION" -o "$FEED" --nologo -v quiet >/dev/null
 done
 
-echo "ok: Vein.Hosting and its dependencies, $VERSION → $FEED"
+echo "ok: Vein.Hosting and its dependencies, and the veinc tool (Vein.Cli), $VERSION → $FEED"
 echo "    a consumer's nuget.config adds that folder as a source; reference Vein.Hosting $VERSION (or 0.1.0-*)."

@@ -98,6 +98,31 @@ public static class AppLinker
         };
     }
 
+    /// RULES 18 — a `need` LINKS — for a single bundle, not only inside a manifest. A bundle that needs a
+    /// bundle INSTALLED beside it (its project's `bundles/`, or a library a host supplies) is linked as the
+    /// principal of an implicit `app <Name> { load "<it>" }`, so the needed bundles' shards run, as they
+    /// would in a manifest. Without this, `need "kit.Cameras"` from a game's one file imported the camera
+    /// library's shapes and left its behaviour — its shards — behind.
+    ///
+    /// Null when the file is itself a manifest, declares no bundle, or needs nothing installed (the stdlib
+    /// declares no shards): the caller then compiles it alone, exactly as before. The bundle is read from
+    /// DISK by the manifest's `load`, so this is for running; an editor's unsaved text is checked unlinked.
+    public static LinkedApp? LinkNeeds(string bundlePath, string source, DiagnosticBag diag)
+    {
+        var unit = ParseUnit(bundlePath, source, new DiagnosticBag());
+        if (unit.Apps.Count > 0 || unit.Bundles.Count != 1) return null;
+
+        string full = Path.GetFullPath(bundlePath);
+        string dir = Path.GetDirectoryName(full) ?? ".";
+        var installed = BundleIndex.For(dir).Installed;
+        var bundle = unit.Bundles[0];
+        if (!bundle.Members.OfType<NeedDecl>().Any(n => installed.Contains(n.Key))) return null;
+
+        // Named after the bundle, as a hand-written manifest would be (`app KitDemo { load "KitDemo.vein" }`).
+        string manifest = Path.Combine(dir, Path.GetFileNameWithoutExtension(full) + ".implicit.app.vein");
+        return Link(manifest, $"app {bundle.Name} {{ load \"{Path.GetFileName(full)}\" }}", diag);
+    }
+
     /// Fold every module into one. Types dedupe by name; shards and functions accumulate; only the
     /// principal's `start` survives.
     private static IrModule Merge(

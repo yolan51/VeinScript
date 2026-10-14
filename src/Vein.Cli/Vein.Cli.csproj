@@ -7,8 +7,20 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>veinc</AssemblyName>
     <RootNamespace>Vein.Cli</RootNamespace>
+    <!-- Also a dotnet TOOL (tools/pack.sh → the local feed): `dotnet tool install Vein.Cli` gives a project
+         outside this repo — VeinKit's tests, a game folder — `dotnet veinc check game.vein`. -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>veinc</ToolCommandName>
+    <PackageId>Vein.Cli</PackageId>
+    <Description>veinc — the VeinScript compiler and runner: check, run, render, serve, build, emit, symbols…</Description>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Vein.Compiler\Vein.Compiler.csproj" />
+  </ItemGroup>
+  <!-- The standard library beside veinc.dll, where BundleIndex.LocateNamed looks last (AppContext.BaseDirectory):
+       an installed tool has no repo above it to find `stdlib/` in. Inside the repo the repo's own copy is
+       found first, by walking up from the program. -->
+  <ItemGroup>
+    <None Include="..\..\stdlib\**\*.vein" Link="stdlib\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -1,0 +1,12 @@
+// A VeinScript library shipped INSIDE an assembly (this test assembly), the way VeinKit ships: embedded as
+// `vein/Hello/Hello.vein`, found and unpacked by Vein.Hosting's VeinLibraries. HostingTests use it.
+bundle Hello by testkit {
+    publicator Api {
+        shared("A greeting the library's own shard prints every tick.")
+        shape $Greeting { text: string = "hello" }
+    }
+
+    shard Greeter {
+        each tick { target $Greeting as g { emit *Vein.Console.Io.@Print { text: "greeting: " + g.Greeting.text } } }
+    }
+}
