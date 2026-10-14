@@ -192,9 +192,16 @@ public static class VeinBuild
         var refs = new List<MetadataReference>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        // THE FRAMEWORK ONLY. In a self-contained app — an EXPORTED Godot game — the trusted set is every
+        // assembly shipped, the game's own included, and the addon has a global-namespace class called
+        // `VeinWorld` (the Godot node). C# prefers a global type to one brought in by `using`, so the
+        // generated `VeinWorld` bound to the node and every program failed (CS0738) and fell back to the
+        // interpreter — in the export only, where the game assembly is on that list. Generated code needs
+        // nothing of the host's, so nothing of the host's is referenced.
         if (AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") is string tpa)
             foreach (string path in tpa.Split(Path.PathSeparator))
-                if (path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) && seen.Add(path) && File.Exists(path))
+                if (path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) && IsFramework(Path.GetFileNameWithoutExtension(path))
+                    && seen.Add(path) && File.Exists(path))
                     refs.Add(MetadataReference.CreateFromFile(path));
 
         var runtime = typeof(Vein.Runtime.SECS.VeinWorld).Assembly;
@@ -221,6 +228,12 @@ public static class VeinBuild
 
         return refs;
     }
+
+    /// A .NET framework assembly, by name: what generated code may link against from the trusted set.
+    private static bool IsFramework(string name) =>
+        name is "mscorlib" or "netstandard" or "System"
+        || name.StartsWith("System.", StringComparison.Ordinal)
+        || name.StartsWith("Microsoft.", StringComparison.Ordinal);
 
     /// The file an assembly lives in. Its `Location` when it has one — but an engine may load assemblies
     /// FROM MEMORY: under Godot every game assembly, Vein.Runtime.SECS and ShardECS included, has an empty
