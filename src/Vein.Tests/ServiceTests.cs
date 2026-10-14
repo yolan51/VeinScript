@@ -232,8 +232,10 @@ public class ServiceTests
             .SelectMany(s => s.Methods)
             .SelectMany(m => StructInits(m.Body))
             .ToList();
-        Assert.Contains("Script", emitted);
-        Assert.DoesNotContain("Html", emitted);
+        // The bundle declares `@Script` itself, so the builder emits THAT event (`local.B.Script`), the one
+        // its own `hear @Script` listens on — not the bare stdlib name, which reached nobody.
+        Assert.Contains("local.B.Script", emitted);
+        Assert.DoesNotContain(emitted, e => e.EndsWith("Html", StringComparison.Ordinal));
     }
 
     [Fact]

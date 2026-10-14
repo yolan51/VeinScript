@@ -282,6 +282,25 @@ public class SamplesTests
                         s => s.Name == "Reference");
     }
 
+    [Theory]
+    [InlineData("samples/mypage.vein", "<h1>Counter</h1>")]
+    [InlineData("samples/shaped.vein", "<h1>Counter</h1>")]
+    [InlineData("samples/handles.vein", "<span id=\"counter\">0</span>")]
+    public void A_page_that_declares_its_own_Html_event_receives_its_builders_fragments(string rel, string expected)
+    {
+        // These pages declare `event @Html/@Script/@Style` themselves, which makes them THEIR events
+        // (`you.App.Html`), and their ShardView hears those. Builders emitted the bare stdlib `Html`, so
+        // every fragment went to nobody and all three rendered an empty <body> with no diagnostic.
+        string path = Path.Combine(RepoRoot(), rel);
+        var result = new VeinCompilerService().Compile(new CompileRequest(
+            Path.GetFileName(path), File.ReadAllText(path), SourcePath: path));
+        Assert.True(result.Success, string.Join("\n", result.Diagnostics));
+
+        var page = new Vein.Compiler.Ir.Interp().Render(result.Modules[0], "/");
+        Assert.Equal(200, page.Status);
+        Assert.Contains(expected, page.Body);
+    }
+
     [Fact]
     public void No_vein_source_uses_the_removed_scope_sigil()
     {

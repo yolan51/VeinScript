@@ -2516,9 +2516,14 @@ public sealed partial class Lower
             stmts.Add(new IrLet(name, null, value, false));
         }
 
+        // THE SAME KEY AN `emit` WOULD USE. A bundle that declares its own `event @Html` (a page that
+        // spells out its API) hears it as `you.App.Html`, and a builder that emitted the bare stdlib
+        // name `Html` delivered every fragment to nobody: `mypage`, `shaped` and `handles` rendered empty
+        // pages with no diagnostic. Resolving through EventKey gives the bundle's own event when it
+        // declares one, and the stdlib's (bare) otherwise — exactly what `emit @Html { … }` resolves to.
         (string ev, (string, IrExpr)[] fields) = output is null
-            ? (b.Name, prms.Select(p => (p.Name, (IrExpr)new IrLocalRef(p.Name))).ToArray())   // construct @<Builder> from params
-            : (ChannelEvent(output.Name),
+            ? (EventKey(Array.Empty<string>(), b.Name), prms.Select(p => (p.Name, (IrExpr)new IrLocalRef(p.Name))).ToArray())   // construct @<Builder> from params
+            : (EventKey(Array.Empty<string>(), ChannelEvent(output.Name)),
                new[] { (output.Name switch { "code" => "code", "css" => "css", "line" => "text", _ => "markup" }, LowerExpr(output.Default!)) });
         stmts.Add(new IrExprStmt(new IrRuntimeCall("Emit", new IrExpr[] { new IrStructInit(ev, fields) })));
         var body = new IrBlock(stmts);

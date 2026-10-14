@@ -501,9 +501,9 @@ HeroArea Cards Controls Prose Article Code Callout Layout`; `Behaviours`: `Theme
 
 A page is **assembled from fragments**: `@Request` boots, shards `bring` fragment builders (each emits
 `@Html`/`@Style`/`@Script`), one shard emits `@Render`, and a `ShardView` concatenates and answers
-`@Response`. **Use the stdlib events (`need "Vein.Web"`) — do NOT redeclare `@Html`/`@Style`/`@Script`
-in your bundle**: a local declaration becomes a different event (`you.Page.Html`) and builders still emit
-the stdlib one, so the page comes out empty (a known open issue).
+`@Response`. The simplest form uses the stdlib events (`need "Vein.Web"`), as below. A bundle may also
+declare its own `event @Html { markup: string }` (and `@Style`, `@Script`): then those are ITS events, and
+its builders and its `hear @Html` both use them — consistently, either way.
 
 ```vein
 bundle Page by you {
