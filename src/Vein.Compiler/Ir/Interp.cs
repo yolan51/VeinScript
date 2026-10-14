@@ -513,6 +513,10 @@ public sealed class Interp
     public void FireSeparated(long a, long b) =>
         FireDevice("Separated", ("a", Math.Min(a, b)), ("b", Math.Max(a, b)));
 
+    /// `*Vein.UI.Interaction.@Clicked { target }` — the player clicked this identity: the host decided
+    /// what was under the pointer (the frontmost model or sprite), which only it can.
+    public void FireClicked(long target) => FireDevice("Clicked", ("target", target));
+
     /// `*Vein.Input.Actions.@ActionPressed { action, strength }` — a named action began. Which inputs
     /// trigger it is the host's setting (an engine's input map), so the rules never name a key.
     public void FireActionPressed(string action, double strength) =>
@@ -1945,7 +1949,7 @@ public sealed class Interp
             "FileLoaded", "FileMissing", "FileWritten", "Input", "Message", "Undelivered",
             "KeyDown", "KeyUp", "TextInput", "MouseDown", "MouseUp", "MouseMove",
             "ActionPressed", "ActionReleased", "ButtonDown", "ButtonUp", "AxisMoved",
-            "Ticked", "SoundEnded", "AnimationEnded", "Collided", "Separated", "InputEnded",
+            "Ticked", "SoundEnded", "AnimationEnded", "Collided", "Separated", "Clicked", "InputEnded",
         };
 
     /// The names `Prebuilt` below answers to. Declared as a set because `Lower` needs the same list: a

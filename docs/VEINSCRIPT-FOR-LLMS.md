@@ -563,6 +563,7 @@ What the host understands (write these from rules; the addon does the rest):
 | `$Tint {r,g,b,a}`, `$Flip {x,y}`, `#Hidden` | colour/opacity, mirror, invisible-but-kept |
 | `$Camera { zoom }` on an identity | the camera follows it (3D: its `$Rotation`, fov 70°/zoom) |
 | `$Collider { width, height, depth }` (half-extents) | a physics area; overlaps arrive as `@Collided` / `@Separated { a, b }` |
+| (nothing — a click) | `@Clicked { target }`: the frontmost model (3D) or sprite (2D) under the pointer |
 | `emit @PlaySound { source, volume }` | a sound |
 | `do quit(0)` | the game closes |
 

@@ -63,6 +63,7 @@ internal sealed class InterpRuntime : IGameRuntime
                 case "AnimationEnded": _interp.FireAnimationEnded((long)Num(f, "entity"), Text(f, "name")); break;
                 case "Collided": _interp.FireCollided((long)Num(f, "a"), (long)Num(f, "b")); break;
                 case "Separated": _interp.FireSeparated((long)Num(f, "a"), (long)Num(f, "b")); break;
+                case "Clicked": _interp.FireClicked((long)Num(f, "target")); break;
                 case "ActionPressed": _interp.FireActionPressed(Text(f, "action"), Num(f, "strength")); break;
                 case "ActionReleased": _interp.FireActionReleased(Text(f, "action")); break;
                 case "ButtonDown": _interp.FireButtonDown((int)Num(f, "device"), Text(f, "button")); break;

@@ -283,6 +283,9 @@ public sealed class VeinGame
     public void Collided(long a, long b) => Device("Collided", ("a", Math.Min(a, b)), ("b", Math.Max(a, b)));
     public void Separated(long a, long b) => Device("Separated", ("a", Math.Min(a, b)), ("b", Math.Max(a, b)));
 
+    /// The player clicked this identity — the host found what was under the pointer (*Vein.UI.Interaction).
+    public void Clicked(long target) => Device("Clicked", ("target", target));
+
     /// A named action began — `strength` 1 for a key or button, partial for a stick or trigger
     /// (*Vein.Input.Actions). Which inputs make an action is the host's input map.
     public void ActionPressed(string action, double strength = 1) => Device("ActionPressed", ("action", action), ("strength", strength));

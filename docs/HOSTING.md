@@ -79,6 +79,7 @@ The vocabulary is the standard library's; nothing in it is engine-specific.
 | `*Vein.Graphics.Animations.@AnimationEnded { entity, name }` | raise it with `game.AnimationEnded(id, clip)` when a non-looping clip finishes |
 | `*Vein.Graphics.Looks.$Tint { r, g, b, a }` | multiply the picture's colour; `a` is opacity (`d.TintR`…`d.TintA`; white without one) |
 | `*Vein.Game.Collision.$Collider { width, height, depth = 0 }` | **physics**: a collision box (half-extents) per identity (`game.Colliders`); report overlaps with `game.Collided(a, b)` / `game.Separated(a, b)` → `@Collided` / `@Separated { a, b }` (lower id first) |
+| `*Vein.UI.Interaction.@Clicked { target }` | raise it with `game.Clicked(id)` when the player clicks an identity — the host finds what is under the pointer (the frontmost model or sprite) |
 | `*Vein.Graphics.Looks.$Flip { x, y }` | mirror the picture (`d.FlipX`, `d.FlipY`) |
 | `*Vein.Graphics.Looks.#Hidden` | keep the node, draw it nowhere (`d.Hidden`, `m.Hidden`) |
 | `$Animation` on an `$Image` | when the image is a set of animated frames (a Godot SpriteFrames), play that clip (`d.Animation`) |

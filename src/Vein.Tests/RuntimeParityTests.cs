@@ -37,7 +37,7 @@ public class RuntimeParityTests : IDisposable
         "PrintInline", "Ticked",
         "KeyDown", "KeyUp", "TextInput", "MouseDown", "MouseUp", "MouseMove", "SoundEnded", "AnimationEnded",
         "ActionPressed", "ActionReleased", "ButtonDown", "ButtonUp", "AxisMoved",
-        "Collided", "Separated",
+        "Collided", "Separated", "Clicked",
     };
     private static readonly HashSet<string> Envelope = new(StringComparer.Ordinal) { "from", "origin", "source", "bundle", "id", "cause", "trail" };
 
@@ -670,5 +670,36 @@ public class RuntimeParityTests : IDisposable
         // keepState: false is the old behaviour — a fresh boot.
         Assert.True(game.Reload());
         Assert.Equal(0.0, game.Entities.Single(e => e.Carries("Player")).Number("Position", "x"));
+    }
+
+    [Fact]
+    public void A_host_reported_click_reaches_the_rules_with_its_target()
+    {
+        string path = Write("click.vein", """
+            bundle Click by me {
+                need "Vein.Transform"
+                need "Vein.UI"
+                mark #Box
+                mark #Picked
+                shard Start { run once { repeat 3 as i {
+                    let b = spawn()
+                    attach $Position to b { x: i * 2.0, y: 0.0, z: 0.0 }
+                    mark b #Box
+                } } }
+                shard Pick { hear *Vein.UI.Interaction.@Clicked as c {
+                    target $Position #Box as b { if Entity == c.target { mark b #Picked } }
+                } }
+            }
+            """);
+
+        Same(path, 4, (g, i) =>
+        {
+            if (i == 1) g.Clicked(g.Entities.Where(e => e.Carries("Box")).ElementAt(1).Id);
+            if (i == 3)
+            {
+                var picked = Assert.Single(g.Entities, e => e.Carries("Picked"));
+                Assert.Equal(g.Entities.Where(e => e.Carries("Box")).ElementAt(1).Id, picked.Id);
+            }
+        });
     }
 }
