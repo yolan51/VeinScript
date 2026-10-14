@@ -461,7 +461,7 @@ a = 1 }`, `$Flip { x = false, y = false }`, `#Hidden`. `Animations`: `$Animation
 **Vein.Audio** — `Sound`: `@PlaySound { source, volume = 1.0 }`, `$Track { source, volume = 1.0,
 looping = false, at = 0.0, #Audible }`, `#Audible`, `@SoundEnded { track: Entity }`.
 
-**Vein.Game** — `Collision`: `$Collider { width, height }`, `@Collided { a, b: Entity }`. `Bodies`:
+**Vein.Game** — `Collision`: `$Collider { width, height, depth = 0 }` (half-extents; depth 0 = as wide), `@Collided { a, b: Entity }` and `@Separated { a, b }` (lower id first; raised by a host with physics, or emitted by your own checks). `Bodies`:
 `$Body { mass, restitution }`. `Combat`: `@Damaged { target: Entity, amount: int }`.
 
 **Vein.Console** — `Io`: `@Print/@PrintInline/@PrintError { text }`, `@Input { text }` (a stdin line),
@@ -562,6 +562,7 @@ What the host understands (write these from rules; the addon does the rest):
 | `$Animation { name, speed }` | play that clip (sprite frames or the model's AnimationPlayer) |
 | `$Tint {r,g,b,a}`, `$Flip {x,y}`, `#Hidden` | colour/opacity, mirror, invisible-but-kept |
 | `$Camera { zoom }` on an identity | the camera follows it (3D: its `$Rotation`, fov 70°/zoom) |
+| `$Collider { width, height, depth }` (half-extents) | a physics area; overlaps arrive as `@Collided` / `@Separated { a, b }` |
 | `emit @PlaySound { source, volume }` | a sound |
 | `do quit(0)` | the game closes |
 

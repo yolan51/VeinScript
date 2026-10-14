@@ -85,3 +85,10 @@ public readonly record struct VeinModel(
     double RotationX, double RotationY, double RotationZ,
     double ScaleX, double ScaleY, double ScaleZ,
     string? Animation, double AnimationSpeed, bool Hidden = false);
+
+/// One collision box this frame (VeinGame.Colliders), from `*Vein.Game.Collision.$Collider`: centred on the
+/// identity's place, HALF-extents on each axis (a 2D host ignores Z and HalfDepth), turned by `$Rotation`.
+public readonly record struct VeinCollider(
+    long Id, double X, double Y, double Z,
+    double HalfWidth, double HalfHeight, double HalfDepth,
+    double RotationX, double RotationY, double RotationZ);

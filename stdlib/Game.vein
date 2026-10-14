@@ -8,11 +8,19 @@ bundle Game by Vein {
 
     // --- shared API (cross-bundle) --------------------------------------------------------------------
     publicator Collision {
-        shared("A collision box (half-extents in world units).")
-        shape $Collider { width: float, height: float }
+        // HALF-extents, centred on the identity's place. `depth` is for 3D; 0 means "as wide as `width`",
+        // so a 2D game never writes it and a 3D crate can stay `{ width: 0.5, height: 0.5 }`.
+        shared("A collision box: half-extents in world units, centred on the identity's place.")
+        shape $Collider { width: float, height: float, depth: float = 0.0 }
 
-        shared("Two identities overlapped this step.")
+        // RAISED BY A HOST THAT HAS PHYSICS (Interp.FireCollided — the Godot addon does it for every
+        // identity carrying `$Collider`): once when two boxes start to overlap, with the lower id as `a`.
+        // A program can also emit it from its own checks; it is pure data either way.
+        shared("Two identities started to overlap. `a` is the lower id.")
         event @Collided { a: Entity, b: Entity }
+
+        shared("Two identities that overlapped no longer do. `a` is the lower id.")
+        event @Separated { a: Entity, b: Entity }
     }
 
     publicator Bodies {

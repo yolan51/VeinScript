@@ -37,6 +37,7 @@ public class RuntimeParityTests : IDisposable
         "PrintInline", "Ticked",
         "KeyDown", "KeyUp", "TextInput", "MouseDown", "MouseUp", "MouseMove", "SoundEnded", "AnimationEnded",
         "ActionPressed", "ActionReleased", "ButtonDown", "ButtonUp", "AxisMoved",
+        "Collided", "Separated",
     };
     private static readonly HashSet<string> Envelope = new(StringComparer.Ordinal) { "from", "origin", "source", "bundle", "id", "cause", "trail" };
 
@@ -79,6 +80,7 @@ public class RuntimeParityTests : IDisposable
                 $"${s.Key}{{{string.Join(",", s.Value.OrderBy(f => f.Key, StringComparer.Ordinal).Select(f => $"{f.Key}={Fmt(f.Value)}"))}}}")));
         foreach (var d in g.Drawables) lines.Add($"draw {d}");
         foreach (var m in g.Models) lines.Add($"model {m}");
+        foreach (var c in g.Colliders) lines.Add($"collider {c}");
         lines.Add($"camera {g.Camera}");
         return string.Join("\n", lines);
     }
@@ -506,6 +508,56 @@ public class RuntimeParityTests : IDisposable
                 Assert.True(g.Models.Single().Hidden);
             }
             if (i == 3) Assert.True(g.Emit("Show"));
+        });
+    }
+
+    [Fact]
+    public void Colliders_and_host_reported_overlaps_agree()
+    {
+        string path = Write("touch.vein", """
+            bundle Touch by me {
+                need "Vein.Transform"
+                need "Vein.Game"
+                mark #Coin
+                shape $Hits { touching: int = 0, total: int = 0, last: int = 0 }
+                shard Start { run once {
+                    let p = spawn()
+                    attach $Position to p { x: 0.0, y: 0.0, z: 0.0 }
+                    attach $Collider to p { width: 1.0, height: 2.0 }
+                    attach $Hits to p { }
+                    let c = spawn()
+                    attach $Position to c { x: 3.0, y: 0.0, z: 1.0 }
+                    attach $Rotation to c { x: 0.0, y: 0.5, z: 0.0 }
+                    attach $Collider to c { width: 0.5, height: 0.5, depth: 0.25 }
+                    mark c #Coin
+                } }
+                shard Ear {
+                    hear *Vein.Game.Collision.@Collided as h { target $Hits as x {
+                        x.Hits.touching += 1
+                        x.Hits.total += 1
+                        x.Hits.last = h.b
+                    } }
+                    hear *Vein.Game.Collision.@Separated as s { target $Hits as x { x.Hits.touching -= 1 } }
+                }
+            }
+            """);
+
+        Same(path, 6, (g, i) =>
+        {
+            if (i == 0)
+            {
+                var a = g.Colliders[0];
+                var c = g.Colliders[1];
+                Assert.Equal((1.0, 2.0, 1.0), (a.HalfWidth, a.HalfHeight, a.HalfDepth));   // depth 0 → as wide
+                Assert.Equal((0.25, 0.5, 3.0), (c.HalfDepth, c.RotationY, c.X));
+            }
+            if (i == 1) g.Collided(g.Colliders[1].Id, g.Colliders[0].Id);   // reversed on purpose
+            if (i == 3) g.Separated(g.Colliders[0].Id, g.Colliders[1].Id);
+            if (i == 4)
+            {
+                var hits = g.Entities.Single(e => e.Has("Hits"));
+                Assert.Equal((0.0, 1.0, (double)g.Colliders[1].Id), (hits.Number("Hits", "touching"), hits.Number("Hits", "total"), hits.Number("Hits", "last")));
+            }
         });
     }
 }

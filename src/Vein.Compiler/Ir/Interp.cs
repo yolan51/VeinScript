@@ -504,6 +504,15 @@ public sealed class Interp
     public void FireAnimationEnded(long entity, string name) =>
         FireDevice("AnimationEnded", ("entity", entity), ("name", name));
 
+    /// `*Vein.Game.Collision.@Collided { a, b }` — two identities' `$Collider` boxes started to overlap,
+    /// as the HOST's physics saw it. `a` is the lower id, so a pair is reported once.
+    public void FireCollided(long a, long b) =>
+        FireDevice("Collided", ("a", Math.Min(a, b)), ("b", Math.Max(a, b)));
+
+    /// `*Vein.Game.Collision.@Separated { a, b }` — the pair no longer overlaps.
+    public void FireSeparated(long a, long b) =>
+        FireDevice("Separated", ("a", Math.Min(a, b)), ("b", Math.Max(a, b)));
+
     /// `*Vein.Input.Actions.@ActionPressed { action, strength }` — a named action began. Which inputs
     /// trigger it is the host's setting (an engine's input map), so the rules never name a key.
     public void FireActionPressed(string action, double strength) =>
@@ -1906,7 +1915,7 @@ public sealed class Interp
             "FileLoaded", "FileMissing", "FileWritten", "Input", "Message", "Undelivered",
             "KeyDown", "KeyUp", "TextInput", "MouseDown", "MouseUp", "MouseMove",
             "ActionPressed", "ActionReleased", "ButtonDown", "ButtonUp", "AxisMoved",
-            "Ticked", "SoundEnded", "AnimationEnded", "InputEnded",
+            "Ticked", "SoundEnded", "AnimationEnded", "Collided", "Separated", "InputEnded",
         };
 
     /// The names `Prebuilt` below answers to. Declared as a set because `Lower` needs the same list: a

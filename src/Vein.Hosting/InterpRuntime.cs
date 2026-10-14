@@ -61,6 +61,8 @@ internal sealed class InterpRuntime : IGameRuntime
                 case "MouseMove": _interp.FireMouseMove(Num(f, "x"), Num(f, "y")); break;
                 case "SoundEnded": _interp.FireSoundEnded((long)Num(f, "track")); break;
                 case "AnimationEnded": _interp.FireAnimationEnded((long)Num(f, "entity"), Text(f, "name")); break;
+                case "Collided": _interp.FireCollided((long)Num(f, "a"), (long)Num(f, "b")); break;
+                case "Separated": _interp.FireSeparated((long)Num(f, "a"), (long)Num(f, "b")); break;
                 case "ActionPressed": _interp.FireActionPressed(Text(f, "action"), Num(f, "strength")); break;
                 case "ActionReleased": _interp.FireActionReleased(Text(f, "action")); break;
                 case "ButtonDown": _interp.FireButtonDown((int)Num(f, "device"), Text(f, "button")); break;

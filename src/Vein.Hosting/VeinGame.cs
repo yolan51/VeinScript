@@ -23,6 +23,7 @@ public sealed class VeinGame
     private IReadOnlyList<VeinEntity>? _entities;
     private IReadOnlyList<VeinDrawable>? _drawables;
     private IReadOnlyList<VeinModel>? _models;
+    private IReadOnlyList<VeinCollider>? _colliders;
     private readonly VeinRuntime _mode;
     private readonly RuntimeSinks _sinks;
 
@@ -179,6 +180,10 @@ public sealed class VeinGame
     /// The clip `name` reached its end on `entity` — the host owns the clock it ran on (*Vein.Graphics).
     public void AnimationEnded(long entity, string name) => Device("AnimationEnded", ("entity", entity), ("name", name));
 
+    /// Two `$Collider` boxes started / stopped overlapping, as the host's physics saw it (*Vein.Game.Collision).
+    public void Collided(long a, long b) => Device("Collided", ("a", Math.Min(a, b)), ("b", Math.Max(a, b)));
+    public void Separated(long a, long b) => Device("Separated", ("a", Math.Min(a, b)), ("b", Math.Max(a, b)));
+
     /// A named action began — `strength` 1 for a key or button, partial for a stick or trigger
     /// (*Vein.Input.Actions). Which inputs make an action is the host's input map.
     public void ActionPressed(string action, double strength = 1) => Device("ActionPressed", ("action", action), ("strength", strength));
@@ -313,10 +318,39 @@ public sealed class VeinGame
         return list;
     }
 
+    /// Every identity with a place and a `*Vein.Game.Collision.$Collider` — what a host with physics turns
+    /// into collision boxes, and reports overlaps of with `Collided`/`Separated`. Placed and turned like
+    /// `Models` ($World else $Position; $Rotation in radians); the extents are HALF-extents, and a `depth`
+    /// of 0 means "as deep as it is wide".
+    public IReadOnlyList<VeinCollider> Colliders => _colliders ??= BuildColliders();
+
+    private IReadOnlyList<VeinCollider> BuildColliders()
+    {
+        if (_runtime is not { } r || !r.Declared("Collider")) return Array.Empty<VeinCollider>();
+        bool hasWorld = r.Declared("World"), hasRotation = r.Declared("Rotation");
+
+        var list = new List<VeinCollider>();
+        foreach (long id in r.Ids("Collider"))
+        {
+            if (!r.Has(id, "Position")) continue;
+            string place = hasWorld && r.Has(id, "World") ? "World" : "Position";
+            bool turned = hasRotation && r.Has(id, "Rotation");
+            double width = Num(r, id, "Collider", "width", 0), depth = Num(r, id, "Collider", "depth", 0);
+            list.Add(new VeinCollider(
+                id,
+                Num(r, id, place, "x", 0), Num(r, id, place, "y", 0), Num(r, id, place, "z", 0),
+                width, Num(r, id, "Collider", "height", 0), depth > 0 ? depth : width,
+                turned ? Num(r, id, "Rotation", "x", 0) : 0,
+                turned ? Num(r, id, "Rotation", "y", 0) : 0,
+                turned ? Num(r, id, "Rotation", "z", 0) : 0));
+        }
+        return list;
+    }
+
     /// Everything read from the world is stale once rules have run.
     private void Changed()
     {
-        _entities = null; _drawables = null; _models = null;
+        _entities = null; _drawables = null; _models = null; _colliders = null;
     }
 
     private IReadOnlyList<VeinDrawable> BuildDrawables()
