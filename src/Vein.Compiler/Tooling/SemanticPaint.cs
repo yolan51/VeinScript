@@ -21,7 +21,7 @@ namespace Vein.Compiler.Tooling;
 /// lexer diagnostics are collected and ignored.
 public static class SemanticPaint
 {
-    public enum Role { Fn, SF, Schedule, Author, Bundle, Publicator }
+    public enum Role { Fn, SF, Schedule, Author, Bundle, Publicator, Shard }
 
     /// One stretch to paint. Line and column are 1-based, as the lexer's spans are.
     public readonly record struct Paint(int Line, int Col, int Length, Role Role);
@@ -78,6 +78,15 @@ public static class SemanticPaint
                 // `do` is what makes a line an SF call (D13), so it wears the SF colour rather than the keyword one.
                 case TokenKind.KwDo:
                     Add(t, Role.SF);
+                    break;
+
+                // A shard's NAME where it is declared (`shard Ledger {`, `ShardView Page`, `bridge Sync`) or
+                // paused (`mute Ledger`) — the same colour `!Ledger` has as a reference (D19), so a shard
+                // reads as one thing wherever it is named. `mute #Gameplay` is a mark and keeps the mark's.
+                case TokenKind.KwShard or TokenKind.KwShardView or TokenKind.KwBridge or TokenKind.KwMute or TokenKind.KwUnmute
+                    when next?.Kind == TokenKind.Ident && prev?.Kind != TokenKind.Dot:
+                    Add(next.Value, Role.Shard);
+                    i++;
                     break;
 
                 case TokenKind.Ident when t.Text == "run" && next is { Kind: TokenKind.Ident, Text: "once" }:

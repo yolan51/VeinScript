@@ -10,10 +10,13 @@ namespace Vein.Tests;
 public class SemanticPaintTests
 {
     /// The roles painted on each word of `source`, as "word:Role", in order.
-    private static List<string> Painted(string source, IReadOnlyDictionary<string, bool>? qualified = null)
+    /// Shard names are left out unless asked for: most cases here are about another role, and a `shard S`
+    /// in their source would otherwise be in every expectation.
+    private static List<string> Painted(string source, IReadOnlyDictionary<string, bool>? qualified = null, bool shards = false)
     {
         var lines = source.Split('\n');
         return SemanticPaint.Analyze(source, qualifiedFunctions: qualified)
+            .Where(p => shards || p.Role != Role.Shard)
             .Select(p => lines[p.Line - 1].Substring(p.Col - 1, p.Length) + ":" + p.Role)
             .ToList();
     }
@@ -125,5 +128,26 @@ public class SemanticPaintTests
         // keywords, which is the point of the ask. (Sigil deliberately repeats Shape.)
         var all = colours.Where(kv => kv.Key != "Sigil").Select(kv => kv.Value).ToList();
         Assert.Equal(all.Count, all.Distinct().Count());
+    }
+
+    [Fact]
+    public void A_shard_name_wears_the_shard_colour_where_it_is_declared_and_paused()
+    {
+        var got = Painted(shards: true, source: """
+            bundle B {
+                mark #Gameplay
+                shard Physics #Gameplay { each tick { } }
+                ShardView Page { }
+                bridge Sync { }
+                shard Pause { run once {
+                    mute Physics
+                    unmute Physics
+                    mute #Gameplay
+                } }
+            }
+            """);
+
+        Assert.Equal(new[] { "Physics:Shard", "each:Schedule", "tick:Schedule", "Page:Shard", "Sync:Shard", "Pause:Shard",
+                             "run:Schedule", "once:Schedule", "Physics:Shard", "Physics:Shard" }, got);   // `mute #Gameplay` is a mark
     }
 }
