@@ -601,4 +601,74 @@ public class RuntimeParityTests : IDisposable
         Assert.Null(VeinGame.Precompile(every, out string why));
         Assert.Contains("every", why);
     }
+
+    [Theory]
+    [InlineData(VeinRuntime.Interpreter)]
+    [InlineData(VeinRuntime.Compiled)]
+    public void A_reload_that_keeps_state_carries_the_world_and_takes_the_edit(VeinRuntime mode)
+    {
+        const string v1 = """
+            bundle Keep by me {
+                need "Vein.Transform"
+                mark #Player
+                mark #Gameplay
+                event @Pause { }
+                shape $Life { hp: int = 3 }
+                shard Start { run once {
+                    let p = spawn()
+                    attach $Position to p { x: 0.0, y: 0.0, z: 0.0 }
+                    attach $Life to p { }
+                    mark p #Player
+                } }
+                shard Move #Gameplay {
+                    var speed: float = 1.0
+                    var steps: int = 0
+                    each tick {
+                        steps += 1
+                        target $Position #Player as p { p.Position.x += speed }
+                    }
+                }
+                shard Pauser { hear @Pause as e { mute #Gameplay } }
+            }
+            """;
+        // The edit: speed's initial value changes; $Life grows a field; a new shard appears.
+        string v2 = v1.Replace("var speed: float = 1.0", "var speed: float = 10.0")
+                      .Replace("shape $Life { hp: int = 3 }", "shape $Life { hp: int = 3, armour: int = 7 }")
+                      .Replace("shard Pauser {", "shard Extra { each tick { } }\n    shard Pauser {");
+        string path = Write($"keep-{mode}.vein", v1);
+
+        var game = VeinGame.Open(path, mode);
+        Assert.True(game.Start());
+        for (int i = 0; i < 3; i++) game.Step(0.016);
+        var before = game.Entities.Single(e => e.Carries("Player"));
+        Assert.Equal(3.0, before.Number("Position", "x"));
+
+        File.WriteAllText(path, v2);
+        Assert.True(game.Reload(keepState: true));
+        Assert.Equal(mode == VeinRuntime.Compiled ? "compiled" : "interpreter", game.Runtime);
+
+        var after = Assert.Single(game.Entities, e => e.Carries("Player"));   // `run once` did not run again
+        Assert.Equal(before.Id, after.Id);                                      // same identity, same id
+        Assert.Equal(3.0, after.Number("Position", "x"));                       // where it was
+        Assert.Equal(3.0, after.Number("Life", "hp"));
+        Assert.Equal(7.0, after.Number("Life", "armour"));                      // a field the edit added: its default
+
+        game.Step(0.016);
+        var moved = game.Entities.Single(e => e.Carries("Player"));
+        Assert.Equal(13.0, moved.Number("Position", "x"));                      // the edited speed took effect
+
+        // An untouched var kept its value; then a pause survives the next reload.
+        Assert.True(game.Emit("Pause"));
+        game.Step(0.016);
+        double x = game.Entities.Single(e => e.Carries("Player")).Number("Position", "x");
+        File.WriteAllText(path, v2.Replace("each tick { }", "each tick { let n = 1 }"));
+        Assert.True(game.Reload(keepState: true));
+        game.Step(0.016);
+        Assert.Contains("Gameplay", game.MutedMarks);
+        Assert.Equal(x, game.Entities.Single(e => e.Carries("Player")).Number("Position", "x"));
+
+        // keepState: false is the old behaviour — a fresh boot.
+        Assert.True(game.Reload());
+        Assert.Equal(0.0, game.Entities.Single(e => e.Carries("Player")).Number("Position", "x"));
+    }
 }

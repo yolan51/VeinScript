@@ -89,6 +89,17 @@ public sealed class EntityStore
 
     public bool IsAlive(long entity) => _alive.Contains(entity);
 
+    /// Spawn the identity with exactly this id — for a host carrying a world across a reload, where the
+    /// rules may hold ids in their state. Ids are monotonic and never reused, so the ids below it that
+    /// this store has not handed out yet are consumed (spawned and destroyed). Returns the id spawned:
+    /// `id` itself, or the next free one when `id` is already taken or past.
+    public long SpawnAt(long id)
+    {
+        long got;
+        while ((got = Spawn()) < id) Destroy(got);
+        return got;
+    }
+
     public void Destroy(long entity)
     {
         _alive.Remove(entity);

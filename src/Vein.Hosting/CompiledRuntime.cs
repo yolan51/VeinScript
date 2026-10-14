@@ -108,6 +108,41 @@ internal sealed class CompiledRuntime : IGameRuntime
 
     public long Spawn() => _world.Spawn();
 
+    public void Resume() => Guard(_world.Resume);
+    public long SpawnAt(long id) => _world.SpawnAt((int)id);
+    public bool SetMark(long id, string mark) => _program.SetMark(_world, (int)id, mark);
+
+    /// A generated shard class keeps its `var`s as public fields of its own; read them by reflection — once
+    /// per reload, never per frame.
+    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, object?>> ShardVars() =>
+        _world.Systems.ToDictionary(
+            kv => kv.Key,
+            kv => (IReadOnlyDictionary<string, object?>)VarFields(kv.Value).ToDictionary(f => f.Name, f => Value(f.GetValue(kv.Value)), StringComparer.Ordinal),
+            StringComparer.Ordinal);
+
+    public bool SetShardVar(string shard, string name, object? value)
+    {
+        if (!_world.Systems.TryGetValue(shard, out var system)) return false;
+        var field = VarFields(system).FirstOrDefault(f => f.Name == name);
+        if (field is null) return false;
+        try
+        {
+            object? converted = value is null || field.FieldType.IsInstanceOfType(value) ? value
+                : value is IConvertible ? Convert.ChangeType(value, field.FieldType, System.Globalization.CultureInfo.InvariantCulture)
+                : null;
+            if (converted is null && field.FieldType.IsValueType) return false;
+            field.SetValue(system, converted);
+            return true;
+        }
+        catch (Exception) { return false; }   // a var whose type changed in the edit keeps its new start value
+    }
+
+    public IReadOnlyList<string> ShardsMutedByName => _world.ShardsMutedByName;
+    public void RestoreMutes(IEnumerable<string> marks, IEnumerable<string> shardKeys) => _world.RestoreMutes(marks, shardKeys);
+
+    private static FieldInfo[] VarFields(VeinSystem system) =>
+        system.GetType().GetFields(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+
     private void Transport(string name, params (string Field, object? Value)[] fields)
     {
         if (!_sinks.WantsEvents()) return;

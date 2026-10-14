@@ -330,6 +330,44 @@ public sealed class VeinWorld
     /// Interp.IsMuted, line for line: muted by name, or carrying a muted mark.
     private bool IsMuted(VeinSystem s) => s.Muted || (_mutedMarks.Count > 0 && s.Marks.Overlaps(_mutedMarks));
 
+    // ---- carrying a running world across an edit (Vein.Hosting's state-keeping reload) -----------------
+
+    /// Start WITHOUT `Once` — Interp.Resume's counterpart: a host restores the identities, shard state and
+    /// mutes it saved from the previous version of the program, so nothing made at start is made twice.
+    public void Resume()
+    {
+        Commit();
+        Compose?.Invoke();
+    }
+
+    /// Spawn the identity with exactly this id (EntityStore.SpawnAt): ids below it not handed out yet are
+    /// consumed, the way Destroy consumes a pooled id, so they are never reused.
+    public int SpawnAt(int id)
+    {
+        int got;
+        while ((got = Spawn()) < id)
+        {
+            _alive.Remove(got);
+            _secs.DestroyEntity(got);
+            _secs.CreateEntity();   // take the pooled id back and drop it — see Destroy
+        }
+        return got;
+    }
+
+    /// Each system by its key (`Author.Bundle.Name`) — a host reads and writes their `var`s (public fields
+    /// of the generated shard classes) across a reload.
+    public IReadOnlyDictionary<string, VeinSystem> Systems => _byKey;
+
+    /// Systems silenced by their own `mute Name` (not by a muted mark) — Interp.ShardsMutedByName.
+    public IReadOnlyList<string> ShardsMutedByName => _byKey.Where(kv => kv.Value.Muted).Select(kv => kv.Key).ToList();
+
+    /// Put back what was muted, immediately — Interp.RestoreMutes.
+    public void RestoreMutes(IEnumerable<string> marks, IEnumerable<string> keys)
+    {
+        _mutedMarks.UnionWith(marks);
+        foreach (string key in keys) if (_byKey.TryGetValue(key, out var system)) system.Muted = true;
+    }
+
     /// `run once` builds the world before anything else, so a query in a later phase finds it.
     /// The transform hierarchy's composition pass, when the program has one (RULES 13c).
     ///

@@ -1070,6 +1070,36 @@ public sealed class Interp
         Drain();
     }
 
+    // ---- carrying a running world across an edit (Vein.Hosting's state-keeping reload) -----------------
+
+    /// Set a program up WITHOUT running it — no `run once`, no boot, nothing drained. A host restoring a
+    /// world it saved from the previous version of the program (identities, shard state, mutes) calls
+    /// this instead of `Boot`, so nothing the program creates at start is created twice.
+    public void Resume(IrModule module) => Setup(module);
+
+    /// Every shard's `var`s, by the shard's key (`Author.Bundle.Name`) — a copy.
+    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, object?>> ShardStates() =>
+        _byKey.ToDictionary(kv => kv.Key, kv => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?>(kv.Value.State, StringComparer.Ordinal),
+                            StringComparer.Ordinal);
+
+    /// Set one shard `var`; false when this program has no such shard or var.
+    public bool SetShardState(string key, string name, object? value)
+    {
+        if (!_byKey.TryGetValue(key, out var inst) || !inst.State.ContainsKey(name)) return false;
+        inst.State[name] = value;
+        return true;
+    }
+
+    /// Shards silenced by their own `mute Name` (not by carrying a muted mark) — what a restore re-mutes.
+    public IReadOnlyList<string> ShardsMutedByName => _byKey.Where(kv => kv.Value.Muted).Select(kv => kv.Key).ToList();
+
+    /// Put back what was muted — immediately, not at a commit: the world is being restored, not run.
+    public void RestoreMutes(IEnumerable<string> marks, IEnumerable<string> shardKeys)
+    {
+        _mutedMarks.UnionWith(marks);
+        foreach (string key in shardKeys) if (_byKey.TryGetValue(key, out var inst)) inst.Muted = true;
+    }
+
     public void Frame()
     {
         _tick++;

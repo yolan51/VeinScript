@@ -129,10 +129,20 @@ true). Bytes that do not load fall back to compiling at start; a reload always c
 
 ## Hot reload
 
-`game.Reload()` recompiles from disk and boots the new program **from its own boot**. State is not
-carried across an edit. If the edit does not compile, the running program is **kept** and the errors are
-in `game.Diagnostics`, so a typo never stops the game. A host watches the `.vein` files and calls it —
-or `ReloadInBackground()`, which compiles off the main thread and swaps on the next `Step`.
+`game.Reload()` recompiles from disk and boots the new program **from its own boot**. If the edit does
+not compile, the running program is **kept** and the errors are in `game.Diagnostics`, so a typo never
+stops the game. A host watches the `.vein` files and calls it — or `ReloadInBackground()`, which compiles
+off the main thread and swaps on the next `Step`.
+
+**`Reload(keepState: true)`** (and `ReloadInBackground(keepState: true)`) carries the running world
+across the edit instead of rebooting:
+
+- every identity keeps its **id**, and the shapes, fields and marks the new program still declares (a
+  dropped field is dropped; an added one starts at its declared default);
+- every shard `var` keeps its value — **unless the edit changed its declared initial value**, which then
+  wins: change `var speed: float = 5.0` to `9.0` and save, and the speed changes while `score` survives;
+- mutes stay as they were (a paused game stays paused);
+- neither `run once` nor the boot event runs again, so nothing made at start is made twice.
 
 ## Limits, said plainly
 

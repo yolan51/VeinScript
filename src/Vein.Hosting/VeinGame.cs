@@ -20,6 +20,9 @@ public sealed class VeinGame
     private IGameRuntime? _runtime;       // running
     private IGameRuntime? _pending;       // opened, not started
     private Prepared? _prepared;          // a background reload, waiting for the next Step to swap in
+    private bool _preparedKeepsState;     // …and whether it carries the running world across
+    private IrModule? _module;            // the running program, for comparing it with an edited one
+    private IrModule? _pendingModule;
     private IReadOnlyList<VeinEntity>? _entities;
     private IReadOnlyList<VeinDrawable>? _drawables;
     private IReadOnlyList<VeinModel>? _models;
@@ -106,6 +109,7 @@ public sealed class VeinGame
         game.Diagnostics = prepared.Diagnostics;
         game.RuntimeNote = prepared.Note;
         game._pending = prepared.Runtime;
+        game._pendingModule = prepared.Module;
         return game;
     }
 
@@ -136,21 +140,27 @@ public sealed class VeinGame
     {
         if (_pending is not { } runtime) return false;
         _pending = null;
+        _module = _pendingModule;
         Boot(runtime);
         return true;
     }
 
-    /// Recompile from disk and boot afresh — what a host calls when a `.vein` file changes. The new
-    /// program starts from its own boot (state is not carried across an edit). If it does not compile,
-    /// the running program is KEPT and the errors are in `Diagnostics`: a typo must not stop the game.
-    public bool Reload()
+    /// Recompile from disk — what a host calls when a `.vein` file changes. If it does not compile, the
+    /// running program is KEPT and the errors are in `Diagnostics`: a typo must not stop the game.
+    ///
+    /// `keepState: false` boots the new program from its own boot, fresh ids and all. `keepState: true`
+    /// carries the running world across the edit instead (see Carry): every identity keeps its id and the
+    /// shapes and marks the new program still declares, every shard `var` keeps its value UNLESS its
+    /// declared initial value was what the edit changed (so `speed = 5.0` → `9.0` takes effect, while
+    /// `score` survives), mutes stay as they were, and neither `run once` nor the boot runs again.
+    public bool Reload(bool keepState = false)
     {
         var prepared = Prepare();
         Diagnostics = prepared.Diagnostics;
         if (prepared.Runtime is null) return false;
         RuntimeNote = prepared.Note;
         _pending = null;
-        Boot(prepared.Runtime);
+        Swap(prepared, keepState);
         return true;
     }
 
@@ -158,7 +168,7 @@ public sealed class VeinGame
     /// and a game should not freeze for it. The new rules are swapped in at the start of the next `Step`
     /// (on the caller's thread, like everything else), and `Reloaded` fires then. The task's result is
     /// whether it compiled; when it did not, the running rules are kept and `Diagnostics` says why.
-    public Task<bool> ReloadInBackground() => Task.Run(() =>
+    public Task<bool> ReloadInBackground(bool keepState = false) => Task.Run(() =>
     {
         var prepared = Prepare();
         if (prepared.Runtime is null)
@@ -166,9 +176,69 @@ public sealed class VeinGame
             Diagnostics = prepared.Diagnostics;
             return false;
         }
+        _preparedKeepsState = keepState;
         Interlocked.Exchange(ref _prepared, prepared);
         return true;
     });
+
+    private void Swap(Prepared prepared, bool keepState)
+    {
+        if (keepState && _runtime is { } old && _module is { } was && prepared.Module is { } now)
+            Carry(old, was, prepared.Runtime!, now);
+        else
+            Boot(prepared.Runtime!);
+        _module = prepared.Module;
+    }
+
+    /// The running world, moved into the edited program (Reload with keepState). Identities first, by id —
+    /// a shard `var` may hold one — with the shapes the new program still declares (a field it dropped is
+    /// dropped; one it added starts at its default) and the marks it knows; then the vars, each restored
+    /// only if its declared initial value is the same text in both programs; then the mutes, so a paused
+    /// game stays paused. The host's `$View` identity comes across with the rest, under the same id.
+    private void Carry(IGameRuntime old, IrModule was, IGameRuntime next, IrModule now)
+    {
+        var entities = old.Snapshot();
+        var vars = old.ShardVars();
+        var mutedMarks = old.MutedMarks.ToList();
+        var mutedShards = old.ShardsMutedByName.ToList();
+
+        _runtime = next;
+        Changed();
+        next.Resume();
+        foreach (var e in entities.OrderBy(e => e.Id))
+        {
+            long id = next.SpawnAt(e.Id);
+            foreach (var (shape, fields) in e.Shapes)
+                if (next.Declared(shape))
+                    foreach (var (field, value) in fields) next.Publish(id, shape, field, value);
+            foreach (string mark in e.Marks) next.SetMark(id, mark);
+        }
+
+        var before = Initialisers(was);
+        var after = Initialisers(now);
+        foreach (var (shard, values) in vars)
+            foreach (var (name, value) in values)
+                if (after.TryGetValue((shard, name), out string? init) && before.TryGetValue((shard, name), out string? old0) && init == old0)
+                    next.SetShardVar(shard, name, value);
+
+        next.RestoreMutes(mutedMarks, mutedShards);
+        Changed();
+        PublishView();
+    }
+
+    /// Each shard var's declared type and initial value, as text — what tells an edit that changed `speed`
+    /// from one that did not touch it.
+    private static Dictionary<(string Shard, string Var), string> Initialisers(IrModule module)
+    {
+        var result = new Dictionary<(string, string), string>();
+        foreach (var shard in module.Shards)
+        {
+            if (shard.Attrs.FirstOrDefault(a => a.Name == "key") is not { Args: [string key] }) continue;
+            foreach (var f in shard.State)
+                result[(key, f.Name)] = f.Type.Name + " = " + (f.Default is { } d ? IrPrinter.Expr(d) : "");
+        }
+        return result;
+    }
 
     private void Boot(IGameRuntime runtime)
     {
@@ -188,7 +258,7 @@ public sealed class VeinGame
         {
             Diagnostics = swap.Diagnostics;
             RuntimeNote = swap.Note;
-            Boot(next);
+            Swap(swap, _preparedKeepsState);
             Reloaded?.Invoke();
         }
         if (!Running) return;
@@ -429,7 +499,7 @@ public sealed class VeinGame
     // ---- compiling --------------------------------------------------------------------------------
 
     /// A compiled program and the runtime chosen for it — or, when it did not compile, only diagnostics.
-    private sealed record Prepared(IGameRuntime? Runtime, IReadOnlyList<Diagnostic> Diagnostics, string Note);
+    private sealed record Prepared(IGameRuntime? Runtime, IReadOnlyList<Diagnostic> Diagnostics, string Note, IrModule? Module = null);
 
     /// Front end, then the runtime: compiled when asked (Auto or Compiled) and the whole program compiles
     /// with no backend note; otherwise the interpreter, and the note says why.
@@ -440,14 +510,14 @@ public sealed class VeinGame
 
         string baseDirectory = System.IO.Path.GetDirectoryName(Path)!;
         if (_mode == VeinRuntime.Interpreter)
-            return new Prepared(new InterpRuntime(module, baseDirectory, _sinks), diagnostics, "");
+            return new Prepared(new InterpRuntime(module, baseDirectory, _sinks), diagnostics, "", module);
 
         // Compiled ahead of time (an exported game): load the bytes, no compiler. Bytes that do not load —
         // built by an older backend — fall through to compiling here, as if there were none.
         if (_precompiled is { } image && VeinBuild.LoadForHost(image) is { Program: { } ready })
         {
             Precompiled = true;
-            return new Prepared(new CompiledRuntime(ready, _sinks), diagnostics, "");
+            return new Prepared(new CompiledRuntime(ready, _sinks), diagnostics, "", module);
         }
         Precompiled = false;
 
@@ -456,8 +526,8 @@ public sealed class VeinGame
         catch (Exception ex) { build = new HostBuild(null, Array.Empty<string>(), new[] { $"{ex.GetType().Name}: {ex.Message}" }, ""); }
 
         return build.Program is { } program
-            ? new Prepared(new CompiledRuntime(program, _sinks), diagnostics, "")
-            : new Prepared(new InterpRuntime(module, baseDirectory, _sinks), diagnostics, "not compiled: " + build.Reason);
+            ? new Prepared(new CompiledRuntime(program, _sinks), diagnostics, "", module)
+            : new Prepared(new InterpRuntime(module, baseDirectory, _sinks), diagnostics, "not compiled: " + build.Reason, module);
     }
 
     /// The same front end `veinc run` uses: an `app` manifest is linked into one module, anything else

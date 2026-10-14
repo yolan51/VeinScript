@@ -1847,6 +1847,16 @@ public sealed class CSharpBackend : IVeinBackend
         sb.AppendLine("    }");
         sb.AppendLine();
 
+        sb.AppendLine("    public bool SetMark(VeinWorld w, int id, string mark)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        switch (mark)");
+        sb.AppendLine("        {");
+        foreach (var m in marks.DistinctBy(m => m.Name)) sb.AppendLine($"            case {Q(m.Name)}: w.MarkAs<global::Vein.Generated.{Ident(module.Name)}.Marks.{Ident(m.Name)}>(id); return true;");
+        sb.AppendLine("            default: return false;");
+        sb.AppendLine("        }");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+
         // Bare name or key, first match — Interp.FireHost's rule. Declared defaults fill what the host left
         // out, and `from` names the runtime sender, as Interp.FireDevice / FireHost do.
         sb.AppendLine("    public bool Raise(VeinWorld w, string name, IReadOnlyDictionary<string, object?> fields, string sender)");
@@ -1886,7 +1896,11 @@ public sealed class CSharpBackend : IVeinBackend
             string type = Ident(c.Name);
             sb.AppendLine($"            case {Q(c.Name)}:");
             sb.AppendLine("            {");
-            sb.AppendLine($"                var c = w.Has<{type}>(id) ? w.Get<{type}>(id) : default;");
+            // A shape attached HERE starts from its declared defaults, as the interpreter's AddComponent
+            // does — not a zeroed struct. A host's `$View`, and a field an edit added to a shape a carried
+            // identity already wore (VeinGame's state-keeping reload), read 0 instead of their defaults.
+            string inits = string.Join(", ", c.Fields.Where(f => f.Default is not null).Select(f => $"{Ident(f.Name)} = {Expr(f.Default!)}"));
+            sb.AppendLine($"                var c = w.Has<{type}>(id) ? w.Get<{type}>(id) : new {type} {{ {inits} }};");
             sb.AppendLine("                switch (field)");
             sb.AppendLine("                {");
             foreach (var f in c.Fields) sb.AppendLine($"                    case {Q(f.Name)}: c.{Ident(f.Name)} = {Conv(f.Type, "value")}; break;");

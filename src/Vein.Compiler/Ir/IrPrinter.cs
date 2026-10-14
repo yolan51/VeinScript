@@ -105,6 +105,10 @@ public static class IrPrinter
             : $"target {lp.Var} in {E(lp.Source!)}"
     };
 
+    /// One expression as the printer writes it — a stable text for comparing two programs' initialisers
+    /// (Vein.Hosting's state-keeping reload asks whether `var speed = 5.0` changed in an edit).
+    public static string Expr(IrExpr e) => E(e);
+
     private static string E(IrExpr e) => e switch
     {
         IrLiteral l => l.Kind == IrLiteralKind.String ? $"\"{l.Value}\"" : $"{l.Value}",

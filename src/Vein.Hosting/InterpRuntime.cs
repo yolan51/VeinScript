@@ -97,6 +97,24 @@ internal sealed class InterpRuntime : IGameRuntime
 
     public long Spawn() => _interp.World.Spawn();
 
+    public void Resume()
+    {
+        using (Enter()) _interp.Resume(_module);
+    }
+
+    public long SpawnAt(long id) => _interp.World.SpawnAt(id);
+
+    public bool SetMark(long id, string mark)
+    {
+        _interp.World.AddTag(id, mark);
+        return true;
+    }
+
+    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, object?>> ShardVars() => _interp.ShardStates();
+    public bool SetShardVar(string shard, string name, object? value) => _interp.SetShardState(shard, name, value);
+    public IReadOnlyList<string> ShardsMutedByName => _interp.ShardsMutedByName;
+    public void RestoreMutes(IEnumerable<string> marks, IEnumerable<string> shardKeys) => _interp.RestoreMutes(marks, shardKeys);
+
     private static string Text(IReadOnlyDictionary<string, object?> f, string k) => f.GetValueOrDefault(k)?.ToString() ?? "";
     private static double Num(IReadOnlyDictionary<string, object?> f, string k) =>
         f.GetValueOrDefault(k) switch { long l => l, int i => i, double d => d, float x => x, _ => 0 };

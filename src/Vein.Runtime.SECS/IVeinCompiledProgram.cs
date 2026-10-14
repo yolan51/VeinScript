@@ -35,6 +35,10 @@ public interface IVeinCompiledProgram
     /// asks one question of every identity every frame (`#Hidden`). False for a mark the program lacks.
     bool Carries(VeinWorld world, int id, string mark);
 
+    /// Put a mark on an identity now, by name — a host restoring a saved world. False for a mark the
+    /// program lacks.
+    bool SetMark(VeinWorld world, int id, string mark);
+
     /// Raise one of the program's events — by bare name (`KeyDown`, `Paused`) or by key — from
     /// `sender` (a runtime identity: "device" for input, "host" for the engine's own), then drain.
     /// False when the program has no such event: a misspelt name is reported, never delivered to nobody.

@@ -50,6 +50,23 @@ internal interface IGameRuntime
     /// A committed write of one field, attaching the shape if needed — what keeps `$View` current.
     bool Publish(long id, string shape, string field, object? value);
     long Spawn();
+
+    // ---- carrying the world across an edit (VeinGame.Reload with keepState) -----------------------
+
+    /// Set up without running `run once` or the boot — the state comes from the previous version.
+    void Resume();
+    /// Spawn with exactly this id (or the next free one, returned).
+    long SpawnAt(long id);
+    /// Put a mark on an identity now; false when the program has no such mark.
+    bool SetMark(long id, string mark);
+    /// Every shard's vars by shard key, values as the interpreter holds them (int as long, float as double).
+    IReadOnlyDictionary<string, IReadOnlyDictionary<string, object?>> ShardVars();
+    /// Set one shard var; false when there is no such shard or var.
+    bool SetShardVar(string shard, string name, object? value);
+    /// Shards silenced by their own `mute Name`.
+    IReadOnlyList<string> ShardsMutedByName { get; }
+    /// Put back mutes, immediately.
+    void RestoreMutes(IEnumerable<string> marks, IEnumerable<string> shardKeys);
 }
 
 /// Where a runtime reports to — VeinGame's events.
