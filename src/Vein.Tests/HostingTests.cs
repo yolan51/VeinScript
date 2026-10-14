@@ -426,4 +426,18 @@ public class HostingTests : IDisposable
         Assert.Equal(new[] { "Gameplay" }, game.MutedMarks);
         Assert.Equal(new[] { "me.M.Hud", "me.M.Physics" }, game.MutedShards.OrderBy(k => k));
     }
+
+    [Fact]
+    public void Check_reports_problems_in_unsaved_text_without_touching_the_file()
+    {
+        // An editor's unsaved buffer: the file on disk is fine, the text being typed has a typo.
+        string path = Write("lint.vein", "bundle Lint by me {\n    mark #Gameplay\n    shard S #Gameplay { }\n}\n");
+        string typed = "bundle Lint by me {\n    mark #Gameplay\n    shard S #Gameplay { each tick { mute #Gameplaysss } }\n}\n";
+
+        var problems = VeinGame.Check(path, typed);
+        var typo = Assert.Single(problems, d => d.Code == "VS0218");
+        Assert.Equal((3, 42), (typo.Span.Line, typo.Span.Col));                 // the mark itself, after `mute `
+        Assert.Empty(VeinGame.Check(path, File.ReadAllText(path)));           // the saved file is clean
+        Assert.DoesNotContain("Gameplaysss", File.ReadAllText(path));           // and was not written
+    }
 }

@@ -130,6 +130,13 @@ public sealed class VeinGame
         return image.Image;
     }
 
+
+    /// Every diagnostic for `source` as if it were the file at `path` — the unsaved text in an editor, so
+    /// a host's editor can underline problems while the user types. The same front end `Open` uses: `need`,
+    /// a bundle's `publicators/`/`shards/` fragments and an app's `load` resolve from `path`'s folder, from
+    /// disk. Nothing is compiled to C# and nothing runs; a few milliseconds for a game-sized file.
+    public static IReadOnlyList<Diagnostic> Check(string path, string source) =>
+        Compile(System.IO.Path.GetFullPath(path), source).Diagnostics;
     /// True when the running rules were loaded from precompiled bytes rather than compiled at start.
     public bool Precompiled { get; private set; }
 
@@ -536,10 +543,10 @@ public sealed class VeinGame
     /// The same front end `veinc run` uses: an `app` manifest is linked into one module, anything else
     /// is a bundle (with its `publicators/` and `shards/` fragments) whose entry module runs. The
     /// stdlib comes from StdlibCache, so it resolves wherever the host process happens to be.
-    private static (IrModule? Module, IReadOnlyList<Diagnostic> Diagnostics) Compile(string path)
+    private static (IrModule? Module, IReadOnlyList<Diagnostic> Diagnostics) Compile(string path, string? text = null)
     {
         string source;
-        try { source = File.ReadAllText(path); }
+        try { source = text ?? File.ReadAllText(path); }
         catch (Exception ex)
         {
             return (null, new[] { new Diagnostic(Severity.Error, "VS0001", $"cannot read {path}: {ex.Message}",
