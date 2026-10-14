@@ -1,0 +1,59 @@
+// math_trig.vein — angles, from stdlib/Math.vein's Angles publicator: pi, sin, cos, atan2.
+//
+//   veinc run samples/math_trig.vein --ticks 1
+//
+// A SAMPLE THAT CHECKS ITSELF. Every line is `ok` or `FAIL`, against values known exactly. It is in
+// tools/check-backend.sh, which runs it on BOTH runtimes and diffs them — and which fails on any line
+// starting `FAIL`, so a wrong answer both runtimes agree on is still caught.
+//
+// Why they exist: a 3D game's most common question is which way something faces. `atan2(dx, dz)` turns
+// a character to look where it walks; `sin`/`cos` swing a camera round a target. They are written in
+// VeinScript (a Taylor series after range reduction), so there is nothing built in to differ.
+
+bundle MathTrig by you {
+
+    // Within 1e-6 of the exact answer — the series are good to ~1e-7.
+    fn check(name: string, got: float, want: float) return string {
+        if *Vein.Math.Scalars.abs(got - want) < 0.000001 { return "ok    " + name }
+        return "FAIL  " + name + " = " + got + ", want " + want
+    }
+
+    shard Trig {
+        run once {
+            let pi = *Vein.Math.Angles.pi()
+
+            // sin: zero, the classic angles, both signs, and far outside one turn.
+            emit *Vein.Console.Io.@Print { text: check("sin 0", *Vein.Math.Angles.sin(0.0), 0.0) }
+            emit *Vein.Console.Io.@Print { text: check("sin pi/6", *Vein.Math.Angles.sin(pi / 6.0), 0.5) }
+            emit *Vein.Console.Io.@Print { text: check("sin pi/4", *Vein.Math.Angles.sin(pi / 4.0), 0.7071067811865476) }
+            emit *Vein.Console.Io.@Print { text: check("sin pi/2", *Vein.Math.Angles.sin(pi / 2.0), 1.0) }
+            emit *Vein.Console.Io.@Print { text: check("sin pi", *Vein.Math.Angles.sin(pi), 0.0) }
+            emit *Vein.Console.Io.@Print { text: check("sin -pi/2", *Vein.Math.Angles.sin(0.0 - pi / 2.0), -1.0) }
+            emit *Vein.Console.Io.@Print { text: check("sin 3pi", *Vein.Math.Angles.sin(3.0 * pi), 0.0) }
+            emit *Vein.Console.Io.@Print { text: check("sin -7.5", *Vein.Math.Angles.sin(-7.5), -0.9379999767747389) }
+            emit *Vein.Console.Io.@Print { text: check("sin 100", *Vein.Math.Angles.sin(100.0), -0.5063656411097588) }
+
+            // cos is sin a quarter turn on.
+            emit *Vein.Console.Io.@Print { text: check("cos 0", *Vein.Math.Angles.cos(0.0), 1.0) }
+            emit *Vein.Console.Io.@Print { text: check("cos pi/3", *Vein.Math.Angles.cos(pi / 3.0), 0.5) }
+            emit *Vein.Console.Io.@Print { text: check("cos pi", *Vein.Math.Angles.cos(pi), -1.0) }
+            emit *Vein.Console.Io.@Print { text: check("cos -2", *Vein.Math.Angles.cos(-2.0), -0.4161468365471424) }
+
+            // atan2(y, x): every quadrant, every axis, both sides of the pi/12 shift, and the origin.
+            emit *Vein.Console.Io.@Print { text: check("atan2 1,1", *Vein.Math.Angles.atan2(1.0, 1.0), pi / 4.0) }
+            emit *Vein.Console.Io.@Print { text: check("atan2 1,-1", *Vein.Math.Angles.atan2(1.0, -1.0), 3.0 * pi / 4.0) }
+            emit *Vein.Console.Io.@Print { text: check("atan2 -1,-1", *Vein.Math.Angles.atan2(-1.0, -1.0), -3.0 * pi / 4.0) }
+            emit *Vein.Console.Io.@Print { text: check("atan2 -1,1", *Vein.Math.Angles.atan2(-1.0, 1.0), 0.0 - pi / 4.0) }
+            emit *Vein.Console.Io.@Print { text: check("atan2 0,1", *Vein.Math.Angles.atan2(0.0, 1.0), 0.0) }
+            emit *Vein.Console.Io.@Print { text: check("atan2 1,0", *Vein.Math.Angles.atan2(1.0, 0.0), pi / 2.0) }
+            emit *Vein.Console.Io.@Print { text: check("atan2 0,-1", *Vein.Math.Angles.atan2(0.0, -1.0), pi) }
+            emit *Vein.Console.Io.@Print { text: check("atan2 -1,0", *Vein.Math.Angles.atan2(-1.0, 0.0), 0.0 - pi / 2.0) }
+            emit *Vein.Console.Io.@Print { text: check("atan2 0,0", *Vein.Math.Angles.atan2(0.0, 0.0), 0.0) }
+            emit *Vein.Console.Io.@Print { text: check("atan2 0.1,2", *Vein.Math.Angles.atan2(0.1, 2.0), 0.0499583957219428) }
+            emit *Vein.Console.Io.@Print { text: check("atan2 3,-0.5", *Vein.Math.Angles.atan2(3.0, -0.5), 1.7359450042095235) }
+
+            // And back again: the angle of (cos a, sin a) is a.
+            emit *Vein.Console.Io.@Print { text: check("atan2 of sin,cos 2.5", *Vein.Math.Angles.atan2(*Vein.Math.Angles.sin(2.5), *Vein.Math.Angles.cos(2.5)), 2.5) }
+        }
+    }
+}

@@ -1579,10 +1579,20 @@ public sealed class CSharpBackend : IVeinBackend
         IrLiteralKind.String => "\"" + Escape(l.Value?.ToString() ?? "") + "\"",
         IrLiteralKind.Bool => (l.Value is true) ? "true" : "false",
         IrLiteralKind.Int => l.Value?.ToString() ?? "0",
-        IrLiteralKind.Float or IrLiteralKind.Percent =>
-            Convert.ToDouble(l.Value ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture),
+        IrLiteralKind.Float or IrLiteralKind.Percent => FloatLiteral(Convert.ToDouble(l.Value ?? 0)),
         _ => "default"
     };
+
+    /// A float literal that STAYS a double in C#. `1.0` is held as the double 1, which prints as "1" — an
+    /// int literal — so `1.0 / 3.0` compiled to `1 / 3`, integer division, 0; and `var r = 0.0` became an
+    /// int local that a later `r = 0.5` could not be assigned to (CS0266). The interpreter keeps it a
+    /// float, so this was compiled code silently computing something else. "R" round-trips the value;
+    /// a ".0" is added when it has neither a point nor an exponent.
+    private static string FloatLiteral(double d)
+    {
+        string s = d.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+        return s.Contains('.') || s.Contains('E') || s.Contains('e') ? s : s + ".0";
+    }
 
     private static string Op(IrBinOp op) => op switch
     {

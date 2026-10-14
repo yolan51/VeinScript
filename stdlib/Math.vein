@@ -134,4 +134,53 @@ bundle Math by Vein {
             return *Vein.Math.Roots.sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1))
         }
     }
+
+    // ---- angles -------------------------------------------------------------------------------------
+
+    // Radians throughout, like `$Rotation`. Written in VeinScript like `sqrt`, so both runtimes run the
+    // same arithmetic and nothing is built in. Accurate to about 1e-7 — for turning a character to face
+    // where it walks or swinging a camera round, not for orbital mechanics.
+    // A 3D game's most common question is "which way is it facing": `atan2(dx, dz)` is the yaw that
+    // turns something to look along (dx, dz), the `$Rotation.y` a host applies.
+    publicator Angles {
+        shared("π — half a turn, in radians.")
+        fn pi() return float { return 3.141592653589793 }
+
+        shared("Sine of an angle in radians.")
+        fn sin(x: float) return float {
+            // Into [-π, π), then folded into [-π/2, π/2], where the series below is good to ~6e-8.
+            var a = x - 6.283185307179586 * *Vein.Math.Round.floor((x + 3.141592653589793) / 6.283185307179586)
+            if a > 1.5707963267948966 { a = 3.141592653589793 - a }
+            if a < -1.5707963267948966 { a = -3.141592653589793 - a }
+            let a2 = a * a
+            // Taylor to a^11, nested: a(1 - a²/6(1 - a²/20(1 - a²/42(1 - a²/72(1 - a²/110))))).
+            return a * (1.0 - a2 / 6.0 * (1.0 - a2 / 20.0 * (1.0 - a2 / 42.0 * (1.0 - a2 / 72.0 * (1.0 - a2 / 110.0)))))
+        }
+
+        shared("Cosine of an angle in radians.")
+        fn cos(x: float) return float { return *Vein.Math.Angles.sin(x + 1.5707963267948966) }
+
+        shared("The angle of the point (x, y) from the +x axis, in (-π, π]. atan2(0, 0) is 0.")
+        fn atan2(y: float, x: float) return float {
+            if x == 0.0 and y == 0.0 { return 0.0 }
+            let ax = *Vein.Math.Scalars.abs(x)
+            let ay = *Vein.Math.Scalars.abs(y)
+            // The smaller over the larger: t in [0, 1], and atan(t) in [0, π/4].
+            var t = ax / ay
+            if ax >= ay { t = ay / ax }
+            // Past tan(π/12), shift by π/6 so the series below only meets |t| ≤ 0.268 (error ~5e-8).
+            var r = 0.0
+            if t > 0.2679491924311227 {
+                t = (t * 1.7320508075688772 - 1.0) / (t + 1.7320508075688772)
+                r = 0.5235987755982988
+            }
+            let t2 = t * t
+            r = r + t * (1.0 - t2 * (1.0 / 3.0 - t2 * (0.2 - t2 * (1.0 / 7.0 - t2 / 9.0))))
+            // Back out to the right octant, then the right quadrant.
+            if ay > ax { r = 1.5707963267948966 - r }
+            if x < 0.0 { r = 3.141592653589793 - r }
+            if y < 0.0 { r = -r }
+            return r
+        }
+    }
 }
