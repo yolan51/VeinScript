@@ -582,7 +582,7 @@ and react to a clip's end with `hear *Vein.Graphics.Animations.@AnimationEnded`.
 
 Editor support: `.vein` syntax colouring, a **VeinScript** problems dock (every diagnostic, rechecked on
 save), a live **Debugger ▸ VeinScript** tab (events as they happen, identities, timing, muted state), and
-hot reload on save (a broken edit keeps the old rules running).
+hot reload on save that keeps the game (identities, ids and `var`s survive; a `var` whose initial value the edit changed takes the new value; `run once` does not re-run; a broken edit keeps the old rules running). Exported games ship their rules compiled ahead of time.
 
 A real excerpt (VeinGodot `demo3d/rules.vein`, runs compiled):
 
