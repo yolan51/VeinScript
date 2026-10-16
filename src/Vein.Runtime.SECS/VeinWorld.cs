@@ -441,6 +441,45 @@ public sealed class VeinWorld
     public Action<string, double>? Sound;
     public void PlaySound(string source, double volume) => Sound?.Invoke(source, Math.Clamp(double.IsFinite(volume) ? volume : 1.0, 0.0, 1.0));
 
+    // ---- files: `@ReadFile` / `@WriteFile` (Interp.DoReadFile / DoWriteFile, the same rules) -------------
+    //
+    // A request is an event and so is its answer; a failure is `@FileMissing` with the reason, never an
+    // exception. Synchronous, with the answer QUEUED — heard in the same drain as any other event. The
+    // answers reach the program through the hooks the generated program sets for the events it hears.
+
+    /// Where a RELATIVE path is anchored — Interp.BaseDirectory's twin. Null: the process's current folder.
+    public string? BaseDirectory { get; set; }
+
+    /// `@FileLoaded { path, text, bytes, tag }`, set by the program when it hears it.
+    public Action<string, string, string>? FileLoaded;
+    /// `@FileWritten { path, bytes, tag }`.
+    public Action<string, long, string>? FileWritten;
+    /// `@FileMissing { path, reason, tag }`.
+    public Action<string, string, string>? FileMissing;
+
+    private string ResolvePath(string path) =>
+        BaseDirectory is { Length: > 0 } b && !Path.IsPathRooted(path) ? Path.GetFullPath(Path.Combine(b, path)) : path;
+
+    public void ReadFile(string path, string tag)
+    {
+        string text;
+        try { text = File.ReadAllText(ResolvePath(path)); }
+        catch (Exception ex) { FileMissing?.Invoke(path, ex.Message, tag); return; }
+        FileLoaded?.Invoke(path, text, tag);
+    }
+
+    public void WriteFile(string path, string text, bool append, string tag)
+    {
+        try
+        {
+            string full = ResolvePath(path);
+            if (Path.GetDirectoryName(Path.GetFullPath(full)) is { Length: > 0 } dir) Directory.CreateDirectory(dir);
+            if (append) File.AppendAllText(full, text); else File.WriteAllText(full, text);
+        }
+        catch (Exception ex) { FileMissing?.Invoke(path, ex.Message, tag); return; }
+        FileWritten?.Invoke(path, text.Length, tag);
+    }
+
     /// `@PrintError { text }` — stderr unless a host redirects it.
     public TextWriter Err { get; set; } = Console.Error;
     public void PrintError(string text) => Err.WriteLine(text);

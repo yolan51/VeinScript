@@ -20,11 +20,12 @@ internal sealed class CompiledRuntime : IGameRuntime
     private static readonly ConcurrentDictionary<Type, FieldInfo[]> PayloadFields = new();
     private static readonly IReadOnlyDictionary<string, object?> None = new Dictionary<string, object?>();
 
-    public CompiledRuntime(IVeinCompiledProgram program, RuntimeSinks sinks)
+    public CompiledRuntime(IVeinCompiledProgram program, RuntimeSinks sinks, string? filesRoot = null)
     {
         _program = program;
         _sinks = sinks;
         _world = program.Create();
+        _world.BaseDirectory = filesRoot;
         // The transport events never pass through the compiled queue (VeinWorld.Observed says so); the
         // interpreter's Emitted sees each of them, so they are reported here as it would report them.
         _world.Out = new LineWriter(line =>
@@ -107,6 +108,8 @@ internal sealed class CompiledRuntime : IGameRuntime
         _program.Publish(_world, (int)id, shape, field, value);
 
     public long Spawn() => _world.Spawn();
+
+    public string? FilesRoot { set => _world.BaseDirectory = value; }
 
     public void Resume() => Guard(_world.Resume);
     public long SpawnAt(long id) => _world.SpawnAt((int)id);

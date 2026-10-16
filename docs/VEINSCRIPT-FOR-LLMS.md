@@ -669,10 +669,12 @@ principal.
 - **Compiled** — C# on an ECS runtime (`veinc emit`, or JIT-compiled in a host), ~14–25× faster. The
   backend never emits silently-wrong code: anything it cannot compile is a **note**, and a host then
   runs the program on the interpreter (`game.RuntimeNote` says why). **Not compiled yet**: `every N`,
-  `audience`, `carries` on a sender's `from`, `hear`/`emit` of another bundle's non-stdlib events, list
-  element assignment and list growth, `target` with more than 3 marks, and the built-ins `here pick
+  `audience`, `carries` on a sender's `from`, the network and console transports (`@Fetch`, `@Send`,
+  `@Listen`, `@Console`), list element assignment and list growth, `target` with more than 3 marks, and the built-ins `here pick
   toJson fromJson args now sort remove slice env`.
 - Both are held equal by `tools/check-backend.sh` (diffs program output) and parity tests.
+- Compiled DOES carry: a needed library's events (linked into one program, both ways), `@Print`,
+  `@PlaySound`, `@Quit` and the files (`@ReadFile`/`@WriteFile` → `@FileLoaded`/`@FileWritten`/`@FileMissing`).
 - Known difference: compiled `@Print` happens when its handler runs; the interpreter's when the queue
   drains (same lines, possibly different interleaving with other events).
 

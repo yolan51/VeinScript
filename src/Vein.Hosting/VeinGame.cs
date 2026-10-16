@@ -45,6 +45,21 @@ public sealed class VeinGame
     /// The `.vein` file or `app` manifest this game runs.
     public string Path { get; }
 
+    /// Where a relative `@ReadFile` / `@WriteFile` path lands (saves, logs) — the program's folder unless a
+    /// host says otherwise. An engine sets its per-user data folder, so an exported game never writes
+    /// beside its executable (VeinGodot: `user://`). Applies now and to every reload.
+    public string? FilesRoot
+    {
+        get => _filesRoot;
+        set
+        {
+            _filesRoot = value;
+            if (_runtime is not null) _runtime.FilesRoot = value ?? System.IO.Path.GetDirectoryName(Path)!;
+            if (_pending is not null) _pending.FilesRoot = value ?? System.IO.Path.GetDirectoryName(Path)!;
+        }
+    }
+    private string? _filesRoot;
+
     /// What the last load or reload reported, warnings included. A failed `Reload` leaves the previous
     /// program running and puts its errors here.
     public IReadOnlyList<Diagnostic> Diagnostics { get; private set; } = Array.Empty<Diagnostic>();
@@ -647,7 +662,7 @@ public sealed class VeinGame
         var (module, diagnostics) = Compile(Path);
         if (module is null) return new Prepared(null, diagnostics, "");
 
-        string baseDirectory = System.IO.Path.GetDirectoryName(Path)!;
+        string baseDirectory = FilesRoot ?? System.IO.Path.GetDirectoryName(Path)!;
         if (_mode == VeinRuntime.Interpreter)
             return new Prepared(new InterpRuntime(module, baseDirectory, _sinks), diagnostics, "", module);
 
@@ -656,7 +671,7 @@ public sealed class VeinGame
         if (_precompiled is { } image && VeinBuild.LoadForHost(image) is { Program: { } ready })
         {
             Precompiled = true;
-            return new Prepared(new CompiledRuntime(ready, _sinks), diagnostics, "", module);
+            return new Prepared(new CompiledRuntime(ready, _sinks, baseDirectory), diagnostics, "", module);
         }
         Precompiled = false;
 
@@ -665,7 +680,7 @@ public sealed class VeinGame
         catch (Exception ex) { build = new HostBuild(null, Array.Empty<string>(), new[] { $"{ex.GetType().Name}: {ex.Message}" }, ""); }
 
         return build.Program is { } program
-            ? new Prepared(new CompiledRuntime(program, _sinks), diagnostics, "", module)
+            ? new Prepared(new CompiledRuntime(program, _sinks, baseDirectory), diagnostics, "", module)
             : new Prepared(new InterpRuntime(module, baseDirectory, _sinks), diagnostics, "not compiled: " + build.Reason, module);
     }
 

@@ -21,6 +21,8 @@ public enum VeinRuntime
 internal interface IGameRuntime
 {
     string Name { get; }
+    /// Where a relative `@ReadFile` / `@WriteFile` path is anchored (VeinGame.FilesRoot).
+    string? FilesRoot { set; }
     bool Running { get; }
     int Tick { get; }
     IReadOnlyList<string> MutedMarks { get; }

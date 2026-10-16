@@ -1390,6 +1390,22 @@ public sealed class CSharpBackend : IVeinBackend
                     var volume = ps.Fields.FirstOrDefault(f => f.Field == "volume").Value;
                     return $"World.PlaySound({Str(source)}, {(volume is null ? "1.0" : $"(double)({Expr(volume)})")})";
                 }
+                // Files (Vein.Files.Io): the world does the reading and writing, as Interp.DoReadFile /
+                // DoWriteFile do, and queues the answer the program hears (wired in Main). A game saving its
+                // progress (core.Save) used to drop the whole program to the interpreter.
+                if (c.Args.Count > 0 && c.Args[0] is IrStructInit { TypeName: "ReadFile" } rf)
+                {
+                    var tag = rf.Fields.FirstOrDefault(f => f.Field == "tag").Value;
+                    return $"World.ReadFile({Str(rf.Fields.FirstOrDefault(f => f.Field == "path").Value)}, {(tag is null ? "\"\"" : Str(tag))})";
+                }
+                if (c.Args.Count > 0 && c.Args[0] is IrStructInit { TypeName: "WriteFile" } wf)
+                {
+                    var tag = wf.Fields.FirstOrDefault(f => f.Field == "tag").Value;
+                    var append = wf.Fields.FirstOrDefault(f => f.Field == "append").Value;
+                    return $"World.WriteFile({Str(wf.Fields.FirstOrDefault(f => f.Field == "path").Value)}, " +
+                           $"{Str(wf.Fields.FirstOrDefault(f => f.Field == "text").Value)}, " +
+                           $"{(append is null ? "false" : $"(bool)({Expr(append)})")}, {(tag is null ? "\"\"" : Str(tag))})";
+                }
                 if (c.Args.Count > 0 && c.Args[0] is IrStructInit { TypeName: "Quit" } q)
                 {
                     var code = q.Fields.FirstOrDefault(f => f.Field == "code").Value;
@@ -1739,6 +1755,15 @@ public sealed class CSharpBackend : IVeinBackend
             // without draining put every handler one frame late: the interpreter reported frame 3 and
             // the backend reported frame 0.
             sb.AppendLine("        world.Ticked = (f, d) => { world.Emit(\"Ticked\", new Events.Ticked { frame = f, delta = d }); world.Drain(); };");
+
+        // File answers, for the ones this program hears: QUEUED, as Interp's Emit queues them — heard in the
+        // drain that is already running, not delivered inside the handler that asked.
+        if (_events.Contains("FileLoaded"))
+            sb.AppendLine("        world.FileLoaded = (path, text, tag) => world.Emit(\"FileLoaded\", new Events.FileLoaded { path = path, text = text, bytes = text.Length, tag = tag });");
+        if (_events.Contains("FileWritten"))
+            sb.AppendLine("        world.FileWritten = (path, bytes, tag) => world.Emit(\"FileWritten\", new Events.FileWritten { path = path, bytes = bytes, tag = tag });");
+        if (_events.Contains("FileMissing"))
+            sb.AppendLine("        world.FileMissing = (path, reason, tag) => world.Emit(\"FileMissing\", new Events.FileMissing { path = path, reason = reason, tag = tag });");
 
         foreach (var s in module.Shards)
             sb.AppendLine($"        world.Register(new {ShardIdent(s)}(), \"{Escape(ShardKey(s))}\"{CarriedMarksArgs(s)});");

@@ -530,4 +530,92 @@ public class HostingTests : IDisposable
         Assert.Null(index.InstalledRoot);
         Assert.Equal(Path.Combine(project, "vein.lock"), Vein.Compiler.Project.SignatureLock.PathFor(index, project));
     }
+
+    [Theory]
+    [InlineData(VeinRuntime.Interpreter, false)]
+    [InlineData(VeinRuntime.Compiled, false)]
+    [InlineData(VeinRuntime.Interpreter, true)]
+    [InlineData(VeinRuntime.Compiled, true)]
+    public void Files_are_written_and_read_back_on_both_runtimes_under_the_hosts_files_root(VeinRuntime mode, bool root)
+    {
+        // A saving game (core.Save) must stay compiled: @ReadFile / @WriteFile are bridged by the world, and
+        // the answers queue back like the interpreter's. FilesRoot is where an engine wants them (user://).
+        string dir = Path.Combine(_dir, $"files-{mode}-{root}");
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "game.vein");
+        File.WriteAllText(path, """
+            bundle Saver by me {
+                need "Vein.Files"
+                shard Disk {
+                    run once { emit *Vein.Files.Io.@WriteFile { path: "saves/slot.save", text: "level=3", append: false, tag: "save" } }
+                    hear *Vein.Files.Io.@FileWritten as w {
+                        emit *Vein.Console.Io.@Print { text: "wrote " + w.bytes + " " + w.tag }
+                        emit *Vein.Files.Io.@ReadFile { path: "saves/slot.save", tag: "load" }
+                        emit *Vein.Files.Io.@ReadFile { path: "saves/none.save", tag: "none" }
+                    }
+                    hear *Vein.Files.Io.@FileLoaded as f { emit *Vein.Console.Io.@Print { text: "read " + f.text + " " + f.tag } }
+                    hear *Vein.Files.Io.@FileMissing as m { emit *Vein.Console.Io.@Print { text: "missing " + m.tag } }
+                }
+            }
+            """);
+        string where = root ? Path.Combine(dir, "user") : dir;
+
+        var game = VeinGame.Open(path, mode);
+        if (root) game.FilesRoot = where;
+        var printed = new List<string>();
+        game.Printed += (line, _) => printed.Add(line);
+        Assert.True(game.Start(), string.Join("\n", game.Diagnostics));
+        Assert.Equal(mode == VeinRuntime.Compiled ? "compiled" : "interpreter", game.Runtime);
+        Assert.Equal("", game.RuntimeNote);
+        game.Step(0.016);
+
+        Assert.Equal(new[] { "wrote 7 save", "read level=3 load", "missing none" }, printed);
+        Assert.Equal("level=3", File.ReadAllText(Path.Combine(where, "saves", "slot.save")));
+    }
+
+    [Theory]
+    [InlineData(VeinRuntime.Interpreter)]
+    [InlineData(VeinRuntime.Compiled)]
+    public void A_game_and_a_library_talk_through_the_library_s_events_on_both_runtimes(VeinRuntime mode)
+    {
+        // A bundle package's API is mostly events (core.Timers says @TimerDone; a game asks core.Save with
+        // @Save). Linked into one program, the library's events are DECLARED there, so the compiled runtime
+        // carries them — a game that uses a library must not fall back to the interpreter for it.
+        string library = Path.Combine(_dir, $"talk-lib-{mode}");
+        Directory.CreateDirectory(library);
+        File.WriteAllText(Path.Combine(library, Vein.Compiler.Project.BundleIndex.LibraryMarker), "test");
+        File.WriteAllText(Path.Combine(library, "Echo.vein"), """
+            bundle Echo by tk {
+                publicator Api {
+                    shared("Ask the library to answer.")
+                    event @Ping { n: int }
+                    shared("The library's answer.")
+                    event @Pong { n: int }
+                }
+                shard Answer { hear @Ping as p { emit @Pong { n: p.n * 2 } } }
+            }
+            """);
+        string project = Path.Combine(_dir, $"talk-{mode}");
+        Directory.CreateDirectory(Path.Combine(project, ".vein"));
+        File.WriteAllText(Path.Combine(project, ".vein", "libraries"), library + "\n");
+        string path = Path.Combine(project, "game.vein");
+        File.WriteAllText(path, """
+            bundle Talk by me {
+                need "tk.Echo"
+                shard Ask {
+                    each tick { emit @Ping { n: 21 } }
+                    hear @Pong as p { emit *Vein.Console.Io.@Print { text: "pong " + p.n } }
+                }
+            }
+            """);
+
+        var game = VeinGame.Open(path, mode);
+        var printed = new List<string>();
+        game.Printed += (line, _) => printed.Add(line);
+        Assert.True(game.Start(), string.Join("\n", game.Diagnostics));
+        Assert.Equal(mode == VeinRuntime.Compiled ? "compiled" : "interpreter", game.Runtime);
+        Assert.Equal("", game.RuntimeNote);
+        game.Step(0.016);
+        Assert.Contains("pong 42", printed);
+    }
 }

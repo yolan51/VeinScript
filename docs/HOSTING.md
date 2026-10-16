@@ -173,6 +173,13 @@ A shard var under `tune("…")` is a SETTING (D21); a project's values for them 
 - `VeinGame.Check` also reports `vein.settings` problems (VS0357, VS0358). An export's precompiled rules
   already hold the saved values.
 
+## Files: where a game's saves land
+
+`@ReadFile` / `@WriteFile` work on both runtimes (the compiled world bridges them as the interpreter does,
+answers queued). A relative path is anchored at `VeinGame.FilesRoot` — the program's folder unless the host
+sets one; an engine sets its per-user data folder (VeinGodot: `user://`) so an exported game never writes
+beside its executable. Setting it applies to the running program and every reload.
+
 ## Limits, said plainly
 
 - **Compiled covers most, not all.** See "Two runtimes" above for what still falls back.
