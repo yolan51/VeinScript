@@ -176,6 +176,16 @@ and writing `$View`, that draws `$World` positions.
 
 ### Tier 4 — outside bundles, end to end (M; builds on vein.lock)
 
+- **Done (2026-10-16): bundles shipped as PACKAGES.**
+  - A .NET assembly embeds `vein/<Bundle>/…`. `VeinLibraries` unpacks it outside the project, and its
+    roots are searched after the stdlib and `bundles/`.
+  - A host writes `.vein/libraries` so `veinc` and the Workbench resolve the same `need`.
+  - A single bundle's `need` links (RULES 18).
+  - `veinc` is a dotnet tool.
+  - The first library is the **VeinKit** repo: kit.Cameras, kit.Movement, kit.Collect and kit.Pause, with
+    tests written in VeinScript. VeinGodot's 3D demo and its `tools/new-game.ps1` starter run on it.
+  - What remains below is the *catalog* path: bundles fetched from a server into `bundles/`.
+
 - **`veinc add | update | remove Author.Bundle`.**
   - `CatalogApi` and `FilesApi.PullAsync` exist and only tests call them.
   - The command writes `bundles/` and updates `vein.lock`, printing the signature diff on update.

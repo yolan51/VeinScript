@@ -5,7 +5,7 @@
 > Every complete program below passes `veinc check`. When this file and your instincts disagree, this
 > file wins. When this file and the compiler disagree, the compiler wins — say so and show the error.
 >
-> Current as of 2026-10-13 (VeinScript repo `da49db8`, VeinGodot `d21de4a`). File extension: `.vein`.
+> Current as of 2026-10-16 (VeinScript repo `a6c5116`, VeinGodot `87d6366`, VeinKit `78cc13c`). File extension: `.vein`.
 
 ---
 
@@ -584,33 +584,61 @@ Editor support: `.vein` syntax colouring, a **VeinScript** problems dock (every 
 save), a live **Debugger ▸ VeinScript** tab (events as they happen, identities, timing, muted state), and
 hot reload on save that keeps the game (identities, ids and `var`s survive; a `var` whose initial value the edit changed takes the new value; `run once` does not re-run; a broken edit keeps the old rules running). Exported games ship their rules compiled ahead of time.
 
-A real excerpt (VeinGodot `demo3d/rules.vein`, runs compiled):
+### VeinKit: reusable game rules (`need "kit.X"`)
+
+A game references the VeinKit package. Its bundles unpack outside the project (Godot's VeinScript ▸
+Libraries tab shows them read-only), and `need` links them, so their shards run. The game attaches their
+shapes and marks:
+
+| Bundle | Attach | It hears | It says |
+|---|---|---|---|
+| `kit.Cameras` | `$OrbitCamera { yaw, tilt, distance }` or `$Follow2D { ease }` on the eye (with `$Position $Rotation $Camera`); `#CameraTarget` on what it follows | right-drag, wheel, right stick; actions `camera_toggle` `fly_up` `fly_down` | `@CameraMode { mode }` |
+| `kit.Movement` | `$Walker { speed }` (with `$Position $Rotation`), `$Jumper { strength, gravity }`, `$Animation` | actions `move_left/right/forward/back`, `jump`, left stick, `@AnimationEnded` | clips `idle walk jump fall` |
+| `kit.Collect` | `#Collector` (with `$Position $Collider`); `$Waves { model or image, clip, first, growth, area, sound }` | `@Collided` | `@Collected`, `@WaveStarted { wave, items }`, `@ScoreChanged { score, left, wave }`, `@WaveCleared` |
+| `kit.Pause` | `#Gameplay` on your shards that should stop | action `pause`, or `emit @TogglePause { }` | `@Paused { paused }` |
+
+A new game: `tools\new-game.ps1 -Name MyGame -Kind 3d` (VeinGodot) makes a project whose own code is
+`game/game.vein`. An excerpt from VeinGodot's `demo3d/rules.vein` (94 lines, runs compiled):
 
 ```text
-shard Move #Gameplay {
-    var speed: float = 5.0
-    var gravity: float = 20.0
-    var dt: float = 0.0
-    hear *Vein.Time.Clock.@Ticked as t { dt = t.delta }
-    each tick {
-        target $Position $Rotation $Intent $Jump $Animation #Hero as h {
-            var dx = h.Intent.right - h.Intent.left + h.Intent.sx
-            var dz = h.Intent.back - h.Intent.forward + h.Intent.sz
-            let len = sqrt(dx * dx + dz * dz)
-            if len > 1.0 {
-                dx = dx / len
-                dz = dz / len
-            }
-            h.Position.x = clamp(h.Position.x + dx * speed * dt, -15.0, 15.0)
-            h.Position.z = clamp(h.Position.z + dz * speed * dt, -15.0, 15.0)
-            if len > 0.1 { h.Rotation.y = atan2(dx, dz) }
-            if h.Jump.grounded == 1 {
-                if len > 0.1 { h.Animation.name = "walk" } else { h.Animation.name = "idle" }
-            }
+bundle Demo by you {
+    need "kit.Movement"
+    need "kit.Cameras"
+    need "kit.Collect"
+    need "kit.Pause"
+    need "Vein.Transform"
+    need "Vein.Graphics"
+    need "Vein.UI"
+    need "Vein.Game"
+    mark #Hero
+    shard Start {
+        run once {
+            let hero = spawn()
+            attach $Position to hero { x: 0.0, y: 0.0, z: 0.0 }
+            attach $Rotation to hero { x: 0.0, y: 0.0, z: 0.0 }
+            attach $Model to hero { source: "hero.tscn" }
+            attach $Animation to hero { name: "idle" }
+            attach $Walker to hero { }
+            attach $Jumper to hero { }
+            attach $Collider to hero { width: 0.4, height: 1.0 }
+            mark hero #Hero
+            mark hero #Collector
+            mark hero #CameraTarget
+            let eye = spawn()
+            attach $Position to eye { x: 0.0, y: 5.0, z: 8.0 }
+            attach $Rotation to eye { x: -0.5, y: 0.0, z: 0.0 }
+            attach $Camera to eye { zoom: 1.0 }
+            attach $OrbitCamera to eye { }
+            let gems = spawn()
+            attach $Waves to gems { model: "gem.tscn", clip: "spin", first: 4, growth: 1 }
         }
     }
 }
 ```
+
+Without a manifest, a single bundle that `need`s an installed bundle (a library, or a project's `bundles/`)
+is linked as an implicit app, so the needed bundle's shards run. A `start` still fires only for the
+principal.
 
 ---
 
