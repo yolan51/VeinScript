@@ -1,5 +1,3 @@
-using System.Reflection.Metadata;
-using System.Reflection.PortableExecutable;
 using Vein.Compiler.Project;
 
 namespace Vein.Hosting;
@@ -23,7 +21,6 @@ public static class VeinLibraries
     /// `.vein` files there (paths relative to Root).
     public sealed record Library(string Name, string Version, string Root, IReadOnlyList<string> Files);
 
-    private const string Prefix = "vein/";
     private static readonly object Gate = new();
     private static IReadOnlyList<Library>? _all;
 
@@ -40,21 +37,7 @@ public static class VeinLibraries
     /// (BundleIndex.SearchRoots) — so a tool that runs no game still resolves `need "kit.Cameras"` exactly
     /// as the game does. Rewritten only when it changes. A host calls it where it knows the project folder
     /// (the Godot editor plugin, at start).
-    public static void WriteProjectList(string projectDir)
-    {
-        string file = Path.Combine(projectDir, BundleIndex.LibrariesFile);
-        string text = "# VeinScript libraries this project's packages provide — written by the host, read by veinc and\n" +
-                      "# the Workbench. Regenerated; do not edit.\n" +
-                      string.Concat(Roots.Select(r => r + "\n"));
-        try
-        {
-            if (File.Exists(file) && File.ReadAllText(file) == text) return;
-            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-            File.WriteAllText(file, text);
-        }
-        catch (IOException) { /* a read-only project folder: the game itself still finds its libraries */ }
-        catch (UnauthorizedAccessException) { }
-    }
+    public static void WriteProjectList(string projectDir) => LibraryPackage.WriteList(projectDir, Roots);
 
     private static IReadOnlyList<Library> Discover()
     {
@@ -80,44 +63,7 @@ public static class VeinLibraries
         name.StartsWith("System.", StringComparison.Ordinal) || name.StartsWith("Microsoft.", StringComparison.Ordinal)
         || name.StartsWith("Godot", StringComparison.Ordinal) || name is "mscorlib" or "netstandard" or "System";
 
-    private static Library? Read(string dll)
-    {
-        using var stream = File.OpenRead(dll);
-        using var pe = new PEReader(stream);
-        if (!pe.HasMetadata || pe.PEHeaders.CorHeader is not { } cor) return null;
-        var md = pe.GetMetadataReader();
-
-        var resources = new List<(string Path, byte[] Bytes)>();
-        PEMemoryBlock? block = null;
-        foreach (var handle in md.ManifestResources)
-        {
-            var resource = md.GetManifestResource(handle);
-            string resourceName = md.GetString(resource.Name).Replace('\\', '/');
-            if (!resourceName.StartsWith(Prefix, StringComparison.Ordinal) || !resource.Implementation.IsNil) continue;
-            block ??= pe.GetSectionData(cor.ResourcesDirectory.RelativeVirtualAddress);
-            var reader = block.Value.GetReader((int)resource.Offset, block.Value.Length - (int)resource.Offset);
-            int length = reader.ReadInt32();
-            resources.Add((resourceName[Prefix.Length..], reader.ReadBytes(length)));
-        }
-        if (resources.Count == 0) return null;
-
-        var assembly = md.GetAssemblyDefinition();
-        string name = md.GetString(assembly.Name);
-        string mvid = md.GetGuid(md.GetModuleDefinition().Mvid).ToString("N");
-        string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                                   "VeinHosting", "libs", name, mvid);
-        foreach (var (path, bytes) in resources)
-        {
-            string target = Path.Combine(root, path);
-            if (File.Exists(target) && File.ReadAllBytes(target).AsSpan().SequenceEqual(bytes)) continue;
-            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            File.WriteAllBytes(target, bytes);
-        }
-        // The marker that tells tools this folder is a LIBRARY (installed, linked, locked — but not a
-        // project's own `bundles/`; BundleIndex.IsLibraryRoot).
-        string marker = Path.Combine(root, BundleIndex.LibraryMarker);
-        if (!File.Exists(marker))
-            File.WriteAllText(marker, $"{name} {assembly.Version} — unpacked by Vein.Hosting; a copy, rewritten when the package changes.\n");
-        return new Library(name, assembly.Version.ToString(), root, resources.Select(r => r.Path).ToList());
-    }
+    /// Unpacked by the compiler's LibraryPackage — the same code `veinc add` uses on a package's .nupkg.
+    private static Library? Read(string dll) =>
+        LibraryPackage.Unpack(dll) is { } u ? new Library(u.Name, u.Version, u.Root, u.Files) : null;
 }

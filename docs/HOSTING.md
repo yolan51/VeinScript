@@ -157,7 +157,10 @@ carries its libraries inside the assembly, like the stdlib.
 - `VeinGame.Libraries` — each library's name, version, unpacked root and files: a host's "Libraries" UI.
 - `VeinLibraries.WriteProjectList(projectDir)` — writes `.vein/libraries`, so `veinc` and the Workbench,
   which run no host, resolve the same `need`s (and F12 into a library's source).
-- A game that `need`s a library runs the library's shards (RULES 18), on both runtimes.
+- A game that `need`s a library runs the library's shards (RULES 18), on both runtimes — and a library's
+  events and the game's are one program's: they compile both ways.
+- A project with no host lists its packages in `.veinproj` instead (`veinc add`, RULES 18a); the same
+  unpacking (`LibraryPackage`, in Vein.Compiler) serves both.
 
 ## Settings: `tune` vars a project changes without opening the source
 

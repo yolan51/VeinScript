@@ -25,6 +25,7 @@
         <MenuItem Header="_Close Tab" Click="OnCloseTab" InputGesture="Ctrl+W" />
         <MenuItem Header="Open _Folder…" Click="OnOpenFolder" InputGesture="Ctrl+K" />
         <MenuItem Header="Open _Recent" Name="RecentMenu" SubmenuOpened="OnRecentOpening" />
+        <MenuItem Header="Add Bundle _Package…" Click="OnAddPackage" />
         <Separator />
         <MenuItem Header="_Save" Click="OnSave" InputGesture="Ctrl+S" />
         <MenuItem Header="Save _As…" Click="OnSaveAs" InputGesture="Ctrl+Shift+S" />

@@ -1,7 +1,9 @@
 namespace Vein.Compiler.Project;
 
 /// A starting file for one of the three things VeinScript ships programs for.
-public sealed record WorkloadTemplate(string Key, string Title, string FileName, string Blurb);
+/// `Packages`: the VeinScript library packages it `need`s (VeinScriptBundle's), written into the project's
+/// `.veinproj` and restored from the local feed when the project is made.
+public sealed record WorkloadTemplate(string Key, string Title, string FileName, string Blurb, IReadOnlyList<string>? Packages = null);
 
 // WHY: `new bundle` and `new app` produce a correct file that does nothing, and the distance from there
 // to a program that runs is the part a newcomer gets wrong. These are three files that already work —
@@ -19,7 +21,10 @@ public static class WorkloadTemplates
         new WorkloadTemplate("chat", "Chat / relay app", "relay.vein",
             "One file launched once per participant; a control process relays between them."),
         new WorkloadTemplate("site", "Small website", "site.vein",
-            "Answers `@Request` with markup. Serve it, or preview a route in the IDE.")
+            "Answers `@Request` with markup. Serve it, or preview a route in the IDE."),
+        new WorkloadTemplate("site-bundles", "Website (bundles)", "web.vein",
+            "A styled site on VeinScriptBundle: web.Site's look and nav, web.Page's document. Each page is its content.",
+            new[] { "Vein.Bundles.Web" })
     };
 
     /// `entryPath` is where the file will actually live, relative to the folder you would run from —
@@ -30,6 +35,7 @@ public static class WorkloadTemplates
     {
         "chat" => Chat(name, author, entryPath),
         "site" => Site(name, author, entryPath),
+        "site-bundles" => SiteOnBundles(name, author, entryPath),
         _ => Cli(name, author, entryPath)
     };
 
@@ -125,6 +131,50 @@ bundle {{name}} by {{author}} {
         hear *Vein.Console.Io.@Undelivered as u {
             emit *Vein.Console.Io.@Print { text: "(no one is listening as " + u.to + ")" }
             target $Worker as w { if w.Worker.addr == u.to { destroy w } }
+        }
+    }
+}
+
+""";
+
+    private static string SiteOnBundles(string name, string author, string entryPath) => $$"""
+// {{name}} — a website on VeinScriptBundle: web.Page assembles the document and web.Site gives the look,
+// the nav and the furniture, so each page is only its content. The package (Vein.Bundles.Web) is listed in
+// .veinproj; `veinc restore` fetches it again on a fresh clone. Routing is `if r.path == "/x"`.
+//
+//   veinc serve {{entryPath}} --port 8080
+
+bundle {{name}} by {{author}} {
+    need "web.Page"
+    need "web.Site"
+    need "Vein.Web"
+
+    // The nav's links: identities, declared once.
+    shard Links {
+        run once {
+            bring NavLink("/", "Home")
+            bring NavLink("/about", "About")
+        }
+    }
+
+    shard Pages {
+        hear *Vein.Web.Http.@Request as r {
+            do look()
+            do navBar(r.path)
+            if r.path == "/" {
+                bring Hero("{{name}}", "Built from two bundles.")
+                do main()
+                do grid()
+                bring Card("Pages", "Each route brings its fragments.")
+                bring Card("Look", "look() is the whole theme; lookInk() is the warm one.")
+                do endGrid()
+                do endMain()
+            } else if r.path == "/about" {
+                emit @Title { text: "About {{name}}" }
+                bring Hero("About", "Edit web.vein and refresh.")
+            }
+            bring Footer("{{name}}")
+            emit *Vein.Web.Http.@Render { }
         }
     }
 }

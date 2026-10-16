@@ -77,6 +77,24 @@ internal static class BuildCommand
                     Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                     File.Copy(file, target, overwrite: true);
                 }
+            // LIBRARIES too (`.vein/libraries`: packages added with `veinc add`, or a host's): the exe has no
+            // package to unpack, so their bundles travel inside it, under bundles/_libraries/<n>/.
+            int libraryIndex = 0;
+            foreach (string root in Vein.Compiler.Project.BundleIndex.SearchRoots(sourceDir).Where(Vein.Compiler.Project.BundleIndex.IsLibraryRoot))
+            {
+                libraryIndex++;
+                foreach (string file in Directory.EnumerateFiles(root, "*.vein", SearchOption.AllDirectories))
+                {
+                    string target = Path.Combine(project, "bundles", "_libraries", libraryIndex.ToString(), Path.GetRelativePath(root, file));
+                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                    File.Copy(file, target, overwrite: true);
+                }
+            }
+            // …and a library list of its own that lists none: the search stops at the first list it finds
+            // walking up from the program, so the folder the exe is STARTED in — which may hold a project's
+            // own .vein/libraries — is never consulted, and no bundle is found twice.
+            Directory.CreateDirectory(Path.Combine(project, ".vein"));
+            File.WriteAllText(Path.Combine(project, ".vein", "libraries"), "# the libraries travel inside this program, in bundles/_libraries\n");
             // Which file is the main one, and which build this is — the exe unpacks into a folder named for
             // the build, so a fragment deleted since an earlier build of the same name cannot linger there
             // and be merged back in.
@@ -178,6 +196,7 @@ internal static class BuildCommand
             <EmbeddedResource Include="main.txt" LogicalName="main.txt" />
             <EmbeddedResource Include="build.txt" LogicalName="build.txt" />
             <EmbeddedResource Include="project\**\*.vein" LogicalName="project/%(RecursiveDir)%(Filename)%(Extension)" />
+            <EmbeddedResource Include="project\.vein\libraries" LogicalName="project/.vein/libraries" />
             <EmbeddedResource Include="stdlib\**\*.vein" LogicalName="stdlib/%(RecursiveDir)%(Filename)%(Extension)" />
           </ItemGroup>
         </Project>
@@ -215,9 +234,13 @@ internal static class BuildCommand
         var unit = BundleLoader.Load(main, diag);
         if (diag.HasErrors) { foreach (var d in diag.Items) Console.Error.WriteLine(d); return 1; }
 
-        // One Lower per bundle — a shared one leaked each bundle's `use` list into the next.
+        // RULES 18: a `need` LINKS. A bundle that needs an installed one (bundles/, a library package) runs
+        // that bundle's shards too, as under `veinc run`; lowered alone, a library's timers never ticked.
+        // Otherwise one Lower per bundle — a shared one leaked each bundle's `use` list into the next.
         var modules = new List<IrModule>();
-        foreach (var b in unit.Bundles) modules.Add(new Lower(diag, projectDir).LowerBundle(b));
+        var linked = AppLinker.LinkNeeds(main, File.ReadAllText(main), diag);
+        if (linked is not null) modules.Add(linked.Module);
+        else foreach (var b in unit.Bundles) modules.Add(new Lower(diag, projectDir).LowerBundle(b));
 
         // CHECKED AFTER LOWERING, which is where a missing builder, an unknown shape or a bad `use`
         // are found. The check above only covers the parse; a program that lowered `bring Console(…)`

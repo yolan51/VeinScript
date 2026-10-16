@@ -1856,6 +1856,7 @@ public partial class MainWindow : Window
         if (!dir.Exists) return;
 
         LoadProject();
+        RestorePackagesIfStale(root);
 
         // A project with an app.vein gets the semantic view (★ principal + 📦 dependencies); anything
         // else falls back to the plain folder tree.
@@ -1868,7 +1869,66 @@ public partial class MainWindow : Window
         }
 
         AddStdlibNode();
+        AddLibrariesNode(root);
         RestoreTreeState(expanded, selected);
+    }
+
+    // ---- library packages (VeinScriptBundle's Vein.Bundles.*): .veinproj Packages → .vein/libraries --------
+
+    /// A project that lists packages but whose `.vein/libraries` is missing, or names a folder that is gone
+    /// (a fresh clone, another machine), is restored on open — so `need "web.Page"` resolves without a
+    /// trip to the terminal.
+    private void RestorePackagesIfStale(string root)
+    {
+        if (LibraryPackage.Packages(root).Count == 0) return;
+        string list = Path.Combine(root, BundleIndex.LibrariesFile);
+        bool stale = !File.Exists(list) || File.ReadAllLines(list)
+            .Where(l => l.Trim().Length > 0 && !l.StartsWith('#')).Any(l => !Directory.Exists(l.Trim()));
+        if (!stale) return;
+        try
+        {
+            var problems = LibraryPackage.Restore(root).Where(r => r.Problem is not null).Select(r => r.Problem).ToList();
+            SetStatus(problems.Count == 0 ? "Library packages restored." : "Library packages: " + string.Join(" ", problems));
+        }
+        catch (Exception ex) { SetStatus("Could not restore library packages: " + ex.Message); }
+    }
+
+    /// 📦 libraries — the bundles of the packages this project uses (and of any a host listed), read-only
+    /// copies unpacked outside the project; double-click opens one, F12 lands in them too.
+    private void AddLibrariesNode(string root)
+    {
+        var roots = BundleIndex.SearchRoots(root).Where(BundleIndex.IsLibraryRoot).ToList();
+        if (roots.Count == 0) return;
+        var node = new TreeViewItem { Header = "📦 libraries (read-only)", IsExpanded = false };
+        foreach (string library in roots)
+        {
+            string marker = Path.Combine(library, BundleIndex.LibraryMarker);
+            string name = File.Exists(marker) ? File.ReadAllText(marker).Split(' ')[0] : Path.GetFileName(library);
+            var package = new TreeViewItem { Header = name };
+            foreach (string file in Directory.EnumerateFiles(library, "*.vein", SearchOption.AllDirectories)
+                                             .OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+                package.Items.Add(new TreeViewItem { Header = Path.GetRelativePath(library, file).Replace('\\', '/'), Tag = file });
+            node.Items.Add(package);
+        }
+        _projectTree.Items.Add(node);
+    }
+
+    private async void OnAddPackage(object? sender, RoutedEventArgs e)
+    {
+        string? folder = _rootFolder ?? (_currentPath is { } p ? Path.GetDirectoryName(p) : null);
+        if (folder is null) { SetStatus("Open a folder first — a package is added to a project."); return; }
+        string project = LibraryPackage.ProjectDir(folder);
+        if (await PackageDialog.ShowAsync(this, project) is not { } id) return;
+        try
+        {
+            LibraryPackage.SetPackage(project, id, "0.1.0-*");
+            var restored = LibraryPackage.Restore(project);
+            var mine = restored.FirstOrDefault(r => r.Id == id);
+            SetStatus(mine?.Problem ?? $"Added {id} {mine?.Version} — its bundles are `need`-able now.");
+            if (_rootFolder is not null) PopulateProjectTree(_rootFolder);
+            if (_bottomPanel.SelectedIndex == TabTune) _tunePanel.Update(RunPath);
+        }
+        catch (Exception ex) { SetStatus($"Could not add {id}: {ex.Message}"); }
     }
 
     /// <summary>The full paths of every folder node currently open.</summary>

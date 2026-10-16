@@ -49,6 +49,7 @@ public static class ProjectScaffold
         File.WriteAllText(mainFile, workload is null
             ? ScratchTemplate(name, author)
             : WorkloadTemplates.Source(workload, name, author, $"{name}/{fileName}"));
+        AddPackages(dir, workload);
         return (dir, mainFile);
     }
 
@@ -116,7 +117,17 @@ public static class ProjectScaffold
             : WorkloadTemplates.Source(workload, name, author, entryPath ?? $"{name}/{name}.vein"));
 
         if (withDiscovery) File.WriteAllText(Path.Combine(bundleDir, "vein.discovery"), DiscoveryTemplate());
+        AddPackages(bundleDir, workload);
         return (bundleDir, mainFile);
+    }
+
+    /// A template's library packages, written into `.veinproj` and restored from the local feed. A feed
+    /// without them is not an error here: the project is made, and `veinc restore` fetches them later.
+    private static void AddPackages(string dir, string? workload)
+    {
+        if (workload is null || WorkloadTemplates.All.FirstOrDefault(t => t.Key == workload)?.Packages is not { Count: > 0 } packages) return;
+        foreach (string id in packages) LibraryPackage.SetPackage(dir, id, "0.1.0-*");
+        try { LibraryPackage.Restore(dir); } catch (Exception) { /* restored later */ }
     }
 
     /// Create an app skeleton under <paramref name="parentDir"/>: `<name>/app.vein` + a principal bundle

@@ -55,6 +55,11 @@ public sealed class VeinProject
     /// a project that is NOT derivable from the code.
     public CloudLink? Cloud { get; set; }
 
+    /// The VeinScript library PACKAGES this project uses — id → version pattern (`"Vein.Bundles.Web":
+    /// "0.1.0-*"`). `veinc add` writes it, `veinc restore` (and the Workbench, on open) unpacks each into
+    /// `.vein/libraries` — what a project with no build of its own has instead of a csproj's references.
+    public Dictionary<string, string>? Packages { get; set; }
+
     [JsonIgnore]
     public string? Folder { get; private set; }
 

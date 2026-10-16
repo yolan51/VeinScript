@@ -415,6 +415,14 @@ and elsewhere as **VS0234** at each call that needed the widening, so a misspell
 broken call. A `need` that names no bundle on the search path is **VS0340** at the declaration, and one
 written without an author is **VS0339**. `use` itself is **VS0338**, which names the `need` line to write.
 
+**18a. A library PACKAGE is added, not copied: `veinc add Vein.Bundles.Web`.** Reusable bundles (the
+VeinScriptBundle repo: `core.*`, `game.*`, `web.*`) ship as .NET packages. A Godot game references them in
+its csproj; any other project lists them in `.veinproj` (`"Packages": { "Vein.Bundles.Web": "0.1.0-*" }`) —
+`veinc add` writes that, unpacks the package from the local feed and lists it in `.vein/libraries`, where
+veinc and the Workbench search; `veinc restore` does it again on a fresh clone (the Workbench does on open).
+Then `need "web.Page"` resolves and LINKS (18). A built exe carries the libraries inside it. Writing one:
+a shared SF runs inline in the CALLER, so name everything inside it qualified.
+
 **18b. `need "Author.Bundle" as Y` imports QUALIFIED, and widens nothing.** The alias names the head of a
 `*` path — `need "Vein.Math" as M` makes `*M.Roots.sqrt(16.0)` resolve — and deliberately does *not* make
 bare `sqrt` mean anything. That is what makes it the answer to VS0216: two bundles exporting one name are

@@ -686,7 +686,8 @@ principal.
 
 | Command | Does |
 |---|---|
-| `new bundle\|app <Name> [--author A]` | scaffold a project |
+| `new bundle\|app\|scratch <Name> [--author A] [--workload site-bundles]` | scaffold a project (a workload is a starting program) |
+| `add\|remove <Package>`, `restore`, `packages` | library packages for a project with no build: `.veinproj` Packages → `.vein/libraries` |
 | `check <file>` | all diagnostics; prints `ok` when clean |
 | `run <file> [--ticks N] [-- args…]` | console mode: stdin → `@Input`, `@Print` → stdout |
 | `render <file> [path] [--set k=v]` | one request → `HTTP status` + body |

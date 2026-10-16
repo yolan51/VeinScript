@@ -184,6 +184,9 @@ and writing `$View`, that draws `$World` positions.
   - `veinc` is a dotnet tool.
   - The first library is the **VeinKit** repo: kit.Cameras, kit.Movement, kit.Collect and kit.Pause, with
     tests written in VeinScript. VeinGodot's 3D demo and its `tools/new-game.ps1` starter run on it.
+  - The repo is now **VeinScriptBundle** (one package per area: Vein.Bundles.Core, .Game, .Web), and a
+    project with no build adds them: `veinc add | remove | restore | packages`, `.veinproj` Packages, the
+    Workbench restoring on open and offering File ▸ Add Bundle Package…; `veinc build` carries them.
   - What remains below is the *catalog* path: bundles fetched from a server into `bundles/`.
 
 - **`veinc add | update | remove Author.Bundle`.**

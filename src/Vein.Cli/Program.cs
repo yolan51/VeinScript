@@ -7,9 +7,12 @@ using Vein.Compiler.Parsing;
 using Vein.Compiler.Project;
 using Vein.Compiler.Tooling;
 
+// Library packages for a project with no build of its own (Vein.Bundles.Web, …): no file argument.
+if (args.Length > 0 && args[0] is "add" or "remove" or "restore" or "packages") return PackageCommand.Run(args);
+
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("usage: veinc <new|check|lock|settings|test|tokens|ast|ir|render|serve|run|build|emit|graph|events|scaffold|symbols|exec> <file.vein> [arg]");
+    Console.Error.WriteLine("usage: veinc <add|remove|restore|packages> …   or   veinc <new|check|lock|settings|test|tokens|ast|ir|render|serve|run|build|emit|graph|events|scaffold|symbols|exec> <file.vein> [arg]");
     return 2;
 }
 
