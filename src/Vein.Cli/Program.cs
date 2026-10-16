@@ -9,7 +9,7 @@ using Vein.Compiler.Tooling;
 
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("usage: veinc <new|check|lock|test|tokens|ast|ir|render|serve|run|build|emit|graph|events|scaffold|symbols|exec> <file.vein> [arg]");
+    Console.Error.WriteLine("usage: veinc <new|check|lock|settings|test|tokens|ast|ir|render|serve|run|build|emit|graph|events|scaffold|symbols|exec> <file.vein> [arg]");
     return 2;
 }
 
@@ -110,6 +110,7 @@ switch (command)
         // `publicators/` and `shards/` and lowers each, so their diagnostics land here.
         if ((AppLinker.Link(path, source, diagnostics) ?? AppLinker.LinkNeeds(path, source, diagnostics)) is not null)
         {
+            SettingsCommand.AddProblems(path, diagnostics);
             foreach (var d in diagnostics.Items) Console.Error.WriteLine(d);
             int appErrors = diagnostics.Items.Count(d => d.Severity == Severity.Error);
             int appWarnings = diagnostics.Items.Count(d => d.Severity == Severity.Warning);
@@ -124,6 +125,7 @@ switch (command)
             // `use` list into the next (see Lower.LowerBundle).
             foreach (var bundle in unit.Bundles) new Lower(diagnostics, projectDir).LowerBundle(bundle);
         }
+        SettingsCommand.AddProblems(path, diagnostics);
 
         foreach (var d in diagnostics.Items) Console.Error.WriteLine(d);
         int errors = diagnostics.Items.Count(d => d.Severity == Severity.Error);
@@ -138,6 +140,10 @@ switch (command)
     // vein.lock line that changed; everything that runs a program only ever adds lines.
     case "lock":
         return LockCommand.Run(path, source, projectDir);
+
+    // `veinc settings` — the program's `tune` settings and the project's vein.settings (D21).
+    case "settings":
+        return SettingsCommand.Run(path, args);
 
     case "ir":
     {

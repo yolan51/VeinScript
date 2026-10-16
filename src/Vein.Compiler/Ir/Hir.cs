@@ -20,7 +20,12 @@ public sealed record IrTypeRef(string Name, IReadOnlyList<IrTypeRef> Args, bool 
 public enum IrTypeKind { Struct, Enum, Component, Message, Tag }
 public enum FoldReducer { Sum, Min, Max, Replace, First, All, Any }
 
-public sealed record IrField(string Name, IrTypeRef Type, FoldReducer? Fold, IrExpr? Default = null);
+public sealed record IrField(string Name, IrTypeRef Type, FoldReducer? Fold, IrExpr? Default = null)
+{
+    /// A shard var under `tune("…")` (D21): its doc ("" if empty); null for ordinary state. Its Default is
+    /// already the project's value when `vein.settings` overrides it.
+    public string? Tune { get; init; }
+}
 public sealed record IrEnumCase(string Name, int Ordinal);
 
 public sealed record IrType(

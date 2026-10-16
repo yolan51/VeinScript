@@ -159,6 +159,20 @@ carries its libraries inside the assembly, like the stdlib.
   which run no host, resolve the same `need`s (and F12 into a library's source).
 - A game that `need`s a library runs the library's shards (RULES 18), on both runtimes.
 
+## Settings: `tune` vars a project changes without opening the source
+
+A shard var under `tune("…")` is a SETTING (D21); a project's values for them live in one `vein.settings`
+(a section per bundle, libraries' included). The host side:
+
+- `VeinGame.Settings` — every setting of the program and its libraries: key, type, default, the saved
+  value (null: the default), the live value, doc, file and line. What a Settings panel lists.
+- `VeinGame.Tune(key, value)` — the running game only, nothing saved: for a slider being dragged.
+- `VeinGame.SaveSetting(key, literal)` / `ResetSetting(key)` — write or remove the line, and apply it now.
+- `VeinGame.SettingsPath` — watch it as you watch `.vein` files: a change is a `Reload(keepState: true)`,
+  and a saved value reaches the rules the way an edited initialiser does.
+- `VeinGame.Check` also reports `vein.settings` problems (VS0357, VS0358). An export's precompiled rules
+  already hold the saved values.
+
 ## Limits, said plainly
 
 - **Compiled covers most, not all.** See "Two runtimes" above for what still falls back.

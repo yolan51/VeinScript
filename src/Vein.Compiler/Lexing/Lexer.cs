@@ -55,6 +55,9 @@ public sealed class Lexer
 
         // D13: `do name(…)` calls an SF — a statement that changes things says so where it is written.
         ["do"] = TokenKind.KwDo,
+
+        // D21: `tune("doc")` marks a shard var as a setting (vein.settings).
+        ["tune"] = TokenKind.KwTune,
     };
 
     private readonly string _src;

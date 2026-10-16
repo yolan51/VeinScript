@@ -41,7 +41,7 @@ arm may sit on its own line — `ParseMatch` reads `else` explicitly — which i
 **3. A string literal is one line.** `\n \t \r \\ \"` are the escapes; a literal newline inside quotes is
 VS0003. To emit a multi-line string, use `\n` and wrap the source with trailing `+` per rule 1.
 
-**4. All 63 lexer keywords are reserved as EXPRESSIONS; most are still legal as field and member names.** `target` is a keyword,
+**4. All 64 lexer keywords are reserved as EXPRESSIONS; most are still legal as field and member names.** `target` is a keyword,
 so `builder Clock { target: string }` is a parse error — it was renamed to `id`. Check the map before
 choosing a name; do not count entries by line, because the table holds two per line.
 
@@ -422,6 +422,13 @@ ambiguous only because both contribute bare names, so aliasing both removes the 
 restating it, and each vocabulary stays reachable under its own head. Only the FIRST segment substitutes;
 an alias names a bundle, and a publicator that happens to share its spelling is not one. This is
 `import numpy as np`, not `from numpy import *`.
+
+**18c. `tune("doc")` above a shard `var` makes it a SETTING, and a project's values live in `vein.settings`** (D21).
+The starting value must be a literal (VS0356); only a shard/ShardView/bridge `var` or `let` can be tuned
+(VS0355). `vein.settings` sits beside the project's `.veinproj` (else beside the program), one
+`[Author.Bundle]` section per bundle, `Shard.var = literal` per line — a NEEDED bundle's settings
+included, which is the only way to change a library's. A line naming no setting is VS0357; a value of the
+wrong type is VS0358, and the source's default is used. `veinc settings game.vein` lists them.
 
 **19. A bundle can span files, and FRAGMENTS MERGE BEFORE THE MAIN FILE.** `publicators/*.vein` is API,
 `shards/*.vein` is behaviour, and a fragment carrying an API declaration is **VS0321**. Member order is

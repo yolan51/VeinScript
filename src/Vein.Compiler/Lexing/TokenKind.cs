@@ -36,6 +36,10 @@ public enum TokenKind
     // member name (`from`, `count`, `to` all are), so `shape S { base: string }` and `c.S.base` keep
     // working. Only a BARE `base` in expression position is the keyword.
     KwBase,
+    // D21: `tune("doc")` above a shard `var` — a SETTING, which a project changes in `vein.settings`
+    // without opening the source. Inside the IsKeyword range, like `shared`, so `tune` stays legal as
+    // a field or member name.
+    KwTune,
     KwShardView,    // output-assembly construct: hears fragment events, concatenates a page
     KwEntity,       // the ECS entity type; as an expression, the nearest entity's int id
     KwIndex,        // as an expression, the nearest loop's 0-based iteration counter

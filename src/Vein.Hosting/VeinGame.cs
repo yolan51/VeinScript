@@ -2,6 +2,7 @@ using Vein.Compiler.Diagnostics;
 using Vein.Compiler.Ir;
 using Vein.Compiler.Project;
 using Vein.Compiler.Service;
+using Vein.Compiler.Tooling;
 using Vein.Jit;
 
 namespace Vein.Hosting;
@@ -135,14 +136,105 @@ public sealed class VeinGame
     /// a host's editor can underline problems while the user types. The same front end `Open` uses: `need`,
     /// a bundle's `publicators/`/`shards/` fragments and an app's `load` resolve from `path`'s folder, from
     /// disk. Nothing is compiled to C# and nothing runs; a few milliseconds for a game-sized file.
-    public static IReadOnlyList<Diagnostic> Check(string path, string source) =>
-        Compile(System.IO.Path.GetFullPath(path), source).Diagnostics;
+    public static IReadOnlyList<Diagnostic> Check(string path, string source)
+    {
+        string full = System.IO.Path.GetFullPath(path);
+        var diagnostics = Compile(full, source).Diagnostics.ToList();
+        // What is wrong in vein.settings (D21) that compiling did not already say: a line naming no setting.
+        foreach (var d in SettingsFor(full).Problems)
+            if (!diagnostics.Any(x => x.Code == d.Code && x.Span.Line == d.Span.Line && x.Span.File == d.Span.File))
+                diagnostics.Add(d);
+        return diagnostics;
+    }
     /// True when the running rules were loaded from precompiled bytes rather than compiled at start.
     public bool Precompiled { get; private set; }
 
     /// The VeinScript libraries (packages such as VeinKit) found beside the app and searched by `need` — for
     /// a host's UI that lists them, and opens their bundles read-only.
     public static IReadOnlyList<VeinLibraries.Library> Libraries => VeinLibraries.All;
+
+    // ---- settings (D21) -------------------------------------------------------------------------------
+
+    /// One SETTING — a shard var under `tune("…")` — of the program or of a library it needs: its default
+    /// (the source's literal), the value `vein.settings` saves for it (null: the default), and its value in
+    /// the running game right now (null when not running).
+    public sealed record Setting(
+        string Key, string Section, string Name, string Type, string Default, string? Saved, object? Live,
+        string Doc, string File, int Line, bool IsLibrary);
+
+    /// The project's `vein.settings`, where SaveSetting writes. A host watches it as it watches `.vein`
+    /// files and reloads on a change (keeping the game), which is how a saved value reaches the rules.
+    public string SettingsPath => SettingsFile.Locate(System.IO.Path.GetDirectoryName(Path)!);
+
+    /// Every setting this program has, for a host's Settings panel.
+    public IReadOnlyList<Setting> Settings
+    {
+        get
+        {
+            var live = _runtime?.ShardVars();
+            return SettingsFor(Path).Settings.Select(s => new Setting(
+                s.Key, s.Section, s.Name, s.Type, s.Default, s.Value,
+                live is not null && live.TryGetValue(s.Section + "." + s.Shard, out var vars) && vars.TryGetValue(s.Var, out var v) ? v : null,
+                s.Doc, s.File, s.Line, s.IsLibrary)).ToList();
+        }
+    }
+
+    /// Change a setting in the RUNNING game only — while a slider is dragged. Nothing is saved: the next
+    /// reload or start goes back to the saved value. False when there is no such setting or the value does
+    /// not fit its type.
+    public bool Tune(string key, object? value)
+    {
+        if (_runtime is null || SettingsFor(Path).Settings.FirstOrDefault(s => s.Key == key) is not { } s) return false;
+        object? typed = s.Type switch
+        {
+            "int" => value is IConvertible c ? Convert.ToInt64(c, System.Globalization.CultureInfo.InvariantCulture) : null,
+            "float" or "percent" => value is IConvertible c ? Convert.ToDouble(c, System.Globalization.CultureInfo.InvariantCulture) : null,
+            "bool" => value as bool?,
+            _ => value?.ToString(),
+        };
+        if (typed is null) return false;
+        bool ok = _runtime.SetShardVar(s.Section + "." + s.Shard, s.Var, typed);
+        if (ok) Changed();
+        return ok;
+    }
+
+    /// Save a setting's value — a VeinScript literal (`6.5`, `30%`, `"text"`, `true`) — to `vein.settings`,
+    /// and apply it to the running game now. False when there is no such setting or the literal does not
+    /// fit its type.
+    public bool SaveSetting(string key, string literal)
+    {
+        if (SettingsFor(Path).Settings.FirstOrDefault(s => s.Key == key) is not { } s) return false;
+        if (SettingsFile.ParseValue(literal, SettingsIndex.KindOf(s.Type), default) is not { } parsed) return false;
+        SettingsFile.Set(SettingsPath, s.Section, s.Name, literal.Trim());
+        if (_runtime is not null) Tune(key, LiteralValue(parsed));
+        return true;
+    }
+
+    /// Remove a setting from `vein.settings` — back to its source default, now too. False when it had none.
+    public bool ResetSetting(string key)
+    {
+        if (SettingsFor(Path).Settings.FirstOrDefault(s => s.Key == key) is not { } s) return false;
+        bool removed = SettingsFile.Remove(SettingsPath, s.Section, s.Name);
+        if (removed && _runtime is not null && SettingsFile.ParseValue(s.Default, SettingsIndex.KindOf(s.Type), default) is { } parsed)
+            Tune(key, LiteralValue(parsed));
+        return removed;
+    }
+
+    private static object? LiteralValue(Compiler.Parsing.Expr e) => e switch
+    {
+        Compiler.Parsing.UnaryExpr { Operand: Compiler.Parsing.LiteralExpr l } => l.Value switch { long n => -n, double d => -d, var o => o },
+        Compiler.Parsing.LiteralExpr { Kind: Compiler.Parsing.LiteralKind.Percent, Value: var p } => Convert.ToDouble(p) / 100.0,
+        Compiler.Parsing.LiteralExpr l => l.Value,
+        _ => null,
+    };
+
+    /// The settings index, resolving libraries as a compile does (they are beside the game, not listed).
+    private static SettingsIndex.Result SettingsFor(string path)
+    {
+        using var _ = BundleSearch.Scope(StdlibCache.Root);
+        using var __ = BundleSearch.WithLibraries(VeinLibraries.Roots);
+        return SettingsIndex.For(path);
+    }
 
     private byte[]? _precompiled;
 

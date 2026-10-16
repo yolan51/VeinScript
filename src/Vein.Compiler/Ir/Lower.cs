@@ -1585,13 +1585,60 @@ public sealed partial class Lower
                 case FuncDecl f: methods.Add(LowerFunc(f)); break;
                 // The INITIALISER goes with it. It was dropped here, so `var n = 0` started EMPTY and
                 // `var x: int = 5` started at 0 — the declared value never reached either runtime.
-                case VarDecl v: state.Add(new IrField(v.Name, v.Type is null ? IrTypeRef.Of("infer") : LowerTypeRef(v.Type), null,
-                                                      v.Init is null ? null : LowerExpr(v.Init))); break;
+                case VarDecl v: state.Add(LowerStateVar(v, name)); break;
             }
         }
 
         return new IrShard(name, state, null, methods, doc, attrs);
     }
+
+    // ---- settings (D21) ---------------------------------------------------
+
+    /// A shard's state var. A SETTING (`tune("…")`) takes the project's value from `vein.settings` when
+    /// one is written there, in place of the source's literal — here, so both runtimes, `Precompile`
+    /// and a hot reload's starting-value comparison all see the same program.
+    private IrField LowerStateVar(VarDecl v, string shard)
+    {
+        var type = v.Type is null ? IrTypeRef.Of("infer") : LowerTypeRef(v.Type);
+        Expr? init = v.Init;
+        if (v.Tune && init is not null && Settings.Find(_ownerKey, shard + "." + v.Name) is { } entry)
+            init = OverrideLiteral(v, entry) ?? init;
+        return new IrField(v.Name, type, null, init is null ? null : LowerExpr(init)) { Tune = v.Tune ? v.Doc ?? "" : null };
+    }
+
+    /// The project's settings, read once per lowering. None without a project folder.
+    private SettingsFile Settings => _settings ??= _projectDir is null ? SettingsFile.Parse("", "") : SettingsFile.Load(_projectDir);
+    private SettingsFile? _settings;
+
+    /// The literal a `vein.settings` line holds, checked against the setting's type (VS0358) — an int is
+    /// accepted for a float, as it is in source. Null (the source default stays) when it does not fit.
+    private Expr? OverrideLiteral(VarDecl v, SettingsFile.Entry entry)
+    {
+        var span = new SourceSpan(Settings.Path, entry.Line, 1, entry.Name.Length);
+        LiteralKind? wanted = SettingKind(v);
+        if (SettingsFile.ParseValue(entry.Value, wanted, span) is { } value) return value;
+        _diag.Error("VS0358",
+            $"`{entry.Key} = {entry.Value}` in {SettingsFile.FileName}: '{v.Name}' is a {(wanted?.ToString() ?? "literal").ToLowerInvariant()} " +
+            "setting, and that value is not one. The source's default is used until the line is fixed or removed.",
+            span);
+        return null;
+    }
+
+    /// The literal kind a setting holds: its declared type, else its source literal's.
+    internal static LiteralKind? SettingKind(VarDecl v) => v.Type?.Name switch
+    {
+        "int" => LiteralKind.Int,
+        "float" => LiteralKind.Float,
+        "string" => LiteralKind.String,
+        "bool" => LiteralKind.Bool,
+        "percent" => LiteralKind.Percent,
+        _ => v.Init switch
+        {
+            LiteralExpr l => l.Kind,
+            UnaryExpr { Operand: LiteralExpr l } => l.Kind,
+            _ => null,
+        },
+    };
 
     private IrShard LowerView(ViewDecl vw)
     {
@@ -1605,8 +1652,7 @@ public sealed partial class Lower
                 case FuncDecl f: methods.Add(LowerFunc(f)); break;
                 // The INITIALISER goes with it. It was dropped here, so `var n = 0` started EMPTY and
                 // `var x: int = 5` started at 0 — the declared value never reached either runtime.
-                case VarDecl v: state.Add(new IrField(v.Name, v.Type is null ? IrTypeRef.Of("infer") : LowerTypeRef(v.Type), null,
-                                                      v.Init is null ? null : LowerExpr(v.Init))); break;
+                case VarDecl v: state.Add(LowerStateVar(v, vw.Name)); break;
             }
         }
         var attrs = new List<IrAttr> { IrAttr.Of("view"), IrAttr.Of("key", ShardKey(vw.Name)) };

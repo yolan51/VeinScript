@@ -62,7 +62,7 @@
          are not keywords at all — `random()` is a built-in FUNCTION (removing it from the lexer is what
          made `random()` callable), and `in` has never been one. -->
     <Keywords color="Keyword">
-      <Word>bundle</Word>   <Word>need</Word>      <Word>use</Word>        <Word>publicator</Word> <Word>shared</Word>
+      <Word>bundle</Word>   <Word>need</Word>      <Word>use</Word>        <Word>publicator</Word> <Word>shared</Word> <Word>tune</Word>
       <Word>shape</Word>    <Word>event</Word>     <Word>shard</Word>      <Word>ShardView</Word>
       <Word>bridge</Word>   <Word>target</Word>    <Word>each</Word>       <Word>tick</Word>
       <Word>settled</Word>  <Word>start</Word>     <Word>hear</Word>       <Word>emit</Word>

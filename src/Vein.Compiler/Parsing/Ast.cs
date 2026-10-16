@@ -27,6 +27,9 @@ public abstract record Decl(SourceSpan Span) : Node(Span)
     /// True when marked `shared("…")` — visible across ALL bundles (the cross-bundle public API; only
     /// these are listed by `veinc symbols` and reachable via a `*Author.Bundle.@…` qualified reference).
     public bool Shared { get; init; }
+    /// True for a shard `var`/`let` under `tune("…")` (D21): a SETTING. Its doc is in `Doc`, its starting
+    /// value is a literal, and a project may override that value in `vein.settings`.
+    public bool Tune { get; init; }
 }
 
 public sealed record BundleDecl(string Name, IReadOnlyList<Decl> Members, SourceSpan Span) : Decl(Span)

@@ -565,6 +565,56 @@ mute and mark in step with the interpreter. `carries` on a sender's `from` it ca
 
 ---
 
+## D21 — `tune("doc")` makes a shard var a SETTING; a project's values live in `vein.settings` {#tune}
+
+> **Reported as `VS0355`** (`tune` on anything but a shard's `var`/`let`), **`VS0356`** (a setting
+> whose starting value is not a literal), **`VS0357`** (a `vein.settings` line naming no setting — a
+> warning) and **`VS0358`** (a `vein.settings` value that is not a literal of the setting's type, or a
+> line that is not `name = value` under a section).
+
+**DECIDED.** Shards hold config-like state — `var speed: float = 5.0`, `var mouseTurn: float = 0.006`. To
+change one you had to find it, and a LIBRARY's (VeinKit's) you could not change at all: its source is a
+read-only copy unpacked from a package. A setting is marked where it is declared, with the same form as
+`shared`:
+
+```
+shard Fly {
+    tune("Metres per second while flying.")
+    var speed: float = 8.0
+    var flying: int = 0                 // ordinary state: not a setting
+}
+```
+
+and changed per PROJECT, in one file beside its `.veinproj` (else beside the program), a section per bundle:
+
+```
+# vein.settings
+[kit.Cameras]
+Fly.speed = 12.0
+
+[you.MyGame]
+Move.speed = 6.5
+```
+
+- **A setting starts from a literal** (number, percent, string, bool; a negative number). That literal is
+  the default a Settings panel shows and the value a line replaces; a computed value has neither.
+- **The project owns the values, not the bundle.** One library serves many games, each tuned its own way —
+  the reasoning that gives each project one `vein.lock`. Keys are qualified (`[Author.Bundle]` +
+  `Shard.var`), so any number of needed bundles share the file. Deleting a line is resetting it.
+- **Applied at lowering.** A setting's IR initialiser IS the project's value, so both runtimes, a
+  precompiled export and `veinc` agree, and a hot reload that keeps the game sees a changed value the way
+  it sees an edited initialiser: the var takes it, everything else carries on.
+- **Not API (D18 stands).** A setting is the project tuning a shard's starting value; no other bundle reads
+  or writes it. The shard may still assign its own var — `tune` sets where it starts.
+- **Tools:** `veinc settings <file> [set K=V | reset K]`; `VeinGame.Settings / Tune / SaveSetting /
+  ResetSetting` for a host; Godot's VeinScript ▸ Settings tab.
+
+**Not settings (yet):** a shape field's default (`$Walker { speed = 5.0 }` is per-identity data, set where
+it is attached); a range for a slider (`tune("…", 0.0, 20.0)` would extend the same annotation); values a
+PLAYER changes at run time (an options menu writes its own file with Vein.Files).
+
+---
+
 ## Reserved-word disposition
 
 Every keyword currently in [Lexer.cs](../src/Vein.Compiler/Lexing/Lexer.cs) `Keywords`, classified.

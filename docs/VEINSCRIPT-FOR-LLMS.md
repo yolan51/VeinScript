@@ -149,12 +149,12 @@ Run it: `veinc run arena.vein --ticks 8` — prints "three enemies", "half" thre
 - **Comparison**: two strings compare ordinally (`"10" < "9"` is true); two values that both read as
   numbers compare numerically; otherwise as text.
 
-### All 63 keywords
+### All 64 keywords
 
 `and as attach audience builder bridge bring bundle by chance count destroy each else emit event false
 folds from hear let map mark mute not on or publicator return settled SF shape shard shared start sync
 target tick to transform true unattach unmark unmute use need var when fn type enum if while repeat break
-continue match ShardView Entity app Index base do`
+continue match ShardView Entity app Index base do tune`
 
 - Reserved with **no meaning** (never use): `count`, `map`, `on`, `sync`, `transform`.
 - Retired: `use` (VS0338) → `need`.
@@ -278,6 +278,27 @@ shard Physics #Gameplay {                 // optional marks the shard itself car
 ```
 
 Members: `var`/`let` state, `hear`, schedules, `SF`, `fn`.
+
+**Settings** (D21): `tune("doc")` on the line above a shard `var`/`let` makes it a setting — a value the
+project changes without opening the source, a library's included. The starting value must be a literal
+(VS0356). The project's values live in ONE `vein.settings` (beside `.veinproj`, else beside the program),
+a section per bundle; delete a line to go back to the default:
+
+```vein
+shard Move #Gameplay {
+    tune("Metres per second.")
+    var speed: float = 5.0
+    var dt: float = 0.0           // ordinary state: not a setting
+}
+```
+
+```text
+# vein.settings
+[kit.Cameras]
+Fly.speed = 12.0
+[you.Game]
+Move.speed = 6.5
+```
 
 **Schedules** (per frame, in this order):
 
@@ -676,6 +697,7 @@ principal.
 | `scaffold <file> '&Builder'` | the argument slots of a builder/event/shape |
 | `exec <file>` | the static execution model (waves, ordering, conflicts) |
 | `graph`, `ir`, `ast`, `tokens` | internals |
+| `settings <file> [set K=V | reset K]` | the program's `tune` settings (its libraries' too) and their `vein.settings` values |
 | `lock <app>` | accept changed signatures in `vein.lock` (records members used from `bundles/`; a moved parameter is VS0344) |
 
 The **Workbench** (`dotnet run --project src/Vein.Workbench`) is the IDE: live red underlines, sigil
@@ -703,6 +725,8 @@ stepper, web preview, AI assistant that compiles suggestions before offering the
 | VS0348 | re-`attach` replaces the whole component (note) |
 | VS0349 | `->` return syntax — write `return T` |
 | VS0350–VS0354 | `mute`/`audience` naming problems |
+| VS0355 / VS0356 | `tune` not on a shard var / a setting without a literal starting value |
+| VS0357 / VS0358 | a `vein.settings` line naming no setting / a value of the wrong type |
 
 ---
 

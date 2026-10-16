@@ -142,6 +142,18 @@ public static class DiagnosticGuide
 
         new("VS0353","A qualified `*Author.Bundle.!Name` names another bundle's shard, which the bundle's own compile cannot see, so linking is the first place it can be checked. A name no linked bundle declares never matches.",
             "docs/SYNTAX-DECISIONS.md — D19"),
+
+        new("VS0355", "`tune(\"…\")` marks a SETTING: a shard's own `var` or `let`, whose starting value a project changes in `vein.settings`. On anything else — a bundle-level declaration, a shape field, a statement — there is no shard state for it to set.",
+            "docs/SYNTAX-DECISIONS.md — D21"),
+
+        new("VS0356", "A setting's starting value is the default the Settings panel shows and the literal `vein.settings` replaces. A computed value (`2.0 * base`, a call) has neither a single value to show nor one to replace, so a setting starts from a literal.",
+            "docs/SYNTAX-DECISIONS.md — D21"),
+
+        new("VS0357", "Every `vein.settings` line names a setting by `[Author.Bundle]` and `Shard.var`. A line that names none — a renamed shard, a typo, a bundle no longer needed — changes nothing, so it is reported rather than silently kept.",
+            "docs/SYNTAX-DECISIONS.md — D21"),
+
+        new("VS0358", "A `vein.settings` value must be a literal of the setting's type (an int is accepted for a float). One that is not would change the program's meaning or fail at run time, so the source's default is used and the line is reported.",
+            "docs/SYNTAX-DECISIONS.md — D21"),
     };
 
     private static readonly Dictionary<string, DiagnosticNote> ByCode =

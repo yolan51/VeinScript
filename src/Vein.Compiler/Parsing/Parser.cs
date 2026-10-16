@@ -232,6 +232,10 @@ public sealed class Parser
             case TokenKind.KwLet: return ParseVar(mutable: false);
             case TokenKind.KwVar: return ParseVar(mutable: true);
             case TokenKind.KwStart: return ParseStart();   // bundle-level boot event
+            case TokenKind.KwTune:
+                _diag.Error("VS0355", "`tune(\"…\")` marks a SETTING, which is a `var` or `let` inside a shard, ShardView or bridge — not a bundle-level declaration.", Here);
+                ParseTunedVar();
+                return null;
             default:
                 _diag.Error("VS0102", $"Unexpected '{Cur.Text}' at declaration level.", Here);
                 throw new ParseError();
@@ -527,6 +531,46 @@ public sealed class Parser
         return new VarDecl(mutable, name, type, init, s);
     }
 
+    /// `tune("doc")` then a `var`/`let` (D21): a shard's SETTING. The doc says what it changes, and the
+    /// starting value must be a LITERAL — that literal is what `vein.settings` replaces, and what the
+    /// Settings panel shows as the default. Anything computed has no single value to show or to override.
+    private VarDecl ParseTunedVar()
+    {
+        var at = Here;
+        Advance();
+        Expect(TokenKind.LParen, "'('");
+        var token = Expect(TokenKind.String, "doc string");
+        Expect(TokenKind.RParen, "')'");
+        SkipTerms();
+        if (token.Text.Length > MaxDocLength)
+            _diag.Warning("VS0243",
+                $"This `tune(\"…\")` is {token.Text.Length} characters; {MaxDocLength} is the most that reads as a " +
+                "label. It is shown in a Settings row beside the others and is trimmed there. Keep the sentence " +
+                "that says what this setting changes, and put the explanation in a `//` comment.",
+                token.Span);
+        if (!Check(TokenKind.KwVar) && !Check(TokenKind.KwLet))
+        {
+            _diag.Error("VS0355", "`tune(\"…\")` goes on the line above a `var` or `let` of a shard, ShardView or bridge.", at);
+            throw new ParseError();
+        }
+        var v = ParseVar(mutable: Check(TokenKind.KwVar));
+        if (!IsTunableLiteral(v.Init))
+            _diag.Error("VS0356",
+                $"Setting '{v.Name}' needs a literal starting value — a number, a percent, a string or true/false " +
+                "(`var speed: float = 5.0`). That literal is the default the Settings panel shows and the value " +
+                "`vein.settings` replaces; a computed value has neither.",
+                v.Init?.Span ?? v.Span);
+        return v with { Doc = token.Text, Tune = true };
+    }
+
+    /// A setting's starting value: a literal, or a negative number.
+    internal static bool IsTunableLiteral(Expr? e) => e switch
+    {
+        LiteralExpr => true,
+        UnaryExpr { Op: UnOp.Neg, Operand: LiteralExpr { Kind: LiteralKind.Int or LiteralKind.Float or LiteralKind.Percent } } => true,
+        _ => false,
+    };
+
     // ---- shards ---------------------------------------------------------
 
     /// Parse the shapes/marks a First-Class object carries: `$Shape #Mark …` before its `{`.
@@ -588,6 +632,7 @@ public sealed class Parser
             if (Check(TokenKind.KwHear)) members.Add(ParseHear());
             else if (Check(TokenKind.KwVar)) members.Add(ParseVar(mutable: true));
             else if (Check(TokenKind.KwLet)) members.Add(ParseVar(mutable: false));
+            else if (Check(TokenKind.KwTune)) members.Add(ParseTunedVar());
             else if (Check(TokenKind.KwSf) || Check(TokenKind.KwFn)) members.Add(ParseFunc());
             else { _diag.Error("VS0108", $"Unexpected '{Cur.Text}' in ShardView body (expected hear/var/let/SF/fn).", Here); throw new ParseError(); }
             SkipTerms();
@@ -615,6 +660,7 @@ public sealed class Parser
             case TokenKind.KwFn: return ParseFunc();     // a shard-local computation helper
             case TokenKind.KwLet: return ParseVar(mutable: false);
             case TokenKind.KwVar: return ParseVar(mutable: true);
+            case TokenKind.KwTune: return ParseTunedVar();
             default:
                 // `run once` / `every N` use contextual words (so `frame`/`every` stay valid field names).
                 if (Check(TokenKind.Ident) && (Cur.Text == "run" || Cur.Text == "every")) return ParseSchedule();
