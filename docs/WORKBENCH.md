@@ -186,6 +186,9 @@ PUBLIC/SHARED/PRIVATE bar (`Tooling/BundleModel.cs`).
   nothing. See below.
 - **Preview** — for a bundle that hears `@Request`: pick a route, see the markup it answers with, and
   Open in Browser. See below.
+- **Tune** — every shard var marked `tune("…")` (D21) in the program and the bundles it needs, a library's
+  included, with its default and the project's value. Edit one and it is saved to `vein.settings` (only
+  changed values are written); a game running in Godot takes it at once. ↺ resets, → jumps to it.
 - **Terminal** — see below.
 
 **Running** — ▶ runs the configuration the **file itself declares in its header**. 49 of the 63 samples

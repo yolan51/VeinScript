@@ -266,6 +266,9 @@
         <TabItem Header="Preview">
           <local:WebPreviewPanel Name="WebPreview" />
         </TabItem>
+        <TabItem Header="Tune">
+          <local:TunePanel Name="Tune" />
+        </TabItem>
       </TabControl>
     </Grid>
   </DockPanel>

@@ -67,6 +67,7 @@ public partial class MainWindow : Window
     private TreeView _projectTree = null!;
     private TreeView _depsTree = null!;
     private SymbolsPanel _symbolsPanel = null!;
+    private TunePanel _tunePanel = null!;
     private ScrollViewer _execPanel = null!;
     private Grid _topCols = null!;
     private Grid _mainRows = null!;
@@ -136,6 +137,7 @@ public partial class MainWindow : Window
     private const int TabLive = 9;
     private const int TabTranscript = 10;
     private const int TabPreview = 11;
+    private const int TabTune = 12;
 
     private ComboBox _runConfigs = null!;
     private TextBlock _runHint = null!;
@@ -166,6 +168,9 @@ public partial class MainWindow : Window
         _symbolsPanel = this.FindControl<SymbolsPanel>("Symbols")!;
         // The window owns navigation, so the panel hands a location back rather than opening files.
         _symbolsPanel.Activate = at => GoTo(at.File, at.Line, at.Col);
+        // Tune (D21): the program's `tune` vars and vein.settings, read when the tab is shown.
+        _tunePanel = this.FindControl<TunePanel>("Tune")!;
+        _tunePanel.Navigate = (file, line) => GoTo(file, line, 1);
         _execPanel = this.FindControl<ScrollViewer>("ExecPanel")!;
         _topCols = this.FindControl<Grid>("TopCols")!;
         _mainRows = this.FindControl<Grid>("MainRows")!;
@@ -176,6 +181,7 @@ public partial class MainWindow : Window
         _bottomPanel.SelectionChanged += (_, _) =>
         {
             if (_bottomPanel.SelectedIndex == TabSymbols) _symbolsPanel.Update(_rootFolder, _currentPath);
+            if (_bottomPanel.SelectedIndex == TabTune) _tunePanel.Update(RunPath);
         };
         _statusBar = this.FindControl<TextBlock>("StatusBar")!;
         _bundleInspector = this.FindControl<Border>("BundleInspector")!;
@@ -2622,6 +2628,7 @@ public partial class MainWindow : Window
         // Loads and parses every bundle the app links, so only when the Symbols tab is actually up.
         // The answer changes with a `load` or a `need`, not with what you type inside a shard.
         if (_bottomPanel.SelectedIndex == TabSymbols) _symbolsPanel.Update(_rootFolder, _currentPath);
+        if (_bottomPanel.SelectedIndex == TabTune) _tunePanel.Update(RunPath);
         PopulateExecution(result.Ast);
         UpdateMarks();
         RefreshRunConfigs();
