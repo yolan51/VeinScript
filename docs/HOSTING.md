@@ -147,7 +147,7 @@ across the edit instead of rebooting:
 
 ## Libraries: reusable VeinScript as packages
 
-A library (VeinKit) is a .NET assembly whose `.vein` files are embedded resources named `vein/<Bundle>/…`
+A library (VeinScriptBundle's Vein.Bundles.*) is a .NET assembly whose `.vein` files are embedded resources named `vein/<Bundle>/…`
 (`<EmbeddedResource Include="bundles/**/*.vein" LogicalName="vein/%(RecursiveDir)%(Filename)%(Extension)" />`).
 A game references the package; its build puts the assembly beside the game's, and Vein.Hosting finds it
 there by reading each `.dll` as a file (`VeinLibraries`, no assembly loaded), unpacks it once per build to

@@ -182,7 +182,7 @@ and writing `$View`, that draws `$World` positions.
   - A host writes `.vein/libraries` so `veinc` and the Workbench resolve the same `need`.
   - A single bundle's `need` links (RULES 18).
   - `veinc` is a dotnet tool.
-  - The first library is the **VeinKit** repo: kit.Cameras, kit.Movement, kit.Collect and kit.Pause, with
+  - The first library was the **VeinKit** repo (game.Cameras, game.Movement, game.Collect, game.Pause), with
     tests written in VeinScript. VeinGodot's 3D demo and its `tools/new-game.ps1` starter run on it.
   - The repo is now **VeinScriptBundle** (one package per area: Vein.Bundles.Core, .Game, .Web), and a
     project with no build adds them: `veinc add | remove | restore | packages`, `.veinproj` Packages, the

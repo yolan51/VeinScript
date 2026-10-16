@@ -573,7 +573,7 @@ mute and mark in step with the interpreter. `carries` on a sender's `from` it ca
 > line that is not `name = value` under a section).
 
 **DECIDED.** Shards hold config-like state — `var speed: float = 5.0`, `var mouseTurn: float = 0.006`. To
-change one you had to find it, and a LIBRARY's (VeinKit's) you could not change at all: its source is a
+change one you had to find it, and a LIBRARY's (VeinScriptBundle's) you could not change at all: its source is a
 read-only copy unpacked from a package. A setting is marked where it is declared, with the same form as
 `shared`:
 
@@ -589,7 +589,7 @@ and changed per PROJECT, in one file beside its `.veinproj` (else beside the pro
 
 ```
 # vein.settings
-[kit.Cameras]
+[game.Cameras]
 Fly.speed = 12.0
 
 [you.MyGame]

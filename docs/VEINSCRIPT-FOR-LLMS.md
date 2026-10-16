@@ -5,7 +5,7 @@
 > Every complete program below passes `veinc check`. When this file and your instincts disagree, this
 > file wins. When this file and the compiler disagree, the compiler wins — say so and show the error.
 >
-> Current as of 2026-10-16 (VeinScript repo `a6c5116`, VeinGodot `87d6366`, VeinKit `78cc13c`). File extension: `.vein`.
+> Current as of 2026-10-16 (VeinScript repo `a6c5116`, VeinGodot `cfcabf9`, VeinScriptBundle `430d31e`). File extension: `.vein`.
 
 ---
 
@@ -294,7 +294,7 @@ shard Move #Gameplay {
 
 ```text
 # vein.settings
-[kit.Cameras]
+[game.Cameras]
 Fly.speed = 12.0
 [you.Game]
 Move.speed = 6.5
@@ -605,28 +605,37 @@ Editor support: `.vein` syntax colouring, a **VeinScript** problems dock (every 
 save), a live **Debugger ▸ VeinScript** tab (events as they happen, identities, timing, muted state), and
 hot reload on save that keeps the game (identities, ids and `var`s survive; a `var` whose initial value the edit changed takes the new value; `run once` does not re-run; a broken edit keeps the old rules running). Exported games ship their rules compiled ahead of time.
 
-### VeinKit: reusable game rules (`need "kit.X"`)
+### VeinScriptBundle: reusable bundles (`need "game.X"`, `"web.X"`, `"core.X"`)
 
-A game references the VeinKit package. Its bundles unpack outside the project (Godot's VeinScript ▸
+A program uses the bundle packages — Vein.Bundles.Game, .Web, .Core: a Godot game references them in its csproj, any other project runs `veinc add Vein.Bundles.Web`. Its bundles unpack outside the project (Godot's VeinScript ▸
 Libraries tab shows them read-only), and `need` links them, so their shards run. The game attaches their
 shapes and marks:
 
 | Bundle | Attach | It hears | It says |
 |---|---|---|---|
-| `kit.Cameras` | `$OrbitCamera { yaw, tilt, distance }` or `$Follow2D { ease }` on the eye (with `$Position $Rotation $Camera`); `#CameraTarget` on what it follows | right-drag, wheel, right stick; actions `camera_toggle` `fly_up` `fly_down` | `@CameraMode { mode }` |
-| `kit.Movement` | `$Walker { speed }` (with `$Position $Rotation`), `$Jumper { strength, gravity }`, `$Animation` | actions `move_left/right/forward/back`, `jump`, left stick, `@AnimationEnded` | clips `idle walk jump fall` |
-| `kit.Collect` | `#Collector` (with `$Position $Collider`); `$Waves { model or image, clip, first, growth, area, sound }` | `@Collided` | `@Collected`, `@WaveStarted { wave, items }`, `@ScoreChanged { score, left, wave }`, `@WaveCleared` |
-| `kit.Pause` | `#Gameplay` on your shards that should stop | action `pause`, or `emit @TogglePause { }` | `@Paused { paused }` |
+| `game.Cameras` | `$OrbitCamera { yaw, tilt, distance }` or `$Follow2D { ease }` on the eye (with `$Position $Rotation $Camera`); `#CameraTarget` on what it follows | right-drag, wheel, right stick; actions `camera_toggle` `fly_up` `fly_down` | `@CameraMode { mode }` |
+| `game.Movement` | `$Walker { speed }` (with `$Position $Rotation`), `$Jumper { strength, gravity }`, `$Animation` | actions `move_left/right/forward/back`, `jump`, left stick, `@AnimationEnded` | clips `idle walk jump fall` |
+| `game.Collect` | `#Collector` (with `$Position $Collider`); `$Waves { model or image, clip, first, growth, area, sound }` | `@Collided` | `@Collected`, `@WaveStarted { wave, items }`, `@ScoreChanged { score, left, wave }`, `@WaveCleared` |
+| `game.Pause` | `#Gameplay` on your shards that should stop | action `pause`, or `emit @TogglePause { }` | `@Paused { paused }` |
+| `core.Timers` | `$Timer { seconds, repeat, tag }`, `$Cooldown { seconds, left }` | the clock (stops while `#Gameplay` is muted) | `@TimerDone { entity, tag }` |
+| `core.Save` | `emit @Save { slot = "save", key, value }`, `@Load { slot }`, `@Clear { slot }` | file answers | `@Loaded { slot, key, value }`, `@LoadDone { slot, found }` |
+| `web.Page` | bring fragments, then `emit *Vein.Web.Http.@Render { }`; `@Title { text }`, `@Head { markup }` | `@Html @Style @Script @Render` | `@Response`: a whole `<!doctype html>` document |
+| `web.Site` | `do look()` / `do lookInk()`, `bring NavLink(href, label)` in `run once`, `do navBar(r.path)`, `bring Hero(t, sub)`, `Card(t, body)`, `Footer(note)`, `do grid()`…`do endGrid()`, `do main()`…`do endMain()` | — | fragments |
+
+A site: `need "web.Page"`, `need "web.Site"`, `need "Vein.Web"`; in `hear *Vein.Web.Http.@Request as r`
+call `do look()`, `do navBar(r.path)`, bring content, then `emit *Vein.Web.Http.@Render { }`. A value is
+saved with `emit @Save { key: "level", value: "" + level }` and read back with `emit @Load { }` →
+`hear @Loaded as l { if l.key == "level" { level = int(l.value) } }`.
 
 A new game: `tools\new-game.ps1 -Name MyGame -Kind 3d` (VeinGodot) makes a project whose own code is
 `game/game.vein`. An excerpt from VeinGodot's `demo3d/rules.vein` (94 lines, runs compiled):
 
 ```text
 bundle Demo by you {
-    need "kit.Movement"
-    need "kit.Cameras"
-    need "kit.Collect"
-    need "kit.Pause"
+    need "game.Movement"
+    need "game.Cameras"
+    need "game.Collect"
+    need "game.Pause"
     need "Vein.Transform"
     need "Vein.Graphics"
     need "Vein.UI"
