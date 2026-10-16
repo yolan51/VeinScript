@@ -744,3 +744,6 @@ stepper, web preview, AI assistant that compiles suggestions before offering the
 9. No reserved word (`on count map sync transform`, any keyword) as a variable, parameter or builder
    parameter; `markup css code line` only as a builder's output field.
 10. If unsure whether something exists, say so and suggest `veinc check` — do not invent syntax.
+11. A number a designer will want to change goes in a shard as `tune("what it changes")` above a `var`
+    with a literal starting value — never computed — and is changed in `vein.settings`, not by editing
+    the shard.

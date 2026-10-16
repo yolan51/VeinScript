@@ -226,6 +226,21 @@ public class SettingsTests : IDisposable
         Assert.Null(Assert.Single(game.Settings).Saved);
     }
 
+    [Fact]
+    public void An_editor_lists_and_saves_settings_without_running_the_game()
+    {
+        string path = Write("editor/game.vein", Mover);
+        var setting = Assert.Single(VeinGame.SettingsOf(path));
+        Assert.Equal(("me.Game.Move.speed", "5.0", (object?)null), (setting.Key, setting.Default, setting.Live));
+
+        Assert.False(VeinGame.SaveSetting(path, "me.Game.Move.speed", "true"));
+        Assert.False(VeinGame.SaveSetting(path, "me.Game.Move.nope", "1.0"));
+        Assert.True(VeinGame.SaveSetting(path, "me.Game.Move.speed", "8.0"));
+        Assert.Equal("8.0", Assert.Single(VeinGame.SettingsOf(path)).Saved);
+        Assert.True(VeinGame.ResetSetting(path, "me.Game.Move.speed"));
+        Assert.Null(Assert.Single(VeinGame.SettingsOf(path)).Saved);
+    }
+
     private static object? VarOf(VeinGame game, string name)
     {
         // Not a setting: read through the runtime's own view, as the debugger does.

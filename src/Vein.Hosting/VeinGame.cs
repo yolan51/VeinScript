@@ -172,7 +172,7 @@ public sealed class VeinGame
         get
         {
             var live = _runtime?.ShardVars();
-            return SettingsFor(Path).Settings.Select(s => new Setting(
+            return Index.Settings.Select(s => new Setting(
                 s.Key, s.Section, s.Name, s.Type, s.Default, s.Value,
                 live is not null && live.TryGetValue(s.Section + "." + s.Shard, out var vars) && vars.TryGetValue(s.Var, out var v) ? v : null,
                 s.Doc, s.File, s.Line, s.IsLibrary)).ToList();
@@ -184,7 +184,7 @@ public sealed class VeinGame
     /// not fit its type.
     public bool Tune(string key, object? value)
     {
-        if (_runtime is null || SettingsFor(Path).Settings.FirstOrDefault(s => s.Key == key) is not { } s) return false;
+        if (_runtime is null || Index.Settings.FirstOrDefault(s => s.Key == key) is not { } s) return false;
         object? typed = s.Type switch
         {
             "int" => value is IConvertible c ? Convert.ToInt64(c, System.Globalization.CultureInfo.InvariantCulture) : null,
@@ -203,9 +203,10 @@ public sealed class VeinGame
     /// fit its type.
     public bool SaveSetting(string key, string literal)
     {
-        if (SettingsFor(Path).Settings.FirstOrDefault(s => s.Key == key) is not { } s) return false;
+        if (Index.Settings.FirstOrDefault(s => s.Key == key) is not { } s) return false;
         if (SettingsFile.ParseValue(literal, SettingsIndex.KindOf(s.Type), default) is not { } parsed) return false;
         SettingsFile.Set(SettingsPath, s.Section, s.Name, literal.Trim());
+        _settingsIndex = null;
         if (_runtime is not null) Tune(key, LiteralValue(parsed));
         return true;
     }
@@ -213,11 +214,37 @@ public sealed class VeinGame
     /// Remove a setting from `vein.settings` — back to its source default, now too. False when it had none.
     public bool ResetSetting(string key)
     {
-        if (SettingsFor(Path).Settings.FirstOrDefault(s => s.Key == key) is not { } s) return false;
+        if (Index.Settings.FirstOrDefault(s => s.Key == key) is not { } s) return false;
         bool removed = SettingsFile.Remove(SettingsPath, s.Section, s.Name);
+        _settingsIndex = null;
         if (removed && _runtime is not null && SettingsFile.ParseValue(s.Default, SettingsIndex.KindOf(s.Type), default) is { } parsed)
             Tune(key, LiteralValue(parsed));
         return removed;
+    }
+
+    /// The settings of the program at `path` without running it — for an editor's Settings panel. `Live` is null.
+    public static IReadOnlyList<Setting> SettingsOf(string path) =>
+        SettingsFor(System.IO.Path.GetFullPath(path)).Settings.Select(s => new Setting(
+            s.Key, s.Section, s.Name, s.Type, s.Default, s.Value, null, s.Doc, s.File, s.Line, s.IsLibrary)).ToList();
+
+    /// Save a setting of the program at `path` to its project's `vein.settings`. A running game that
+    /// watches the file (SettingsPath) reloads and takes it. False when there is no such setting or the
+    /// literal does not fit its type.
+    public static bool SaveSetting(string path, string key, string literal)
+    {
+        string full = System.IO.Path.GetFullPath(path);
+        if (SettingsFor(full).Settings.FirstOrDefault(s => s.Key == key) is not { } s) return false;
+        if (SettingsFile.ParseValue(literal, SettingsIndex.KindOf(s.Type), default) is null) return false;
+        SettingsFile.Set(SettingsFile.Locate(System.IO.Path.GetDirectoryName(full)!), s.Section, s.Name, literal.Trim());
+        return true;
+    }
+
+    /// Remove a setting of the program at `path` from `vein.settings`: back to its default.
+    public static bool ResetSetting(string path, string key)
+    {
+        string full = System.IO.Path.GetFullPath(path);
+        if (SettingsFor(full).Settings.FirstOrDefault(s => s.Key == key) is not { } s) return false;
+        return SettingsFile.Remove(SettingsFile.Locate(System.IO.Path.GetDirectoryName(full)!), s.Section, s.Name);
     }
 
     private static object? LiteralValue(Compiler.Parsing.Expr e) => e switch
@@ -227,6 +254,11 @@ public sealed class VeinGame
         Compiler.Parsing.LiteralExpr l => l.Value,
         _ => null,
     };
+
+    /// This program's settings index, read once and again after a reload, a save or a reset — a debugger asks
+    /// for Settings several times a second, and the index parses files.
+    private SettingsIndex.Result Index => _settingsIndex ??= SettingsFor(Path);
+    private SettingsIndex.Result? _settingsIndex;
 
     /// The settings index, resolving libraries as a compile does (they are beside the game, not listed).
     private static SettingsIndex.Result SettingsFor(string path)
@@ -286,6 +318,7 @@ public sealed class VeinGame
 
     private void Swap(Prepared prepared, bool keepState)
     {
+        _settingsIndex = null;   // the edit, or vein.settings, may have changed what the settings are
         if (keepState && _runtime is { } old && _module is { } was && prepared.Module is { } now)
             Carry(old, was, prepared.Runtime!, now);
         else
