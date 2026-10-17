@@ -1551,7 +1551,7 @@ public sealed partial class Lower
     // ---- functions ------------------------------------------------------
 
     private IrFunction LowerFunc(FuncDecl f) => new(
-        f.Name,
+        _shardFuncNames.TryGetValue(f.Name, out var qualified) && _funcDecls.GetValueOrDefault(f.Name) == f ? qualified : f.Name,
         f.Params.Select(p => new IrParam(p.Name, LowerTypeRef(p.Type))).ToList(),
         f.Return is null ? IrTypeRef.Of("void") : LowerTypeRef(f.Return),
         LowerBlock(f.Body), f.IsPure, f.Doc,
@@ -1562,9 +1562,42 @@ public sealed partial class Lower
     /// Shared lowering for shard-like First-Class objects (shard/bridge). `kind` becomes the base
     /// attribute (@system / @bridge). `carriedShapes`/`carriedMarks` become @carries metadata that an
     /// `audience` barrier matches against.
+    /// A shard's OWN `fn` / `SF` (LANGUAGE §shards: a shard holds state, hears, schedules, SF and fn) known by
+    /// name while its body lowers — and only then: they are its private helpers. They were never registered,
+    /// so `do helper()` inside the shard that declared it was VS0234, and every helper had to move to bundle
+    /// level and take the shard's settings as parameters. A shard's own function wins over a bundle one of
+    /// the same name, as the nearer declaration should.
+    ///
+    /// At run time a shard's functions share one table with every other shard's, so each is lowered under a
+    /// name qualified by its shard (`Gun__twice`) — at its declaration and at every call inside the shard —
+    /// and two shards' helpers of the same name stay two functions.
+    private IDisposable ShardFunctions(string shard, IEnumerable<Node> members)
+    {
+        var mine = members.OfType<FuncDecl>().ToList();
+        foreach (var f in mine) _shardFuncNames[f.Name] = shard + "__" + f.Name;
+        var shadowed = mine.Where(f => _funcDecls.ContainsKey(f.Name)).ToDictionary(f => f.Name, f => _funcDecls[f.Name]);
+        var added = mine.Where(f => _localFuncs.Add(f.Name)).Select(f => f.Name).ToList();
+        foreach (var f in mine) _funcDecls[f.Name] = f;
+        return new Scope(() =>
+        {
+            foreach (var n in added) { _localFuncs.Remove(n); _funcDecls.Remove(n); }
+            foreach (var (n, f) in shadowed) _funcDecls[n] = f;
+            _shardFuncNames.Clear();
+        });
+    }
+
+    /// The shard being lowered: its own functions' names → their qualified names.
+    private readonly Dictionary<string, string> _shardFuncNames = new(StringComparer.Ordinal);
+
+    private sealed class Scope(Action leave) : IDisposable
+    {
+        public void Dispose() => leave();
+    }
+
     private IrShard LowerShardLike(string name, IReadOnlyList<Node> members, string kind, string? doc,
         IReadOnlyList<string>? carriedShapes = null, IReadOnlyList<string>? carriedMarks = null)
     {
+        using var own = ShardFunctions(name, members);
         // A shard is a set of scheduled behaviour blocks; each `target` query nests inside a schedule.
         var state = new List<IrField>();
         var methods = new List<IrFunction>();
@@ -1642,6 +1675,7 @@ public sealed partial class Lower
 
     private IrShard LowerView(ViewDecl vw)
     {
+        using var own = ShardFunctions(vw.Name, vw.Members);
         var state = new List<IrField>();
         var methods = new List<IrFunction>();
         foreach (var m in vw.Members)
@@ -2790,7 +2824,8 @@ public sealed partial class Lower
             case CallExpr { Callee: NameExpr ln } c when _funcDecls.TryGetValue(ln.Name, out var ldecl):
                 CheckCallArity(ldecl, ln.Name, c.Args, c.Span);
                 CheckCallMarker(c, ln.Name, ldecl);
-                return new IrCall(LowerExpr(c.Callee), c.Args.Select(LowerExpr).ToList());
+                return new IrCall(_shardFuncNames.TryGetValue(ln.Name, out var mine) ? new IrLocalRef(mine) : LowerExpr(c.Callee),
+                                  c.Args.Select(LowerExpr).ToList());
 
             // THE LAST CALL CASE, so everything the branches above recognise has already gone. What is
             // left is a built-in, or a bare name that resolves to nothing at all.

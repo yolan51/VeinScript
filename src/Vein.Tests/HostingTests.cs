@@ -576,6 +576,49 @@ public class HostingTests : IDisposable
     [Theory]
     [InlineData(VeinRuntime.Interpreter)]
     [InlineData(VeinRuntime.Compiled)]
+    public void A_shard_calls_its_own_fn_and_SF_and_they_read_its_vars_on_both_runtimes(VeinRuntime mode)
+    {
+        // A shard's own helpers were VS0234 at every call: they were never registered. Found writing a game,
+        // whose helpers then had to move to bundle level and take the shard's settings as parameters.
+        string path = Write($"own-{mode}.vein", """
+            bundle Own by me {
+                shard Gun {
+                    var shots: int = 0
+                    let rate = 3
+                    fn twice(n: int) return int { return n * 2 }
+                    SF fire(label: string) {
+                        shots += 1
+                        emit *Vein.Console.Io.@Print { text: label + " " + twice(rate) }
+                    }
+                    run once {
+                        do fire("bang")
+                        do fire("pow")
+                    }
+                    each tick { emit *Vein.Console.Io.@Print { text: "shots " + shots } }
+                }
+                shard Other {
+                    // Another shard's helper of the same name is its own.
+                    fn twice(n: int) return int { return n + 100 }
+                    run once { emit *Vein.Console.Io.@Print { text: "other " + twice(1) } }
+                }
+            }
+            """);
+        var game = VeinGame.Open(path, mode);
+        var printed = new List<string>();
+        game.Printed += (line, _) => printed.Add(line);
+        Assert.True(game.Start(), string.Join("\n", game.Diagnostics));
+        Assert.Equal(mode == VeinRuntime.Compiled ? "compiled" : "interpreter", game.Runtime);
+        Assert.Equal("", game.RuntimeNote);
+        game.Step(0.016);
+        Assert.Contains("bang 6", printed);
+        Assert.Contains("pow 6", printed);
+        Assert.Contains("other 101", printed);
+        Assert.Contains("shots 2", printed);
+    }
+
+    [Theory]
+    [InlineData(VeinRuntime.Interpreter)]
+    [InlineData(VeinRuntime.Compiled)]
     public void A_shard_var_without_a_type_is_typed_by_its_starting_value_on_both_runtimes(VeinRuntime mode)
     {
         // `let folder = "saves"` (core.Save's) once compiled to `public infer folder` — CS0246 — and sent every

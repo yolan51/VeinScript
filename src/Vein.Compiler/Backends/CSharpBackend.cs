@@ -698,6 +698,19 @@ public sealed class CSharpBackend : IVeinBackend
                 continue;
             }
 
+            // The shard's OWN `fn` / `SF` (named `Shard__name` by Lower): an instance method, so it reads and
+            // writes the shard's vars as the shard's handlers do. These fell through to the note below — a
+            // shard with a helper was "not compiled", and ran interpreted.
+            if (when is null && m.Attrs.All(a => a.Name is not ("schedule" or "hear")))
+            {
+                _bound.Clear();
+                foreach (var p in m.Params) _bound.Add(p.Name);
+                string ps = string.Join(", ", m.Params.Select(p => $"{Cs(p.Type)} {Ident(p.Name)}"));
+                sb.AppendLine($"    private {Cs(m.Return)} {Ident(m.Name)}({ps})");
+                EmitBlock(sb, m.Body, 1);
+                continue;
+            }
+
             // `every N` is defined in real seconds, and this runtime has no wall clock — a stub that
             // never fires would be silently wrong code rather than a missing feature.
             _notes.Add($"{shard.Name}.{m.Name}: '{when ?? "?"}' not emitted — " +
