@@ -576,6 +576,28 @@ public class HostingTests : IDisposable
     [Theory]
     [InlineData(VeinRuntime.Interpreter)]
     [InlineData(VeinRuntime.Compiled)]
+    public void A_3D_host_says_where_the_pointer_meets_the_ground(VeinRuntime mode)
+    {
+        // Click-to-move in 3D needs a world point, and a 3D host's mouse events are screen pixels.
+        string path = Write($"mouseworld-{mode}.vein", """
+            bundle Aim by me {
+                shard Point {
+                    hear *Vein.Input.Mouse.@MouseWorld as m { emit *Vein.Console.Io.@Print { text: "at " + m.x + " " + m.y + " " + m.z } }
+                }
+            }
+            """);
+        var game = VeinGame.Open(path, mode);
+        var printed = new List<string>();
+        game.Printed += (line, _) => printed.Add(line);
+        Assert.True(game.Start(), string.Join("\n", game.Diagnostics));
+        Assert.Equal(mode == VeinRuntime.Compiled ? "compiled" : "interpreter", game.Runtime);
+        game.MouseWorld(4.5, 0, -2.25);
+        Assert.Contains("at 4.5 0 -2.25", printed);
+    }
+
+    [Theory]
+    [InlineData(VeinRuntime.Interpreter)]
+    [InlineData(VeinRuntime.Compiled)]
     public void A_shard_calls_its_own_fn_and_SF_and_they_read_its_vars_on_both_runtimes(VeinRuntime mode)
     {
         // A shard's own helpers were VS0234 at every call: they were never registered. Found writing a game,

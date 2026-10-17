@@ -425,6 +425,10 @@ public sealed class VeinGame
     public void MouseDown(double x, double y, int button) => Device("MouseDown", ("x", x), ("y", y), ("button", (long)button));
     public void MouseUp(double x, double y, int button) => Device("MouseUp", ("x", x), ("y", y), ("button", (long)button));
     public void MouseMove(double x, double y) => Device("MouseMove", ("x", x), ("y", y));
+
+    /// Where the pointer meets the ground plane in the world (*Vein.Input.Mouse.@MouseWorld) — a 3D host's
+    /// screen-pixel mouse events say nothing about the world, so it sends this as well.
+    public void MouseWorld(double x, double y, double z) => Device("MouseWorld", ("x", x), ("y", y), ("z", z));
     public void SoundEnded(long track) => Device("SoundEnded", ("track", track));
 
     /// The clip `name` reached its end on `entity` — the host owns the clock it ran on (*Vein.Graphics).

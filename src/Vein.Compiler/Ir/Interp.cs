@@ -477,6 +477,8 @@ public sealed class Interp
 
     /// `@MouseMove { x, y }`.
     public void FireMouseMove(double x, double y) => FireDevice("MouseMove", ("x", x), ("y", y));
+    /// `*Vein.Input.Mouse.@MouseWorld { x, y, z }` — where the pointer meets the ground, from a 3D host.
+    public void FireMouseWorld(double x, double y, double z) => FireDevice("MouseWorld", ("x", x), ("y", y), ("z", z));
 
     /// `*Vein.Time.Clock.@Ticked { frame, delta }` — the clock, from a host that owns one.
     ///
@@ -1947,7 +1949,7 @@ public sealed class Interp
         {
             "Request", "Response", "DiagnosticRaised", "Failed", "Fetched",
             "FileLoaded", "FileMissing", "FileWritten", "Input", "Message", "Undelivered",
-            "KeyDown", "KeyUp", "TextInput", "MouseDown", "MouseUp", "MouseMove",
+            "KeyDown", "KeyUp", "TextInput", "MouseDown", "MouseUp", "MouseMove", "MouseWorld",
             "ActionPressed", "ActionReleased", "ButtonDown", "ButtonUp", "AxisMoved",
             "Ticked", "SoundEnded", "AnimationEnded", "Collided", "Separated", "Clicked", "InputEnded",
         };

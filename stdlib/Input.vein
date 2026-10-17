@@ -18,6 +18,12 @@ bundle Input by Vein {
 
         shared("The pointer moved.")
         event @MouseMove { *Vein.Math.Values.$Vec2 }
+
+        // Where the pointer is IN THE WORLD — what click-to-move and aiming want. A 2D host's mouse events
+        // are in world coordinates already; a 3D host's are screen pixels, so it raises this too: the point
+        // where the ray under the pointer meets the ground plane (y = 0), on every move and press.
+        shared("Where the pointer meets the ground (y = 0) in the world — raised by a 3D host as the mouse moves.")
+        event @MouseWorld { *Vein.Math.Values.$Vec3 }
     }
 
     publicator Keyboard {
