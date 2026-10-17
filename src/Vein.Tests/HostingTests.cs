@@ -532,6 +532,56 @@ public class HostingTests : IDisposable
     }
 
     [Theory]
+    [InlineData(VeinRuntime.Interpreter)]
+    [InlineData(VeinRuntime.Compiled)]
+    public void A_shape_reached_through_anothers_need_keeps_its_defaults_on_both_runtimes(VeinRuntime mode)
+    {
+        // A game needing rpg.Combat attaches rpg.Stats' `$Life { }` — reached only through Combat's own need,
+        // so the game's compile cannot see its defaults. The interpreter filled them from the linked type;
+        // compiled, the struct came out at zero and every monster attached that way was born dead.
+        string root = Path.Combine(_dir, $"deep-{mode}");
+        Directory.CreateDirectory(Path.Combine(root, "bundles"));
+        File.WriteAllText(Path.Combine(root, "bundles", "Sheet.vein"), """
+            bundle Sheet by st {
+                publicator P {
+                    shared("Hit points.")
+                    shape $Life { hp: float = 100.0, regen: float = 0.5 }
+                }
+            }
+            """);
+        File.WriteAllText(Path.Combine(root, "bundles", "Fight.vein"), """
+            bundle Fight by st {
+                need "st.Sheet"
+                shard Show { each tick { target $Life as l { emit *Vein.Console.Io.@Print { text: "life " + l.Life.hp + " " + l.Life.regen } } } }
+            }
+            """);
+        string path = Path.Combine(root, "game.vein");
+        File.WriteAllText(path, """
+            bundle Deep by me {
+                need "st.Fight"
+                shard Seed {
+                    run once {
+                        let a = spawn()
+                        attach $Life to a { }
+                        let b = spawn()
+                        attach $Life to b { hp: 7.0 }
+                    }
+                }
+            }
+            """);
+        var game = VeinGame.Open(path, mode);
+        var printed = new List<string>();
+        game.Printed += (line, _) => printed.Add(line);
+        Assert.True(game.Start(), string.Join("\n", game.Diagnostics));
+        Assert.Equal(mode == VeinRuntime.Compiled ? "compiled" : "interpreter", game.Runtime);
+        Assert.Equal("", game.RuntimeNote);
+        game.Step(0.016);
+        game.Step(0.016);
+        Assert.Contains("life 100 0.5", printed);
+        Assert.Contains("life 7 0.5", printed);
+    }
+
+    [Theory]
     [InlineData(VeinRuntime.Interpreter, false)]
     [InlineData(VeinRuntime.Compiled, false)]
     [InlineData(VeinRuntime.Interpreter, true)]
@@ -636,6 +686,60 @@ public class HostingTests : IDisposable
         Assert.Contains("pow 6", printed);
         Assert.Contains("other 101", printed);
         Assert.Contains("shots 2", printed);
+    }
+
+    [Theory]
+    [InlineData(VeinRuntime.Interpreter)]
+    [InlineData(VeinRuntime.Compiled)]
+    public void Imported_functions_field_writes_and_reused_names_compile_on_both_runtimes(VeinRuntime mode)
+    {
+        // Four things rpg.Monsters and core.Inventory do that each kept a game off the compiled runtime:
+        //  · `max` / `sqrt` first called inside `target … as a` / `as v` — their own parameters `a` and `v`
+        //    lowered as the query's identity, and C# met a loop variable outside its loop (CS0103);
+        //  · `max(0, …)` (a double) into an int field, and a `var found = 0` (a long) into an Entity field
+        //    (CS0266, both);
+        //  · `let dx` inside an `if`, then another `let dx` after it — fine in VeinScript, CS0136 in C#.
+        string path = Write($"compiles-{mode}.vein", """
+            bundle Compiles by me {
+                need "Vein.Math"
+                shape $Stack { count: int = 3 }
+                shape $Pet { owner: Entity = 0, x: float = 4.0 }
+                shard Go {
+                    run once {
+                        let s = spawn()
+                        attach $Stack to s { }
+                        let p = spawn()
+                        attach $Pet to p { }
+                    }
+                    each tick {
+                        target $Stack as a { a.Stack.count = max(0, a.Stack.count - 1) }
+                        target $Pet as v {
+                            let d = sqrt(v.Pet.x * 4.0)
+                            var found = 0
+                            target $Stack as s { found = Entity }
+                            v.Pet.owner = found
+                            if d > 100.0 {
+                                let dx = 1.0
+                                v.Pet.x = dx
+                            }
+                            let dx = 2.0
+                            emit *Vein.Console.Io.@Print { text: "pet " + found + " " + dx + " " + d }
+                        }
+                        target $Stack as a { emit *Vein.Console.Io.@Print { text: "stack " + a.Stack.count } }
+                    }
+                }
+            }
+            """);
+        var game = VeinGame.Open(path, mode);
+        var printed = new List<string>();
+        game.Printed += (line, _) => printed.Add(line);
+        Assert.True(game.Start(), string.Join("\n", game.Diagnostics));
+        Assert.Equal(mode == VeinRuntime.Compiled ? "compiled" : "interpreter", game.Runtime);
+        Assert.Equal("", game.RuntimeNote);
+        for (int i = 0; i < 6; i++) game.Step(0.016);
+        Assert.Contains("stack 0", printed);
+        Assert.DoesNotContain(printed, line => line.StartsWith("stack -"));
+        Assert.Contains(printed, line => System.Text.RegularExpressions.Regex.IsMatch(line, @"^pet [1-9]\d* 2 4$"));
     }
 
     [Theory]

@@ -51,6 +51,38 @@ public sealed class CSharpBackend : IVeinBackend
     /// because C# scopes a local to its method and two shards may each have their own `i`.
     private readonly HashSet<string> _bound = new(StringComparer.Ordinal);
 
+    /// A local's C# name, by VeinScript name, per open block — innermost last. VeinScript lets a block declare
+    /// `let dx` and the statements after it declare their own `dx`; C# does not (CS0136: a name declared in
+    /// an enclosing scope, even later, may not be reused inside). Monsters.vein found it: a nested `target`
+    /// measured `dx` to each enemy, then the step home measured its own. A declaration whose name this
+    /// function already used gets a fresh C# name, and references follow the innermost declaration.
+    private readonly List<Dictionary<string, string>> _localNames = new() { new(StringComparer.Ordinal) };
+    private readonly HashSet<string> _usedLocals = new(StringComparer.Ordinal);
+    private int _localSerial;
+
+    private void ResetLocals()
+    {
+        _localNames.Clear();
+        _localNames.Add(new(StringComparer.Ordinal));
+        _usedLocals.Clear();
+    }
+
+    /// The C# name for a local being declared here.
+    private string DeclareLocal(string name)
+    {
+        string cs = Ident(name);
+        if (!_usedLocals.Add(cs)) { cs = $"{cs}__{++_localSerial}"; _usedLocals.Add(cs); }
+        _localNames[^1][name] = cs;
+        return cs;
+    }
+
+    private string LocalName(string name)
+    {
+        for (int i = _localNames.Count - 1; i >= 0; i--)
+            if (_localNames[i].TryGetValue(name, out var cs)) return cs;
+        return Ident(name);
+    }
+
     /// The CURRENT shard's state fields. A `var total: int` at shard level is a FIELD, and an
     /// assignment to it is an assignment — declaring a local of the same name shadows the field with an
     /// inferred type, so `total = 0` became `var total = 0` (an int) and the next `total = total + a_long`
@@ -613,6 +645,7 @@ public sealed class CSharpBackend : IVeinBackend
         foreach (var f in module.Functions)
         {
             _bound.Clear();
+            ResetLocals();
             foreach (var p in f.Params) _bound.Add(p.Name);
             string ps = string.Join(", ", f.Params.Select(p => $"{Cs(p.Type)} {Ident(p.Name)}"));
             sb.AppendLine($"    public static {Cs(f.Return)} {Ident(f.Name)}({ps})");
@@ -675,6 +708,7 @@ public sealed class CSharpBackend : IVeinBackend
             if (phase is not null)
             {
                 _bound.Clear();
+                ResetLocals();
                 sb.AppendLine($"    public override void {phase}()");
                 EmitBlock(sb, m.Body, 1);
                 continue;
@@ -692,6 +726,7 @@ public sealed class CSharpBackend : IVeinBackend
                 }
                 var p = m.Params.FirstOrDefault();
                 _bound.Clear();
+                ResetLocals();
                 _bound.Add(p?.Name ?? "e");
                 sb.AppendLine($"    private void {Ident(m.Name)}({EventType(ev)} {Ident(p?.Name ?? "e")})");
                 EmitBlock(sb, m.Body, 1);
@@ -704,6 +739,7 @@ public sealed class CSharpBackend : IVeinBackend
             if (when is null && m.Attrs.All(a => a.Name is not ("schedule" or "hear")))
             {
                 _bound.Clear();
+                ResetLocals();
                 foreach (var p in m.Params) _bound.Add(p.Name);
                 string ps = string.Join(", ", m.Params.Select(p => $"{Cs(p.Type)} {Ident(p.Name)}"));
                 sb.AppendLine($"    private {Cs(m.Return)} {Ident(m.Name)}({ps})");
@@ -753,7 +789,9 @@ public sealed class CSharpBackend : IVeinBackend
         }
         string pad = new string(' ', depth * 4);
         sb.AppendLine(pad + "{");
+        _localNames.Add(new(StringComparer.Ordinal));
         foreach (var s in block.Statements) EmitStmt(sb, s, depth + 1);
+        _localNames.RemoveAt(_localNames.Count - 1);
         sb.AppendLine(pad + "}");
     }
 
@@ -770,7 +808,8 @@ public sealed class CSharpBackend : IVeinBackend
                 // first `n = e.Shape.count` (a long field) failed to compile (CS0266), sending the whole
                 // program to the interpreter. An integer literal therefore declares a long.
                 bool intLiteral = l.Init is IrLiteral { Kind: IrLiteralKind.Int } or IrUnary { Operand: IrLiteral { Kind: IrLiteralKind.Int } };
-                sb.AppendLine($"{pad}{(intLiteral ? "long" : "var")} {Ident(l.Name)} = {Expr(l.Init)};");
+                string init = Expr(l.Init);   // before declaring: `let x = x + 1` reads the outer x
+                sb.AppendLine($"{pad}{(intLiteral ? "long" : "var")} {DeclareLocal(l.Name)} = {init};");
                 break;
 
             // ASSIGNMENT TO A NAME NOTHING DECLARED IS A DECLARATION, because that is what the
@@ -794,9 +833,12 @@ public sealed class CSharpBackend : IVeinBackend
                 if (a.Value is IrBinary { Op: IrBinOp.Add, Left: var grown } && grown.ResolvedType?.Name == "list")
                     _notes.Add("growing a list with `+` / `+=` is interpreter-only — this file will not compile; keep this program on `veinc run`.");
                 if (a.Target is IrLocalRef bare && !_fields.Contains(bare.Name) && _bound.Add(bare.Name))
-                    sb.AppendLine($"{pad}var {Ident(bare.Name)} = {Expr(a.Value)};");
+                {
+                    string value = Expr(a.Value);
+                    sb.AppendLine($"{pad}var {DeclareLocal(bare.Name)} = {value};");
+                }
                 else
-                    sb.AppendLine($"{pad}{Expr(a.Target)} = {Expr(a.Value)};");
+                    sb.AppendLine($"{pad}{Expr(a.Target)} = {FieldValue(a.Target, a.Value)};");
                 break;
 
             case IrIf i:
@@ -1171,7 +1213,7 @@ public sealed class CSharpBackend : IVeinBackend
     {
         null => "",
         IrLiteral l => Literal(l),
-        IrLocalRef r => Ident(r.Name),
+        IrLocalRef r => LocalName(r.Name),
         IrEntityRef => _entityVar,
         IrLoopIndexRef => _indexVar,
         IrSelfRef sr => _selfVars.GetValueOrDefault(sr.Bind, _entityVar),
@@ -1335,12 +1377,9 @@ public sealed class CSharpBackend : IVeinBackend
             case "AddComponent":
                 if (c.Args.Count > 1 && c.Args[1] is IrTypeNameExpr at)
                 {
+                    // Its defaults, when it declares any: an empty initialiser, which StructInit completes.
                     if (_componentTypes.TryGetValue(at.Name, out var decl) && decl.Fields.Any(f => f.Default is not null))
-                    {
-                        _notes.Add($"attach ${at.Name} with no initialiser not emitted — the shape declares " +
-                                   "field defaults, and the emitted struct seeds them as zero.");
-                        return "";
-                    }
+                        return $"World.Attach({Expr(c.Args[0])}, {StructInit(new IrStructInit(at.Name, Array.Empty<(string, IrExpr)>()), preferEvent: false)})";
                     return $"World.Attach({Expr(c.Args[0])}, default({Ident(at.Name)}))";
                 }
                 // A COMPONENT, said outright. `attach` names a shape, so when a name is both a shape
@@ -1532,13 +1571,47 @@ public sealed class CSharpBackend : IVeinBackend
             _notes.Add($"struct literal {si.TypeName} not emitted.");
             return "null";
         }
-        var sets = si.Fields.Select(f => $"{Ident(f.Field)} = {Coerce(si.TypeName, f.Field, f.Value)}");
+        var sets = si.Fields.Select(f => $"{Ident(f.Field)} = {Coerce(si.TypeName, f.Field, f.Value)}").ToList();
 
         bool asEvent = preferEvent ? _events.Contains(si.TypeName)
                                    : _events.Contains(si.TypeName) && !_components.Contains(si.TypeName);
 
+        // A COMPONENT IS WHOLE (RULES 11b): a field the attach leaves out takes its declared default. Lower
+        // fills those in when it can see the shape, but a bundle that attaches a shape it reaches only
+        // through another bundle's `need` (`$Life` from rpg.Stats, in a game needing rpg.Combat) cannot,
+        // and C# then left the field at zero — `attach $Life to e { }` was 100 life interpreted and dead on
+        // arrival compiled. The linked module holds the real declaration, so the defaults are taken here.
+        if (!asEvent && _componentTypes.TryGetValue(si.TypeName, out var decl))
+        {
+            var written = si.Fields.Select(f => f.Field).ToHashSet(StringComparer.Ordinal);
+            foreach (var f in decl.Fields)
+                if (f.Default is { } d && !written.Contains(f.Name))
+                    sets.Add($"{Ident(f.Name)} = {Coerce(si.TypeName, f.Name, d)}");
+        }
+
         string type = asEvent ? EventType(si.TypeName) : Ident(si.TypeName);
         return $"new {type} {{ {string.Join(", ", sets)} }}";
+    }
+
+    /// The value written by `x.Shape.field = value`, cast to the field's C# type when that is narrower than
+    /// what the value may be. `max(0, b.count - 1)` is a `double` in C# (the stdlib's `max` takes and gives
+    /// doubles) and an `int` field is a `long`; an `Entity` field is a C# `int` while `var prey = 0` is a
+    /// `long`. The interpreter stores either without a word, and C# refused both (CS0266), so a program
+    /// using `max` on a count, or keeping a found identity in a local, did not compile and fell back to the
+    /// interpreter. A plain cast, not `Coerce`'s helpers: it is free when the value already has the type,
+    /// and field writes are the hot path.
+    private string FieldValue(IrExpr target, IrExpr value)
+    {
+        string emitted = Expr(value);
+        if (value is IrLiteral) return emitted;
+        if (target is not IrFieldAccess { Receiver: IrFieldAccess { Field: var comp }, Field: var field }) return emitted;
+        if (!_componentTypes.TryGetValue(comp, out var decl)) return emitted;
+        return decl.Fields.FirstOrDefault(x => x.Name == field)?.Type.Name switch
+        {
+            "int" => $"(long)({emitted})",
+            "Entity" => $"(int)({emitted})",
+            _ => emitted
+        };
     }
 
     /// Convert a value to the field's DECLARED type when C# would not do it implicitly.

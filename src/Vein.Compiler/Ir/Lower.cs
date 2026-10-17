@@ -1074,8 +1074,26 @@ public sealed partial class Lower
         var owned = Owned(hit.Key);
         _importOwner = owned[..Math.Max(0, owned.LastIndexOf('.'))];
         _importDepth++;
+        // THE BODY LOWERS IN ITS OWN SCOPE, not the caller's. A function is imported the first time a call
+        // to it is lowered, which is often inside a `target … as a` — and with that binding still in scope,
+        // `max(a, b)`'s own parameter `a` lowered as the identity `a` (IrSelfRef). The interpreter looked
+        // the name up and found the parameter anyway; the C# backend emitted the loop's entity variable,
+        // which does not exist in a function, so any program whose first `max` or `sqrt` sat inside
+        // `target … as a` or `as v` did not compile and quietly ran on the interpreter instead.
+        var outerBinds = _targetBinds.ToList();
+        var outerCarried = _carried.ToList();
+        _targetBinds.Clear();
+        _carried.Clear();
         try { lowered = LowerFunc(hit.Value) with { Name = mangled }; }
-        finally { _importDepth--; _importOwner = outerOwner; }
+        finally
+        {
+            _importDepth--;
+            _importOwner = outerOwner;
+            _targetBinds.Clear();
+            _targetBinds.AddRange(outerBinds);
+            _carried.Clear();
+            _carried.AddRange(outerCarried);
+        }
         // Tagged with WHERE IT CAME FROM. Every bundle that calls `print` imports its own copy under
         // this same mangled name, and the app linker then saw the name twice and warned (VS0333) that
         // two bundles had "declared" it — advising a rename of a function neither of them wrote. The
