@@ -135,9 +135,10 @@ public class CompiledAppTests : IDisposable
 
         var cs = new CSharpBackend().Emit(r.Modules[0]).Files[0].Contents;
 
-        Assert.Contains("var i = 0;", cs);
+        Assert.Contains("long i = 0;", cs);                // an int literal declares a long (VeinScript int)
         Assert.Contains("i = (i + 1);", cs);
         Assert.DoesNotContain("var i = (i + 1);", cs);   // the second one is an assignment, not a decl
+        Assert.DoesNotContain("long i = (i + 1);", cs);
     }
 
     [Fact]

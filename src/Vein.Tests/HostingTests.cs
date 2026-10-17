@@ -576,6 +576,49 @@ public class HostingTests : IDisposable
     [Theory]
     [InlineData(VeinRuntime.Interpreter)]
     [InlineData(VeinRuntime.Compiled)]
+    public void A_shard_var_without_a_type_is_typed_by_its_starting_value_on_both_runtimes(VeinRuntime mode)
+    {
+        // `let folder = "saves"` (core.Save's) once compiled to `public infer folder` — CS0246 — and sent every
+        // game needing that library to the interpreter.
+        string path = Write($"untyped-{mode}.vein", """
+            bundle Untyped by me {
+                shape $Count { n: int = 7 }
+                shard Read {
+                    run once {
+                        let e = spawn()
+                        attach $Count to e { }
+                    }
+                    // A local started from an int literal, then given an int FIELD: a long in C# (CS0266 once).
+                    each tick {
+                        var seen = 0
+                        target $Count as c { seen = c.Count.n }
+                        emit *Vein.Console.Io.@Print { text: "seen " + seen }
+                    }
+                }
+                shard S {
+                    let folder = "saves"
+                    var n = 3
+                    var rate = 0.5
+                    var lit = true
+                    var down = -2
+                    run once { emit *Vein.Console.Io.@Print { text: folder + " " + (n + down) + " " + (rate * 2.0) + " " + lit } }
+                }
+            }
+            """);
+        var game = VeinGame.Open(path, mode);
+        var printed = new List<string>();
+        game.Printed += (line, _) => printed.Add(line);
+        Assert.True(game.Start(), string.Join("\n", game.Diagnostics));
+        Assert.Equal(mode == VeinRuntime.Compiled ? "compiled" : "interpreter", game.Runtime);
+        Assert.Equal("", game.RuntimeNote);
+        Assert.Single(printed, line => line.StartsWith("saves 1 1"));
+        game.Step(0.016);
+        Assert.Contains("seen 7", printed);
+    }
+
+    [Theory]
+    [InlineData(VeinRuntime.Interpreter)]
+    [InlineData(VeinRuntime.Compiled)]
     public void A_game_and_a_library_talk_through_the_library_s_events_on_both_runtimes(VeinRuntime mode)
     {
         // A bundle package's API is mostly events (core.Timers says @TimerDone; a game asks core.Save with

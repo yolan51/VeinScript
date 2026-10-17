@@ -626,6 +626,19 @@ public sealed class CSharpBackend : IVeinBackend
     /// The shard being emitted, so an `emit` inside it can tag the payload with who sent it.
     private string? _currentShard;
 
+    /// A shard var written without a type (`let folder = "saves"`) is typed by its starting value, as the
+    /// interpreter's is: `infer` is a placeholder, not a C# type, and emitting it failed the whole program
+    /// (CS0246) — so a library with one such var sent every game that needed it to the interpreter.
+    private static IrTypeRef StateType(IrField f) => f.Type.Name != "infer" ? f.Type : f.Default switch
+    {
+        IrLiteral { Kind: IrLiteralKind.Int } or IrUnary { Operand: IrLiteral { Kind: IrLiteralKind.Int } } => IrTypeRef.Of("int"),
+        IrLiteral { Kind: IrLiteralKind.Float or IrLiteralKind.Percent } or IrUnary { Operand: IrLiteral { Kind: IrLiteralKind.Float or IrLiteralKind.Percent } } => IrTypeRef.Of("float"),
+        IrLiteral { Kind: IrLiteralKind.String } => IrTypeRef.Of("string"),
+        IrLiteral { Kind: IrLiteralKind.Bool } => IrTypeRef.Of("bool"),
+        { ResolvedType: { } t } => t,
+        _ => f.Type,
+    };
+
     private void EmitShard(StringBuilder sb, IrShard shard)
     {
         _currentShard = shard.Name;
@@ -635,8 +648,8 @@ public sealed class CSharpBackend : IVeinBackend
         foreach (var f in shard.State) _fields.Add(f.Name);
         foreach (var f in shard.State)
             sb.AppendLine(f.Default is { } init
-                ? $"    public {Cs(f.Type)} {Ident(f.Name)} = {Expr(init)};"
-                : $"    public {Cs(f.Type)} {Ident(f.Name)};");
+                ? $"    public {Cs(StateType(f))} {Ident(f.Name)} = {Expr(init)};"
+                : $"    public {Cs(StateType(f))} {Ident(f.Name)};");
         if (shard.State.Count > 0) sb.AppendLine();
 
         // `hear` blocks, collected first so Subscribe can wire them — and only for events this module
@@ -740,7 +753,11 @@ public sealed class CSharpBackend : IVeinBackend
 
             case IrLet l:
                 _bound.Add(l.Name);
-                sb.AppendLine($"{pad}var {Ident(l.Name)} = {Expr(l.Init)};");
+                // A VeinScript int is a C# LONG, but `var n = 0` lets C# pick int from the literal — and the
+                // first `n = e.Shape.count` (a long field) failed to compile (CS0266), sending the whole
+                // program to the interpreter. An integer literal therefore declares a long.
+                bool intLiteral = l.Init is IrLiteral { Kind: IrLiteralKind.Int } or IrUnary { Operand: IrLiteral { Kind: IrLiteralKind.Int } };
+                sb.AppendLine($"{pad}{(intLiteral ? "long" : "var")} {Ident(l.Name)} = {Expr(l.Init)};");
                 break;
 
             // ASSIGNMENT TO A NAME NOTHING DECLARED IS A DECLARATION, because that is what the
