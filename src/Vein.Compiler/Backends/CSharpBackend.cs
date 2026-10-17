@@ -1822,6 +1822,9 @@ public sealed class CSharpBackend : IVeinBackend
         sb.AppendLine("    /// `--ticks N` matches the interpreter's flag, so the two can be diffed frame for frame.");
         sb.AppendLine("    public static void Main(string[] args)");
         sb.AppendLine("    {");
+        // UTF-8, as `veinc run` writes (Interp.Run → ConsoleLauncher.UseUtf8). Left at the Windows code page,
+        // `print("…and behind it")` came out as ".and behind it" here and right there.
+        sb.AppendLine("        try { Console.OutputEncoding = new System.Text.UTF8Encoding(false); } catch { }");
         sb.AppendLine("        int ticks = 0;");
         sb.AppendLine("        for (int i = 0; i < args.Length; i++)");
         sb.AppendLine("            if (args[i] == \"--ticks\" && i + 1 < args.Length) int.TryParse(args[++i], out ticks);");
