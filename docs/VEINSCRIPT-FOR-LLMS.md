@@ -27,6 +27,9 @@ an **event**, and behaviour lives in **shards** that react to events or run ever
 - Code is organised in **bundles** (`bundle Game by you { … }`), whose public API is grouped in
   **publicators**. Several bundles are composed by an **app** manifest.
 - **Queries** iterate identities: `target $Position $Velocity #Enemy as e { e.Position.x += e.Velocity.x }`.
+  One identity you already have: `target $Life on d.who as l { … }` (D22) — never a scan with
+  `if Entity == id`. Inside nested queries `Entity` is the innermost; an outer identity is its binding
+  (`emit @Hit { attacker: a }`). Time: `each tick as t { … speed * t.delta … }`.
 - **Commit model**: structural changes (`attach`, `unattach`, `mark`, `unmark`, `destroy`) are DEFERRED to
   the next commit; `spawn()` and field writes are immediate. Concurrent writes to a field are reconciled
   by its `folds` reducer.

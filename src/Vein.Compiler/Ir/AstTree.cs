@@ -128,7 +128,8 @@ public sealed class AstTree
     };
 
     private static string ScheduleArg(ScheduleBlock sb) =>
-        sb.Kind == ScheduleKind.Every ? (sb.IntervalSeconds ?? 0).ToString(CultureInfo.InvariantCulture) + "s" : "";
+        sb.Kind == ScheduleKind.Every ? (sb.IntervalSeconds ?? 0).ToString(CultureInfo.InvariantCulture) + "s"
+        : sb.Bind is { } clock ? "as " + clock : "";
 
     /// `by rank` / `by &Row.rank` / `by &Row.$Row.rank` — the key, with whichever qualifiers were
     /// written. Both are optional and each narrows one step, so the head shows what the source said
@@ -138,10 +139,10 @@ public sealed class AstTree
               + (os.Shape is null ? "" : "$" + os.Shape + ".")
               + os.Key;
 
-    private static string QueryHead(QueryStmt q)
+    private string QueryHead(QueryStmt q)
     {
         var refs = q.Components.Select(c => "$" + c).Concat(q.Tags.Select(t => "#" + t));
-        return $"{string.Join(" ", refs)} as {q.Bind}";
+        return $"{string.Join(" ", refs)}{(q.On is null ? "" : " on " + Inline(q.On))} as {q.Bind}";
     }
 
     // ---- statements -----------------------------------------------------

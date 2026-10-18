@@ -691,6 +691,73 @@ public class HostingTests : IDisposable
     [Theory]
     [InlineData(VeinRuntime.Interpreter)]
     [InlineData(VeinRuntime.Compiled)]
+    public void Target_on_one_identity_and_each_tick_as_the_clock_on_both_runtimes(VeinRuntime mode)
+    {
+        // D22. `target $S on e as x` looks at one identity — the body runs when it carries every shape and
+        // mark named, and not at all otherwise — and `each tick as t` binds the frame's clock.
+        string path = Write($"d22-{mode}.vein", """
+            bundle D22 by me {
+                shape $Hp { n: int = 10 }
+                shape $Pos { x: float = 0.0 }
+                mark #Boss
+                event @Hurt { who: Entity, amount: int }
+                shard Seed { run once {
+                    let a = spawn()
+                    attach $Hp to a { }
+                    let b = spawn()
+                    attach $Hp to b { n: 50 }
+                    attach $Pos to b { }
+                    mark b #Boss
+                } }
+                shard Move {
+                    each tick as t {
+                        target $Pos as p { p.Pos.x = p.Pos.x + 60.0 * t.delta }
+                        if t.frame == 3 { target $Hp #Boss as b { emit @Hurt { who: b, amount: 7 } } }
+                    }
+                }
+                shard Wounds {
+                    hear @Hurt as w {
+                        target $Hp on w.who as h { h.Hp.n = h.Hp.n - w.amount }
+                        target $Hp #Boss on w.who as h { emit *Vein.Console.Io.@Print { text: "boss hit" } }
+                        target $Hp on 0 as h { emit *Vein.Console.Io.@Print { text: "WRONG on 0" } }
+                        target $Pos on 999 as h { emit *Vein.Console.Io.@Print { text: "WRONG on 999" } }
+                    }
+                    settled { target $Hp $Pos as h { emit *Vein.Console.Io.@Print { text: "boss " + h.Hp.n + " x " + int(h.Pos.x + 0.5) } } }
+                }
+            }
+            """);
+        var game = VeinGame.Open(path, mode);
+        var printed = new List<string>();
+        game.Printed += (line, _) => printed.Add(line);
+        Assert.True(game.Start(), string.Join("\n", game.Diagnostics));
+        Assert.Equal(mode == VeinRuntime.Compiled ? "compiled" : "interpreter", game.Runtime);
+        Assert.Equal("", game.RuntimeNote);
+        for (int i = 0; i < 5; i++) game.Step(1.0 / 60.0);
+        Assert.Contains("boss hit", printed);
+        Assert.Contains("boss 43 x 4", printed);       // hurt once, by 7; moved 60 × 1/60 a frame
+        Assert.DoesNotContain(printed, line => line.StartsWith("WRONG"));
+    }
+
+    [Fact]
+    public void On_with_by_and_a_clock_on_a_once_block_are_refused()
+    {
+        var bag = new Vein.Compiler.Diagnostics.DiagnosticBag();
+        new Vein.Compiler.Parsing.Parser(new Vein.Compiler.Lexing.Lexer("""
+            bundle Bad by me {
+                shape $Hp { n: int = 1 }
+                shard S {
+                    run once as t { }
+                    each tick { target $Hp by Hp.n on 1 as h { } }
+                }
+            }
+            """, "bad.vein", bag).Tokenize(), bag).ParseUnit();
+        Assert.Contains(bag.Items, d => d.Code == "VS0360");
+        Assert.Contains(bag.Items, d => d.Code == "VS0359");
+    }
+
+    [Theory]
+    [InlineData(VeinRuntime.Interpreter)]
+    [InlineData(VeinRuntime.Compiled)]
     public void Imported_functions_field_writes_and_reused_names_compile_on_both_runtimes(VeinRuntime mode)
     {
         // Four things rpg.Monsters and core.Inventory do that each kept a game off the compiled runtime:

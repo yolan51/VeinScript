@@ -51,7 +51,8 @@ dialect. There is no general `class`.
 | `event` | `event @N { fields }` | message | `type N { … }` `@message` |
 | `shard` | `shard N { … }` | behavior over identities | `IrShard` |
 | `target` | `target C… #T… as self { … }` · `target coll as x { … }` | cycle identities / iterate data | query descriptor + loop |
-| `each` `tick` | `each tick { … }` · `each frame { … }` | a shard schedule (per tick / per frame); `frame` is a contextual word | shard `tick()`/`frame()` |
+| `on` | `target C… on e as x { … }` | the query for ONE identity, already known: runs once if it carries everything named, else not at all (D22) | a direct lookup, no scan |
+| `each` `tick` | `each tick { … }` · `each frame { … }` · `each tick as t { … t.delta … }` | a shard schedule (per tick / per frame); `frame` is a contextual word; `as t` binds the clock, @Ticked's `frame` and `delta` (D22) | shard `tick()`/`frame()` |
 | `settled` | `settled { … }` | shard schedule: once after a tick's folds reconcile | shard `settled()` |
 | *(contextual)* `run once`, `every N` | `run once { … }` · `every 1.0 { … }` | shard schedules: once at start; every N seconds. `run`/`once`/`every` are contextual words, not reserved | — |
 | `folds` | (in `shape`) `f: T folds sum` | concurrent-write reducer | `@fold(f, sum)` |
@@ -88,7 +89,6 @@ Held so they aren't accidentally repurposed. Assign a meaning or cut before v1.0
 
 | Keyword | Leaning / candidate use |
 |---------|-------------------------|
-| `on` | event/UI handler sugar (`on click { … }`) — desktop domain |
 | `bridge` | interop / FFI boundary |
 | `bring` | instantiate a `builder` (`bring [N] Name(args)`), binding args positionally + emitting its output event |
 | `builder` | a reusable template: signature body (params + one `markup`/`code`/`css`/`line` output field), or a `mark` member making it an identity template |

@@ -1,0 +1,37 @@
+// D22: `target $S on e as x` looks at one identity; `each tick as t` binds the frame's clock.
+bundle D22 by me {
+    need "Vein.Math"
+    shape $Hp { n: int = 10 }
+    shape $Pos { x: float = 0.0 }
+    mark #Boss
+    event @Hurt { who: Entity, amount: int }
+    shard Seed { run once {
+        let a = spawn()
+        attach $Hp to a { }
+        let b = spawn()
+        attach $Hp to b { n: 50 }
+        attach $Pos to b { }
+        mark b #Boss
+    } }
+    shard Move {
+        // The clock, bound: no `var dt`, no `hear @Ticked`.
+        each tick as t {
+            target $Pos as p { p.Pos.x = p.Pos.x + 60.0 * t.delta }
+            if t.frame == 3 { target $Hp #Boss as b { emit @Hurt { who: b, amount: 7 } } }
+            if t.frame == 4 { target $Hp as h { if not (h.Hp.n == 10) { emit @Hurt { who: h, amount: 1 } } } }
+        }
+    }
+    shard Wounds {
+        hear @Hurt as w {
+            target $Hp on w.who as h { h.Hp.n = h.Hp.n - w.amount }
+            // `on` with a mark that does not match: the body does not run.
+            target $Hp #Boss on w.who as h { emit *Vein.Console.Io.@Print { text: "boss hurt to " + (h.Hp.n - w.amount) } }
+            // An identity that is not there, and one without the shape: nothing.
+            target $Hp on 0 as h { emit *Vein.Console.Io.@Print { text: "WRONG: on 0" } }
+            target $Pos on 999 as h { emit *Vein.Console.Io.@Print { text: "WRONG: on 999" } }
+        }
+        settled {
+            target $Hp $Pos as h { emit *Vein.Console.Io.@Print { text: "boss " + h.Hp.n + " at " + round(h.Pos.x) } }
+        }
+    }
+}

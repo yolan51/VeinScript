@@ -1827,7 +1827,16 @@ public sealed partial class Lower
         var attr = sb.Kind == ScheduleKind.Every
             ? IrAttr.Of("schedule", name, sb.IntervalSeconds ?? 0.0)
             : IrAttr.Of("schedule", name);
-        return new IrFunction(name, Array.Empty<IrParam>(), IrTypeRef.Of("void"), LowerBlock(sb.Body),
+        // `each tick as t`: one parameter, the clock — typed as `*Vein.Time.Clock.@Ticked`, so `t.delta` and
+        // `t.frame` are checked like a hear's payload. Each runtime hands the block the frame it is in (D22).
+        var prms = Array.Empty<IrParam>();
+        if (sb.Bind is { } clock)
+        {
+            var path = new[] { "Vein", "Time", "Clock" };
+            RegisterImportedEvent(path, "Ticked");
+            prms = new[] { new IrParam(clock, IrTypeRef.Of(EventKey(path, "Ticked"))) };
+        }
+        return new IrFunction(name, prms, IrTypeRef.Of("void"), LowerBlock(sb.Body),
             false, null, new[] { attr });
     }
 
@@ -2053,13 +2062,17 @@ public sealed partial class Lower
                         "whose data the body uses.", q.Span);
                 }
 
+                // `on victim` is read OUTSIDE the query: it names an identity the code around it already has,
+                // never the query's own binding (D22).
+                IrExpr? on = q.On is null ? null : LowerExpr(q.On);
+
                 using var _ = BindTarget(q.Bind);
                 // Inside the body, the binding carries every shape the query matched on — certain.
                 int carried = _carried.Count;
                 foreach (var shape in q.Components) _carried.Add((q.Bind, shape, "the target matched it"));
                 var body = LowerBlock(q.Body);
                 _carried.RemoveRange(carried, _carried.Count - carried);
-                return new IrLoop(IrLoopKind.Target, null, q.Bind, null, new IrQuery(q.Components, q.Tags, q.Bind, q.OrderShape, q.OrderField), null, body);
+                return new IrLoop(IrLoopKind.Target, null, q.Bind, null, new IrQuery(q.Components, q.Tags, q.Bind, q.OrderShape, q.OrderField) { On = on }, null, body);
             }
             case RepeatStmt r:
                 return new IrLoop(IrLoopKind.Repeat, null, r.Var, null, null, LowerExpr(r.Count), LowerBlock(r.Body));

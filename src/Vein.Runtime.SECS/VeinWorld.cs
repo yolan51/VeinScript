@@ -392,6 +392,48 @@ public sealed class VeinWorld
     /// both runtimes, or a game that moves on the clock moves differently compiled.
     public Action<int, double>? Ticked;
 
+    /// The clock, as the host gives it before a frame: kept for `each tick as t` (D22), and passed on to a
+    /// program that hears @Ticked. A host that never calls it still gives that block a frame number (the
+    /// tick count) and the fixed 1/60 step, as the interpreter does.
+    public void Clock(int frame, double delta)
+    {
+        _clockFrame = frame;
+        _clockDelta = delta;
+        Ticked?.Invoke(frame, delta);
+    }
+
+    private int _clockFrame;
+    private double _clockDelta;
+
+    /// `t.frame` and `t.delta` in an `each tick as t` block.
+    public long FrameNumber => _clockFrame > 0 ? _clockFrame : Tick;
+    public double FrameDelta => _clockFrame > 0 ? _clockDelta : 1.0 / 60.0;
+
+    /// `target $T on id as x` (D22): that one identity when it carries T, else nothing — looked at, not
+    /// searched for. A struct enumerator, so a lookup in a hot loop allocates nothing.
+    public OneEntity One<T>(int id) where T : struct, IVeinComponent<T> => new(id > 0 && Has<T>(id) ? id : 0);
+
+    public readonly struct OneEntity
+    {
+        private readonly int _id;
+        public OneEntity(int id) => _id = id;
+        public Enumerator GetEnumerator() => new(_id);
+
+        public struct Enumerator
+        {
+            private readonly int _id;
+            private bool _done;
+            public Enumerator(int id) { _id = id; _done = false; }
+            public int Current => _id;
+            public bool MoveNext()
+            {
+                if (_done || _id == 0) return false;
+                _done = true;
+                return true;
+            }
+        }
+    }
+
 
     public void Start()
     {
@@ -423,7 +465,7 @@ public sealed class VeinWorld
     {
         for (int i = 0; i < frames && !Stopped; i++)   // `quit` stops the run, as Interp.RunFrames does
         {
-            Ticked?.Invoke(i + 1, 1.0 / 60.0);   // before the frame, as Interp.RunFrames does
+            Clock(i + 1, 1.0 / 60.0);   // before the frame, as Interp.RunFrames does
             Frame();
         }
     }

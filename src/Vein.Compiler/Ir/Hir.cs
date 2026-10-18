@@ -40,7 +40,11 @@ public sealed record IrFunction(
     bool IsPure, string? Doc, IReadOnlyList<IrAttr> Attrs);
 
 public sealed record IrQuery(IReadOnlyList<string> Components, IReadOnlyList<string> Tags, string Bind,
-                             string? OrderShape = null, string? OrderField = null);
+                             string? OrderShape = null, string? OrderField = null)
+{
+    /// `target $S on e as x` — the one identity looked at; null for a query of every identity (D22).
+    public IrExpr? On { get; init; }
+}
 
 public sealed record IrShard(
     string Name, IReadOnlyList<IrField> State, IrQuery? Query,

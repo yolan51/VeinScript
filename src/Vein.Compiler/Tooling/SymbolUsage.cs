@@ -272,6 +272,7 @@ public sealed class UsageMap
                     Shapes(q.Components);        // the list SymbolIndex never reads
                     Marks(q.Tags);
                     Ref(SymbolKind.Shape, q.OrderShape);
+                    if (q.On is not null) Expr(q.On);   // `on victim` reads a name like any expression (D22)
                     foreach (var x in q.Body.Statements) Stmt(x);
                     break;
                 case TargetStmt t:

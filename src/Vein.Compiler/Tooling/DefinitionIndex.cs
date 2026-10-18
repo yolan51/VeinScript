@@ -189,6 +189,7 @@ public sealed class DefinitionIndex
                 case QueryStmt q:
                     foreach (string c in q.Components) Use(c, SymbolKind.Shape, q.Span);
                     foreach (string g in q.Tags) Use(g, SymbolKind.Mark, q.Span);
+                    if (q.On is not null) Ex(q.On);
                     Stm(q.Body);
                     break;
                 case AttachStmt a: Use(a.Shape, SymbolKind.Shape, a.Span); break;

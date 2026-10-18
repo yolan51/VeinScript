@@ -65,7 +65,11 @@ public sealed class Interp
 
     /// A behaviour block the CLOCK drives rather than an event: `once`/`tick`/`frame`/`settled`/`every`.
     /// `Seconds` is meaningful only for `every N`; the frame-counted kinds leave it 0.
-    private sealed record Schedule(Instance Owner, string Kind, double Seconds, IrBlock Body);
+    private sealed record Schedule(Instance Owner, string Kind, double Seconds, IrBlock Body)
+    {
+        /// `each tick as t` — the name the block gives the clock (D22); null when it asks for none.
+        public string? Clock { get; init; }
+    }
 
     private readonly List<Schedule> _schedules = new();
 
@@ -368,7 +372,7 @@ public sealed class Interp
                 {
                     string when = sch.Args.Count > 0 ? sch.Args[0]?.ToString() ?? "" : "";
                     double seconds = sch.Args.Count > 1 && sch.Args[1] is double d ? d : 0;
-                    _schedules.Add(new Schedule(inst, when, seconds, m.Body));
+                    _schedules.Add(new Schedule(inst, when, seconds, m.Body) { Clock = m.Params.FirstOrDefault()?.Name });
                     continue;
                 }
 
@@ -488,8 +492,16 @@ public sealed class Interp
     /// no error anywhere, because the six entry points above were keyboard and mouse only and the
     /// helper they share is private. The host was doing the `$Clock` half through `World.Write` and had
     /// no way to do this half at all.
-    public void FireTicked(int frame, double delta) =>
+    public void FireTicked(int frame, double delta)
+    {
+        // Kept for `each tick as t` (D22): the block reads the frame it runs in without hearing @Ticked.
+        _clockFrame = frame;
+        _clockDelta = delta;
         FireDevice("Ticked", ("frame", (long)frame), ("delta", delta));
+    }
+
+    private int _clockFrame;
+    private double _clockDelta;
 
     /// A track reached its end. Only a NON-LOOPING one ever does, and only the host can know: it owns
     /// the speaker and the clock, and a program cannot ask how long a file is.
@@ -1149,8 +1161,18 @@ public sealed class Interp
         foreach (var sched in _schedules)
             if (sched.Kind == kind && IsMuted(sched.Owner)) _log.Add($"{sched.Owner.Fc} MUTED {kind}");
             else if (sched.Kind == kind)
-                RunGuarded(sched.Body, sched.Owner,
-                           new Dictionary<string, object?>(StringComparer.Ordinal), kind);
+            {
+                var locals = new Dictionary<string, object?>(StringComparer.Ordinal);
+                // `each tick as t`: the clock of this frame, as @Ticked carries it. A host that never fires
+                // @Ticked still gets a frame number (the tick count), and the fixed step a run uses.
+                if (sched.Clock is { } clock)
+                    locals[clock] = new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["frame"] = (long)(_clockFrame > 0 ? _clockFrame : _tick),
+                        ["delta"] = _clockFrame > 0 ? _clockDelta : 1.0 / (FrameRate > 0 ? FrameRate : 60.0),
+                    };
+                RunGuarded(sched.Body, sched.Owner, locals, kind);
+            }
     }
 
     /// Run one unit of user code — a schedule block or one event handler — and turn a fault into a
@@ -1700,7 +1722,12 @@ public sealed class Interp
                 if (lp.Query is { } q)
                 {
                     long idx = -1, prevIdx = _currentIndex;
-                    foreach (long entity in _store.Query(q.Components, q.Tags, q.OrderShape, q.OrderField))
+                    // `on e`: that one identity, when it carries everything the query names (D22). Not a scan
+                    // that keeps one: the store answers `Has` per shape and mark directly.
+                    IEnumerable<long> matches = q.On is { } on
+                        ? OneOf(AsLong(Eval(on, self, locals)), q)
+                        : _store.Query(q.Components, q.Tags, q.OrderShape, q.OrderField);
+                    foreach (long entity in matches)
                     {
                         long previous = _currentEntity;
                         _currentEntity = entity;
@@ -1744,6 +1771,12 @@ public sealed class Interp
                 break;
             }
         }
+    }
+
+    private IEnumerable<long> OneOf(long id, IrQuery q)
+    {
+        if (id > 0 && _store.IsAlive(id) && q.Components.All(c => _store.Has(id, c)) && q.Tags.All(t => _store.HasTag(id, t)))
+            yield return id;
     }
 
     private void DoAssign(IrAssign a, Instance self, Dictionary<string, object?> locals)

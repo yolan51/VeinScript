@@ -686,7 +686,19 @@ public sealed class Parser
         else if (Check(TokenKind.Ident) && Cur.Text == "run") { Advance(); ExpectContextual("once"); kind = ScheduleKind.Once; }
         else if (Check(TokenKind.Ident) && Cur.Text == "every") { Advance(); kind = ScheduleKind.Every; interval = ParseSeconds(); }
         else { _diag.Error("VS0109", "expected a schedule (`run once`, `each tick`, `each frame`, `every N`, `settled`).", Here); throw new ParseError(); }
-        return new ScheduleBlock(kind, interval, ParseBlock(), s);
+
+        // `each tick as t` — the frame's clock for the block (D22). Only a per-frame block has one.
+        string? bind = null;
+        if (Check(TokenKind.KwAs))
+        {
+            var at = Here;
+            Advance();
+            bind = Expect(TokenKind.Ident, "a name for the clock").Text;
+            if (kind is not (ScheduleKind.Tick or ScheduleKind.Frame))
+                _diag.Error("VS0360", $"only `each tick` and `each frame` bind the clock (`each tick as {bind}`) — " +
+                    "this block does not run once a frame, so there is no frame to describe.", at);
+        }
+        return new ScheduleBlock(kind, interval, ParseBlock(), s) { Bind = bind };
     }
 
     /// Consume a contextual word (ident spelled `word`, e.g. `once`).
@@ -881,10 +893,23 @@ public sealed class Parser
                 orderField = ExpectName("a field name").Text;
             }
 
+            // `on victim` — ONE identity, already known (D22): the query then looks at it alone instead of
+            // scanning every identity for the one whose `Entity` matches.
+            Expr? on = null;
+            if (Check(TokenKind.KwOn))
+            {
+                var at = Here;
+                Advance();
+                on = ParseExpr();
+                if (orderShape is not null)
+                    _diag.Error("VS0359", "`by` orders many identities, and `on` names one — there is nothing to " +
+                        "order. Drop `by`.", at);
+            }
+
             Expect(TokenKind.KwAs, "'as'");
             string bind = Expect(TokenKind.Ident, "binding name").Text;
             return new QueryStmt(comps, tags, bind, ParseBlock(), s)
-                { OrderShape = orderShape, OrderField = orderField };
+                { OrderShape = orderShape, OrderField = orderField, On = on };
         }
         var src = ParseExpr();
         Expect(TokenKind.KwAs, "'as'");

@@ -440,7 +440,7 @@ shard Drain {
 | Schedule | Runs |
 |----------|------|
 | `run once { … }` | once, when the shard/bundle starts (`start` is reserved for the bundle boot event, §2.1) |
-| `each tick { … }` | every simulation tick |
+| `each tick { … }` | every simulation tick — `each tick as t { … t.delta … }` binds the frame's clock (`frame`, `delta`; D22) |
 | `each frame { … }` | once per render frame |
 | `every N { … }` | on a timer — `N` is **seconds** (a plain number: `every 1.0`, `every 0.5`) |
 | `settled { … }` | once, **after** a tick's `folds` contributions reconcile — the correct place to read final values (e.g. death checks) |

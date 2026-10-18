@@ -60,7 +60,7 @@ internal sealed class CompiledRuntime : IGameRuntime
 
     public void Step(double delta) => Guard(() =>
     {
-        _world.Ticked?.Invoke(_world.Tick + 1, delta);
+        _world.Clock(_world.Tick + 1, delta);
         _world.Frame();
     });
 

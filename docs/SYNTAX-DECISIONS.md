@@ -615,6 +615,52 @@ PLAYER changes at run time (an options menu writes its own file with Vein.Files)
 
 ---
 
+## D22 — `target $S on e as x` looks at ONE identity; `each tick as t` binds the clock {#on}
+
+> **Reported as `VS0359`** (`on` with `by`: one identity has no order) and **`VS0360`** (a clock bound on a
+> block that does not run once a frame: `run once as t`, `settled as t`, `every N as t`).
+
+**DECIDED.** Two forms, both found by counting what the bundles and games repeat (VeinScriptBundle's
+PATTERNS.md: 59 and 15 times in about 3,600 lines).
+
+**`on`: the query for an identity you already have.** Code holds an identity — an event's `who`, a
+`target` field, a spawned id — and wants its data. Without `on` it scanned every identity with the shape
+and kept the one whose `Entity` matched:
+
+```
+target $Reward as r { if Entity == victim { gain = r.Reward.xp } }    // reads every $Reward
+target $Reward on victim as r { gain = r.Reward.xp }                  // reads victim's
+```
+
+The body runs once when the identity carries every shape and mark named, and not at all otherwise (dead,
+0, or missing a shape) — the same test the full query applies, so `on` narrows a query and changes
+nothing else: the binding, `Entity`, `Index` (0) and fold contributions are what they were. The
+expression is read OUTSIDE the query (`on Entity` is the enclosing identity). Both runtimes look the
+identity up directly rather than scanning: `EntityStore.Has` per shape and mark, `VeinWorld.One<T>(id)`
+compiled (a struct enumerator; nothing is allocated).
+
+`on` was reserved with no meaning (KEYWORDS.md leaned to UI handler sugar, `on click { … }`; `hear` is
+that already). The word reads as the sentence: *target $Reward on victim*. A `where` clause was the
+alternative and was not taken: a general filter is what `if` in the body already is, and the case
+worth a form is the one identity.
+
+**`each tick as t`: the clock, for the block.** Moving by time needed a shard var and a second handler:
+
+```
+var dt: float = 0.0
+hear *Vein.Time.Clock.@Ticked as t { dt = t.delta }
+each tick { … speed * dt … }
+```
+```
+each tick as t { … speed * t.delta … }
+```
+
+`t` has @Ticked's fields, `frame` and `delta` — the frame the block runs in, as the host gave it. A host
+that never sends a clock still gives a frame number (the tick count) and the fixed step (1/60, or the
+interpreter's frame rate). `as` is the word every other binding uses (`hear … as`, `target … as`), so
+nothing new is learned. Only `each tick` and `each frame` bind it: the other schedules do not run once a
+frame.
+
 ## Reserved-word disposition
 
 Every keyword currently in [Lexer.cs](../src/Vein.Compiler/Lexing/Lexer.cs) `Keywords`, classified.
@@ -648,7 +694,8 @@ Full detail in [KEYWORDS.md](KEYWORDS.md).
 | `fn` `type` `if` `while` `repeat` `break` `continue` `match` `enum` | **core** | general computation and control flow (D2, D11) |
 | `ShardView` | **core (IOP)** | a First-Class object that ASSEMBLES |
 | `mute` `unmute` | **core (IOP)** | pause / resume a shard by name, at the next commit (D18) |
-| `on` `transform` | **reserved** | genuinely unassigned: no parser case, no sample |
+| `on` | **core (IOP)** | `target $S on e as x` — the query for one identity (D22) |
+| `transform` | **reserved** | genuinely unassigned: no parser case, no sample |
 
 The nine keywords this section once listed as **"to ADD in M2"** — `fn` `type` `enum` `if` `while`
 `repeat` `break` `continue` `match` — have all been in the lexer for some time; they are classified
@@ -667,7 +714,7 @@ Still pending: tokens `LBracket`/`RBracket` if D9(a). **Never keywords:** `class
 
 - **D9** — brackets & list syntax: (a) vs (b). *(specs assume (a).)*
 - **D10** — user-defined generics timing. *(deferred.)*
-- **Reserved block** — `on`, `transform`: assign a meaning or cut before v1.0.
+- **Reserved block** — `transform`: assign a meaning or cut before v1.0. (`on` got one: D22.)
   *(The rest of what this list once held — `by`, `start`, `audience`, `bridge`, `bring`, `builder`,
   `mute`, `unmute` —
   all got meanings and are classified above.)*

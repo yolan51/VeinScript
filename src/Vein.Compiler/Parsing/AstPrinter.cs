@@ -77,7 +77,7 @@ public static class AstPrinter
         switch (m)
         {
             case ScheduleBlock sc:
-                Line(sb, ind, ScheduleText(sc));
+                Line(sb, ind, ScheduleText(sc) + (sc.Bind is null ? "" : " as " + sc.Bind));
                 PrintBlock(sb, sc.Body, ind + 1);
                 break;
             case HearBlock hb:
@@ -108,7 +108,7 @@ public static class AstPrinter
                 break;
             case WhileStmt w: Line(sb, ind, $"while {Ex(w.Cond)}"); PrintBlock(sb, w.Body, ind + 1); break;
             case TargetStmt t: Line(sb, ind, $"target {Ex(t.Source)} as {t.Bind}"); PrintBlock(sb, t.Body, ind + 1); break;
-            case QueryStmt q: Line(sb, ind, $"target {string.Join(" ", q.Components.Select(c => "$" + c).Concat(q.Tags.Select(t => "#" + t)))} as {q.Bind}"); PrintBlock(sb, q.Body, ind + 1); break;
+            case QueryStmt q: Line(sb, ind, $"target {string.Join(" ", q.Components.Select(c => "$" + c).Concat(q.Tags.Select(t => "#" + t)))}{(q.On is null ? "" : " on " + Ex(q.On))} as {q.Bind}"); PrintBlock(sb, q.Body, ind + 1); break;
             case RepeatStmt r: Line(sb, ind, $"repeat {Ex(r.Count)}{(r.Var is null ? "" : " as " + r.Var)}"); PrintBlock(sb, r.Body, ind + 1); break;
             case MatchStmt m:
                 Line(sb, ind, $"match {Ex(m.Subject)}");

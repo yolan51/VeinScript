@@ -710,7 +710,17 @@ public sealed class CSharpBackend : IVeinBackend
                 _bound.Clear();
                 ResetLocals();
                 sb.AppendLine($"    public override void {phase}()");
-                EmitBlock(sb, m.Body, 1);
+                // `each tick as t` (D22): the clock of this frame, read from the world — the same two fields
+                // @Ticked carries, so `t.delta` reads alike in a block and in a hear.
+                if (m.Params.FirstOrDefault() is { } clock)
+                {
+                    _bound.Add(clock.Name);
+                    sb.AppendLine("    {");
+                    sb.AppendLine($"        var {DeclareLocal(clock.Name)} = new {{ frame = World.FrameNumber, delta = World.FrameDelta }};");
+                    EmitBlock(sb, m.Body, 2);
+                    sb.AppendLine("    }");
+                }
+                else EmitBlock(sb, m.Body, 1);
                 continue;
             }
 
@@ -1130,8 +1140,25 @@ public sealed class CSharpBackend : IVeinBackend
                 : $".OrderBy(__k => {key}).ThenBy(__k => __k)";
         }
         sb.AppendLine($"{pad}long {_indexVar} = -1;");
-        sb.AppendLine($"{pad}foreach (var {entVar} in World.Query<{comp}{marks}>(){order})");
-        sb.AppendLine(pad + "{");
+        // `on e` (D22): that one identity, looked at — `World.One` answers it or nothing, and its marks are
+        // tested here because the cached query that filters them is not used.
+        if (q.On is { } on)
+        {
+            // Read with the OUTER loop's identity in scope, as Lower reads it outside the binding: `Entity`
+            // in `on Entity` is the enclosing query's, never this one's.
+            _entityVar = prevEnt;
+            string id = Expr(on);
+            _entityVar = entVar;
+            sb.AppendLine($"{pad}foreach (var {entVar} in World.One<{comp}>((int)({id})))");
+            sb.AppendLine(pad + "{");
+            foreach (var t in q.Tags)
+                sb.AppendLine($"{pad}    if (!World.MarkedAs<Marks.{Ident(t)}>({entVar})) continue;");
+        }
+        else
+        {
+            sb.AppendLine($"{pad}foreach (var {entVar} in World.Query<{comp}{marks}>(){order})");
+            sb.AppendLine(pad + "{");
+        }
         foreach (var c in comps.Skip(1))
             sb.AppendLine($"{pad}    if (!World.Has<{c}>({entVar})) continue;");
         sb.AppendLine($"{pad}    {_indexVar}++;");

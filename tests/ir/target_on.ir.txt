@@ -1,0 +1,82 @@
+VeinIR v1  file=samples/target_on.vein
+Bundle D22  author=me
+|--- Need Vein.Math
+|--- Shape $Hp
+|    `--- Field n: int = Int 10
+|--- Shape $Pos
+|    `--- Field x: float = Float 0
+|--- Mark #Boss
+|--- Event @Hurt
+|    |--- Field who: Entity
+|    `--- Field amount: int
+|--- Shard Seed
+|    `--- RunOnce
+|         |--- Let a = Call spawn
+|         |--- Attach $Hp to a
+|         |--- Let b = Call spawn
+|         |--- Attach $Hp to b
+|         |    `--- Arg n = Int 50
+|         |--- Attach $Pos to b
+|         `--- Mark b #Boss
+|--- Shard Move
+|    `--- EachTick as t
+|         |--- Target $Pos as p
+|         |    `--- Assign = p.Pos.x
+|         |         `--- Concat
+|         |              |--- Path p.Pos.x
+|         |              `--- Binary *
+|         |                   |--- Float 60
+|         |                   `--- Path t.delta
+|         |--- If
+|         |    |--- Cond = Binary ==
+|         |    |    |--- Path t.frame
+|         |    |    `--- Int 3
+|         |    `--- Then
+|         |         `--- Target $Hp #Boss as b
+|         |              `--- Emit @Hurt
+|         |                   |--- Arg who = Ref b
+|         |                   `--- Arg amount = Int 7
+|         `--- If
+|              |--- Cond = Binary ==
+|              |    |--- Path t.frame
+|              |    `--- Int 4
+|              `--- Then
+|                   `--- Target $Hp as h
+|                        `--- If
+|                             |--- Cond = Unary not
+|                             |    `--- Binary ==
+|                             |         |--- Path h.Hp.n
+|                             |         `--- Int 10
+|                             `--- Then
+|                                  `--- Emit @Hurt
+|                                       |--- Arg who = Ref h
+|                                       `--- Arg amount = Int 1
+`--- Shard Wounds
+     |--- Hear @Hurt as w
+     |    |--- Target $Hp on w.who as h
+     |    |    `--- Assign = h.Hp.n
+     |    |         `--- Binary -
+     |    |              |--- Path h.Hp.n
+     |    |              `--- Path w.amount
+     |    |--- Target $Hp #Boss on w.who as h
+     |    |    `--- Emit *Vein.Console.Io.@Print
+     |    |         `--- Arg text = Concat
+     |    |              |--- Str "boss hurt to "
+     |    |              `--- Binary -
+     |    |                   |--- Path h.Hp.n
+     |    |                   `--- Path w.amount
+     |    |--- Target $Hp on Int 0 as h
+     |    |    `--- Emit *Vein.Console.Io.@Print
+     |    |         `--- Arg text = Str "WRONG: on 0"
+     |    `--- Target $Pos on Int 999 as h
+     |         `--- Emit *Vein.Console.Io.@Print
+     |              `--- Arg text = Str "WRONG: on 999"
+     `--- Settled
+          `--- Target $Hp $Pos as h
+               `--- Emit *Vein.Console.Io.@Print
+                    `--- Arg text = Concat
+                         |--- Str "boss "
+                         |--- Path h.Hp.n
+                         |--- Str " at "
+                         `--- Call round
+                              `--- Path h.Pos.x

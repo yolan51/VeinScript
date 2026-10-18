@@ -96,7 +96,8 @@ public static class MemberIndex
             switch (n)
             {
                 case HearBlock hb: m.Bindings[hb.Bind] = "event:" + hb.Event; Block(hb.Body); break;
-                case ScheduleBlock sc: Block(sc.Body); break;
+                // `each tick as t`: t is the clock, @Ticked's fields (D22).
+                case ScheduleBlock sc: if (sc.Bind is { } clock) m.Bindings[clock] = "event:Ticked"; Block(sc.Body); break;
                 case FuncDecl f: Block(f.Body); break;
                 case Stmt s: Stmt(s); break;
             }

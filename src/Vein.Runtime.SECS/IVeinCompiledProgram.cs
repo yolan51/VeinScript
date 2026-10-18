@@ -10,7 +10,7 @@ namespace Vein.Runtime.SECS;
 public interface IVeinCompiledProgram
 {
     /// A world with every shard registered and its hooks set — NOT started. The host calls
-    /// `Start()` once, then per frame `Ticked?.Invoke(frame, delta)` and `Frame()`.
+    /// `Start()` once, then per frame `Clock(frame, delta)` and `Frame()`.
     VeinWorld Create();
 
     /// Shape names this program has as component types (`Position`, `Image`, …).

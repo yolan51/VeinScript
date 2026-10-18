@@ -311,6 +311,16 @@ blank rather than wrong — because `row` lowers to the nameless `IrSelfRef` (ru
 stack, not a local. `samples/entities_bring_rows.vein`, and `samples/json_roundtrip.vein` for the JSON
 case.
 
+**14f. An identity you already have is looked at with `on`, and an outer binding IS its identity.**
+`target $Reward on victim as r { … }` runs once if `victim` carries `$Reward` (and every mark named), and
+not at all otherwise — never `target $Reward as r { if Entity == victim { … } }`, which reads every
+`$Reward` to find one (D22). Inside nested queries, `Entity` is the INNERMOST identity; an outer one is its
+binding's name, usable anywhere an identity is (`emit @Hit { attacker: a, victim: v }`), and an event's
+fields stay readable too (`d.who` inside a query). So nothing needs copying into a local first:
+`emit @Hit { attacker: Entity }` inside an inner query named the VICTIM — the bug that made rpg.Combat
+credit every kill to the one killed. And `each tick as t { … t.delta … }` gives a block the frame's clock,
+in place of a `var dt` kept by a `hear @Ticked`.
+
 **15. `$Enemy` and `#Enemy` are different things.** Different keyword, different sigil; a program may use
 both. In emitted C# the mark becomes `Marks.Enemy` and the shape `Enemy`.
 

@@ -181,7 +181,12 @@ public sealed record BridgeDecl(string Name, IReadOnlyList<Node> Members, Source
 public enum ScheduleKind { Once, Tick, Frame, Every, Settled }
 
 /// A shard behaviour block: a schedule + body. `IntervalSeconds` is set only for `Every` (`every 1.0`).
-public sealed record ScheduleBlock(ScheduleKind Kind, double? IntervalSeconds, Block Body, SourceSpan Span) : Node(Span);
+public sealed record ScheduleBlock(ScheduleKind Kind, double? IntervalSeconds, Block Body, SourceSpan Span) : Node(Span)
+{
+    /// `each tick as t` — the frame's clock, `t.frame` and `t.delta` (the `*Vein.Time.Clock.@Ticked` fields),
+    /// bound for the block. Null when not asked for. Only `each tick` and `each frame` take one (D22).
+    public string? Bind { get; init; }
+}
 
 /// `hear @Event as bind [audience $Shape #Mark …] { … }`. The audience barrier restricts which
 /// emitters this handler will react to (by the emitter's shapes/marks) — see docs.
@@ -238,6 +243,10 @@ public sealed record QueryStmt(IReadOnlyList<string> Components, IReadOnlyList<s
     /// so entity ids never move and the same set can be shown in several orders.
     public string? OrderShape { get; init; }
     public string? OrderField { get; init; }
+
+    /// `target $Life on victim as l { … }` — the query for ONE identity, already known: the body runs once
+    /// when it carries every shape and mark named, and not at all otherwise (D22). Null for a query of all.
+    public Expr? On { get; init; }
 }
 public sealed record RepeatStmt(Expr Count, string? Var, Block Body, SourceSpan Span) : Stmt(Span);
 public sealed record MatchStmt(Expr Subject, IReadOnlyList<MatchArm> Arms, Block? Else, SourceSpan Span) : Stmt(Span);
