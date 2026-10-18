@@ -738,6 +738,125 @@ public class HostingTests : IDisposable
         Assert.DoesNotContain(printed, line => line.StartsWith("WRONG"));
     }
 
+    [Theory]
+    [InlineData(VeinRuntime.Interpreter)]
+    [InlineData(VeinRuntime.Compiled)]
+    public void A_nested_query_reads_its_siblings_writes_only_after_the_commit_on_both_runtimes(VeinRuntime mode)
+    {
+        // Inside one outer query, a second inner query read what the first had just written — on the
+        // interpreter (one shared overlay), not compiled (a copy per binding), and not at the top level on
+        // either. RULES 13: a field written this tick reads its old value until the commit. An outer binding's
+        // own write made inside an inner query is still its own, and the outer query reads it back.
+        string path = Write($"nested-{mode}.vein", """
+            bundle Nested by me {
+                shape $Host { ready: int = 0 }
+                shape $Num { plain: int = 5 }
+                shard Seed { run once {
+                    let a = spawn()
+                    attach $Host to a { }
+                    let b = spawn()
+                    attach $Num to b { }
+                } }
+                shard Go { each tick as t {
+                    if t.frame == 1 {
+                        target $Host as h {
+                            target $Num as n {
+                                n.Num.plain = n.Num.plain - 1
+                                h.Host.ready = 7
+                            }
+                            target $Num as n { emit *Vein.Console.Io.@Print { text: "sibling " + n.Num.plain } }
+                            emit *Vein.Console.Io.@Print { text: "own " + h.Host.ready }
+                        }
+                    }
+                    if t.frame == 2 { target $Num as n { emit *Vein.Console.Io.@Print { text: "next " + n.Num.plain } } }
+                } }
+            }
+            """);
+        var game = VeinGame.Open(path, mode);
+        var printed = new List<string>();
+        game.Printed += (line, _) => printed.Add(line);
+        Assert.True(game.Start(), string.Join("\n", game.Diagnostics));
+        Assert.Equal("", game.RuntimeNote);
+        game.Step(1.0 / 60.0);
+        game.Step(1.0 / 60.0);
+        Assert.Equal(new[] { "sibling 5", "own 7", "next 4" }, printed);
+    }
+
+    [Theory]
+    [InlineData(VeinRuntime.Interpreter)]
+    [InlineData(VeinRuntime.Compiled)]
+    public void Typed_locals_and_characters_passed_to_functions_compile_on_both_runtimes(VeinRuntime mode)
+    {
+        // `var found: Entity = 0` was a C# long, so handing it on as an identity did not compile; `s[i]` is an
+        // object compiled, so `isDigit(s[i])` against `c: string` did not either. Both found by samples/advanced.
+        string path = Write($"typed-{mode}.vein", """
+            bundle Typed by me {
+                shape $Hp { n: int = 3 }
+                fn isDigit(c: string) return bool { return c >= "0" and c <= "9" }
+                fn pickOne(e: Entity) return Entity { return e }
+                shard Go {
+                    run once {
+                        let a = spawn()
+                        attach $Hp to a { }
+                        let s = "a1b22"
+                        var digits = 0
+                        var i = 0
+                        while i < len(s) {
+                            if isDigit(s[i]) { digits += 1 }
+                            i += 1
+                        }
+                        emit *Vein.Console.Io.@Print { text: "digits " + digits }
+                    }
+                    each tick as t {
+                        if t.frame == 1 {
+                            var found: Entity = 0
+                            target $Hp as h { found = h }
+                            target $Hp on pickOne(found) as h { emit *Vein.Console.Io.@Print { text: "found " + h.Hp.n } }
+                        }
+                    }
+                }
+            }
+            """);
+        var game = VeinGame.Open(path, mode);
+        var printed = new List<string>();
+        game.Printed += (line, _) => printed.Add(line);
+        Assert.True(game.Start(), string.Join("\n", game.Diagnostics));
+        Assert.Equal(mode == VeinRuntime.Compiled ? "compiled" : "interpreter", game.Runtime);
+        Assert.Equal("", game.RuntimeNote);
+        game.Step(1.0 / 60.0);
+        Assert.Contains("digits 3", printed);
+        Assert.Contains("found 3", printed);
+    }
+
+    [Fact]
+    public void A_function_named_like_a_built_in_is_refused()
+    {
+        string path = Write("builtin-name.vein", """
+            bundle Clash by me {
+                fn join(a: string, b: string) return string { return a + b }
+                shard S { run once { emit *Vein.Console.Io.@Print { text: join("a", "b") } } }
+            }
+            """);
+        var game = VeinGame.Open(path, VeinRuntime.Interpreter);
+        Assert.False(game.Start());
+        Assert.Contains(game.Diagnostics, d => d.Code == "VS0361");
+    }
+
+    [Fact]
+    public void Hearing_a_runtime_transport_event_is_refused()
+    {
+        // `event @Send` for a mailbox: every emit became a network send, and the hear never ran (samples/advanced/08).
+        string path = Write("send-clash.vein", """
+            bundle Mailbox by me {
+                event @Send { payload: string }
+                shard S { run once { emit @Send { payload: "hi" } } hear @Send as m { } }
+            }
+            """);
+        var game = VeinGame.Open(path, VeinRuntime.Interpreter);
+        Assert.False(game.Start());
+        Assert.Contains(game.Diagnostics, d => d.Code == "VS0362");
+    }
+
     [Fact]
     public void On_with_by_and_a_clock_on_a_once_block_are_refused()
     {

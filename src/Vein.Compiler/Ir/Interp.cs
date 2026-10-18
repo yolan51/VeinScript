@@ -1736,7 +1736,7 @@ public sealed class Interp
                         if (lp.Var is not null) locals[lp.Var] = entity;
 
                         _activations++;
-                        _store.BeginActivation();
+                        _store.BeginActivation(entity);
                         bool more;
                         try { more = Iterate(lp.Body, self, locals); }
                         finally

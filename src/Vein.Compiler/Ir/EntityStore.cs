@@ -219,25 +219,22 @@ public sealed class EntityStore
 
     private readonly record struct Cell(long Entity, string Shape, string Field);
 
-    private readonly Dictionary<Cell, object?> _overlay = new();
-    private readonly Dictionary<Cell, object?> _snapshots = new();
+    /// The pending writes of each open activation, innermost last. A `target` inside a `target` opens its own
+    /// layer: a binding reads its own pending writes and its enclosing bindings', and nothing a SIBLING query
+    /// wrote — that was contributed when the sibling ended, and like any contribution it lands at the commit
+    /// (RULES 13). The two loops used to share one overlay, so the interpreter let a second inner query read
+    /// what the first had just written, while compiled code (each binding a copy of its component) and the
+    /// interpreter's own top-level queries read the value from before — found by samples/advanced/02.
+    private readonly List<(long Entity, Dictionary<Cell, object?> Pending, Dictionary<Cell, object?> Snapshots)> _layers = new();
 
     private sealed record Contribution(long Entity, string Shape, string Field, object? Value, FoldReducer? Fold, int Order);
     private readonly List<Contribution> _contributions = new();
     private int _order;
 
-    /// How deep the current activation is nested. A `target` inside a `target` is still ONE unit of
-    /// behaviour, so the inner one joins the outer's overlay instead of clearing it — cells are keyed by
-    /// entity, so the two loops' writes stay separate anyway unless they really touch the same field.
-    private int _depth;
-
-    /// Begin one unit activation — a single schedule block running over a single entity.
-    public void BeginActivation()
-    {
-        if (_depth++ > 0) return;
-        _overlay.Clear();
-        _snapshots.Clear();
-    }
+    /// Begin one unit activation — a single schedule block running over a single entity — or a nested query
+    /// inside one, which gets a layer of its own.
+    public void BeginActivation(long entity = 0) =>
+        _layers.Add((entity, new Dictionary<Cell, object?>(), new Dictionary<Cell, object?>()));
 
     /// A field read: the activation's own pending write if there is one, else the committed value.
     /// The fields a component type declares, so a caller can walk a whole component rather than naming
@@ -248,7 +245,8 @@ public sealed class EntityStore
     public object? Read(long entity, string shape, string field)
     {
         var cell = new Cell(entity, shape, field);
-        if (_overlay.TryGetValue(cell, out var pending)) return pending;
+        for (int i = _layers.Count - 1; i >= 0; i--)
+            if (_layers[i].Pending.TryGetValue(cell, out var pending)) return pending;
         return Committed(cell);
     }
 
@@ -257,34 +255,39 @@ public sealed class EntityStore
     public void Write(long entity, string shape, string field, object? value)
     {
         var cell = new Cell(entity, shape, field);
-        if (!_snapshots.ContainsKey(cell)) _snapshots[cell] = Committed(cell);
-        _overlay[cell] = value;
-
         // A write with no activation around it (a hear handler touching an entity directly) is its own
-        // one-write unit. Contributing it now is what keeps it from being dropped by the next Begin.
-        if (_depth == 0) Flush();
+        // one-write unit, contributed at once.
+        if (_layers.Count == 0)
+        {
+            Contribute(cell, value, Committed(cell));
+            return;
+        }
+        // Into the layer of the activation that OWNS this identity: `a.Fighter.ready = …` inside an inner query
+        // is the outer binding's write, and the outer query reads it back after the inner one ends — as compiled
+        // code does, where each binding writes its own copy. Any other identity's write is the innermost's.
+        int owner = _layers.Count - 1;
+        for (int i = _layers.Count - 1; i >= 0; i--)
+            if (_layers[i].Entity == entity) { owner = i; break; }
+        var (_, pending, snapshots) = _layers[owner];
+        if (!snapshots.ContainsKey(cell)) snapshots[cell] = Read(entity, shape, field);
+        pending[cell] = value;
     }
 
-    /// Turn the overlay into contributions. Sum contributes the DELTA from the snapshot; everything else
-    /// contributes the absolute value. See the header comment for why.
+    /// Turn the innermost layer into contributions. Sum contributes the DELTA from the snapshot; everything
+    /// else contributes the absolute value. See the header comment for why.
     public void EndActivation()
     {
-        if (_depth > 0 && --_depth > 0) return;
-        Flush();
+        if (_layers.Count == 0) return;
+        var (_, pending, snapshots) = _layers[^1];
+        _layers.RemoveAt(_layers.Count - 1);
+        foreach (var (cell, value) in pending) Contribute(cell, value, snapshots.GetValueOrDefault(cell));
     }
 
-    private void Flush()
+    private void Contribute(Cell cell, object? value, object? snapshot)
     {
-        foreach (var (cell, value) in _overlay)
-        {
-            var fold = FoldOf(cell.Shape, cell.Field);
-            object? contributed = fold == FoldReducer.Sum
-                ? Subtract(value, _snapshots.GetValueOrDefault(cell))
-                : value;
-            _contributions.Add(new Contribution(cell.Entity, cell.Shape, cell.Field, contributed, fold, _order++));
-        }
-        _overlay.Clear();
-        _snapshots.Clear();
+        var fold = FoldOf(cell.Shape, cell.Field);
+        object? contributed = fold == FoldReducer.Sum ? Subtract(value, snapshot) : value;
+        _contributions.Add(new Contribution(cell.Entity, cell.Shape, cell.Field, contributed, fold, _order++));
     }
 
     /// Reconcile every contribution from this phase and apply it. Sum/Min/Max/All/Any are

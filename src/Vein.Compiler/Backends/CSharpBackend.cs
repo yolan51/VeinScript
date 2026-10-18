@@ -44,6 +44,7 @@ public sealed class CSharpBackend : IVeinBackend
     /// emitted the call and never the function — CS0103 at every call site, which no backend-checked
     /// sample hit because none of them used a function.
     private readonly HashSet<string> _functions = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IrFunction> _functionDecls = new(StringComparer.Ordinal);
 
     /// Names already declared in the method body being emitted. An assignment to a name NOT in here is
     /// the first mention of a local, and the interpreter treats that as a declaration — so the backend
@@ -143,7 +144,8 @@ public sealed class CSharpBackend : IVeinBackend
         _selfVars.Clear();
         _selfComps.Clear();
         _entityVar = "__e";
-        foreach (var f in module.Functions) _functions.Add(f.Name);
+        _functionDecls.Clear();
+        foreach (var f in module.Functions) { _functions.Add(f.Name); _functionDecls[f.Name] = f; }
         foreach (var t in module.Types)
             if (t.Kind == IrTypeKind.Component) { _components.Add(t.Name); _componentTypes[t.Name] = t; }
             // AN IMPORTED EVENT IS EMITTED UNLESS ITS MEANING IS TRANSPORT.
@@ -819,7 +821,29 @@ public sealed class CSharpBackend : IVeinBackend
                 // program to the interpreter. An integer literal therefore declares a long.
                 bool intLiteral = l.Init is IrLiteral { Kind: IrLiteralKind.Int } or IrUnary { Operand: IrLiteral { Kind: IrLiteralKind.Int } };
                 string init = Expr(l.Init);   // before declaring: `let x = x + 1` reads the outer x
-                sb.AppendLine($"{pad}{(intLiteral ? "long" : "var")} {DeclareLocal(l.Name)} = {init};");
+                // A DECLARED type is the local's C# type: `var found: Entity = 0` is an `int`, as every Entity is
+                // here — it was a `long` from the literal, and passing it on as an identity did not compile
+                // (CS1503/CS0266). The value is converted, as the interpreter takes whatever it is given.
+                string? declared = l.Type?.Name switch
+                {
+                    "int" => "long",
+                    "Entity" => "int",
+                    "float" => "double",
+                    "bool" => "bool",
+                    "string" => "string",
+                    _ => null
+                };
+                if (declared is not null && l.Init is not null)
+                {
+                    string value = declared switch
+                    {
+                        "string" => $"System.Convert.ToString({init}, System.Globalization.CultureInfo.InvariantCulture) ?? \"\"",
+                        "bool" => init,
+                        _ => $"({declared})({init})"
+                    };
+                    sb.AppendLine($"{pad}{declared} {DeclareLocal(l.Name)} = {value};");
+                }
+                else sb.AppendLine($"{pad}{(intLiteral ? "long" : "var")} {DeclareLocal(l.Name)} = {init};");
                 break;
 
             // ASSIGNMENT TO A NAME NOTHING DECLARED IS A DECLARATION, because that is what the
@@ -1294,11 +1318,30 @@ public sealed class CSharpBackend : IVeinBackend
 
         // A module function is qualified; anything else is emitted as written.
         IrCall { Callee: IrLocalRef fnRef } fc when _functions.Contains(fnRef.Name)
-            => $"Fns.{Ident(fnRef.Name)}({string.Join(", ", fc.Args.Select(Expr))})",
+            => $"Fns.{Ident(fnRef.Name)}({string.Join(", ", fc.Args.Select((a, i) => Argument(fnRef.Name, i, a)))})",
         IrCall c => $"{Expr(c.Callee)}({string.Join(", ", c.Args.Select(Expr))})",
         IrList l => ListLiteral(l),
         _ => Unsupported(e)
     };
+
+    /// An argument to a module function, converted to the parameter's type when it is UNTYPED in C#. `s[i]`
+    /// (`__VeinText.At`) is an `object`: passed to `fn isDigit(c: string)` it did not compile (CS1503), where
+    /// the interpreter simply passes the character. Only those are wrapped; a typed argument stays as it is.
+    private string Argument(string function, int index, IrExpr arg)
+    {
+        string emitted = Expr(arg);
+        if (arg is not IrIndex) return emitted;
+        if (!_functionDecls.TryGetValue(function, out var decl) || index >= decl.Params.Count) return emitted;
+        return decl.Params[index].Type.Name switch
+        {
+            "string" => $"__VeinText.S({emitted})",
+            "int" => $"__VeinText.I({emitted})",
+            "Entity" => $"(int)__VeinText.I({emitted})",
+            "float" => $"__VeinText.D({emitted})",
+            "bool" => $"__VeinText.B({emitted})",
+            _ => emitted
+        };
+    }
 
     private string Unsupported(IrExpr e)
     {

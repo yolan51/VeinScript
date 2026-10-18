@@ -1568,7 +1568,26 @@ public sealed partial class Lower
 
     // ---- functions ------------------------------------------------------
 
-    private IrFunction LowerFunc(FuncDecl f) => new(
+    /// A program's own `fn`/`SF` cannot take a built-in's name (VS0361). The interpreter called the program's
+    /// function and compiled code the built-in, so `fn pick` (core.Loot) and `fn join` (an advanced sample) each
+    /// computed one thing on `veinc run` and another in a game, with nothing said. The same rule `use` already
+    /// follows (VS0217): a built-in name means one thing everywhere. The standard library, which wraps
+    /// built-ins on purpose, and imported bodies are not this program's declarations.
+    private void CheckBuiltinName(FuncDecl f)
+    {
+        if (_importDepth > 0 || _ownerKey.StartsWith("Vein.", StringComparison.Ordinal)) return;
+        if (Interp.PrebuiltNames.Contains(f.Name))
+            _diag.Error("VS0361", $"`{f.Name}` is a built-in function — a `fn`/`SF` of that name would run on one " +
+                "runtime and the built-in on the other. Give it another name.", f.Span);
+    }
+
+    private IrFunction LowerFunc(FuncDecl f)
+    {
+        CheckBuiltinName(f);
+        return LowerFuncBody(f);
+    }
+
+    private IrFunction LowerFuncBody(FuncDecl f) => new(
         _shardFuncNames.TryGetValue(f.Name, out var qualified) && _funcDecls.GetValueOrDefault(f.Name) == f ? qualified : f.Name,
         f.Params.Select(p => new IrParam(p.Name, LowerTypeRef(p.Type))).ToList(),
         f.Return is null ? IrTypeRef.Of("void") : LowerTypeRef(f.Return),
@@ -1911,6 +1930,13 @@ public sealed partial class Lower
     private IrFunction LowerHear(HearBlock hb)
     {
         RegisterImportedEvent(hb.EventPath, hb.Event);
+        // A TRANSPORT event is carried out by the runtime and never reaches a `hear` (VS0362): `@Print` is
+        // written, `@Send` goes over the bus, `@Response` answers the request. Declaring and emitting one is how a
+        // program uses them; hearing one does nothing, silently — a mailbox made of `event @Send` heard none of
+        // its own mail (samples/advanced/08).
+        if (Interp.HostEvents.Contains(hb.Event) && EventKey(hb.EventPath, hb.Event) == hb.Event)
+            _diag.Error("VS0362", $"`@{hb.Event}` is carried out by the runtime itself (it is a transport event), so " +
+                "this `hear` would never run. To pass messages between shards, declare an event with another name.", hb.Span);
         var attrs = new List<IrAttr> { IrAttr.Of("hear", EventKey(hb.EventPath, hb.Event)) };
         // An `audience #Mark` barrier names a mark too, and it is where a typo costs most: a misspelt
         // audience admits nobody, which reads exactly like a barrier doing its job.
