@@ -842,6 +842,37 @@ public class HostingTests : IDisposable
         Assert.Contains(game.Diagnostics, d => d.Code == "VS0361");
     }
 
+    [Theory]
+    [InlineData(VeinRuntime.Interpreter)]
+    [InlineData(VeinRuntime.Compiled)]
+    public void A_shard_hearing_one_event_twice_and_a_list_var_compile_on_both_runtimes(VeinRuntime mode)
+    {
+        // Two `hear @Hit` in one shard were two C# methods `hear_Hit` (CS0111), and `var log = [0]` was a field
+        // of type `infer` (CS0246) — samples/patterns/06 and 04.
+        string path = Write($"twice-{mode}.vein", """
+            bundle Twice by me {
+                event @Hit { amount: int }
+                shard Count {
+                    var log = [10, 20, 30]
+                    var first: int = 0
+                    var second: int = 0
+                    run once { emit @Hit { amount: 2 } }
+                    hear @Hit as h { first += h.amount }
+                    hear @Hit as h { second += h.amount * log[1] }
+                    each tick { emit *Vein.Console.Io.@Print { text: "first " + first + " second " + second } }
+                }
+            }
+            """);
+        var game = VeinGame.Open(path, mode);
+        var printed = new List<string>();
+        game.Printed += (line, _) => printed.Add(line);
+        Assert.True(game.Start(), string.Join("\n", game.Diagnostics));
+        Assert.Equal(mode == VeinRuntime.Compiled ? "compiled" : "interpreter", game.Runtime);
+        Assert.Equal("", game.RuntimeNote);
+        game.Step(1.0 / 60.0);
+        Assert.Contains("first 2 second 40", printed);
+    }
+
     [Fact]
     public void Hearing_a_runtime_transport_event_is_refused()
     {

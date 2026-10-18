@@ -46,6 +46,9 @@ public sealed class CSharpBackend : IVeinBackend
     private readonly HashSet<string> _functions = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IrFunction> _functionDecls = new(StringComparer.Ordinal);
 
+    /// Shard vars and locals made from a list literal of one element type — indexed as that type.
+    private readonly HashSet<string> _arrayVars = new(StringComparer.Ordinal);
+
     /// Names already declared in the method body being emitted. An assignment to a name NOT in here is
     /// the first mention of a local, and the interpreter treats that as a declaration — so the backend
     /// emits one too, or the generated C# assigns to a variable it never declared. Reset per method,
@@ -247,6 +250,8 @@ public sealed class CSharpBackend : IVeinBackend
             //
             // tools/check-backend.sh runs both and diffs the output, so "mirrors exactly" is a claim
             // the build checks rather than one this comment makes.
+            sb.AppendLine("    /// `xs[i]` on a list whose element type is known: that type, or its empty value out of range.");
+            sb.AppendLine("    public static T Item<T>(T[] a, long i) => i >= 0 && i < a.Length ? a[i] : default!;");
             sb.AppendLine("    /// `s[i]` — a one-character string, or null when out of range.");
             sb.AppendLine("    public static object? At(object? v, long i) => v switch");
             sb.AppendLine("    {");
@@ -674,6 +679,19 @@ public sealed class CSharpBackend : IVeinBackend
         _ => f.Type,
     };
 
+    /// A shard var's C# type. An untyped list (`var log = [0]`) is the array its literal emits — ListLiteral
+    /// picks `long[]`, `double[]`, … by its items — where it used to be `infer`, which nothing declares (CS0246).
+    private string StateCs(IrField f)
+    {
+        var t = StateType(f);
+        if (t.Name == "infer" && f.Default is IrList list)
+        {
+            string literal = ListLiteral(list);
+            return literal.Substring(4, literal.IndexOf('{') - 5);   // "new long[] { … }" → "long[]"
+        }
+        return Cs(t);
+    }
+
     private void EmitShard(StringBuilder sb, IrShard shard)
     {
         _currentShard = shard.Name;
@@ -681,10 +699,12 @@ public sealed class CSharpBackend : IVeinBackend
         sb.AppendLine("{");
         _fields.Clear();
         foreach (var f in shard.State) _fields.Add(f.Name);
+        _arrayVars.Clear();
+        foreach (var f in shard.State) if (StateCs(f) is { } cs && cs.EndsWith("[]") && cs != "object[]") _arrayVars.Add(f.Name);
         foreach (var f in shard.State)
             sb.AppendLine(f.Default is { } init
-                ? $"    public {Cs(StateType(f))} {Ident(f.Name)} = {Expr(init)};"
-                : $"    public {Cs(StateType(f))} {Ident(f.Name)};");
+                ? $"    public {StateCs(f)} {Ident(f.Name)} = {Expr(init)};"
+                : $"    public {StateCs(f)} {Ident(f.Name)};");
         if (shard.State.Count > 0) sb.AppendLine();
 
         // `hear` blocks, collected first so Subscribe can wire them — and only for events this module
@@ -695,6 +715,17 @@ public sealed class CSharpBackend : IVeinBackend
             .Select(m => (Method: m, Event: m.Attrs.FirstOrDefault(a => a.Name == "hear")?.Args.FirstOrDefault()?.ToString()))
             .Where(x => x.Event is not null && _events.Contains(x.Event))
             .ToList();
+
+        // One C# method per `hear`, even when a shard hears an event twice — with two audiences, say
+        // (samples/patterns/06). Both were `hear_Damage`, and C# refused the second (CS0111).
+        var handlerNames = new Dictionary<IrFunction, string>(ReferenceEqualityComparer.Instance);
+        var taken = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var m in shard.Methods.Where(x => x.Attrs.Any(a => a.Name == "hear")))
+        {
+            string name = Ident(m.Name);
+            for (int n = 2; !taken.Add(name); n++) name = Ident(m.Name) + "_" + n;
+            handlerNames[m] = name;
+        }
 
         foreach (var m in shard.Methods)
         {
@@ -740,7 +771,7 @@ public sealed class CSharpBackend : IVeinBackend
                 _bound.Clear();
                 ResetLocals();
                 _bound.Add(p?.Name ?? "e");
-                sb.AppendLine($"    private void {Ident(m.Name)}({EventType(ev)} {Ident(p?.Name ?? "e")})");
+                sb.AppendLine($"    private void {handlerNames[m]}({EventType(ev)} {Ident(p?.Name ?? "e")})");
                 EmitBlock(sb, m.Body, 1);
                 continue;
             }
@@ -772,7 +803,7 @@ public sealed class CSharpBackend : IVeinBackend
             sb.AppendLine("    {");
             foreach (var (m, ev) in hears)
             {
-                sb.AppendLine($"        World.On(\"{ev}\", this, p => {Ident(m.Name)}(({EventType(ev!)})p));");
+                sb.AppendLine($"        World.On(\"{ev}\", this, p => {handlerNames[m]}(({EventType(ev!)})p));");
                 // Not enforced here: the compiled `from` has no carried shapes/marks or shard key to
                 // check. Said out loud (BACKEND-CONTRACT rule 4), because the handler compiles and simply
                 // hears everything — a barrier that silently admits all is the worst way to be missing.
@@ -843,7 +874,11 @@ public sealed class CSharpBackend : IVeinBackend
                     };
                     sb.AppendLine($"{pad}{declared} {DeclareLocal(l.Name)} = {value};");
                 }
-                else sb.AppendLine($"{pad}{(intLiteral ? "long" : "var")} {DeclareLocal(l.Name)} = {init};");
+                else
+                {
+                    if (l.Init is IrList li && li.Items.Count > 0 && !ListLiteral(li).StartsWith("new object[]")) _arrayVars.Add(l.Name);
+                    sb.AppendLine($"{pad}{(intLiteral ? "long" : "var")} {DeclareLocal(l.Name)} = {init};");
+                }
                 break;
 
             // ASSIGNMENT TO A NAME NOTHING DECLARED IS A DECLARATION, because that is what the
@@ -1300,6 +1335,10 @@ public sealed class CSharpBackend : IVeinBackend
 
         // `s[i]` — a character out of a string, or an entry out of a list. Was unemitted, which made
         // every program that reads text a character at a time interpreter-only.
+        // A list whose element type is known (a list literal in a shard var or a `let`) indexes as that type:
+        // `log[1] * 2` was `object * long` through At, which does not compile (CS0019).
+        IrIndex ix when ix.Receiver is IrLocalRef { Name: var arr } && _arrayVars.Contains(arr)
+            => $"__VeinText.Item({Expr(ix.Receiver)}, {Expr(ix.Index)})",
         IrIndex ix => $"__VeinText.At({Expr(ix.Receiver)}, {Expr(ix.Index)})",
         IrUnary u => u.Op == IrUnOp.Neg ? $"(-{Expr(u.Operand)})" : $"(!{Expr(u.Operand)})",
         IrRuntimeCall rc => RuntimeCall(rc),
