@@ -63,7 +63,7 @@ public static class ConsoleLauncher
         string? self = Environment.ProcessPath;
         if (self is null) return;
 
-        var passthrough = Environment.GetCommandLineArgs().Skip(1).ToArray();
+        var passthrough = RelaunchArguments(self, Environment.GetCommandLineArgs());
 
         if (OperatingSystem.IsWindows())
         {
@@ -92,6 +92,17 @@ public static class ConsoleLauncher
             psi.Environment[ParentVar] = Environment.ProcessId.ToString();   // so it can outlive nothing
             TryStart(psi);
         }
+    }
+
+    /// The arguments that run THIS program again, after the executable `processPath`. A built program (`mesh.exe`)
+    /// is its own executable, so its first command-line argument — itself — is dropped. Under the `dotnet` host
+    /// (`dotnet veinc run game.vein`, a local tool) the executable is dotnet.exe and the first argument is the
+    /// program's .dll, which must be KEPT: dropped, every spawned window ran `dotnet run game.vein` — the .NET
+    /// SDK's own `run` — which failed at once, and the window closed before anyone saw it.
+    public static string[] RelaunchArguments(string processPath, IReadOnlyList<string> commandLine)
+    {
+        bool dotnetHost = string.Equals(Path.GetFileNameWithoutExtension(processPath), "dotnet", StringComparison.OrdinalIgnoreCase);
+        return (dotnetHost ? commandLine : commandLine.Skip(1)).ToArray();
     }
 
     private static string Quote(string s) => s.Length == 0 || s.Contains(' ') ? $"\"{s}\"" : s;
