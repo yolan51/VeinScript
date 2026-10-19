@@ -873,6 +873,51 @@ public class HostingTests : IDisposable
         Assert.Contains("first 2 second 40", printed);
     }
 
+    [Theory]
+    [InlineData(VeinRuntime.Interpreter)]
+    [InlineData(VeinRuntime.Compiled)]
+    public void Vein_Crypto_seals_for_one_reader_signs_and_locks_on_both_runtimes(VeinRuntime mode)
+    {
+        string path = Write($"crypto-{mode}.vein", """
+            bundle Secrets by me {
+                need "Vein.Crypto"
+                SF say(name: string, good: bool) {
+                    if good { emit *Vein.Console.Io.@Print { text: "ok " + name } } else { emit *Vein.Console.Io.@Print { text: "FAIL " + name } }
+                }
+                shard S { run once {
+                    let alice = newKeys()
+                    let bob = newKeys()
+                    let carol = newKeys()
+                    let aliceCard = publicKey(alice)
+                    let bobCard = publicKey(bob)
+                    let box = seal("meet at noon — ☕", bobCard, alice)
+                    do say("bob opens what alice sealed for him", open(box, bob, aliceCard) == "meet at noon — ☕")
+                    do say("carol cannot open it", open(box, carol, aliceCard) == "")
+                    do say("it does not pass for carol's", open(box, bob, publicKey(carol)) == "")
+                    let tampered = substring(box, 0, len(box) - 8) + "AAAAAAA="
+                    do say("a changed message does not open", open(tampered, bob, aliceCard) == "")
+                    do say("the sealed text hides the message", indexOf(box, "noon") < 0 and startsWith(box, "vs1:"))
+                    do say("sealing twice gives two different texts", not (seal("x", bobCard, alice) == seal("x", bobCard, alice)))
+                    let locked = lock(alice, "correct horse")
+                    do say("a lock opens with its password", unlock(locked, "correct horse") == alice)
+                    do say("and with no other", unlock(locked, "wrong horse") == "")
+                    do say("sha256 matches the standard vector", sha256("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+                    do say("a fingerprint is six groups, the same for the same key", len(fingerprint(bobCard)) == 35 and fingerprint(bobCard) == fingerprint(publicKey(bob)) and not (fingerprint(bobCard) == fingerprint(aliceCard)))
+                    do say("tokens are random and as long as asked", len(token(16)) == 22 and not (token(16) == token(16)))
+                    do say("nonsense in, empty out", open("hello", bob, aliceCard) == "" and publicKey("nope") == "")
+                } }
+            }
+            """);
+        var game = VeinGame.Open(path, mode);
+        var printed = new List<string>();
+        game.Printed += (line, _) => printed.Add(line);
+        Assert.True(game.Start(), string.Join("\n", game.Diagnostics));
+        Assert.Equal(mode == VeinRuntime.Compiled ? "compiled" : "interpreter", game.Runtime);
+        Assert.Equal("", game.RuntimeNote);
+        Assert.Equal(12, printed.Count(l => l.StartsWith("ok ")));
+        Assert.DoesNotContain(printed, l => l.StartsWith("FAIL"));
+    }
+
     [Fact]
     public void Hearing_an_event_another_bundle_did_not_share_is_a_warning()
     {

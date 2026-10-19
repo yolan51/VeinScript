@@ -1217,7 +1217,10 @@ public sealed partial class Lower
         ["isNumber"] = (1, 1), ["args"] = (0, 0), ["now"] = (0, 0), ["sort"] = (1, 1), ["remove"] = (2, 2),
         ["join"] = (2, 2), ["split"] = (2, 2), ["contains"] = (2, 2), ["startsWith"] = (2, 2),
         ["endsWith"] = (2, 2), ["indexOf"] = (2, 2), ["substring"] = (2, 3), ["replace"] = (3, 3),
-        ["slice"] = (2, 3), ["padLeft"] = (2, 3), ["padRight"] = (2, 3), ["env"] = (1, 1)
+        ["slice"] = (2, 3), ["padLeft"] = (2, 3), ["padRight"] = (2, 3), ["env"] = (1, 1),
+        ["cryptoKeys"] = (0, 0), ["cryptoPublic"] = (1, 1), ["cryptoSeal"] = (3, 3), ["cryptoOpen"] = (3, 3),
+        ["cryptoFingerprint"] = (1, 1), ["cryptoLock"] = (2, 2), ["cryptoUnlock"] = (2, 2), ["cryptoHash"] = (1, 1),
+        ["cryptoToken"] = (1, 1)
     };
 
     /// A bare `name(…)` that reached the end of lowering: every other case has already claimed the calls

@@ -1,0 +1,52 @@
+// stdlib/Crypto.vein — VeinScript Standard Library : Vein.Crypto
+// End-to-end encryption, signatures, passwords and hashes, as text. Every function is the runtime's — .NET's
+// own cryptography (ECDH and ECDSA on P-256, HKDF-SHA256, AES-256-GCM, PBKDF2, SHA-256), the same code on
+// both runtimes — and nothing is invented here.
+// Discover:  veinc symbols stdlib/Crypto.vein
+//
+//   let mine = newKeys()                     a person's keys: SECRET — keep them, locked, on their machine
+//   let card = publicKey(mine)               what they give everyone else
+//   let box = seal("hi bob", bobCard, mine)  for bob only, signed by me
+//   let text = open(box, bobKeys, myCard)    bob reads it: "" when it is not genuine
+//
+// What a sealed text protects: only the holder of the recipient's keys can read it; it names its sender (the
+// signature checks out against the sender's public key, or `open` answers ""); nobody can change it unseen.
+// What it does not: someone relaying it still sees that a message went from whom to whom, when, and how long
+// it was. There is no ratchet: a stolen key opens what was sealed to it before, if someone kept a copy. And a
+// public key is only as trustworthy as the way it reached you — compare `fingerprint`s, in person or by voice.
+
+bundle Crypto by Vein {
+
+    publicator Keys {
+        shared("A new set of keys for one person. Secret: keep it on their machine, ideally lock()ed.")
+        fn newKeys() return string { return cryptoKeys() }
+
+        shared("The public half of keys: safe to give to anyone. Others seal to it and check signatures with it.")
+        fn publicKey(keys: string) return string { return cryptoPublic(keys) }
+
+        shared("30 digits two people compare, by voice or in person, to know a public key is really the other's.")
+        fn fingerprint(publicKey: string) return string { return cryptoFingerprint(publicKey) }
+    }
+
+    publicator Box {
+        shared("Text only the holder of `recipient` (a public key) can read, signed with `keys` (the sender's own).")
+        fn seal(text: string, recipient: string, keys: string) return string { return cryptoSeal(text, recipient, keys) }
+
+        shared("The text of a sealed message, with my keys and the sender's public key; \"\" if it is not genuine.")
+        fn open(sealed: string, keys: string, sender: string) return string { return cryptoOpen(sealed, keys, sender) }
+    }
+
+    publicator Secrets {
+        shared("Text locked with a password (slow to guess, tamper-evident): for keeping keys on disk.")
+        fn lock(text: string, password: string) return string { return cryptoLock(text, password) }
+
+        shared("What lock() locked, with the same password; \"\" with any other password or a changed text.")
+        fn unlock(locked: string, password: string) return string { return cryptoUnlock(locked, password) }
+
+        shared("SHA-256 of a text, as 64 hex digits.")
+        fn sha256(text: string) return string { return cryptoHash(text) }
+
+        shared("A random, unguessable token of `bytes` bytes (1 to 1024), in URL-safe base64.")
+        fn token(bytes: int) return string { return cryptoToken(bytes) }
+    }
+}

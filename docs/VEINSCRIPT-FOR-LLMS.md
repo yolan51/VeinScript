@@ -498,6 +498,17 @@ consoles: `@Console { name: Mark, firsttext }`, `@Send { to: Mark, text }`, `@Me
 bytes, tag }`; SFs `read(path) readAs(path, tag) write(path, text) append(path, text)`. Files are events;
 route answers by `tag`.
 
+**Vein.Crypto** — plain functions, both runtimes, all total (bad input → `""`, never an error). `Keys`:
+`newKeys()` (ONE secret text, both private keys — never send it), `publicKey(keys)` (the card to share),
+`fingerprint(publicKey)` (30 digits to compare by voice). `Box`: `seal(text, recipient, keys)` — for the
+holder of `recipient` (their public key), signed with your keys, different every time; `open(sealed, keys,
+sender)` — the text, or `""` when it is not for you, not signed by `sender`, or changed. The box does not
+name its sender: you need their card to open it. One box per reader — a room line is sealed once per member.
+`Secrets`: `lock(text, password)` / `unlock(locked, password)` (PBKDF2 + AES-GCM, for keys on disk),
+`sha256(text)`, `token(bytes)`. Keys and boxes are base64 parts joined by `:` — no space, `|`, `;` or `,`,
+but `=` (padding) does occur. NOT covered: who talks to whom, when and how much stays visible to relays; no
+forward secrecy; a card is only as good as the way it reached you (compare fingerprints).
+
 **Vein.Net** — `Peer` (encrypted TCP, pre-shared key): `@Listen @Link @Send @Message @Undelivered`, SFs
 `listen(me, port, key) link(name, at, key) send(dest, text)`. `Http`: `@Fetch { url, method, body, headers }`
 → `@Fetched { url, status, body }` / `@Failed { url, reason }`; SFs `get post getWith postWith request`.

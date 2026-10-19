@@ -1996,7 +1996,10 @@ public sealed class Interp
           "split", "lines", "words", "chars", "trim", "code", "chr", "upper", "lower",
           "contains", "startsWith", "endsWith", "indexOf", "substring", "replace",
           "int", "float", "string", "bool", "isNumber", "args", "now", "remove", "sort",
-          "slice", "padLeft", "padRight", "env" };
+          "slice", "padLeft", "padRight", "env",
+          // Vein.Crypto (stdlib/Crypto.vein): VeinCrypto, the one implementation compiled code calls too.
+          "cryptoKeys", "cryptoPublic", "cryptoSeal", "cryptoOpen", "cryptoFingerprint",
+          "cryptoLock", "cryptoUnlock", "cryptoHash", "cryptoToken" };
 
     /// Prebuilt (built-in) functions that DO return a value — the only functions that return.
     ///
@@ -2024,6 +2027,16 @@ public sealed class Interp
         // An environment variable, "" when it is not set — the same answer as a set-but-empty one, which is
         // what a program means by "not configured". Pulled, like `now()`: the environment is the host's.
         "env" => args.Count > 0 ? Environment.GetEnvironmentVariable(Str(args[0])) ?? "" : "",
+        // Vein.Crypto: one implementation (VeinCrypto), the same one compiled code calls.
+        "cryptoKeys" => VeinCrypto.NewKeys(),
+        "cryptoPublic" => VeinCrypto.PublicKey(Str(args.ElementAtOrDefault(0))),
+        "cryptoSeal" => VeinCrypto.Seal(Str(args.ElementAtOrDefault(0)), Str(args.ElementAtOrDefault(1)), Str(args.ElementAtOrDefault(2))),
+        "cryptoOpen" => VeinCrypto.Open(Str(args.ElementAtOrDefault(0)), Str(args.ElementAtOrDefault(1)), Str(args.ElementAtOrDefault(2))),
+        "cryptoFingerprint" => VeinCrypto.Fingerprint(Str(args.ElementAtOrDefault(0))),
+        "cryptoLock" => VeinCrypto.Lock(Str(args.ElementAtOrDefault(0)), Str(args.ElementAtOrDefault(1))),
+        "cryptoUnlock" => VeinCrypto.Unlock(Str(args.ElementAtOrDefault(0)), Str(args.ElementAtOrDefault(1))),
+        "cryptoHash" => VeinCrypto.Hash(Str(args.ElementAtOrDefault(0))),
+        "cryptoToken" => VeinCrypto.Token(AsLong(args.ElementAtOrDefault(0))),
         "pick" => args.Count > 0 && args[0] is IReadOnlyList<object?> { Count: > 0 } items
             ? items[_rng.Next(items.Count)]
             : null,

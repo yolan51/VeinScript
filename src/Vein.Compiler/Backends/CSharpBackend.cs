@@ -1426,11 +1426,16 @@ public sealed class CSharpBackend : IVeinBackend
     /// they are not hard, but each carries a rule (which empties survive, which line endings) that has
     /// to be reproduced rather than approximated, and an approximation here is the one failure the
     /// backend contract forbids.
+    /// Argument `i` of a built-in, as text, or "" when it is missing.
+    private string TextArg(IrRuntimeCall c, int i) => i < c.Args.Count ? $"__VeinText.S({Expr(c.Args[i])})" : "\"\"";
+
     private static bool IsPrebuilt(string name) =>
         name is "spawn" or "random" or "len" or "code" or "chr" or "chars" or "upper" or "lower"
              or "contains" or "startsWith" or "endsWith" or "indexOf" or "substring" or "replace"
              or "split" or "lines" or "words" or "trim" or "join"
-             or "int" or "float" or "string" or "bool" or "isNumber" or "padLeft" or "padRight";
+             or "int" or "float" or "string" or "bool" or "isNumber" or "padLeft" or "padRight"
+             or "cryptoKeys" or "cryptoPublic" or "cryptoSeal" or "cryptoOpen" or "cryptoFingerprint"
+             or "cryptoLock" or "cryptoUnlock" or "cryptoHash" or "cryptoToken";
 
     private string RuntimeCall(IrRuntimeCall c)
     {
@@ -1475,6 +1480,17 @@ public sealed class CSharpBackend : IVeinBackend
             case "string": return $"__VeinText.S({Expr(c.Args[0])})";
             case "bool": return $"__VeinText.ToBool({Expr(c.Args[0])})";
             case "isNumber": return $"__VeinText.IsNum({Expr(c.Args[0])})";
+            // Vein.Crypto: the interpreter's own implementation, so the two runtimes agree by construction.
+            case "cryptoKeys": return "Vein.Compiler.Ir.VeinCrypto.NewKeys()";
+            case "cryptoPublic": return $"Vein.Compiler.Ir.VeinCrypto.PublicKey({TextArg(c, 0)})";
+            case "cryptoSeal": return $"Vein.Compiler.Ir.VeinCrypto.Seal({TextArg(c, 0)}, {TextArg(c, 1)}, {TextArg(c, 2)})";
+            case "cryptoOpen": return $"Vein.Compiler.Ir.VeinCrypto.Open({TextArg(c, 0)}, {TextArg(c, 1)}, {TextArg(c, 2)})";
+            case "cryptoFingerprint": return $"Vein.Compiler.Ir.VeinCrypto.Fingerprint({TextArg(c, 0)})";
+            case "cryptoLock": return $"Vein.Compiler.Ir.VeinCrypto.Lock({TextArg(c, 0)}, {TextArg(c, 1)})";
+            case "cryptoUnlock": return $"Vein.Compiler.Ir.VeinCrypto.Unlock({TextArg(c, 0)}, {TextArg(c, 1)})";
+            case "cryptoHash": return $"Vein.Compiler.Ir.VeinCrypto.Hash({TextArg(c, 0)})";
+            case "cryptoToken": return $"Vein.Compiler.Ir.VeinCrypto.Token(__VeinText.I({(c.Args.Count > 0 ? Expr(c.Args[0]) : "0")}))";
+
             case "padLeft" or "padRight":
                 return $"__VeinText.Pad({Expr(c.Args[0])}, {Expr(c.Args[1])}, {(c.Args.Count > 2 ? Expr(c.Args[2]) : "null")}, {(c.Name == "padLeft" ? "true" : "false")})";
 
