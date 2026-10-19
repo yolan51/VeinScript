@@ -276,7 +276,7 @@ switch (command)
                 // A relative `@WriteFile` path means the PROGRAM's folder, not the shell's — run the same
                 // program from two directories and its saves used to land in two places, neither beside
                 // the `.vein` that asked for them.
-                var appInterp = new Interp { Ticks = ticks, BaseDirectory = projectDir, Args = programArgs, ErrorOutput = Console.Error };
+                var appInterp = new Interp { Ticks = ticks, FrameRate = ticks > 0 ? 0 : 60, BaseDirectory = projectDir, Args = programArgs, ErrorOutput = Console.Error };   // the live frame clock: see below
                 appInterp
                     .Run(la.Module, Console.In, Console.Out, messaging: true);
                 programExit = appInterp.ExitCode;
@@ -299,7 +299,10 @@ switch (command)
 
                 foreach (var module in lowered)
                 {
-                    var interp = new Interp { Ticks = ticks, BaseDirectory = projectDir, Args = programArgs, ErrorOutput = Console.Error };
+                    // A live run has a frame clock, at the 60 a second a built .exe has (BuildCommand): `each tick`
+                    // ran in the .exe and never under `veinc run`, so the same program behaved differently by how
+                    // it was started. With `--ticks` the run steps its own frames and needs no clock.
+                    var interp = new Interp { Ticks = ticks, FrameRate = ticks > 0 ? 0 : 60, BaseDirectory = projectDir, Args = programArgs, ErrorOutput = Console.Error };
                     interp.Run(module, Console.In, Console.Out, messaging: true);
                     if (interp.ExitCode != 0) programExit = interp.ExitCode;
                     if (interp.Stopped) break;   // `@Quit` ends the program, not just this bundle

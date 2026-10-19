@@ -28,7 +28,11 @@ public sealed class BundleIndex
         IReadOnlyDictionary<string, MarkDecl> Marks,
         IReadOnlyDictionary<string, EventDecl> Events,
         IReadOnlyDictionary<string, FuncDecl> Functions,
-        IReadOnlyDictionary<string, string> Owners);   // "Author.Bundle" → the file that declared it
+        IReadOnlyDictionary<string, string> Owners)   // "Author.Bundle" → the file that declared it
+    {
+        /// Unshared events, `author.Bundle.Name` (BundleIndex.UnsharedEvents).
+        public IReadOnlySet<string> Unshared { get; init; } = new HashSet<string>();
+    }
 
     /// One parse pass per folder, reused by every composite that includes it.
     private static readonly ConcurrentDictionary<string, FolderIndex> _folders = new(StringComparer.OrdinalIgnoreCase);
@@ -56,6 +60,10 @@ public sealed class BundleIndex
     /// just the name, which is why the declaration is the value.
     public required IReadOnlyDictionary<string, EventDecl> Events { get; init; }
     public required IReadOnlyDictionary<string, FuncDecl> Functions { get; init; }
+
+    /// Events declared in a publicator WITHOUT `shared`, keyed `author.Bundle.Name`: not reachable from
+    /// another bundle, and kept only so a `hear` of one can be told why it never runs (VS0363).
+    public IReadOnlySet<string> UnsharedEvents { get; init; } = new HashSet<string>();
 
     /// Declarations hidden because an earlier root declared the same qualified name.
     public required IReadOnlyList<(string Key, string Winner, string Loser)> Shadowed { get; init; }
@@ -101,6 +109,7 @@ public sealed class BundleIndex
         var shadowed = new List<(string, string, string)>();
         var duplicates = new List<(string, string, string)>();
         var installed = new HashSet<string>(StringComparer.Ordinal);
+        var unshared = new HashSet<string>(StringComparer.Ordinal);
         string? installedRoot = null;
 
         foreach (var root in roots)
@@ -120,6 +129,7 @@ public sealed class BundleIndex
             Merge(folder.Events, events);
             Merge(folder.Functions, functions);
             symbols.AddRange(folder.Symbols);
+            unshared.UnionWith(folder.Unshared);
 
             bool stdlib = IsStdlibRoot(root);
             // A LIBRARY is installed (linked, locked) but is not the project's own `bundles/`: the lock never
@@ -138,7 +148,7 @@ public sealed class BundleIndex
         {
             Roots = roots, Symbols = symbols, Builders = builders, Shapes = shapes, Marks = marks, Events = events, Functions = functions,
             Owners = owners, Shadowed = shadowed, Duplicates = duplicates,
-            Installed = installed, InstalledRoot = installedRoot,
+            Installed = installed, InstalledRoot = installedRoot, UnsharedEvents = unshared,
         };
         _composites[key] = index;
         return index;
@@ -262,6 +272,7 @@ public sealed class BundleIndex
         var builders = new Dictionary<string, BuilderDecl>(StringComparer.Ordinal);
         var shapes = new Dictionary<string, ShapeDecl>(StringComparer.Ordinal);
         var marks = new Dictionary<string, MarkDecl>(StringComparer.Ordinal);
+        var unshared = new HashSet<string>(StringComparer.Ordinal);
         var events = new Dictionary<string, EventDecl>(StringComparer.Ordinal);
         var functions = new Dictionary<string, FuncDecl>(StringComparer.Ordinal);
         var owners = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -289,12 +300,15 @@ public sealed class BundleIndex
                     string author = b.Author ?? "local";
                     owners.TryAdd($"{author}.{b.Name}", file);
                     Collect(b.Members, author, b.Name, null, sources, symbols, builders, shapes, marks, events, functions);
+                    foreach (var p in b.Members.OfType<PublicatorDecl>())
+                        foreach (var e in p.Members.OfType<EventDecl>().Where(e => !e.Shared))
+                            unshared.Add($"{author}.{b.Name}.{e.Name}");
                 }
             }
             catch { /* skip a malformed file rather than fail the whole index */ }
         }
 
-        var index = new FolderIndex(folder, Stamp(folder), symbols, builders, shapes, marks, events, functions, owners);
+        var index = new FolderIndex(folder, Stamp(folder), symbols, builders, shapes, marks, events, functions, owners) { Unshared = unshared };
         _folders[folder] = index;
         return index;
     }

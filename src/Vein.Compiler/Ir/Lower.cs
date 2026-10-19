@@ -1869,19 +1869,19 @@ public sealed partial class Lower
     /// C# backend emits a payload class and a dispatch for every event it owns; doing that for a stdlib
     /// transport would turn `emit @Fetch` into a queued no-op instead of the note that says the
     /// transport lives on the interpreter — trading an honest gap for a silent one.
-    private void RegisterImportedEvent(IReadOnlyList<string> path, string name)
+    private bool RegisterImportedEvent(IReadOnlyList<string> path, string name)
     {
         // A LOCAL declaration always wins, and an already-registered import is done. Note the empty path
         // is NOT a reason to stop: `use Web` then `hear @Request` reaches stdlib by a bare name, which is
         // exactly rule 18 — `use` widens what a bare name may mean — and skipping it left every
         // `r.path` untyped in the web samples.
-        if (_events.ContainsKey(name) || _importedEvents.ContainsKey(name)) return;
+        if (_events.ContainsKey(name) || _importedEvents.ContainsKey(name)) return true;
 
         // The OWNER goes with the members, for the same reason the builder branch below passes one.
         if (ResolveEventOwned(path, name) is { Decl: { } decl } owned)
         {
             _importedEvents[name] = ImportedEvent(EventKey(path, name), ExpandMembers(decl.Members, owned.Key), decl.Doc);
-            return;
+            return true;
         }
 
         // A BUILDER with no output channel and no `mark` emits `@<BuilderName>` carrying all its params
@@ -1895,7 +1895,9 @@ public sealed partial class Lower
             // `owner` is load-bearing: the builder's `$Shape` includes belong to the bundle that
             // DECLARED it, and expanding them against this one silently produced an empty payload.
             _importedEvents[name] = ImportedEvent(EventKey(path, name), ExpandMembers(b.Members, owner), b.Doc);
+            return true;
         }
+        return false;
     }
 
     /// The imported copy of a SHARED event declared in another bundle, so a `hear` here can type its
@@ -1929,7 +1931,16 @@ public sealed partial class Lower
 
     private IrFunction LowerHear(HearBlock hb)
     {
-        RegisterImportedEvent(hb.EventPath, hb.Event);
+        // A bare `hear` of an event that, from here, does not exist — while some bundle declares one of that
+        // name WITHOUT sharing it — never runs, and said nothing (VS0363). The case that found it: net.Mesh put
+        // `@PeerDown` under `@PeerUp`'s `shared("…")` line, which shares only the declaration after it.
+        // Narrow on purpose: a capability bundle in an app hears its principal's events by name, and those
+        // meet only when the app is linked, so "nothing declares it here" alone is not a mistake.
+        if (!RegisterImportedEvent(hb.EventPath, hb.Event) && hb.EventPath.Count == 0
+            && Index.UnsharedEvents.FirstOrDefault(k => k.EndsWith("." + hb.Event, StringComparison.Ordinal)) is { } privateKey)
+            _diag.Warning("VS0363", $"`@{hb.Event}` is declared in {privateKey[..privateKey.LastIndexOf('.')]} but not shared, so this " +
+                "`hear` never runs. In that bundle, put a `shared(\"…\")` line right above it — each one shares only the " +
+                "declaration after it.", hb.Span);
         // A TRANSPORT event is carried out by the runtime and never reaches a `hear` (VS0362): `@Print` is
         // written, `@Send` goes over the bus, `@Response` answers the request. Declaring and emitting one is how a
         // program uses them; hearing one does nothing, silently — a mailbox made of `event @Send` heard none of

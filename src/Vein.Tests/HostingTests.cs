@@ -874,6 +874,39 @@ public class HostingTests : IDisposable
     }
 
     [Fact]
+    public void Hearing_an_event_another_bundle_did_not_share_is_a_warning()
+    {
+        // net.Mesh declared @PeerDown under @PeerUp's `shared("…")` line, which shares only the declaration after
+        // it; a program's `hear @PeerDown` then never ran, and nothing said so.
+        string root = Path.Combine(_dir, "unshared");
+        Directory.CreateDirectory(Path.Combine(root, "bundles"));
+        File.WriteAllText(Path.Combine(root, "bundles", "Links.vein"), """
+            bundle Links by ln {
+                publicator P {
+                    shared("A link came up.")
+                    event @Up { peer: string }
+                    event @Down { peer: string }
+                }
+            }
+            """);
+        string path = Path.Combine(root, "game.vein");
+        File.WriteAllText(path, """
+            bundle Watch by me {
+                need "ln.Links"
+                shard S {
+                    hear @Up as u { }
+                    hear @Down as d { }
+                }
+            }
+            """);
+        var game = VeinGame.Open(path, VeinRuntime.Interpreter);
+        game.Start();
+        var warning = Assert.Single(game.Diagnostics, d => d.Code == "VS0363");
+        Assert.Contains("@Down", warning.Message);
+        Assert.Contains("ln.Links", warning.Message);
+    }
+
+    [Fact]
     public void Hearing_a_runtime_transport_event_is_refused()
     {
         // `event @Send` for a mailbox: every emit became a network send, and the hear never ran (samples/advanced/08).
