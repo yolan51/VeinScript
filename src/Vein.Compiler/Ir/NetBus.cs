@@ -162,6 +162,7 @@ public sealed class NetBus : IDisposable
             foreach (var l in Live.Values) l.Dispose();
             Live.Clear();
         }
+        lock (Outboxes) Outboxes.Clear();
         _selfPort = 0;
         _current = null;
     }
@@ -329,6 +330,91 @@ public sealed class NetBus : IDisposable
             return TryWrite(fresh, from, text, route.Key);
         }
         catch { return false; }
+    }
+
+    /// Frames waiting for a peer that has no live socket, sent in order by one background thread per peer.
+    /// `DownUntil` is the back-off after a dial failed: until then a send to it fails at once.
+    private sealed class Outbox
+    {
+        public readonly Queue<(string From, string Text, Action Failed)> Items = new();
+        public bool Draining;
+        public DateTime DownUntil;
+        public TimeSpan Backoff;
+    }
+
+    private static readonly Dictionary<string, Outbox> Outboxes = new(StringComparer.Ordinal);
+    private const int OutboxCap = 1000;
+    private static readonly TimeSpan BackoffFirst = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan BackoffMax = TimeSpan.FromSeconds(8);
+
+    /// <see cref="Send"/> without blocking the caller. A live socket is written at once; otherwise the frame
+    /// is queued and a background thread dials. <paramref name="failed"/> runs — on whatever thread found
+    /// out — when the frame cannot be delivered, so the caller can raise @Undelivered from its own loop.
+    ///
+    /// WHY: `Send` dials inline with a 5-second timeout, and the interpreter calls it from its event loop.
+    /// A refused connection takes ~2 s on Windows and a dropped one the whole 5 s, so a server that keeps
+    /// talking to a dead neighbour — a mesh advertises to every neighbour every second — spent nearly all
+    /// its time waiting, and answered its own users many seconds late. Queued, the wait is the worker's.
+    ///
+    /// ORDER is kept per peer: while frames for a peer are queued, a new one queues behind them even if a
+    /// socket has appeared meanwhile. A peer that refused is not dialled again for a back-off (1 s, doubling
+    /// to 8 s) and sends to it fail at once; a socket the peer opens to us ends that, since a live socket is
+    /// always tried first.
+    public static void SendQueued(string to, string from, string text, Action failed)
+    {
+        if (Hook is not null) { if (!Hook(to, from, text)) failed(); return; }
+
+        Outbox box;
+        lock (Outboxes) { if (!Outboxes.TryGetValue(to, out box!)) Outboxes[to] = box = new Outbox(); }
+
+        lock (box)
+        {
+            if (box.Items.Count == 0 && !box.Draining)
+            {
+                Conn? link;
+                lock (LiveLock) Live.TryGetValue(to, out link);
+                if (link is { Alive: true } && TryWrite(link, from, text)) return;
+                if (DateTime.UtcNow < box.DownUntil) { failed(); return; }
+            }
+            if (box.Items.Count >= OutboxCap) { failed(); return; }
+            box.Items.Enqueue((from, text, failed));
+            if (box.Draining) return;
+            box.Draining = true;
+        }
+        new Thread(() => DrainOutbox(to, box)) { IsBackground = true, Name = "vein-net-send" }.Start();
+    }
+
+    private static void DrainOutbox(string to, Outbox box)
+    {
+        while (true)
+        {
+            (string From, string Text, Action Failed) item;
+            lock (box)
+            {
+                if (box.Items.Count == 0) { box.Draining = false; return; }
+                item = box.Items.Dequeue();
+            }
+
+            if (Send(to, item.From, item.Text))
+            {
+                lock (box) { box.Backoff = TimeSpan.Zero; box.DownUntil = default; }
+                continue;
+            }
+
+            // Unreachable: this frame and every one queued behind it fail now (they would only wait the same
+            // timeout each), and the peer is left alone for the back-off.
+            var failures = new List<Action> { item.Failed };
+            lock (box)
+            {
+                box.Backoff = box.Backoff == TimeSpan.Zero ? BackoffFirst
+                    : TimeSpan.FromTicks(Math.Min(box.Backoff.Ticks * 2, BackoffMax.Ticks));
+                box.DownUntil = DateTime.UtcNow + box.Backoff;
+                while (box.Items.Count > 0) failures.Add(box.Items.Dequeue().Failed);
+                box.Draining = false;
+            }
+            foreach (var f in failures) { try { f(); } catch { /* the run ended */ } }
+            return;
+        }
     }
 
     /// Write one frame, serialised per connection so two emits cannot interleave on the same socket.

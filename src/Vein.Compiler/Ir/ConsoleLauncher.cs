@@ -56,6 +56,30 @@ public static class ConsoleLauncher
         try { Console.InputEncoding = new UTF8Encoding(false); } catch { }
     }
 
+    /// Let the console draw ANSI escape sequences — `chr(27) + "[31m"` — as colours. Windows Terminal does
+    /// already, but a classic console window (what `cmd /c start` opens for a spawned console) starts with
+    /// virtual-terminal processing OFF and prints the sequence as text: `←[31m`. Elsewhere terminals draw
+    /// them anyway. Best-effort, like UseUtf8: a redirected output has no console mode to set.
+    public static void UseColors()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        try
+        {
+            var handle = GetStdHandle(StdOutputHandle);
+            if (GetConsoleMode(handle, out uint mode)) SetConsoleMode(handle, mode | EnableVirtualTerminalProcessing);
+        }
+        catch { /* no console, or no kernel32: plain text it is */ }
+    }
+
+    private const int StdOutputHandle = -11;
+    private const uint EnableVirtualTerminalProcessing = 0x0004;
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr GetStdHandle(int nStdHandle);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
+
     public static void Spawn(string name, string firstText)
     {
         if (Hook is not null) { Hook(name, firstText); return; }

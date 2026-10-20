@@ -70,6 +70,11 @@ internal static class BuildCommand
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                 File.Copy(fragment, target, overwrite: true);
             }
+            // The program's SETTINGS too: `vein.settings` beside it is what `run` tunes it with, and the built
+            // host lowers in this folder, so the exe answers with the same values. Left out, a built server
+            // ran on its source defaults — another address book, another key — with nothing said.
+            string settings = Path.Combine(sourceDir, Vein.Compiler.Project.SettingsFile.FileName);
+            if (File.Exists(settings)) File.Copy(settings, Path.Combine(project, Vein.Compiler.Project.SettingsFile.FileName), overwrite: true);
             if (ProjectBundles(sourceDir) is { } bundlesDir)
                 foreach (string file in Directory.EnumerateFiles(bundlesDir, "*.vein", SearchOption.AllDirectories))
                 {
@@ -156,6 +161,8 @@ internal static class BuildCommand
             if (!File.Exists(produced)) { Console.Error.WriteLine($"build error: published exe not found: {produced}"); return 1; }
 
             string dest = outPath ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(sourcePath)) ?? ".", name + exeExt);
+            // `-o out/server` into a folder that does not exist yet: make it, rather than fail after a whole publish.
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(dest))!);
             File.Copy(produced, dest, overwrite: true);
             Console.Error.WriteLine($"built {dest}");
             return 0;
@@ -197,6 +204,7 @@ internal static class BuildCommand
             <EmbeddedResource Include="build.txt" LogicalName="build.txt" />
             <EmbeddedResource Include="project\**\*.vein" LogicalName="project/%(RecursiveDir)%(Filename)%(Extension)" />
             <EmbeddedResource Include="project\.vein\libraries" LogicalName="project/.vein/libraries" />
+            <EmbeddedResource Include="project\vein.settings" LogicalName="project/vein.settings" Condition="Exists('project\vein.settings')" />
             <EmbeddedResource Include="stdlib\**\*.vein" LogicalName="stdlib/%(RecursiveDir)%(Filename)%(Extension)" />
           </ItemGroup>
         </Project>

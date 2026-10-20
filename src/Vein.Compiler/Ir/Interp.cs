@@ -217,6 +217,7 @@ public sealed class Interp
         {
             bool fromConsole = ReferenceEquals(input, Console.In);
             ConsoleLauncher.UseUtf8();
+            ConsoleLauncher.UseColors();
             output = Console.Out;
             if (fromConsole) input = Console.In;
         }
@@ -1421,22 +1422,33 @@ public sealed class Interp
             if (name == "Send")
             {
                 string to = Str(payload.GetValueOrDefault("to")), body = Str(payload.GetValueOrDefault("text"));
+                var undelivered = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["to"] = to, ["text"] = body,
+                    ["from"] = payload.GetValueOrDefault("from"), ["origin"] = null, ["bundle"] = _bundle
+                };
+
                 // The ONE place a transport is chosen, and the program never sees it happen. A mark that
                 // has been `@Link`ed names a peer on another machine, so it goes over the wire; anything
                 // else is a console on this one, so it goes over the pipe. That is the whole reason
                 // console_roles.vein runs cross-machine by editing only its Boot shard: `@Send { to: #X }`
                 // addresses an IDENTITY, and where that identity lives is the routing table's business.
+                //
+                // A live session never waits on the wire: a send that needs a connection is dialled by
+                // NetBus's own thread, and a failure comes back through the inbox, as @Fetch's answer does.
+                // Waiting here stalled every event behind a dead peer's connect timeout (2–5 s per send).
+                if (NetBus.IsRemote(to) && _inbox is { } box)
+                {
+                    NetBus.SendQueued(to, _self, body, () =>
+                    { try { box.Add(() => { Emit("Undelivered", undelivered); Drain(); }); } catch { /* the run ended */ } });
+                    continue;
+                }
                 bool sent = NetBus.IsRemote(to) ? NetBus.Send(to, _self, body) : ConsoleBus.Send(to, _self, body);
 
                 // A console that was closed cannot be reached. A peer going away is NORMAL, so this is an
                 // event the program can hear rather than an error — and never a silent drop, which would
                 // leave a program unable to tell "delivered" from "shouting into a void".
-                if (!sent)
-                    Emit("Undelivered", new Dictionary<string, object?>(StringComparer.Ordinal)
-                    {
-                        ["to"] = to, ["text"] = body,
-                        ["from"] = payload.GetValueOrDefault("from"), ["origin"] = null, ["bundle"] = _bundle
-                    });
+                if (!sent) Emit("Undelivered", undelivered);
                 continue;
             }
             if (name == "Listen") { DoListen(payload); continue; }

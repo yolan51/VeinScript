@@ -423,4 +423,71 @@ public class NetPeerTests : IDisposable
             try { Directory.Delete(dir, recursive: true); } catch { }
         }
     }
+
+    // ---- queued sends: the event loop never waits on a dial ---------------------------------------
+
+    /// A port nothing listens on: bound by the OS, then released.
+    private static int DeadPort()
+    {
+        var l = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        l.Start();
+        int port = ((System.Net.IPEndPoint)l.LocalEndpoint).Port;
+        l.Stop();
+        return port;
+    }
+
+    [Fact]
+    public void A_queued_send_to_a_dead_peer_returns_at_once_and_fails_later()
+    {
+        Assert.True(NetBus.Link("Gone", "127.0.0.1:" + DeadPort(), "k"));
+        using var failed = new ManualResetEventSlim(false);
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        NetBus.SendQueued("Gone", "Me", "hello", () => failed.Set());
+        clock.Stop();
+
+        // A refused dial takes ~2 s on Windows. The caller must not have paid it.
+        Assert.True(clock.ElapsedMilliseconds < 300, $"SendQueued blocked for {clock.ElapsedMilliseconds} ms");
+        Assert.True(failed.Wait(TimeSpan.FromSeconds(10)), "the failure was never reported");
+
+        // Inside the back-off, the next send fails on the spot instead of dialling again.
+        bool failedNow = false;
+        NetBus.SendQueued("Gone", "Me", "again", () => failedNow = true);
+        Assert.True(failedNow);
+    }
+
+    [Fact]
+    public void Queued_sends_arrive_in_order_and_a_peer_that_comes_back_is_reached()
+    {
+        var got = new List<string>();
+        using var all = new CountdownEvent(5);
+        using var hub = NetBus.Start("Hub", 0, "shared", (from, text) =>
+        { lock (got) got.Add(text); all.Signal(); });
+        Assert.True(NetBus.Link("Hub", "127.0.0.1:" + NetBus.SelfPort, "shared"));
+
+        for (int i = 1; i <= 5; i++) NetBus.SendQueued("Hub", "Spoke", "n" + i, () => { });
+
+        Assert.True(all.Wait(TimeSpan.FromSeconds(10)), "not every frame arrived");
+        Assert.Equal(new[] { "n1", "n2", "n3", "n4", "n5" }, got);
+
+        // A peer that was down: once the back-off has passed, a send dials again and gets through.
+        int port = DeadPort();
+        Assert.True(NetBus.Link("Later", "127.0.0.1:" + port, "shared"));
+        using var lost = new ManualResetEventSlim(false);
+        NetBus.SendQueued("Later", "Spoke", "too early", () => lost.Set());
+        Assert.True(lost.Wait(TimeSpan.FromSeconds(10)));
+
+        using var arrived = new ManualResetEventSlim(false);
+        var back = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, port);
+        back.Start();
+        try
+        {
+            Thread.Sleep(1200);   // past the first back-off (1 s)
+            NetBus.SendQueued("Later", "Spoke", "now", () => { });
+            using var client = back.AcceptTcpClientAsync();
+            Assert.True(client.Wait(TimeSpan.FromSeconds(10)), "the peer that came back was never dialled");
+            client.Result.Dispose();
+        }
+        finally { back.Stop(); }
+    }
 }
