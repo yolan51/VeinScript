@@ -51,10 +51,13 @@ public sealed class VeinWorld
     ///
     /// A seeded `System.Random` sequence is stable across .NET versions by design (the seeded
     /// constructor keeps the legacy algorithm), which is what lets net8 and net9 agree here.
-    private readonly System.Random _rng = new(0);
+    private System.Random _rng = new(0);
 
     /// One draw in [0,1). Named for what it is to a Vein program, not for the BCL method it wraps.
     public double Random() => _rng.NextDouble();
+
+    /// Start the draws over from `seed` — Interp.Reseed, so a host reseeding both runtimes gets the same draws.
+    public void Reseed(int seed) => _rng = new System.Random(seed);
 
     /// Allocate an entity id.
     ///

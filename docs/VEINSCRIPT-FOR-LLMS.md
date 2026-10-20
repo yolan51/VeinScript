@@ -504,7 +504,8 @@ route answers by `tag`.
 holder of `recipient` (their public key), signed with your keys, different every time; `open(sealed, keys,
 sender)` — the text, or `""` when it is not for you, not signed by `sender`, or changed. The box does not
 name its sender: you need their card to open it. One box per reader — a room line is sealed once per member.
-`Secrets`: `lock(text, password)` / `unlock(locked, password)` (PBKDF2 + AES-GCM, for keys on disk),
+`Signatures`: `sign(text, keys)` ("vg1:…", randomized) and `verify(text, signature, publicKey)` (bool, the same
+on every machine — allowed in a pure program). `Secrets`: `lock(text, password)` / `unlock(locked, password)` (PBKDF2 + AES-GCM, for keys on disk),
 `sha256(text)`, `token(bytes)`. Keys and boxes are base64 parts joined by `:` — no space, `|`, `;` or `,`,
 but `=` (padding) does occur. NOT covered: who talks to whom, when and how much stays visible to relays; no
 forward secrecy; a card is only as good as the way it reached you (compare fingerprints).

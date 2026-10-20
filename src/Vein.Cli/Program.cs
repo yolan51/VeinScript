@@ -111,8 +111,20 @@ switch (command)
         // the bundle path below found nothing to lower and said "ok" — for an app whose fragment held a
         // VS0321 error that `check` on the bundle itself reported. Linking loads every bundle with its
         // `publicators/` and `shards/` and lowers each, so their diagnostics land here.
-        if ((AppLinker.Link(path, source, diagnostics) ?? AppLinker.LinkNeeds(path, source, diagnostics)) is not null)
+        // `--pure`: also refuse what would make replicas disagree (Purity, VS0364) — the clock, the
+        // environment, fresh randomness, files, network, consoles — in code a shard can reach.
+        bool pure = args.Contains("--pure");
+        void AddPurity(IrModule module)
         {
+            foreach (var p in Purity.Check(module))
+                diagnostics.Add(new Diagnostic(Severity.Error, "VS0364",
+                    $"not allowed in a pure program — replicas would disagree: {p.What} (in {p.Where})",
+                    new Vein.Compiler.Lexing.SourceSpan(path, 1, 1, 0)));
+        }
+
+        if ((AppLinker.Link(path, source, diagnostics) ?? AppLinker.LinkNeeds(path, source, diagnostics)) is { } linkedApp)
+        {
+            if (pure && !diagnostics.HasErrors) AddPurity(linkedApp.Module);
             SettingsCommand.AddProblems(path, diagnostics);
             foreach (var d in diagnostics.Items) Console.Error.WriteLine(d);
             int appErrors = diagnostics.Items.Count(d => d.Severity == Severity.Error);
@@ -126,7 +138,11 @@ switch (command)
         {
             // One Lower per bundle — its state is per-bundle, and a shared one leaked each bundle's
             // `use` list into the next (see Lower.LowerBundle).
-            foreach (var bundle in unit.Bundles) new Lower(diagnostics, projectDir).LowerBundle(bundle);
+            foreach (var bundle in unit.Bundles)
+            {
+                var lowered = new Lower(diagnostics, projectDir).LowerBundle(bundle);
+                if (pure && !diagnostics.HasErrors) AddPurity(lowered);
+            }
         }
         SettingsCommand.AddProblems(path, diagnostics);
 

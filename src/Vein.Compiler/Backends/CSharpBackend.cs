@@ -1435,7 +1435,7 @@ public sealed class CSharpBackend : IVeinBackend
              or "split" or "lines" or "words" or "trim" or "join"
              or "int" or "float" or "string" or "bool" or "isNumber" or "padLeft" or "padRight"
              or "cryptoKeys" or "cryptoPublic" or "cryptoSeal" or "cryptoOpen" or "cryptoFingerprint"
-             or "cryptoLock" or "cryptoUnlock" or "cryptoHash" or "cryptoToken";
+             or "cryptoLock" or "cryptoUnlock" or "cryptoHash" or "cryptoToken" or "cryptoSign" or "cryptoVerify";
 
     private string RuntimeCall(IrRuntimeCall c)
     {
@@ -1488,6 +1488,8 @@ public sealed class CSharpBackend : IVeinBackend
             case "cryptoFingerprint": return $"Vein.Compiler.Ir.VeinCrypto.Fingerprint({TextArg(c, 0)})";
             case "cryptoLock": return $"Vein.Compiler.Ir.VeinCrypto.Lock({TextArg(c, 0)}, {TextArg(c, 1)})";
             case "cryptoUnlock": return $"Vein.Compiler.Ir.VeinCrypto.Unlock({TextArg(c, 0)}, {TextArg(c, 1)})";
+            case "cryptoSign": return $"Vein.Compiler.Ir.VeinCrypto.Sign({TextArg(c, 0)}, {TextArg(c, 1)})";
+            case "cryptoVerify": return $"Vein.Compiler.Ir.VeinCrypto.Verify({TextArg(c, 0)}, {TextArg(c, 1)}, {TextArg(c, 2)})";
             case "cryptoHash": return $"Vein.Compiler.Ir.VeinCrypto.Hash({TextArg(c, 0)})";
             case "cryptoToken": return $"Vein.Compiler.Ir.VeinCrypto.Token(__VeinText.I({(c.Args.Count > 0 ? Expr(c.Args[0]) : "0")}))";
 

@@ -1220,7 +1220,7 @@ public sealed partial class Lower
         ["slice"] = (2, 3), ["padLeft"] = (2, 3), ["padRight"] = (2, 3), ["env"] = (1, 1),
         ["cryptoKeys"] = (0, 0), ["cryptoPublic"] = (1, 1), ["cryptoSeal"] = (3, 3), ["cryptoOpen"] = (3, 3),
         ["cryptoFingerprint"] = (1, 1), ["cryptoLock"] = (2, 2), ["cryptoUnlock"] = (2, 2), ["cryptoHash"] = (1, 1),
-        ["cryptoToken"] = (1, 1)
+        ["cryptoToken"] = (1, 1), ["cryptoSign"] = (2, 2), ["cryptoVerify"] = (3, 3)
     };
 
     /// A bare `name(…)` that reached the end of lowering: every other case has already claimed the calls

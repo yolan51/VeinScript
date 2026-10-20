@@ -12,12 +12,13 @@ internal sealed class InterpRuntime : IGameRuntime
     private readonly IrModule _module;
     private readonly RuntimeSinks _sinks;
 
-    public InterpRuntime(IrModule module, string baseDirectory, RuntimeSinks sinks)
+    public InterpRuntime(IrModule module, string baseDirectory, RuntimeSinks sinks, bool pure = false)
     {
         _module = module;
         _sinks = sinks;
         _interp = new Interp
         {
+            Pure = pure,
             BaseDirectory = baseDirectory,
             Output = new LineWriter(line => sinks.Printed(line, false)),
             ErrorOutput = new LineWriter(line => sinks.Printed(line, true)),
@@ -117,6 +118,35 @@ internal sealed class InterpRuntime : IGameRuntime
     public bool SetShardVar(string shard, string name, object? value) => _interp.SetShardState(shard, name, value);
     public IReadOnlyList<string> ShardsMutedByName => _interp.ShardsMutedByName;
     public void RestoreMutes(IEnumerable<string> marks, IEnumerable<string> shardKeys) => _interp.RestoreMutes(marks, shardKeys);
+
+    public void Reseed(int seed) => _interp.Reseed(seed);
+
+    /// FireHost under a budget. A fault in a handler fails the work too: the interpreter would carry on
+    /// past it (a game must), but a host asking "did this finish" must hear no.
+    public VeinOutcome Execute(string name, IReadOnlyDictionary<string, object?>? fields, long budget)
+    {
+        string? fault = null;
+        var previous = _interp.Fault;
+        _interp.Fault = f => { fault ??= $"{f.Owner} ({f.Kind}): {f.Exception.Message}"; previous?.Invoke(f); };
+        _interp.Budget = budget;
+        _interp.ResetGas();
+        try
+        {
+            bool raised;
+            using (Enter()) raised = _interp.FireHost(name, fields);
+            if (!raised) return new VeinOutcome(false, _interp.GasUsed, $"the program has no event {name}");
+            return fault is null ? new VeinOutcome(true, _interp.GasUsed, "") : new VeinOutcome(false, _interp.GasUsed, fault);
+        }
+        catch (OutOfGas ex) { return new VeinOutcome(false, _interp.GasUsed, ex.Message); }
+        finally
+        {
+            _interp.Budget = 0;
+            _interp.Fault = previous;
+        }
+    }
+
+    public long? NextId => _interp.World.NextId;
+    public bool ReserveIds(long next) { _interp.World.ReserveIds(next); return true; }
 
     private static string Text(IReadOnlyDictionary<string, object?> f, string k) => f.GetValueOrDefault(k)?.ToString() ?? "";
     private static double Num(IReadOnlyDictionary<string, object?> f, string k) =>

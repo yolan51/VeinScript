@@ -69,6 +69,16 @@ internal interface IGameRuntime
     IReadOnlyList<string> ShardsMutedByName { get; }
     /// Put back mutes, immediately.
     void RestoreMutes(IEnumerable<string> marks, IEnumerable<string> shardKeys);
+
+    // ---- replicas (VeinGame.Replica.cs) ---------------------------------------------------------
+
+    /// Start random(), pick and chance over from `seed`.
+    void Reseed(int seed);
+    /// Raise one of the program's events under a step budget (0: none) and say whether the work finished.
+    VeinOutcome Execute(string name, IReadOnlyDictionary<string, object?>? fields, long budget);
+    /// The id the next spawn returns, and making it at least `next`; null/false where not supported.
+    long? NextId { get; }
+    bool ReserveIds(long next);
 }
 
 /// Where a runtime reports to — VeinGame's events.

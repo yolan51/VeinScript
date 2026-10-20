@@ -80,12 +80,13 @@ internal sealed class CompiledRuntime : IGameRuntime
     public bool Carries(long id, string mark) => _program.Carries(_world, (int)id, mark);
     public object? Read(long id, string shape, string field) => _program.Read(_world, (int)id, shape, field);
 
-    /// EntityStore.Snapshot's shape: every identity carrying any shape, ascending; its shapes (by name)
+    /// EntityStore.Snapshot's shape: every live identity, ascending; its shapes (by name)
     /// with their fields; its marks, sorted.
     public IReadOnlyList<VeinEntity> Snapshot()
     {
-        var ids = new SortedSet<int>();
-        foreach (string shape in _program.Shapes) ids.UnionWith(_program.Ids(_world, shape));
+        // Every LIVE identity, as EntitySnapshot has it — one with only marks, or nothing at all, included.
+        // Collecting the ids of each shape missed those, so a state hash differed between the runtimes.
+        var ids = new SortedSet<int>(_world.Alive);
 
         var result = new List<VeinEntity>(ids.Count);
         foreach (int id in ids)
@@ -142,6 +143,23 @@ internal sealed class CompiledRuntime : IGameRuntime
 
     public IReadOnlyList<string> ShardsMutedByName => _world.ShardsMutedByName;
     public void RestoreMutes(IEnumerable<string> marks, IEnumerable<string> shardKeys) => _world.RestoreMutes(marks, shardKeys);
+
+    public void Reseed(int seed) => _world.Reseed(seed);
+
+    /// Compiled code counts no steps: the budget is not enforced (Gas -1), and a fault fails the work.
+    public VeinOutcome Execute(string name, IReadOnlyDictionary<string, object?>? fields, long budget)
+    {
+        try
+        {
+            return _program.Raise(_world, name, fields ?? None, "host")
+                ? new VeinOutcome(true, -1, "")
+                : new VeinOutcome(false, -1, $"the program has no event {name}");
+        }
+        catch (Exception ex) { return new VeinOutcome(false, -1, $"{ex.GetType().Name}: {ex.Message}"); }
+    }
+
+    public long? NextId => null;
+    public bool ReserveIds(long next) => false;
 
     private static FieldInfo[] VarFields(VeinSystem system) =>
         system.GetType().GetFields(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);

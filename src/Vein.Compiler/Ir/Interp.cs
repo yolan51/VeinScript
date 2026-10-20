@@ -141,7 +141,46 @@ public sealed class Interp
     private readonly Stack<List<Deferred>> _orderFrames = new();
 
     /// Seeded so a program using `chance` is reproducible; without this there is no golden run test.
-    private readonly Random _rng = new(0);
+    private Random _rng = new(0);
+
+    /// Start `random()`, `pick` and `chance` over from `seed` — a host replaying a block reseeds with
+    /// something every replica agrees on (the previous block's hash), so draws are unpredictable in advance
+    /// and identical everywhere. 0 is the seed every run starts with.
+    public void Reseed(int seed) => _rng = new Random(seed);
+
+    // ---- gas: a budget that FAILS rather than truncates ------------------------------------------------
+    //
+    // The safety caps below (a `while` at 100,000 turns, recursion at 256, the queue at 10,000 events)
+    // stop a runaway program SILENTLY — right for a game, where a frame must end, and wrong for a host that
+    // has to agree with other machines about whether a piece of work finished. With a budget set, every
+    // statement and expression costs one step, and running out — or hitting a cap — throws OutOfGas out of
+    // the host call, through every handler, so the host knows the work did NOT finish and can roll it back.
+
+    /// Steps allowed per host call (FireHost); 0, the default, is no budget at all.
+    public long Budget { get; set; }
+
+    /// Steps used since the last ResetGas.
+    public long GasUsed { get; private set; }
+
+    public void ResetGas() => GasUsed = 0;
+
+    private void Burn()
+    {
+        if (Budget <= 0) return;
+        if (++GasUsed > Budget) throw new OutOfGas($"out of gas after {Budget} steps");
+    }
+
+    /// A safety cap was reached: silent without a budget, a failure with one.
+    private void Capped(string what)
+    {
+        if (Budget > 0) throw new OutOfGas(what);
+    }
+
+    /// A pure program (Purity) is one whose every run agrees: nothing reads the clock, the environment or
+    /// the machine, and nothing reaches outside — files, network, consoles. A host that asked for one has
+    /// already refused a program that does any of it at compile time; this is the defence in depth for
+    /// what slips past a static look (a host event reached through a name the check did not see).
+    public bool Pure { get; set; }
 
     /// The world, for tests that want to assert on state rather than on stdout.
     public EntityStore World => _store;
@@ -1217,6 +1256,9 @@ public sealed class Interp
         // mistake into a failed frame.
         catch (BreakSignal) { }
         catch (ContinueSignal) { }
+        // Out of gas is the HOST's to hear, not the program's: the work did not finish, and no handler may
+        // turn that into a diagnostic and carry on as if it had.
+        catch (OutOfGas) { throw; }
         catch (Exception ex)
         {
             string where = $"{owner.Name} ({what})";
@@ -1389,9 +1431,15 @@ public sealed class Interp
     private void Drain()
     {
         int guard = 0;
-        while (_queue.Count > 0 && guard++ < 10_000)
+        while (_queue.Count > 0)
         {
+            if (guard++ >= 10_000) { Capped("10,000 events in one drain"); break; }
             var (name, payload) = _queue.Dequeue();
+            if (Pure && Purity.ReachesOutside(name))
+            {
+                Err?.WriteLine($"(refused in a pure program: @{name})");
+                continue;
+            }
             _current = payload;   // emits inside handlers inherit this event's id into their trail
             Observed?.Invoke(EventName(name), payload);
             if (name == "Response") { _responseBody = Str(payload.GetValueOrDefault("body")); _responseStatus = AsLong(payload.GetValueOrDefault("status")); continue; }
@@ -1609,6 +1657,7 @@ public sealed class Interp
 
     private void ExecStmt(IrStmt s, Instance self, Dictionary<string, object?> locals)
     {
+        Burn();
         switch (s)
         {
             case IrBlock b: Exec(b, self, locals); break;
@@ -1712,8 +1761,11 @@ public sealed class Interp
         switch (lp.Kind)
         {
             case IrLoopKind.While:
-                { int g = 0; while (Truthy(Eval(lp.Cond!, self, locals)) && g++ < 100_000)
-                      if (!Iterate(lp.Body, self, locals)) break; }
+                { int g = 0; while (Truthy(Eval(lp.Cond!, self, locals)))
+                  {
+                      if (g++ >= 100_000) { Capped("a `while` loop ran 100,000 times"); break; }
+                      if (!Iterate(lp.Body, self, locals)) break;
+                  } }
                 break;
             case IrLoopKind.Repeat:
                 { long n = AsLong(Eval(lp.Count!, self, locals));
@@ -1851,6 +1903,7 @@ public sealed class Interp
 
     private object? Eval(IrExpr e, Instance self, Dictionary<string, object?> locals)
     {
+        Burn();
         switch (e)
         {
             case IrLiteral l: return l.Value;
@@ -1886,7 +1939,8 @@ public sealed class Interp
             case IrUnary u:
             {
                 var v = Eval(u.Operand, self, locals);
-                return u.Op == IrUnOp.Not ? !Truthy(v) : -AsDouble(v);
+                // `-x` of an int is an int (it was always a double: an int field negated turned float).
+                return u.Op == IrUnOp.Not ? !Truthy(v) : v is long or int ? (object)unchecked(-AsLong(v)) : -AsDouble(v);
             }
             case IrRuntimeCall rc: return EvalRuntime(rc, self, locals);
             case IrList li: return li.Items.Select(i => Eval(i, self, locals)).ToList();
@@ -1929,7 +1983,7 @@ public sealed class Interp
     /// a fresh local scope — a function never sees its caller's locals.
     private object? CallUser(IrFunction f, List<object?> args, Instance self)
     {
-        if (_callDepth >= 256) return null;   // runaway recursion: stop rather than blow the stack
+        if (_callDepth >= 256) { Capped("calls nested 256 deep"); return null; }   // runaway recursion: stop rather than blow the stack
         _callDepth++;
         try
         {
@@ -2011,14 +2065,19 @@ public sealed class Interp
           "slice", "padLeft", "padRight", "env",
           // Vein.Crypto (stdlib/Crypto.vein): VeinCrypto, the one implementation compiled code calls too.
           "cryptoKeys", "cryptoPublic", "cryptoSeal", "cryptoOpen", "cryptoFingerprint",
-          "cryptoLock", "cryptoUnlock", "cryptoHash", "cryptoToken" };
+          "cryptoLock", "cryptoUnlock", "cryptoHash", "cryptoToken", "cryptoSign", "cryptoVerify" };
 
     /// Prebuilt (built-in) functions that DO return a value — the only functions that return.
     ///
     /// `spawn()` is here rather than a keyword: `let e = spawn()` already parses and lowers, so creating
     /// an entity costs no lexer, parser or AstTree change — and nothing in the language creates one
     /// otherwise, which would leave every `target` query matching an empty world forever.
-    private object? Prebuilt(string name, List<object?> args) => name switch
+    /// A built-in that answers differently on each machine (the clock, the environment, fresh randomness)
+    /// answers "" in a pure program — total, like every built-in, and the same everywhere.
+    private object? Prebuilt(string name, List<object?> args) =>
+        Pure && Purity.MachineDependent.Contains(name) ? "" : PrebuiltCore(name, args);
+
+    private object? PrebuiltCore(string name, List<object?> args) => name switch
     {
         "spawn" => _store.Spawn(),
         // This console's own address. Every spawned console runs the SAME program, so `here() == #Main`
@@ -2049,6 +2108,8 @@ public sealed class Interp
         "cryptoUnlock" => VeinCrypto.Unlock(Str(args.ElementAtOrDefault(0)), Str(args.ElementAtOrDefault(1))),
         "cryptoHash" => VeinCrypto.Hash(Str(args.ElementAtOrDefault(0))),
         "cryptoToken" => VeinCrypto.Token(AsLong(args.ElementAtOrDefault(0))),
+        "cryptoSign" => VeinCrypto.Sign(Str(args.ElementAtOrDefault(0)), Str(args.ElementAtOrDefault(1))),
+        "cryptoVerify" => VeinCrypto.Verify(Str(args.ElementAtOrDefault(0)), Str(args.ElementAtOrDefault(1)), Str(args.ElementAtOrDefault(2))),
         "pick" => args.Count > 0 && args[0] is IReadOnlyList<object?> { Count: > 0 } items
             ? items[_rng.Next(items.Count)]
             : null,
@@ -2436,10 +2497,17 @@ public sealed class Interp
                 // number addition and answered 0, so a list could never grow (D4: mutation is `+=`).
                 if (l is IReadOnlyList<object?>) return ListOps.Plus(l, r);
                 if (l is string || r is string) return Str(l) + Str(r);   // string concat (prebuilt +)
-                return AsDouble(l) + AsDouble(r) is var sum && IsInt(l) && IsInt(r) ? (object)(long)sum : sum;
-            case IrBinOp.Sub: return Num(AsDouble(l) - AsDouble(r), l, r);
-            case IrBinOp.Mul: return Num(AsDouble(l) * AsDouble(r), l, r);
-            case IrBinOp.Div: return Num(AsDouble(l) / AsDouble(r), l, r);
+                // TWO INTS STAY EXACT INTS, in 64 bits as compiled code computes them. Through a double they
+                // lost precision past 2^53, and `Num` below returned a double for every `-`, `*` and `/` —
+                // `cond ? (long)v : v` has ONE type, double — so `balance -= amount` turned an int field into
+                // a float on the interpreter only (found by a state hash that differed between the runtimes).
+                if (IsInt(l) && IsInt(r)) return unchecked(AsLong(l) + AsLong(r));
+                return AsDouble(l) + AsDouble(r);
+            case IrBinOp.Sub: return IsInt(l) && IsInt(r) ? (object)unchecked(AsLong(l) - AsLong(r)) : Num(AsDouble(l) - AsDouble(r), l, r);
+            case IrBinOp.Mul: return IsInt(l) && IsInt(r) ? (object)unchecked(AsLong(l) * AsLong(r)) : Num(AsDouble(l) * AsDouble(r), l, r);
+            // Integer division truncates toward zero, as C#'s does; by zero it stays the old answer (no throw).
+            case IrBinOp.Div: return IsInt(l) && IsInt(r) && AsLong(r) != 0 && !(AsLong(l) == long.MinValue && AsLong(r) == -1)
+                                     ? (object)(AsLong(l) / AsLong(r)) : Num(AsDouble(l) / AsDouble(r), l, r);
             // `%` alone truncated BOTH operands to long, so `7.5 % 2.0` was 1 rather than 1.5 while
             // `7 / 2.0` was correctly 3.5 — and the C# backend emits `%` on doubles, so the two
             // runtimes disagreed silently about every float remainder.
@@ -2505,7 +2573,7 @@ public sealed class Interp
         _ => null
     };
 
-    private static object Num(double v, object? l, object? r) => IsInt(l) && IsInt(r) ? (long)v : v;
+    private static object Num(double v, object? l, object? r) => IsInt(l) && IsInt(r) ? (object)(long)v : v;
     private static bool IsInt(object? o) => o is long or int;
     private static bool Truthy(object? o) => o switch { null => false, bool b => b, long n => n != 0, double d => d != 0, string s => s.Length > 0, _ => true };
     private static long AsLong(object? o) => o switch { long l => l, int i => i, double d => (long)d, _ => 0 };

@@ -72,4 +72,6 @@ public sealed class VeinEntityRegistry
     /// Allocate the next entity id (always >= 1; 0 means "no entity").
     public int Allocate() => ++_seq;
     public int Count => _seq;
+    /// Never hand out an id below `next` — a restored world continues numbering where the saved one was.
+    public void SkipTo(int next) { if (next - 1 > _seq) _seq = next - 1; }
 }

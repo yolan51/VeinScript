@@ -36,6 +36,14 @@ bundle Crypto by Vein {
         fn open(sealed: string, keys: string, sender: string) return string { return cryptoOpen(sealed, keys, sender) }
     }
 
+    publicator Signatures {
+        shared("A signature of text with your keys: anyone with your public key can check it. The text itself is not hidden.")
+        fn sign(text: string, keys: string) return string { return cryptoSign(text, keys) }
+
+        shared("Whether signature is the holder of publicKey signing exactly this text. The same answer on every machine.")
+        fn verify(text: string, signature: string, publicKey: string) return bool { return cryptoVerify(text, signature, publicKey) }
+    }
+
     publicator Secrets {
         shared("Text locked with a password (slow to guess, tamper-evident): for keeping keys on disk.")
         fn lock(text: string, password: string) return string { return cryptoLock(text, password) }

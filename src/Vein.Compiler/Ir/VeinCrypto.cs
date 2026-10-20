@@ -122,6 +122,38 @@ public static class VeinCrypto
         catch (FormatException) { return ""; }
     }
 
+    /// `text` signed with `keys`: "vg1:<ECDSA P-256 signature over its UTF-8, SHA-256>". Anyone with the public
+    /// key checks it (Verify); nothing is hidden — the text travels beside it, readable. Randomized, as ECDSA
+    /// is: signing twice gives two signatures, both good.
+    public static string Sign(string text, string keys)
+    {
+        try
+        {
+            var k = Parts(keys, "vk1", 2);
+            if (k is null) return "";
+            using var signer = ECDsa.Create();
+            signer.ImportPkcs8PrivateKey(k[1], out _);
+            return "vg1:" + B64(signer.SignData(Encoding.UTF8.GetBytes(text), HashAlgorithmName.SHA256));
+        }
+        catch (CryptographicException) { return ""; }
+    }
+
+    /// Whether `signature` is the holder of `publicKey` signing exactly `text`. Deterministic — every machine
+    /// gives the same answer — so a pure program (a replicated ledger) may call it.
+    public static bool Verify(string text, string signature, string publicKey)
+    {
+        try
+        {
+            var s = Parts(signature, "vg1", 1);
+            var p = Parts(publicKey, "vp1", 2);
+            if (s is null || p is null) return false;
+            using var verifier = ECDsa.Create();
+            verifier.ImportSubjectPublicKeyInfo(p[1], out _);
+            return verifier.VerifyData(Encoding.UTF8.GetBytes(text), s[0], HashAlgorithmName.SHA256);
+        }
+        catch (CryptographicException) { return false; }
+    }
+
     /// A short number two people compare — read aloud, in person — to know a public key is really the
     /// other's: 30 digits in six groups, from SHA-256 of the key (Signal's way of turning a hash into digits).
     public static string Fingerprint(string publicKey)

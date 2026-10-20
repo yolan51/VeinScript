@@ -89,6 +89,13 @@ public sealed class EntityStore
 
     public bool IsAlive(long entity) => _alive.Contains(entity);
 
+    /// The id the next Spawn will return.
+    public long NextId => _ids.Count + 1;
+
+    /// Make the next Spawn return at least `next` — a host restoring a saved world, so ids carry on where
+    /// they were rather than reusing the ones destroyed before the save.
+    public void ReserveIds(long next) => _ids.SkipTo((int)next);
+
     /// Spawn the identity with exactly this id — for a host carrying a world across a reload, where the
     /// rules may hold ids in their state. Ids are monotonic and never reused, so the ids below it that
     /// this store has not handed out yet are consumed (spawned and destroyed). Returns the id spawned:
@@ -367,7 +374,10 @@ public sealed class EntityStore
     private static double AsDouble(object? v) => v switch
     {
         long l => l, double d => d, bool b => b ? 1 : 0,
-        string s when double.TryParse(s, out var p) => p, _ => 0
+        // Invariant, as every other number↔text conversion in the runtime is: "1,5" is not 1.5 on one
+        // machine and 15 on another.
+        string s when double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var p) => p,
+        _ => 0
     };
 
     private static bool Truthy(object? v) => v switch

@@ -363,7 +363,9 @@ public sealed class Resolve
         "spawn" => IrTypeRef.Of("Entity"),
         "len" or "int" or "code" or "indexOf" => IrTypeRef.Of("int"),
         "random" or "float" => IrTypeRef.Of("float"),
-        "bool" or "isNumber" or "contains" or "startsWith" or "endsWith" => IrTypeRef.Of("bool"),
+        "bool" or "isNumber" or "contains" or "startsWith" or "endsWith" or "cryptoVerify" => IrTypeRef.Of("bool"),
+        "cryptoKeys" or "cryptoPublic" or "cryptoSeal" or "cryptoOpen" or "cryptoFingerprint" or "cryptoLock"
+            or "cryptoUnlock" or "cryptoHash" or "cryptoToken" or "cryptoSign" => IrTypeRef.Of("string"),
         "join" or "toJson" or "string" or "trim" or "upper" or "lower" or "now"
             or "substring" or "replace" or "chr" => IrTypeRef.Of("string"),
         "here" => IrTypeRef.Of("Mark"),

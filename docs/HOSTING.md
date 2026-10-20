@@ -183,6 +183,33 @@ answers queued). A relative path is anchored at `VeinGame.FilesRoot` — the pro
 sets one; an engine sets its per-user data folder (VeinGodot: `user://`) so an exported game never writes
 beside its executable. Setting it applies to the running program and every reload.
 
+## Replicas: several machines that must agree
+
+A host that runs the same rules on several machines — a ledger's validators, a job run twice to check it —
+needs every machine to reach the same state from the same inputs, and to know when a piece of work did not
+finish. `VeinGame.Replica.cs`:
+
+```csharp
+var game = VeinGame.Open("rules.vein", VeinRuntime.Interpreter, new VeinOptions { Pure = true });
+game.Start();                                   // false, with VS0364 errors, if the rules are not pure
+var before = game.Checkpoint();                 // interpreter only
+game.Reseed(seedEveryReplicaAgrees);            // random(), pick, chance — e.g. from the last block hash
+var outcome = game.Execute("Transfer", fields, budget: 50_000);
+if (!outcome.Ok) game.Restore(before);          // out of gas, a fault in a handler, or no such event
+string hash = game.StateHash();                 // the same on every replica; StateText() to diff two
+```
+
+- **Pure** refuses, at compile time, code a shard can reach that reads the machine (`now`, `env`, `args`,
+  `here`), draws fresh randomness (`cryptoKeys`, `seal`, `lock`, `token`, `sign`), or reaches outside
+  (files, network, consoles, sound, `@Quit`). Output (`@Print`, `@Response`) and `random()` (seeded) are
+  allowed. `veinc check --pure file.vein` says the same.
+- **Execute**'s budget counts statements and expressions on the interpreter; running out — or reaching
+  a safety cap (a `while` at 100,000, recursion at 256, 10,000 queued events) — FAILS the work, where
+  without a budget it is cut short silently, as a game frame must be. Compiled code counts nothing (Gas -1).
+- **StateHash** covers every identity (by id: marks, shapes, fields, typed), then every shard var.
+- **Restore** builds a fresh runtime of the same rules, resumed without boot, holding the checkpoint's
+  identities, vars, mutes, and the id the next spawn returns.
+
 ## Limits, said plainly
 
 - **Compiled covers most, not all.** See "Two runtimes" above for what still falls back.

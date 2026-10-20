@@ -16,7 +16,7 @@ namespace Vein.Hosting;
 /// same way from either, which is what keeps them giving the same answers. Single-threaded, like the
 /// interpreter: call it from the engine's main thread (ReloadInBackground compiles on a worker, and swaps
 /// on the caller's next Step).
-public sealed class VeinGame
+public sealed partial class VeinGame
 {
     private IGameRuntime? _runtime;       // running
     private IGameRuntime? _pending;       // opened, not started
@@ -29,12 +29,14 @@ public sealed class VeinGame
     private IReadOnlyList<VeinModel>? _models;
     private IReadOnlyList<VeinCollider>? _colliders;
     private readonly VeinRuntime _mode;
+    private readonly VeinOptions _options;
     private readonly RuntimeSinks _sinks;
 
-    private VeinGame(string path, VeinRuntime mode)
+    private VeinGame(string path, VeinRuntime mode, VeinOptions? options = null)
     {
         Path = System.IO.Path.GetFullPath(path);
         _mode = mode;
+        _options = options ?? new VeinOptions();
         _sinks = new RuntimeSinks(
             (line, isError) => Printed?.Invoke(line, isError),
             (source, volume) => Sound?.Invoke(source, volume),
@@ -111,7 +113,7 @@ public sealed class VeinGame
 
     /// Compile without booting, so the host can subscribe to `Printed`, `Sound` and `Emitted` first.
     /// `Diagnostics`, `Runtime` and `RuntimeNote` are filled; nothing runs until `Start`.
-    public static VeinGame Open(string path, VeinRuntime runtime = VeinRuntime.Auto) => Open(path, runtime, null);
+    public static VeinGame Open(string path, VeinRuntime runtime = VeinRuntime.Auto) => Open(path, runtime, (byte[]?)null);
 
     /// `Open`, with the rules already compiled AHEAD OF TIME (`Precompile`, run by a game's export): the
     /// bytes are loaded instead of compiling at start — no compiler runs, nothing waits a second. The source
@@ -665,10 +667,12 @@ public sealed class VeinGame
     {
         var (module, diagnostics) = Compile(Path);
         if (module is null) return new Prepared(null, diagnostics, "");
+        if (_options.Pure && PurityProblems(module) is { Count: > 0 } impure)
+            return new Prepared(null, diagnostics.Concat(impure).ToList(), "");
 
         string baseDirectory = FilesRoot ?? System.IO.Path.GetDirectoryName(Path)!;
         if (_mode == VeinRuntime.Interpreter)
-            return new Prepared(new InterpRuntime(module, baseDirectory, _sinks), diagnostics, "", module);
+            return new Prepared(new InterpRuntime(module, baseDirectory, _sinks, _options.Pure), diagnostics, "", module);
 
         // Compiled ahead of time (an exported game): load the bytes, no compiler. Bytes that do not load —
         // built by an older backend — fall through to compiling here, as if there were none.
@@ -685,7 +689,7 @@ public sealed class VeinGame
 
         return build.Program is { } program
             ? new Prepared(new CompiledRuntime(program, _sinks, baseDirectory), diagnostics, "", module)
-            : new Prepared(new InterpRuntime(module, baseDirectory, _sinks), diagnostics, "not compiled: " + build.Reason, module);
+            : new Prepared(new InterpRuntime(module, baseDirectory, _sinks, _options.Pure), diagnostics, "not compiled: " + build.Reason, module);
     }
 
     /// The same front end `veinc run` uses: an `app` manifest is linked into one module, anything else
