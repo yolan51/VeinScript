@@ -15,8 +15,13 @@ bundle Diagnostics by Vein {
             column: int
         }
 
-        shared("A diagnostic was produced by some tool/shard.")
-        event @DiagnosticRaised { severity: int, message: string }
+        // WHERE it happened, filled in by the runtime — for a fault, and for every info/warn/error a shard
+        // raises: the shard, the unit of work (`once`, `tick`, `settled`, `hear @Event`), and the file and
+        // line that unit starts on. So a collector can CATCH ONE FAILURE and not just log them all:
+        //     hear @DiagnosticRaised as d { if d.shard == "LoadSave" { …start from defaults… } }
+        // Empty / 0 when there is no unit (raised by a host).
+        shared("A diagnostic was produced: severity, message, and where — shard, phase (once / tick / hear @E), file and line.")
+        event @DiagnosticRaised { severity: int, message: string, shard: string = "", phase: string = "", file: string = "", line: int = 0 }
 
         // Emit-only helpers. An `SF` names the intent so callers don't hand-roll the severity codes.
         shared("Raise an informational diagnostic (severity 0).")

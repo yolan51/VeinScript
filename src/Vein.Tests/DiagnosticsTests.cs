@@ -104,9 +104,10 @@ public class DiagnosticsTests
             "    do *Vein.Diagnostics.Report.warn(\"ear\")\n" +
             "    do *Vein.Diagnostics.Report.error(\"nose\") } }");
 
-        Assert.Contains("(info: eye)", output);
-        Assert.Contains("(warning: ear)", output);
-        Assert.Contains("(error: nose)", output);
+        // …and each says WHERE: the shard, the unit and the line it starts on.
+        Assert.Contains("(info: eye — S (once) at t.vein:2)", output);
+        Assert.Contains("(warning: ear — S (once) at t.vein:2)", output);
+        Assert.Contains("(error: nose — S (once) at t.vein:2)", output);
     }
 
     [Fact]
@@ -644,7 +645,8 @@ public class DiagnosticsTests
         string output = sw.ToString();
 
         Assert.Contains("WARN  | a row has an empty title", output);
-        Assert.Contains("ERROR | Compute (once): Attempted to divide by zero.", output);
+        Assert.Contains("ERROR | Compute (once) at diagnostics.vein:80: Attempted to divide by zero.", output);
+        Assert.Contains("recovered from Compute (once, diagnostics.vein line 80): using 0", output);
         Assert.DoesNotContain("THIS LINE NEVER PRINTS", output);
         // Still alive afterwards, and the rows the faulting run brought are intact.
         Assert.Contains("row: [write the docs] rank 3", output);

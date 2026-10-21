@@ -1,6 +1,6 @@
 // diagnostics.vein — what VeinScript has instead of try/catch.
 //
-//   veinc run samples/diagnostics.vein --ticks 1
+//   veinc run samples/diagnostics.vein --ticks 1        (compiled: tools/check-backend.sh holds it to the same output)
 //
 // THE FAILURE IS A MESSAGE. There is no block to encircle, and that is not an omission: `bring` and
 // `emit` cannot fail at the point they are written. `bring` always spawns (an unknown builder is
@@ -85,11 +85,31 @@ bundle DiagnosticsDemo by you {
             //
             //   * the line below does not print — the BLOCK stops, not the statement. Resuming
             //     mid-block would leave the world in a state no source line describes.
-            //   * the message names the shard AND the phase (`Compute (once)`), because "something
-            //     threw" is useless and "which unit of work died" is not.
+            //   * the message names the shard, the phase and where the block is written
+            //     (`Compute (once) at diagnostics.vein:80`), because "something threw" is useless and
+            //     "which unit of work died, and where" is not. The diagnostic carries the same as
+            //     fields — `d.shard`, `d.phase`, `d.file`, `d.line` — for a shard to act on (Recover).
             //   * shard Carry_on below still runs. One broken unit does not take the program.
-            emit *Vein.Console.Io.@Print { text: "   5 % 0 = " + (5 % 0) }
+            //   * compiled (a Godot game) the same: each block and handler is guarded on its own.
+            //
+            // The zero is a VALUE, as it is in a real program — a count that came out empty. A literal
+            // `5 % 0` is refused by C# outright, so the compiled half of this sample never built.
+            let empty = 2 - 2
+            emit *Vein.Console.Io.@Print { text: "   5 % " + empty + " = " + (5 % empty) }
             emit *Vein.Console.Io.@Print { text: "   THIS LINE NEVER PRINTS" }
+        }
+    }
+
+    // ---- 2b. catching ONE failure, and recovering --------------------------------------------------
+    //
+    // The collector above logs everything. This shard cares about one unit: when Compute fails, it puts
+    // a fallback in place. `if d.shard == …` is the `catch (DivideByZeroException)` of a language whose
+    // handlers belong to whoever cares — Compute does not know Recover exists.
+    shard Recover {
+        hear *Vein.Diagnostics.Report.@DiagnosticRaised as d {
+            if d.shard == "Compute" and d.severity == 2 {
+                emit *Vein.Console.Io.@Print { text: "   recovered from " + d.shard + " (" + d.phase + ", " + d.file + " line " + d.line + "): using 0" }
+            }
         }
     }
 

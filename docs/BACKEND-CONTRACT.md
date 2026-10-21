@@ -27,7 +27,10 @@ nothing measurable. The transport a GAME needs is bridged to the host through Ve
 compiled game was silent and could not end. Since 2026-10-21 the network too: `@Listen`/`@Link`/`@Send`
 call `VeinWorld.Listen/Link/Send`, which a host carries out (Vein.Hosting's `HostedNet`, Interp's rules line
 for line), and `@Message`/`@Undelivered` come back queued through `VeinWorld.Message`/`Undelivered` — a
-networked game used to run 14–25× slower on the interpreter. Every program also gets `Program.Create()` (the world, not
+networked game used to run 14–25× slower on the interpreter. And faults: each generated block and `hear`
+handler runs inside its own guard (`World.Enter`/`Fault`/`Leave`, a static `VeinUnit` naming its shard, phase,
+file and line), so a fault stops that unit and becomes `@DiagnosticRaised`, as `Interp.RunGuarded` does — it used
+to escape the frame. Every program also gets `Program.Create()` (the world, not
 started) and a generated `__Host : IVeinCompiledProgram`, through which an engine (Vein.Hosting) steps and
 reads it with no reflection per frame; `src/Vein.Tests/RuntimeParityTests.cs` holds it to the interpreter.
 Anything outside the subset emits a **note**, never silent wrong code (rule 4) — and a host treats any

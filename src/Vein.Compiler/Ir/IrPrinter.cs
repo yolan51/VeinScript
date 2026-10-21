@@ -140,7 +140,9 @@ public static class IrPrinter
 
     private static string Attrs(IReadOnlyList<IrAttr> attrs, string? exclude = null)
     {
-        var shown = attrs.Where(a => a.Name != exclude).ToList();
+        // `@at` is where a unit is written, not what it means: printing it would change every golden file
+        // whenever a line above moved.
+        var shown = attrs.Where(a => a.Name != exclude && a.Name != "at").ToList();
         if (shown.Count == 0) return "";
         return "  " + string.Join(" ", shown.Select(FormatAttr));
     }

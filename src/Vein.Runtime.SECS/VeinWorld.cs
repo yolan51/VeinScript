@@ -616,7 +616,12 @@ public sealed class VeinWorld
     /// `emit @E { … }`. Queued rather than dispatched, so an emit inside a handler is handled AFTER the
     /// current one finishes — the interpreter's order, and the reason a handler can emit without
     /// recursing into itself.
-    public void Emit(string @event, object payload) => _events.Enqueue((@event, payload));
+    public void Emit(string @event, object payload)
+    {
+        // A diagnostic raised inside a unit — `do warn(…)` — says where, as Interp.Stamp makes it.
+        if (@event == "DiagnosticRaised" && Unit is { } unit) StampDiagnostic?.Invoke(payload, unit);
+        _events.Enqueue((@event, payload));
+    }
 
     /// The guard is the interpreter's, for the same reason: a pair of handlers that emit each other's
     /// event is a live-lock, and stopping is better than hanging with no output.
@@ -627,13 +632,107 @@ public sealed class VeinWorld
         {
             var (name, payload) = _events.Dequeue();
             Observed?.Invoke(name, payload);
-            if (_handlers.TryGetValue(name, out var hs))
-                foreach (var (owner, h) in hs)
-                    if (owner is null || !IsMuted(owner)) h(payload);
+            _handlers.TryGetValue(name, out var hs);
+            // A DIAGNOSTIC IS NEVER DROPPED (Interp.Drain): heard by an unmuted shard, or printed.
+            if (name == "DiagnosticRaised" && (hs is null || hs.All(x => x.Owner is not null && IsMuted(x.Owner))))
+            {
+                if (DescribeDiagnostic?.Invoke(payload) is { } d)
+                {
+                    if (d.Severity >= 2) Faulted = true;
+                    Err.WriteLine($"({(d.Severity switch { 0 => "info", 1 => "warning", _ => "error" })}: {DiagnosticText(d)})");
+                }
+                Commit();
+                continue;
+            }
+            if (hs is not null)
+            {
+                string? outer = _draining;
+                _draining = name;
+                try
+                {
+                    foreach (var (owner, h) in hs)
+                        if (owner is null || !IsMuted(owner)) h(payload);
+                }
+                finally { _draining = outer; }
+            }
             Commit();
         }
     }
+
+    // ---- faults: the failure is a message (Interp.RunGuarded, line for line) --------------------------
+    //
+    // Each unit of work — a phase method or one `hear` handler — runs inside a guard the generated code
+    // writes around it: `var outer = World.Enter(unit); try { … } catch (Exception e) { World.Fault(unit, e); }
+    // finally { World.Leave(outer); }`. A fault stops THAT unit, becomes `@DiagnosticRaised`, and every other
+    // unit runs. It used to escape the frame: a standalone program died, and inside a host every shard after
+    // the failing one was skipped for the frame, with nothing for the program to hear.
+
+    /// The unit running now, so a diagnostic raised inside it says where (StampDiagnostic).
+    public VeinUnit? Unit { get; private set; }
+
+    public VeinUnit? Enter(VeinUnit unit)
+    {
+        var outer = Unit;
+        Unit = unit;
+        return outer;
+    }
+
+    public void Leave(VeinUnit? outer) => Unit = outer;
+
+    /// The event whose handlers are running, while they run: a fault in a @DiagnosticRaised handler cannot
+    /// become another one (a loop the queue guard would end at 10,000, the cause long buried).
+    private string? _draining;
+
+    /// An unheard ERROR, or a fault with nowhere to go — what makes a run's exit code 1.
+    public bool Faulted { get; private set; }
+
+    /// Set by a program that has @DiagnosticRaised: raise one for a fault (severity, message, unit).
+    public Action<long, string, VeinUnit>? Diagnose;
+    /// Set by such a program: fill an emitted @DiagnosticRaised's empty shard/phase/file/line from the unit.
+    public Action<object, VeinUnit>? StampDiagnostic;
+    /// Set by such a program: a @DiagnosticRaised payload's fields, for printing one nobody heard.
+    public Func<object, VeinDiagnostic>? DescribeDiagnostic;
+
+    public void Fault(VeinUnit unit, Exception ex)
+    {
+        if (_draining == "DiagnosticRaised")
+        {
+            Faulted = true;
+            Err.WriteLine($"(error in {unit.Where} while reporting: {ex.Message})");
+            return;
+        }
+        string message = $"{unit.Where}: {ex.Message}";
+        if (Diagnose is { } raise) raise(2, message, unit);
+        else { Faulted = true; Err.WriteLine($"(error: {message})"); }
+    }
+
+    /// A diagnostic in a program that never hears @DiagnosticRaised: printed, with where it was raised —
+    /// what Interp.Drain does with one nobody hears.
+    public void Report(long severity, string message)
+    {
+        if (severity >= 2) Faulted = true;
+        var u = Unit;
+        var d = new VeinDiagnostic(severity, message, u?.Shard ?? "", u?.Phase ?? "", u?.File ?? "", u?.Line ?? 0);
+        Err.WriteLine($"({(severity switch { 0 => "info", 1 => "warning", _ => "error" })}: {DiagnosticText(d)})");
+    }
+
+    /// Interp.DiagnosticText: the message, and where unless it already says.
+    private static string DiagnosticText(VeinDiagnostic d)
+    {
+        if (d.Shard.Length == 0 || d.Message.StartsWith(d.Shard + " (", StringComparison.Ordinal)) return d.Message;
+        return $"{d.Message} — {new VeinUnit(d.Shard, d.Phase, d.File, d.Line).Where}";
+    }
 }
+
+/// A unit of work's place: its shard, its phase (`once`, `tick`, `settled`, `hear @E`), and the file and line
+/// it starts on. One static instance per unit in generated code, so entering one allocates nothing.
+public sealed record VeinUnit(string Shard, string Phase, string File, long Line)
+{
+    public string Where => File.Length == 0 ? $"{Shard} ({Phase})" : $"{Shard} ({Phase}) at {File}:{Line}";
+}
+
+/// A @DiagnosticRaised's fields, as a host or the console reads them.
+public readonly record struct VeinDiagnostic(long Severity, string Message, string Shard, string Phase, string File, long Line);
 
 /// Every generated component implements this. `Fold` is generated per shape, because which fields are
 /// `folds sum` is a fact about the shape declaration rather than something the runtime can infer.

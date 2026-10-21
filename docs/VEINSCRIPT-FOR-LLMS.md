@@ -427,7 +427,9 @@ continue
 - Lists: `[3, 1, 2]`, `xs[0]`, `len(xs)`, `xs += 4` (append), `xs[i] = v`.
 - Conversions are total (never throw): `int("abc")` is 0; guard with `isNumber(s)`. `int` truncates.
 - No `null` literal to write; a missing value reads empty / 0 / false.
-- A fault in user code becomes `@DiagnosticRaised` (the language's only "catch"); unheard, it prints and
+- A fault stops its UNIT (one block or one `hear` handler; the rest of the program runs) and becomes
+  `@DiagnosticRaised { …, shard, phase, file, line }` — the language's only "catch", on both runtimes. Catch ONE
+  failure by name: `hear …@DiagnosticRaised as d { if d.shard == "LoadSave" { …defaults… } }`. Unheard, it prints and
   sets exit code 1.
 
 ### Built-in functions (called bare, fixed arity)
@@ -521,7 +523,8 @@ clientError serverError`; `Db`: `$Connection { base, key }`, `#Connection`, buil
 `Connect`, SFs `get post`.
 
 **Vein.Diagnostics** — `Report`: `$Diagnostic { severity, message, line, column }`, `@DiagnosticRaised
-{ severity: int, message }`, SFs `info warn error(message)`.
+{ severity: int, message, shard = "", phase = "", file = "", line = 0 }` (where: filled in by the runtime, for a fault
+and for every info/warn/error raised inside a unit), SFs `info warn error(message)`.
 
 **Vein.Web** — `Http`: `@Request { path, method = "GET", body = "" }`, `@Html { markup }`, `@Style
 { css }`, `@Script { code }`, `@Render { path }`, `@Response { status, body }`. `Elements` (builders, each

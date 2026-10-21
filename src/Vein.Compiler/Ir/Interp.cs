@@ -46,7 +46,17 @@ public sealed class Interp
     public IReadOnlyCollection<string> MutedMarks => _mutedMarks;
     public IReadOnlyList<string> MutedShards => _byKey.Where(kv => IsMuted(kv.Value)).Select(kv => kv.Key).ToList();
 
-    private sealed record Handler(Instance Owner, string BindName, IrBlock Body, Audience Aud);
+    private sealed record Handler(Instance Owner, string BindName, IrBlock Body, Audience Aud)
+    {
+        /// Where the `hear` is written (Lower's `@at`), for a fault to say so.
+        public SourceAt? At { get; init; }
+    }
+
+    /// A unit's place in the source: the file name and the line it starts on.
+    private sealed record SourceAt(string File, long Line);
+
+    private static SourceAt? AtOf(IReadOnlyList<IrAttr> attrs) =>
+        attrs.FirstOrDefault(a => a.Name == "at") is { Args: [string file, long line] } ? new SourceAt(file, line) : null;
 
     /// A `hear`'s `audience` barrier, read from its `@audience` attr. The sender must carry every
     /// required shape and mark and none of the excluded ones; when `Shards` is non-empty it must BE one of
@@ -69,6 +79,8 @@ public sealed class Interp
     {
         /// `each tick as t` — the name the block gives the clock (D22); null when it asks for none.
         public string? Clock { get; init; }
+        /// Where the block is written (Lower's `@at`).
+        public SourceAt? At { get; init; }
     }
 
     private readonly List<Schedule> _schedules = new();
@@ -450,7 +462,7 @@ public sealed class Interp
                 {
                     string when = sch.Args.Count > 0 ? sch.Args[0]?.ToString() ?? "" : "";
                     double seconds = sch.Args.Count > 1 && sch.Args[1] is double d ? d : 0;
-                    _schedules.Add(new Schedule(inst, when, seconds, m.Body) { Clock = m.Params.FirstOrDefault()?.Name });
+                    _schedules.Add(new Schedule(inst, when, seconds, m.Body) { Clock = m.Params.FirstOrDefault()?.Name, At = AtOf(m.Attrs) });
                     continue;
                 }
 
@@ -459,7 +471,7 @@ public sealed class Interp
                 string ev = hear.Args.Count > 0 ? hear.Args[0]?.ToString() ?? "" : "";
                 string bind = m.Params.Count > 0 ? m.Params[0].Name : "_";
                 _handlers.TryAdd(ev, new List<Handler>());
-                _handlers[ev].Add(new Handler(inst, bind, m.Body, AudienceOf(m.Attrs)));
+                _handlers[ev].Add(new Handler(inst, bind, m.Body, AudienceOf(m.Attrs)) { At = AtOf(m.Attrs) });
             }
         }
     }
@@ -1085,7 +1097,7 @@ public sealed class Interp
     {
         if (IsMuted(sched.Owner)) { _log.Add($"{sched.Owner.Fc} MUTED every {sched.Seconds}s"); return; }
         RunGuarded(sched.Body, sched.Owner,
-                   new Dictionary<string, object?>(StringComparer.Ordinal), sched.Kind);
+                   new Dictionary<string, object?>(StringComparer.Ordinal), sched.Kind, at: sched.At);
         CommitPhase();
         Drain();
     }
@@ -1251,7 +1263,7 @@ public sealed class Interp
                         ["frame"] = (long)(_clockFrame > 0 ? _clockFrame : _tick),
                         ["delta"] = _clockFrame > 0 ? _clockDelta : 1.0 / (FrameRate > 0 ? FrameRate : 60.0),
                     };
-                RunGuarded(sched.Body, sched.Owner, locals, kind);
+                RunGuarded(sched.Body, sched.Owner, locals, kind, at: sched.At);
             }
     }
 
@@ -1272,7 +1284,39 @@ public sealed class Interp
     /// another @DiagnosticRaised — that is a loop the queue guard would end at 10,000 iterations, with
     /// the original cause long buried.
     private void RunGuarded(IrBlock body, Instance owner, Dictionary<string, object?> locals,
-                            string what, bool canRaise = true)
+                            string what, bool canRaise = true, SourceAt? at = null)
+    {
+        // The unit running, so a diagnostic raised INSIDE it — `do warn(…)` — says where, as a fault does
+        // (Stamp). Saved and put back: units nest when a handler's drain runs another.
+        var outer = _unit;
+        _unit = (owner.Name, what, at);
+        try { RunUnit(body, owner, locals, what, canRaise, at); }
+        finally { _unit = outer; }
+    }
+
+    /// The unit of work running now: its shard, its phase (`once`, `tick`, `hear @E`) and where it is written.
+    private (string Shard, string Phase, SourceAt? At)? _unit;
+
+    /// "Compute (once) at diagnostics.vein:88" — a place a person can open.
+    private static string Where(string shard, string phase, SourceAt? at) =>
+        at is null ? $"{shard} ({phase})" : $"{shard} ({phase}) at {at.File}:{at.Line}";
+
+    /// A @DiagnosticRaised from inside a unit, given the unit's place where the raiser left it empty —
+    /// what makes `if d.shard == "LoadSave"` work for a `do warn(…)` as it does for a fault.
+    private void Stamp(Dictionary<string, object?> payload)
+    {
+        if (_unit is not { } u) return;
+        if (Str(payload.GetValueOrDefault("shard")) == "") payload["shard"] = u.Shard;
+        if (Str(payload.GetValueOrDefault("phase")) == "") payload["phase"] = u.Phase;
+        if (u.At is { } at && Str(payload.GetValueOrDefault("file")) == "")
+        {
+            payload["file"] = at.File;
+            payload["line"] = at.Line;
+        }
+    }
+
+    private void RunUnit(IrBlock body, Instance owner, Dictionary<string, object?> locals,
+                         string what, bool canRaise, SourceAt? at)
     {
         // The trace point. RunGuarded is the ONE place a unit of user code runs — a schedule block or a
         // single `hear` handler — so a hook here sees the whole execution without a second traversal,
@@ -1301,7 +1345,7 @@ public sealed class Interp
         catch (OutOfGas) { throw; }
         catch (Exception ex)
         {
-            string where = $"{owner.Name} ({what})";
+            string where = Where(owner.Name, what, at);
 
             // The HOST hears about it first, and unconditionally — including the `!canRaise` case
             // below, where the program cannot be told at all because a @DiagnosticRaised handler is
@@ -1318,6 +1362,7 @@ public sealed class Interp
             Emit("DiagnosticRaised", new Dictionary<string, object?>(StringComparer.Ordinal)
             {
                 ["severity"] = 2L, ["message"] = $"{where}: {ex.Message}",
+                ["shard"] = owner.Name, ["phase"] = what, ["file"] = at?.File ?? "", ["line"] = at?.Line ?? 0L,
                 ["origin"] = null, ["bundle"] = _bundle,
             });
         }
@@ -1330,6 +1375,18 @@ public sealed class Interp
                     (System.Diagnostics.Stopwatch.GetTimestamp() - startedAt) * 1000.0 / System.Diagnostics.Stopwatch.Frequency,
                     _activations - startedActivations));
         }
+    }
+
+    /// A diagnostic as the console shows it: the message, and where — unless the message already says
+    /// (a fault's does: "Compute (once) at f.vein:88: …").
+    private static string DiagnosticText(Dictionary<string, object?> payload)
+    {
+        string message = Str(payload.GetValueOrDefault("message"));
+        string shard = Str(payload.GetValueOrDefault("shard"));
+        if (shard == "" || message.StartsWith(shard + " (", StringComparison.Ordinal)) return message;
+        string file = Str(payload.GetValueOrDefault("file"));
+        var at = file == "" ? null : new SourceAt(file, AsLong(payload.GetValueOrDefault("line")));
+        return $"{message} — {Where(shard, Str(payload.GetValueOrDefault("phase")), at)}";
     }
 
     /// info / warning / error, matching the `severity` codes stdlib/Diagnostics.vein documents.
@@ -1563,8 +1620,7 @@ public sealed class Interp
             {
                 long severity = AsLong(payload.GetValueOrDefault("severity"));
                 if (severity >= 2) _faulted = true;   // an unheard ERROR fails the run: exit code 1
-                Err?.WriteLine($"({SeverityWord(severity)}: " +
-                                Str(payload.GetValueOrDefault("message")) + ")");
+                Err?.WriteLine($"({SeverityWord(severity)}: {DiagnosticText(payload)})");
                 continue;
             }
 
@@ -1580,7 +1636,7 @@ public sealed class Interp
                     continue;
                 }
                 var locals = new Dictionary<string, object?> { [h.BindName] = payload };
-                RunGuarded(h.Body, h.Owner, locals, "hear @" + EventName(name),
+                RunGuarded(h.Body, h.Owner, locals, "hear @" + EventName(name), at: h.At,
                            canRaise: name != "DiagnosticRaised");
             }
 
@@ -1678,6 +1734,7 @@ public sealed class Interp
 
     private void Emit(string ev, Dictionary<string, object?> payload)
     {
+        if (ev == "DiagnosticRaised") Stamp(payload);
         // Every event gets its own id (not an entity id) and a causation chain.
         payload["id"] = "ev" + (++_eventSeq);
         if (_current is not null)

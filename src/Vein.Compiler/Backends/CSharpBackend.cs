@@ -754,18 +754,20 @@ public sealed class CSharpBackend : IVeinBackend
             {
                 _bound.Clear();
                 ResetLocals();
+                string unit = Unit(sb, shard, m, when!);
                 sb.AppendLine($"    public override void {phase}()");
+                sb.AppendLine("    {");
+                GuardOpen(sb, unit);
                 // `each tick as t` (D22): the clock of this frame, read from the world — the same two fields
                 // @Ticked carries, so `t.delta` reads alike in a block and in a hear.
                 if (m.Params.FirstOrDefault() is { } clock)
                 {
                     _bound.Add(clock.Name);
-                    sb.AppendLine("    {");
-                    sb.AppendLine($"        var {DeclareLocal(clock.Name)} = new {{ frame = World.FrameNumber, delta = World.FrameDelta }};");
-                    EmitBlock(sb, m.Body, 2);
-                    sb.AppendLine("    }");
+                    sb.AppendLine($"            var {DeclareLocal(clock.Name)} = new {{ frame = World.FrameNumber, delta = World.FrameDelta }};");
                 }
-                else EmitBlock(sb, m.Body, 1);
+                EmitBlock(sb, m.Body, 3);
+                GuardClose(sb, unit);
+                sb.AppendLine("    }");
                 continue;
             }
 
@@ -783,8 +785,13 @@ public sealed class CSharpBackend : IVeinBackend
                 _bound.Clear();
                 ResetLocals();
                 _bound.Add(p?.Name ?? "e");
+                string unit = Unit(sb, shard, m, "hear @" + Interp.EventName(ev));
                 sb.AppendLine($"    private void {handlerNames[m]}({EventType(ev)} {Ident(p?.Name ?? "e")})");
-                EmitBlock(sb, m.Body, 1);
+                sb.AppendLine("    {");
+                GuardOpen(sb, unit);
+                EmitBlock(sb, m.Body, 3);
+                GuardClose(sb, unit);
+                sb.AppendLine("    }");
                 continue;
             }
 
@@ -828,6 +835,39 @@ public sealed class CSharpBackend : IVeinBackend
 
         sb.AppendLine("}");
         sb.AppendLine();
+    }
+
+    // ---- the failure is a message: one guard per unit of work (Interp.RunGuarded) ----------------------
+
+    private int _unitCount;
+
+    /// A unit's place, as a static field of its shard class — `Compute (once) at diagnostics.vein:88` — so
+    /// entering it allocates nothing per frame. Returns the field's name.
+    private string Unit(StringBuilder sb, IrShard shard, IrFunction m, string phase)
+    {
+        var at = m.Attrs.FirstOrDefault(a => a.Name == "at");
+        string file = at?.Args.ElementAtOrDefault(0) as string ?? "";
+        long line = at?.Args.ElementAtOrDefault(1) is long l ? l : 0;
+        string name = "__unit" + _unitCount++;
+        sb.AppendLine($"    private static readonly VeinUnit {name} = new(\"{Escape(shard.Name)}\", \"{Escape(phase)}\", \"{Escape(file)}\", {line});");
+        return name;
+    }
+
+    /// Around a unit's body: a fault stops THIS unit, becomes `@DiagnosticRaised` (World.Fault), and every
+    /// other unit runs — the interpreter's rule. A `try` that never throws costs nothing measurable, unlike
+    /// a closure per block per frame.
+    private static void GuardOpen(StringBuilder sb, string unit)
+    {
+        sb.AppendLine($"        var __outer = World.Enter({unit});");
+        sb.AppendLine("        try");
+        sb.AppendLine("        {");
+    }
+
+    private static void GuardClose(StringBuilder sb, string unit)
+    {
+        sb.AppendLine("        }");
+        sb.AppendLine($"        catch (System.Exception __fault) {{ World.Fault({unit}, __fault); }}");
+        sb.AppendLine("        finally { World.Leave(__outer); }");
     }
 
     // ---- statements ------------------------------------------------------
@@ -1641,6 +1681,15 @@ public sealed class CSharpBackend : IVeinBackend
                     return $"World.Link({Str(lk.Fields.FirstOrDefault(f => f.Field == "name").Value)}, " +
                            $"{Str(lk.Fields.FirstOrDefault(f => f.Field == "at").Value)}, " +
                            $"{Str(lk.Fields.FirstOrDefault(f => f.Field == "key").Value)})";
+                // `do warn(…)` in a program that never hears @DiagnosticRaised has no payload type to build —
+                // and no one to hear it, so it goes straight to the console, as Interp.Drain prints an
+                // unheard one. It was a note, and a compiled program's warnings vanished.
+                if (c.Args.Count > 0 && c.Args[0] is IrStructInit { TypeName: "DiagnosticRaised" } dr && !_events.Contains("DiagnosticRaised"))
+                {
+                    var severity = dr.Fields.FirstOrDefault(f => f.Field == "severity").Value;
+                    return $"World.Report({(severity is null ? "2L" : $"(long)({Expr(severity)})")}, " +
+                           $"{Str(dr.Fields.FirstOrDefault(f => f.Field == "message").Value)})";
+                }
                 if (c.Args.Count > 0 && c.Args[0] is IrStructInit { TypeName: "Quit" } q)
                 {
                     var code = q.Fields.FirstOrDefault(f => f.Field == "code").Value;
@@ -2010,7 +2059,8 @@ public sealed class CSharpBackend : IVeinBackend
         sb.AppendLine("        var world = Create();");
         sb.AppendLine("        world.Start();");
         sb.AppendLine("        world.Run(ticks);");
-        sb.AppendLine("        Environment.ExitCode = world.ExitCode ?? 0;   // `quit(code)`, as `veinc run` returns it");
+        // `quit(code)`, as `veinc run` returns it — and 1 after an error nobody heard, as `veinc run` does.
+        sb.AppendLine("        Environment.ExitCode = world.ExitCode ?? (world.Faulted ? 1 : 0);");
         sb.AppendLine("    }");
         sb.AppendLine();
         // THE STEPPABLE HALF. Everything Main did except start and run, so a HOST (an engine, through
@@ -2047,6 +2097,30 @@ public sealed class CSharpBackend : IVeinBackend
             sb.AppendLine("        world.FileWritten = (path, bytes, tag) => world.Emit(\"FileWritten\", new Events.FileWritten { path = path, bytes = bytes, tag = tag });");
         if (_events.Contains("FileMissing"))
             sb.AppendLine("        world.FileMissing = (path, reason, tag) => world.Emit(\"FileMissing\", new Events.FileMissing { path = path, reason = reason, tag = tag });");
+
+        // Faults and diagnostics (VeinWorld.Fault, Interp.RunGuarded): a fault becomes @DiagnosticRaised with
+        // its place; one a shard raises gets the place of the unit raising it; one nobody hears is printed.
+        // Only the fields this program's @DiagnosticRaised has — a stdlib from before `shard`/`line` has none.
+        if (_events.Contains("DiagnosticRaised") && _eventTypes.TryGetValue("DiagnosticRaised", out var diag))
+        {
+            bool placed = new[] { "shard", "phase", "file", "line" }.All(f => diag.Fields.Any(x => x.Name == f));
+            sb.AppendLine(placed
+                ? "        world.Diagnose = (severity, message, u) => world.Emit(\"DiagnosticRaised\", new Events.DiagnosticRaised { severity = severity, message = message, shard = u.Shard, phase = u.Phase, file = u.File, line = u.Line });"
+                : "        world.Diagnose = (severity, message, u) => world.Emit(\"DiagnosticRaised\", new Events.DiagnosticRaised { severity = severity, message = message });");
+            if (placed)
+            {
+                sb.AppendLine("        world.StampDiagnostic = (p, u) =>");
+                sb.AppendLine("        {");
+                sb.AppendLine("            var d = (Events.DiagnosticRaised)p;");
+                sb.AppendLine("            if (d.shard == \"\") d.shard = u.Shard;");
+                sb.AppendLine("            if (d.phase == \"\") d.phase = u.Phase;");
+                sb.AppendLine("            if (d.file == \"\") { d.file = u.File; d.line = u.Line; }");
+                sb.AppendLine("        };");
+            }
+            sb.AppendLine(placed
+                ? "        world.DescribeDiagnostic = p => { var d = (Events.DiagnosticRaised)p; return new VeinDiagnostic(d.severity, d.message, d.shard, d.phase, d.file, d.line); };"
+                : "        world.DescribeDiagnostic = p => { var d = (Events.DiagnosticRaised)p; return new VeinDiagnostic(d.severity, d.message, \"\", \"\", \"\", 0); };");
+        }
 
         // The network's answers, the same way. The host calls these between frames and drains.
         if (_events.Contains("Message"))

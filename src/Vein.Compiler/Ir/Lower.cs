@@ -1859,8 +1859,14 @@ public sealed partial class Lower
             prms = new[] { new IrParam(clock, IrTypeRef.Of(EventKey(path, "Ticked"))) };
         }
         return new IrFunction(name, prms, IrTypeRef.Of("void"), LowerBlock(sb.Body),
-            false, null, new[] { attr });
+            false, null, new[] { attr, At(sb.Span) });
     }
+
+    /// `@at(file, line)` on a unit of work — a schedule block or a `hear` — so a fault in it can say WHERE,
+    /// on both runtimes: the interpreter reads it in RunGuarded, the C# backend bakes it into the unit's
+    /// guard. The file name only: a message is read by a person, and the folder is noise in it. Not
+    /// printed by IrPrinter — a golden IR file must not change because a line moved.
+    private static IrAttr At(SourceSpan span) => IrAttr.Of("at", System.IO.Path.GetFileName(span.File), (long)span.Line);
 
     /// An event this bundle HEARS or EMITS but did not declare — `*Vein.Net.Http.@Fetched`.
     ///
@@ -1961,7 +1967,7 @@ public sealed partial class Lower
         if (Interp.HostEvents.Contains(hb.Event) && EventKey(hb.EventPath, hb.Event) == hb.Event)
             _diag.Error("VS0362", $"`@{hb.Event}` is carried out by the runtime itself (it is a transport event), so " +
                 "this `hear` would never run. To pass messages between shards, declare an event with another name.", hb.Span);
-        var attrs = new List<IrAttr> { IrAttr.Of("hear", EventKey(hb.EventPath, hb.Event)) };
+        var attrs = new List<IrAttr> { IrAttr.Of("hear", EventKey(hb.EventPath, hb.Event)), At(hb.Span) };
         // An `audience #Mark` barrier names a mark too, and it is where a typo costs most: a misspelt
         // audience admits nobody, which reads exactly like a barrier doing its job.
         foreach (var am in hb.AudienceMarks.Concat(hb.ExcludedMarks)) UseMark(am, hb.Span);
