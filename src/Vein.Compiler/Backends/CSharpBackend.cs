@@ -39,6 +39,8 @@ public sealed class CSharpBackend : IVeinBackend
     /// Component declarations by name, so an `attach` with no initialiser can tell whether the shape
     /// declares field defaults — `default(T)` is only the right seed when it does not.
     private readonly Dictionary<string, IrType> _componentTypes = new(StringComparer.Ordinal);
+    /// Every event payload this program emits, by name — so `Coerce` knows what type a payload field takes.
+    private readonly Dictionary<string, IrType> _eventTypes = new(StringComparer.Ordinal);
 
     /// Module-level `fn`/`SF` names, so a call to one is emitted qualified. Without this the backend
     /// emitted the call and never the function — CS0103 at every call site, which no backend-checked
@@ -164,7 +166,10 @@ public sealed class CSharpBackend : IVeinBackend
             // its clock, for a reason that was never about them.
             else if (t.Kind == IrTypeKind.Message
                      && (!t.Attrs.Any(a => a.Name == "imported") || !Interp.HostEvents.Contains(t.Name)))
+            {
                 _events.Add(t.Name);
+                _eventTypes[t.Name] = t;
+            }
             else if (t.Kind == IrTypeKind.Struct) _structs.Add(t.Name);
             else if (t.Kind == IrTypeKind.Enum)
             {
@@ -656,7 +661,9 @@ public sealed class CSharpBackend : IVeinBackend
             foreach (var p in f.Params) _bound.Add(p.Name);
             string ps = string.Join(", ", f.Params.Select(p => $"{Cs(p.Type)} {Ident(p.Name)}"));
             sb.AppendLine($"    public static {Cs(f.Return)} {Ident(f.Name)}({ps})");
+            _currentReturn = f.Return;
             EmitBlock(sb, f.Body, 1);
+            _currentReturn = null;
             sb.AppendLine();
         }
         sb.AppendLine("}");
@@ -665,6 +672,11 @@ public sealed class CSharpBackend : IVeinBackend
 
     /// The shard being emitted, so an `emit` inside it can tag the payload with who sent it.
     private string? _currentShard;
+
+    /// The declared return type of the fn being emitted. `return found` from `var found = 0` is a C# `long`
+    /// where an `Entity` fn returns `int`, and a list element is an `object?` where a `string` fn returns one
+    /// — the interpreter returns either without a word, and C# refused both (CS0266).
+    private IrTypeRef? _currentReturn;
 
     /// A shard var written without a type (`let folder = "saves"`) is typed by its starting value, as the
     /// interpreter's is: `infer` is a placeholder, not a C# type, and emitting it failed the whole program
@@ -992,7 +1004,13 @@ public sealed class CSharpBackend : IVeinBackend
                 }
 
             case IrReturn r2:
-                sb.AppendLine(pad + (r2.Value is null ? "return;" : $"return {Expr(r2.Value)};"));
+                sb.AppendLine(pad + (r2.Value switch
+                {
+                    null => "return;",
+                    // Coerce's rule: what already has its C# type is left alone.
+                    IrLiteral or IrBinary or IrUnary => $"return {Expr(r2.Value)};",
+                    _ => $"return {Fit(_currentReturn, Expr(r2.Value))};",
+                }));
                 break;
 
             case IrBreak: sb.AppendLine($"{pad}break;"); break;
@@ -1784,10 +1802,16 @@ public sealed class CSharpBackend : IVeinBackend
         // is null here), so the test is on the expression's FORM.
         if (value is IrLiteral or IrBinary or IrUnary or IrStructInit or IrList) return emitted;
 
-        if (!_componentTypes.TryGetValue(typeName, out var decl)) return emitted;
+        // A payload field too: `emit @ActionPressed { action: parts[3] }` puts a list element — an `object?` —
+        // into a `string` field, and the file stopped compiling.
+        if (!_componentTypes.TryGetValue(typeName, out var decl) && !_eventTypes.TryGetValue(typeName, out decl)) return emitted;
         var f = decl.Fields.FirstOrDefault(x => x.Name == field);
+        return Fit(f?.Type, emitted);
+    }
 
-        return f?.Type.Name switch
+    /// `emitted` converted to `type` (a field's or a function's), by the helpers that read any runtime value.
+    private static string Fit(IrTypeRef? type, string emitted) =>
+        type?.Name switch
         {
             "string" => $"__VeinText.S({emitted})",
             "int" => $"__VeinText.I({emitted})",
@@ -1797,7 +1821,6 @@ public sealed class CSharpBackend : IVeinBackend
             "bool" => $"__VeinText.B({emitted})",
             _ => emitted
         };
-    }
 
     /// A VeinScript string as a C# string literal.
     ///
@@ -1881,6 +1904,7 @@ public sealed class CSharpBackend : IVeinBackend
         "bool" => "false",
         "Entity" => "0",
         "string" or "Mark" => "\"\"",
+        "list" => "new System.Collections.Generic.List<object?>()",
         // A payload's `from` is a Provenance OBJECT, and `default` would be null — so a program
         // reading `d.from.kind` would throw where the interpreter reads a value. Named types get a
         // fresh instance for the same reason strings get "" rather than null.
@@ -1904,6 +1928,11 @@ public sealed class CSharpBackend : IVeinBackend
         "string" or "Mark" => "string",
         "Entity" => "int",
         "void" => "void",
+        // A `list<T>` is the List<object?> every list built-in hands back (`split`, `lines`, `chars`), so a
+        // helper taking one — `fn rest(parts: list<string>, …)` — accepts what `split` made. It was emitted
+        // as a type named `list`, and every program with such a helper (net.Mesh, net.Coop) stayed on the
+        // interpreter.
+        "list" => "System.Collections.Generic.List<object?>",
         _ => Ident(t.Name)
     };
 
