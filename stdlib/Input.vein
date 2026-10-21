@@ -45,12 +45,16 @@ bundle Input by Vein {
     // NAMED ACTIONS — "jump", "fire", "move_left" — rather than keys. Which keys, buttons or sticks trigger
     // an action is the HOST's setting (Godot's Input Map), so a player can rebind and a gamepad can jump
     // without the rules naming a single key. The rules hear what the player MEANT.
+    //
+    // `player` says WHOSE action: 0 for the person at this machine, 1.. for a second pad on the same screen
+    // or a co-op partner across the network (Vein.Coop raises their actions on the host with their number).
+    // A single-player game never reads it.
     publicator Actions {
         shared("A named action began. `strength` is 0..1 — 1 for a key or button, partial for a stick or trigger.")
-        event @ActionPressed { action: string, strength: float = 1.0 }
+        event @ActionPressed { action: string, strength: float = 1.0, player: int = 0 }
 
         shared("A named action ended.")
-        event @ActionReleased { action: string }
+        event @ActionReleased { action: string, player: int = 0 }
     }
 
     // Raw gamepad input, for what actions do not cover (a stick's exact angle, which pad is which player).

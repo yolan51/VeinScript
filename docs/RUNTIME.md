@@ -374,6 +374,22 @@ A dropped connection is reported, not hidden: the peer leaves the live table, th
 socket and no route, and the program hears `@Undelivered` — which is how
 [samples/chat/server.vein](../samples/chat/server.vein) notices a client closed its window.
 
+**Fast lines: `@Send { to, text, fast: true }`.** A reliable line waits behind every line before it, so
+one lost packet stalls the stream — fine for a chat, a stutter for a game sending where a ship is 20 times
+a second. A fast line goes as **one UDP datagram** to the same port number, sealed and checked exactly as
+a TCP frame is (its own magic, so neither can be replayed as the other). It may be lost or arrive out of
+order and is **never** `@Undelivered`: use it for a line the next one replaces. The address is the one the
+peer's own fast lines came from, else its `@Link` route — so the side that dialled speaks first and the
+listener answers to where that came from, the shape NAT allows. A line that cannot go fast (over ~1100
+bytes, or to a peer with no fast address yet) goes the reliable way instead: late rather than never.
+
+**Compiled, and inside a host.** `@Listen`/`@Link`/`@Send` compile (VeinWorld hooks, carried out by the host:
+[HostedNet](../src/Vein.Hosting/HostedNet.cs), Interp's rules line for line), so a networked game is no
+longer sent to the interpreter. In a hosted game (`VeinGame`, both runtimes) what arrives is queued and
+handled when the host steps, on its thread — never on a socket's thread mid-frame — and a send never
+waits on a dial. `VeinGame.Close()` frees the port. One network identity per PROCESS (the routing table
+is process-wide), so two co-op players are two processes.
+
 ### 4.3.2 The trust model — and why `audience` needed one
 
 [KEYWORDS.md](KEYWORDS.md) has always defined `audience` as "networking/replication scope". Over the pipe
@@ -551,10 +567,11 @@ shard, entity or event in scope for anything else to evaluate against (`VS0335`)
 | load-site `start { … }` override (parsed + validated by `veinc symbols`) | fires once app link+run lands |
 | `target`/`each tick`/`folds`/`settled`, `Entity` id, `spawn()`/`attach`/`mark`/`destroy` | **runs** (`veinc run samples/entities.vein --ticks 3`) |
 | `every N` (wall-clock schedule), `here()` | **runs** in a console session (`veinc run`, built .exe) |
-| cross-machine `@Send`/`@Message` by identity (`Vein.Net.Peer`) | **runs** — HMAC-signed, so `audience` is **enforced**, not advisory (§4.3) |
+| cross-machine `@Send`/`@Message` by identity (`Vein.Net.Peer`) | **runs** — encrypted and authenticated (AES-256-GCM), so `audience` is **enforced**, not advisory (§4.3); compiled too, and inside a host |
+| `@Send { fast: true }` — one UDP datagram, may be lost, never `@Undelivered` | **runs** (§4.3.1) |
 | HTTP client (`Vein.Net.Http` `@Fetch`/`@Fetched`/`@Failed`) | **runs** (§4.3.3) |
 | HTTP server — real `@Request`→`@Response` over a socket | **runs** (`veinc serve <file> --port N`) |
-| transport encryption (TLS) for `Vein.Net.Peer` | **follow-on** — frames are authenticated, not secret |
+| TLS for `Vein.Net.Peer` (forward secrecy, certificate identity) | **follow-on** — frames are encrypted under one pre-shared key (§4.3.2) |
 | C# backend → SECS (identity half: shapes/marks/`target`/folds/phases) | **runs** — ≈10× the interpreter, verified byte-equal by `tools/check-backend.sh`, speed by `tools/check-perf.sh` |
 | app link + run — principal boots, capabilities join one runtime | **runs** (`veinc run samples/app_capabilities/shop.app.vein`) |
 

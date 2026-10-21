@@ -34,8 +34,12 @@ bundle Net by Vein {
         shared("Teach this program how to reach a peer — `at` is \"host\" or \"host:port\". Registers a route; nothing connects until you send.")
         event @Link { name: Mark, at: string, key: string }
 
-        shared("Send a line to a peer or console by address — remote when linked, local otherwise.")
-        event @Send { to: Mark, text: string }
+        // `fast: true` sends a remote line as ONE UDP DATAGRAM, sealed and checked like any frame: it may be
+        // lost, may arrive out of order, and is never reported @Undelivered — for a line the next one
+        // replaces (where a ship is now), sent many times a second. A line over ~1100 bytes, or to a peer
+        // with no fast channel yet, goes the reliable way instead. Between consoles it changes nothing.
+        shared("Send a line to a peer or console by address — remote when linked, local otherwise. `fast`: a datagram that may be lost, for lines the next one replaces.")
+        event @Send { to: Mark, text: string, fast: bool = false }
 
         shared("A line that arrived — `from` is the sender's proven identity, safe to use in `audience`.")
         event @Message { from: Mark, text: string }

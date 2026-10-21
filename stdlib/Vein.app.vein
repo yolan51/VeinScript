@@ -22,4 +22,5 @@ app Vein {
     load "Crypto.vein"
     load "Audio.vein"
     load "Graphics.vein"
+    load "Coop.vein"
 }

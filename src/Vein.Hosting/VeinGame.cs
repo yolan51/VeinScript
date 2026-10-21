@@ -86,6 +86,14 @@ public sealed partial class VeinGame
     /// Frames stepped since the program booted.
     public int Tick => _runtime?.Tick ?? 0;
 
+    /// Whether the program is on the network — it `@Listen`ed, and the port is open.
+    public bool Listening => _runtime?.Listening ?? false;
+
+    /// Let go of what the program opened outside itself — its listening port — when the host closes the
+    /// game. The port is free for the next run at once rather than when the process ends. The program
+    /// stays loaded; nothing more is read from the network.
+    public void Close() => _runtime?.Shutdown();
+
     /// A line the program printed (`@Print`), and whether it was an error (`@PrintError`, or a runtime
     /// fault nobody heard).
     public event Action<string, bool>? Printed;
@@ -355,6 +363,10 @@ public sealed partial class VeinGame
         var mutedMarks = old.MutedMarks.ToList();
         var mutedShards = old.ShardsMutedByName.ToList();
 
+        // The network does NOT carry across: its connections belong to the old runtime, and `run once`,
+        // where a program listens and links, does not run again. Said rather than silently dropped.
+        if (old.Listening) Printed?.Invoke("(reload: the network session was closed — restart the game to reconnect)", true);
+        old.Shutdown();
         _runtime = next;
         Changed();
         next.Resume();
@@ -395,6 +407,7 @@ public sealed partial class VeinGame
 
     private void Boot(IGameRuntime runtime)
     {
+        _runtime?.Shutdown();   // the program being replaced lets go of its port, so this one can listen
         _runtime = runtime;
         _viewId = -1;   // a new world: the old one's identity is gone with it
         Changed();
@@ -444,9 +457,12 @@ public sealed partial class VeinGame
     public void Clicked(long target) => Device("Clicked", ("target", target));
 
     /// A named action began — `strength` 1 for a key or button, partial for a stick or trigger
-    /// (*Vein.Input.Actions). Which inputs make an action is the host's input map.
-    public void ActionPressed(string action, double strength = 1) => Device("ActionPressed", ("action", action), ("strength", strength));
-    public void ActionReleased(string action) => Device("ActionReleased", ("action", action));
+    /// (*Vein.Input.Actions). Which inputs make an action is the host's input map. `player` is whose:
+    /// 0 for this machine's player, 1.. for a second pad or a co-op partner (Vein.Coop).
+    public void ActionPressed(string action, double strength = 1, int player = 0) =>
+        Device("ActionPressed", ("action", action), ("strength", strength), ("player", (long)player));
+    public void ActionReleased(string action, int player = 0) =>
+        Device("ActionReleased", ("action", action), ("player", (long)player));
 
     /// A gamepad button by its common-layout name ("A", "Start", "DpadUp"; *Vein.Input.Gamepad).
     public void ButtonDown(int device, string button) => Device("ButtonDown", ("device", (long)device), ("button", button));
@@ -496,9 +512,15 @@ public sealed partial class VeinGame
         if (!Running) return;
         var payload = new Dictionary<string, object?>(StringComparer.Ordinal);
         foreach (var (field, value) in fields) payload[field] = value;
+        DeviceRaised?.Invoke(name, payload);
         _runtime!.Device(name, payload);
         Changed();
     }
+
+    /// Every input the host sent (KeyDown, ActionPressed, AxisMoved, …), by device-event name with its
+    /// fields, just before the rules hear it — what lets a co-op client (Vein.Coop) forward this machine's
+    /// input to the host without the engine knowing there is a network. Read, don't keep.
+    public event Action<string, IReadOnlyDictionary<string, object?>>? DeviceRaised;
 
     // ---- what to draw ---------------------------------------------------------------------------
 

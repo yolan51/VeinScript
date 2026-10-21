@@ -39,6 +39,10 @@ public interface IVeinCompiledProgram
     /// program lacks.
     bool SetMark(VeinWorld world, int id, string mark);
 
+    /// Take a mark off an identity now, by name. False for a mark the program lacks — and for a program
+    /// generated before this existed.
+    bool Unmark(VeinWorld world, int id, string mark) => false;
+
     /// Raise one of the program's events — by bare name (`KeyDown`, `Paused`) or by key — from
     /// `sender` (a runtime identity: "device" for input, "host" for the engine's own), then drain.
     /// False when the program has no such event: a misspelt name is reported, never delivered to nobody.

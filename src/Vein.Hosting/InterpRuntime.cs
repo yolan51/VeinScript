@@ -35,6 +35,7 @@ internal sealed class InterpRuntime : IGameRuntime
 
     public void Start()
     {
+        _interp.UseInbox();   // before the boot: `@Listen` usually sits in `run once`
         using (Enter()) _interp.Boot(_module);
     }
 
@@ -42,6 +43,7 @@ internal sealed class InterpRuntime : IGameRuntime
     {
         using (Enter())
         {
+            _interp.Pump();   // what the network posted, on this (the engine's) thread, before the frame
             _interp.FireTicked(_interp.Tick + 1, delta);
             _interp.Frame();
             _interp.AdvanceEvery(delta);   // `every N` on the HOST's clock — there is no timer thread here
@@ -67,8 +69,8 @@ internal sealed class InterpRuntime : IGameRuntime
                 case "Collided": _interp.FireCollided((long)Num(f, "a"), (long)Num(f, "b")); break;
                 case "Separated": _interp.FireSeparated((long)Num(f, "a"), (long)Num(f, "b")); break;
                 case "Clicked": _interp.FireClicked((long)Num(f, "target")); break;
-                case "ActionPressed": _interp.FireActionPressed(Text(f, "action"), Num(f, "strength")); break;
-                case "ActionReleased": _interp.FireActionReleased(Text(f, "action")); break;
+                case "ActionPressed": _interp.FireActionPressed(Text(f, "action"), Num(f, "strength"), (int)Num(f, "player")); break;
+                case "ActionReleased": _interp.FireActionReleased(Text(f, "action"), (int)Num(f, "player")); break;
                 case "ButtonDown": _interp.FireButtonDown((int)Num(f, "device"), Text(f, "button")); break;
                 case "ButtonUp": _interp.FireButtonUp((int)Num(f, "device"), Text(f, "button")); break;
                 case "AxisMoved": _interp.FireAxisMoved((int)Num(f, "device"), Text(f, "axis"), Num(f, "value")); break;
@@ -103,8 +105,12 @@ internal sealed class InterpRuntime : IGameRuntime
 
     public void Resume()
     {
+        _interp.UseInbox();
         using (Enter()) _interp.Resume(_module);
     }
+
+    public void Shutdown() => _interp.Shutdown();
+    public bool Listening => _interp.Listening;
 
     public long SpawnAt(long id) => _interp.World.SpawnAt(id);
 
@@ -118,6 +124,15 @@ internal sealed class InterpRuntime : IGameRuntime
     public bool SetShardVar(string shard, string name, object? value) => _interp.SetShardState(shard, name, value);
     public IReadOnlyList<string> ShardsMutedByName => _interp.ShardsMutedByName;
     public void RestoreMutes(IEnumerable<string> marks, IEnumerable<string> shardKeys) => _interp.RestoreMutes(marks, shardKeys);
+
+    public bool Unmark(long id, string mark)
+    {
+        _interp.World.RemoveTag(id, mark);
+        return true;
+    }
+
+    public void Destroy(long id) => _interp.World.Destroy(id);
+    public bool Alive(long id) => _interp.World.IsAlive(id);
 
     public void Reseed(int seed) => _interp.Reseed(seed);
 

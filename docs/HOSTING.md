@@ -69,7 +69,8 @@ The vocabulary is the standard library's; nothing in it is engine-specific.
 | `*Vein.Console.Io.@Print`, `@PrintError` | `game.Printed += (line, isError) => …` |
 | `*Vein.Input.Keyboard.@KeyDown` / `@KeyUp` / `@TextInput` | raised by `game.KeyDown(…)` etc. |
 | `*Vein.Input.Mouse.@MouseDown` / `@MouseUp` / `@MouseMove` | raised by `game.MouseDown(…)` etc. |
-| `*Vein.Input.Actions.@ActionPressed { action, strength }` / `@ActionReleased { action }` | raised by `game.ActionPressed("jump")` etc. — the engine's input map decides which keys and buttons make an action |
+| `*Vein.Input.Actions.@ActionPressed { action, strength, player }` / `@ActionReleased { action, player }` | raised by `game.ActionPressed("jump")` etc. — the engine's input map decides which keys and buttons make an action; `player` (0 = this machine's) tells a second pad or a co-op partner apart: `game.ActionPressed("jump", 1, player: 1)` |
+| `*Vein.Net.Peer.@Listen` / `@Link` / `@Send` / `@Message` / `@Undelivered` | **nothing to do**: the game is on the network by itself, on either runtime (see "The network" below); call `game.Close()` when the game closes |
 | `*Vein.Input.Gamepad.@ButtonDown` / `@ButtonUp { device, button }` | raised by `game.ButtonDown(0, "A")` etc.; buttons by common-layout name (A B X Y Start DpadUp …) |
 | `*Vein.Input.Gamepad.@AxisMoved { device, axis, value }` | raised by `game.AxisMoved(0, "LeftX", -0.5)`; drop jitter near rest, report rest as 0 |
 | `*Vein.UI.Surface.$View { width, height }` | **written by the host**: `game.SetView(w, h)` at start and on every resize; kept across reloads |
@@ -209,6 +210,39 @@ string hash = game.StateHash();                 // the same on every replica; St
 - **StateHash** covers every identity (by id: marks, shapes, fields, typed), then every shard var.
 - **Restore** builds a fresh runtime of the same rules, resumed without boot, holding the checkpoint's
   identities, vars, mutes, and the id the next spawn returns.
+
+## The network: a hosted game on `Vein.Net.Peer`
+
+A program that `@Listen`s, `@Link`s and `@Send`s (RUNTIME.md §4.3) does so inside a host with no host code,
+compiled or interpreted. What arrives is **queued** and handed to the rules at the start of the next
+`Step`, on the host's thread — never on a socket's thread in the middle of a frame — and a send never waits
+on a dial (`@Undelivered` comes back on a later step). `@Send { fast: true }` goes as a datagram, for lines
+the next one replaces. So network co-op is written in VeinScript (VeinScriptBundle's `net.Coop`), not in
+the host.
+
+- `game.Listening` — whether the program has a port open. `game.Close()` frees it when the game closes.
+- A **reload** closes the network session (its connections belong to the old program, and `run once`, where
+  a program listens, does not run again on a state-keeping reload); it says so on `Printed`.
+- **One network identity per process** — the routing table is process-wide. Two players on one machine are
+  two processes (Godot: Debug → Customize Run Instances).
+
+## Mirrors: writing the world from the host
+
+The rules own their identities; these are for ones the HOST owns — an editor placing a prop, a replay, a
+view of another machine's world. Each write is committed at once, between frames, as `$View` is:
+
+```csharp
+long id = game.Spawn();
+game.Set(id, "Position", "x", 3.0);     // attaches $Position (other fields at their defaults) if needed
+game.Mark(id, "Hidden");   game.Unmark(id, "Hidden");
+game.Destroy(id);
+game.Mute("Gameplay");                   // `mute #Gameplay` from outside
+game.DeviceRaised += (name, fields) => …; // every input the host sends, just before the rules hear it
+```
+
+Values go in as the rules hold them (int as long, float as double, Entity as long). A shape, field or mark
+the program does not have is refused — and a program only has what it USES: lowering drops the parts of a
+needed bundle nothing mentions.
 
 ## Limits, said plainly
 

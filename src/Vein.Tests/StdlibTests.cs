@@ -29,7 +29,7 @@ public class StdlibTests
         new VeinCompilerService().Compile(new CompileRequest("t.vein", src));
 
     public static readonly string[] Bundles =
-        { "Core.vein", "Math.vein", "Transform.vein", "Input.vein", "UI.vein", "Time.vein", "Game.vein", "Web.vein", "WebTheme.vein", "Net.vein", "Diagnostics.vein", "Console.vein", "Audio.vein", "Files.vein", "Filter.vein", "Rest.vein" };
+        { "Core.vein", "Math.vein", "Transform.vein", "Input.vein", "UI.vein", "Time.vein", "Game.vein", "Web.vein", "WebTheme.vein", "Net.vein", "Diagnostics.vein", "Console.vein", "Audio.vein", "Files.vein", "Filter.vein", "Rest.vein", "Coop.vein" };
 
     public static IEnumerable<object[]> BundleFiles => Bundles.Select(b => new object[] { b });
 
@@ -81,7 +81,7 @@ public class StdlibTests
         // are each a shape PLUS a builder, so the two counts now grow together with every element the
         // library learns.
         Assert.InRange(byKind[SymbolKind.Shape], 10, 60);
-        Assert.InRange(byKind[SymbolKind.Event], 5, 60);
+        Assert.InRange(byKind[SymbolKind.Event], 5, 80);
         Assert.InRange(byKind[SymbolKind.Builder], 5, 60);
         Assert.False(byKind.ContainsKey(SymbolKind.Shard));   // shards are never in the shared API
     }

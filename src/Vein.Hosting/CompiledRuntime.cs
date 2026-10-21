@@ -16,6 +16,7 @@ internal sealed class CompiledRuntime : IGameRuntime
 {
     private readonly IVeinCompiledProgram _program;
     private readonly VeinWorld _world;
+    private readonly HostedNet _net;
     private readonly RuntimeSinks _sinks;
     private static readonly ConcurrentDictionary<Type, FieldInfo[]> PayloadFields = new();
     private static readonly IReadOnlyDictionary<string, object?> None = new Dictionary<string, object?>();
@@ -26,6 +27,7 @@ internal sealed class CompiledRuntime : IGameRuntime
         _sinks = sinks;
         _world = program.Create();
         _world.BaseDirectory = filesRoot;
+        _net = new HostedNet(_world);
         // The transport events never pass through the compiled queue (VeinWorld.Observed says so); the
         // interpreter's Emitted sees each of them, so they are reported here as it would report them.
         _world.Out = new LineWriter(line =>
@@ -60,9 +62,13 @@ internal sealed class CompiledRuntime : IGameRuntime
 
     public void Step(double delta) => Guard(() =>
     {
+        _net.Pump();   // what the network brought, before the frame — InterpRuntime.Step's order
         _world.Clock(_world.Tick + 1, delta);
         _world.Frame();
     });
+
+    public void Shutdown() => _net.Shutdown();
+    public bool Listening => _net.Listening;
 
     public void Device(string name, IReadOnlyDictionary<string, object?> fields) =>
         Guard(() => _program.Raise(_world, name, fields, "device"));
@@ -143,6 +149,10 @@ internal sealed class CompiledRuntime : IGameRuntime
 
     public IReadOnlyList<string> ShardsMutedByName => _world.ShardsMutedByName;
     public void RestoreMutes(IEnumerable<string> marks, IEnumerable<string> shardKeys) => _world.RestoreMutes(marks, shardKeys);
+
+    public bool Unmark(long id, string mark) => _program.Unmark(_world, (int)id, mark);
+    public void Destroy(long id) => _world.DestroyNow((int)id);
+    public bool Alive(long id) => _world.Alive.Contains((int)id);
 
     public void Reseed(int seed) => _world.Reseed(seed);
 

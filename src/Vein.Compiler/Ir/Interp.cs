@@ -364,6 +364,44 @@ public sealed class Interp
         _inbox = null;
     }
 
+    // ---- a HOST's loop (Vein.Hosting's VeinGame) ------------------------------------------------
+    //
+    // A game engine owns the frame loop, so there is no `Run` here to own an inbox. Without one, a line
+    // that arrived from the network ran on NetBus's reader thread — in the middle of whatever frame the
+    // engine was stepping — and a send to a peer with no socket yet dialled inline, freezing the frame
+    // for up to five seconds. With one, the network only POSTS, as it does under `veinc run`, and the
+    // host runs what was posted between frames.
+
+    /// Give this run an inbox the HOST pumps. Call before booting, for the reason `Run` gives: `@Listen`
+    /// usually sits in `run once`.
+    public void UseInbox() => _inbox ??= new System.Collections.Concurrent.BlockingCollection<Action>();
+
+    /// Run everything the network posted since the last call, on the caller's thread — the host calls it
+    /// once a frame, before stepping. Each item is guarded alone, as `Run`'s loop guards it.
+    public int Pump()
+    {
+        if (_inbox is not { } box) return 0;
+        int ran = 0;
+        while (!Stopped && box.TryTake(out var action))
+        {
+            try { action(); }
+            catch (Exception ex) { _faulted = true; Err?.WriteLine($"(runtime error, continuing: {ex.Message})"); }
+            ran++;
+        }
+        return ran;
+    }
+
+    /// Close this run's port, if `@Listen` opened one — a host replacing the program (a reload) or ending
+    /// it, so the next one can listen on the same port.
+    public void Shutdown()
+    {
+        _net?.Stop();
+        _net = null;
+    }
+
+    /// Whether `@Listen` opened a port that is still open.
+    public bool Listening => _net is not null;
+
     /// Register every First-Class object (shard/view/bridge) and wire its `hear` handlers.
     private void Setup(IrModule module)
     {
@@ -573,11 +611,13 @@ public sealed class Interp
 
     /// `*Vein.Input.Actions.@ActionPressed { action, strength }` — a named action began. Which inputs
     /// trigger it is the host's setting (an engine's input map), so the rules never name a key.
-    public void FireActionPressed(string action, double strength) =>
-        FireDevice("ActionPressed", ("action", action), ("strength", strength));
+    /// `player` is whose action — 0 for this machine's player (see stdlib/Input.vein).
+    public void FireActionPressed(string action, double strength, int player = 0) =>
+        FireDevice("ActionPressed", ("action", action), ("strength", strength), ("player", (long)player));
 
-    /// `*Vein.Input.Actions.@ActionReleased { action }`.
-    public void FireActionReleased(string action) => FireDevice("ActionReleased", ("action", action));
+    /// `*Vein.Input.Actions.@ActionReleased { action, player }`.
+    public void FireActionReleased(string action, int player = 0) =>
+        FireDevice("ActionReleased", ("action", action), ("player", (long)player));
 
     /// `*Vein.Input.Gamepad.@ButtonDown { device, button }` — the button by its common-layout name ("A").
     public void FireButtonDown(int device, string button) =>
@@ -1485,6 +1525,10 @@ public sealed class Interp
                 // A live session never waits on the wire: a send that needs a connection is dialled by
                 // NetBus's own thread, and a failure comes back through the inbox, as @Fetch's answer does.
                 // Waiting here stalled every event behind a dead peer's connect timeout (2–5 s per send).
+                // FAST: one datagram, fire and forget. When it cannot go fast (no fast channel yet, too
+                // long) it goes the reliable way below — late rather than never.
+                if (payload.GetValueOrDefault("fast") is true && NetBus.IsRemote(to) && NetBus.SendFast(to, _self, body))
+                    continue;
                 if (NetBus.IsRemote(to) && _inbox is { } box)
                 {
                     NetBus.SendQueued(to, _self, body, () =>

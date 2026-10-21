@@ -1923,11 +1923,21 @@ public sealed partial class Lower
 
     /// What every event payload carries beyond its own declaration: the emitter's identity, and the
     /// provenance `Interp.Emit` attaches. One helper because two copies of this list DID drift.
+    ///
+    /// An event that declares a field of the same name keeps ITS field: `@Message { from: Mark }` is the
+    /// proven sender, `@PlaySound { source }` the file — what the runtime puts there, and what a handler
+    /// reads. Adding the tail's too gave the payload two `from`s, which the interpreter resolved to the
+    /// first and the C# backend emitted as two fields of one class — so no program hearing `@Message`
+    /// compiled.
     private static void AddPayloadTail(List<IrField> fields)
     {
-        fields.Add(new IrField("origin", IrTypeRef.Of("Entity"), null));
-        fields.Add(new IrField("source", IrTypeRef.Of("Entity"), null));
-        fields.Add(new IrField("from", IrTypeRef.Of(ProvenanceType), null));
+        void Add(string name, string type)
+        {
+            if (!fields.Any(f => f.Name == name)) fields.Add(new IrField(name, IrTypeRef.Of(type), null));
+        }
+        Add("origin", "Entity");
+        Add("source", "Entity");
+        Add("from", ProvenanceType);
     }
 
     private readonly Dictionary<string, IrType> _importedEvents = new(StringComparer.Ordinal);

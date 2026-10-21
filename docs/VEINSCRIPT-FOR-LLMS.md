@@ -510,7 +510,9 @@ on every machine — allowed in a pure program). `Secrets`: `lock(text, password
 but `=` (padding) does occur. NOT covered: who talks to whom, when and how much stays visible to relays; no
 forward secrecy; a card is only as good as the way it reached you (compare fingerprints).
 
-**Vein.Net** — `Peer` (encrypted TCP, pre-shared key): `@Listen @Link @Send @Message @Undelivered`, SFs
+**Vein.Net** — `Peer` (encrypted TCP, pre-shared key): `@Listen @Link @Send @Message @Undelivered`;
+`@Send { to, text, fast: true }` is one UDP datagram (may be lost, never `@Undelivered`) for lines the next
+replaces, like positions; one network identity per process. SFs
 `listen(me, port, key) link(name, at, key) send(dest, text)`. `Http`: `@Fetch { url, method, body, headers }`
 → `@Fetched { url, status, body }` / `@Failed { url, reason }`; SFs `get post getWith postWith request`.
 
@@ -693,8 +695,8 @@ principal.
 - **Compiled** — C# on an ECS runtime (`veinc emit`, or JIT-compiled in a host), ~14–25× faster. The
   backend never emits silently-wrong code: anything it cannot compile is a **note**, and a host then
   runs the program on the interpreter (`game.RuntimeNote` says why). **Not compiled yet**: `every N`,
-  `audience`, `carries` on a sender's `from`, the network and console transports (`@Fetch`, `@Send`,
-  `@Listen`, `@Console`), list element assignment and list growth, `target` with more than 3 marks, and the built-ins `here pick
+  `audience`, `carries` on a sender's `from`, `@Fetch` and `@Console` (`@Listen`/`@Link`/`@Send` DO compile,
+  carried out by the host), list element assignment and list growth, `target` with more than 3 marks, and the built-ins `here pick
   toJson fromJson args now sort remove slice env`.
 - Both are held equal by `tools/check-backend.sh` (diffs program output) and parity tests.
 - Compiled DOES carry: a needed library's events (linked into one program, both ways), `@Print`,

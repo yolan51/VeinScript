@@ -30,9 +30,17 @@ internal interface IGameRuntime
 
     void Start();
 
-    /// One frame: the clock event (`@Ticked` with `delta`), every tick/frame/settled block, then any
-    /// `every N` whose seconds have passed on this clock.
+    /// One frame: what the network brought since the last (`@Message`, `@Undelivered`), then the clock
+    /// event (`@Ticked` with `delta`), every tick/frame/settled block, then any `every N` whose seconds
+    /// have passed on this clock.
     void Step(double delta);
+
+    /// Close what this runtime opened outside the program — its listening port — before another runtime
+    /// replaces it (a reload) or the host closes the game.
+    void Shutdown();
+
+    /// Whether the program listens on the network right now (`@Listen` opened a port).
+    bool Listening { get; }
 
     /// A device event the runtime raises — KeyDown, MouseMove, SoundEnded, … — with its fields.
     void Device(string name, IReadOnlyDictionary<string, object?> fields);
@@ -69,6 +77,15 @@ internal interface IGameRuntime
     IReadOnlyList<string> ShardsMutedByName { get; }
     /// Put back mutes, immediately.
     void RestoreMutes(IEnumerable<string> marks, IEnumerable<string> shardKeys);
+
+    // ---- mirrors: a host writing the world (VeinGame.Mirror.cs) ---------------------------------
+
+    /// Take a mark off an identity now; false when the program has no such mark.
+    bool Unmark(long id, string mark);
+    /// Destroy an identity now, between frames; a dead id is left alone.
+    void Destroy(long id);
+    /// Whether an identity is alive.
+    bool Alive(long id);
 
     // ---- replicas (VeinGame.Replica.cs) ---------------------------------------------------------
 

@@ -1,0 +1,45 @@
+// stdlib/Coop.vein — VeinScript Standard Library : Vein.Coop
+// The vocabulary of NETWORK CO-OP, between a program and a host that runs Vein.Coop (the C# package): what
+// the host raises, and the marks it reads. One player HOSTS — their machine runs the rules — and up to three
+// JOIN: their machines run the same program with the host-only shards muted, send their input to the host,
+// and show MIRRORS of what the host's world holds.
+//
+//     host:    rules run · every #Synced identity is sent · a partner's input arrives as their `player`
+//     client:  #Authority shards muted · its own #Synced identities removed · mirrors drawn, carrying #Mirror
+//
+// The behaviour a game reuses (seats, a roster, what to share) is the net.Coop bundle (Vein.Bundles.Net).
+// Discover:  veinc symbols stdlib/Coop.vein
+
+bundle Coop by Vein {
+
+    publicator Sharing {
+        shared("Send this identity to every player — its looks, place and the shapes net.Coop's Share lists.")
+        mark #Synced
+
+        shared("A shard only the host runs — spawning, AI, collisions. A client mutes it on joining.")
+        mark #Authority
+
+        shared("A copy of another machine's identity, made and moved by Vein.Coop. Rules leave it alone.")
+        mark #Mirror
+
+        shared("This machine's player's own identity: the mirror (or, on the host, the identity) seated as them.")
+        mark #Mine
+
+        shared("Whose this identity is: the player it was made for, from 0 (the host's).")
+        shape $Seat { player: int }
+    }
+
+    publicator Session {
+        shared("Co-op began on this machine: `role` is \"host\" or \"client\", `player` this machine's number.")
+        event @CoopStarted { role: string, player: int }
+
+        shared("A player joined the host's game — raised on the host, with their number (1..3).")
+        event @PlayerJoined { player: int }
+
+        shared("A player left the host's game, or their connection was lost — raised on the host.")
+        event @PlayerLeft { player: int }
+
+        shared("The connection to the host was lost — raised on a client, with why.")
+        event @CoopEnded { reason: string }
+    }
+}

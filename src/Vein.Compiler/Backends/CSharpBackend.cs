@@ -1602,6 +1602,27 @@ public sealed class CSharpBackend : IVeinBackend
                            $"{Str(wf.Fields.FirstOrDefault(f => f.Field == "text").Value)}, " +
                            $"{(append is null ? "false" : $"(bool)({Expr(append)})")}, {(tag is null ? "\"\"" : Str(tag))})";
                 }
+                // The network (Vein.Net.Peer): the world hands each request to the host that owns the sockets,
+                // and queues `@Message` / `@Undelivered` back (wired in Main). A networked game used to drop
+                // the whole program to the interpreter — 14–25× slower, in exactly the games that send the
+                // most.
+                if (c.Args.Count > 0 && c.Args[0] is IrStructInit { TypeName: "Send" } sd)
+                {
+                    var fast = sd.Fields.FirstOrDefault(f => f.Field == "fast").Value;
+                    return $"World.Send({Str(sd.Fields.FirstOrDefault(f => f.Field == "to").Value)}, " +
+                           $"{Str(sd.Fields.FirstOrDefault(f => f.Field == "text").Value)}, " +
+                           $"{(fast is null ? "false" : $"(bool)({Expr(fast)})")})";
+                }
+                if (c.Args.Count > 0 && c.Args[0] is IrStructInit { TypeName: "Listen" } ls)
+                {
+                    var port = ls.Fields.FirstOrDefault(f => f.Field == "at").Value;
+                    return $"World.Listen({Str(ls.Fields.FirstOrDefault(f => f.Field == "as").Value)}, " +
+                           $"{(port is null ? "0L" : $"(long)({Expr(port)})")}, {Str(ls.Fields.FirstOrDefault(f => f.Field == "key").Value)})";
+                }
+                if (c.Args.Count > 0 && c.Args[0] is IrStructInit { TypeName: "Link" } lk)
+                    return $"World.Link({Str(lk.Fields.FirstOrDefault(f => f.Field == "name").Value)}, " +
+                           $"{Str(lk.Fields.FirstOrDefault(f => f.Field == "at").Value)}, " +
+                           $"{Str(lk.Fields.FirstOrDefault(f => f.Field == "key").Value)})";
                 if (c.Args.Count > 0 && c.Args[0] is IrStructInit { TypeName: "Quit" } q)
                 {
                     var code = q.Fields.FirstOrDefault(f => f.Field == "code").Value;
@@ -1998,6 +2019,12 @@ public sealed class CSharpBackend : IVeinBackend
         if (_events.Contains("FileMissing"))
             sb.AppendLine("        world.FileMissing = (path, reason, tag) => world.Emit(\"FileMissing\", new Events.FileMissing { path = path, reason = reason, tag = tag });");
 
+        // The network's answers, the same way. The host calls these between frames and drains.
+        if (_events.Contains("Message"))
+            sb.AppendLine("        world.Message = (from, text) => world.Emit(\"Message\", new Events.Message { from = from, text = text });");
+        if (_events.Contains("Undelivered"))
+            sb.AppendLine("        world.Undelivered = (to, text) => world.Emit(\"Undelivered\", new Events.Undelivered { to = to, text = text });");
+
         foreach (var s in module.Shards)
             sb.AppendLine($"        world.Register(new {ShardIdent(s)}(), \"{Escape(ShardKey(s))}\"{CarriedMarksArgs(s)});");
         sb.AppendLine("        return world;");
@@ -2110,6 +2137,16 @@ public sealed class CSharpBackend : IVeinBackend
         sb.AppendLine("        switch (mark)");
         sb.AppendLine("        {");
         foreach (var m in marks.DistinctBy(m => m.Name)) sb.AppendLine($"            case {Q(m.Name)}: w.MarkAs<global::Vein.Generated.{Ident(module.Name)}.Marks.{Ident(m.Name)}>(id); return true;");
+        sb.AppendLine("            default: return false;");
+        sb.AppendLine("        }");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+
+        sb.AppendLine("    public bool Unmark(VeinWorld w, int id, string mark)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        switch (mark)");
+        sb.AppendLine("        {");
+        foreach (var m in marks.DistinctBy(m => m.Name)) sb.AppendLine($"            case {Q(m.Name)}: w.UnmarkAs<global::Vein.Generated.{Ident(module.Name)}.Marks.{Ident(m.Name)}>(id); return true;");
         sb.AppendLine("            default: return false;");
         sb.AppendLine("        }");
         sb.AppendLine("    }");

@@ -42,6 +42,14 @@ public sealed class NetBus : IDisposable
     /// Bumped from VEIN1: the frame is encrypted now, so the format is not backward compatible.
     private const string Magic = "VEIN2";
 
+    /// A FAST frame — one UDP datagram (`@Send { fast: true }`). Its own magic, so a captured datagram can
+    /// never be replayed down a TCP connection as a reliable frame, nor the other way round.
+    private const string FastMagic = "VEIN2F";
+
+    /// The largest fast frame sent as a datagram. Under any internet path's MTU, so it is never split into
+    /// fragments (one lost fragment loses the whole datagram); a longer line goes over TCP instead.
+    private const int MaxDatagram = 1200;
+
     /// AES-GCM sizes. A 96-bit nonce is the size GCM is defined for; the tag is its full 128 bits.
     private const int NonceSize = 12;
     private const int TagSize = 16;
@@ -88,7 +96,12 @@ public sealed class NetBus : IDisposable
     private readonly string _key;
     private readonly Action<string, string> _onMessage;
     private TcpListener? _listener;
+    private UdpClient? _udp;
     private volatile bool _running;
+
+    /// peer name → where its fast frames come from, learned from its first datagram that verified. A
+    /// reply goes back to exactly that address, which is the one a NAT in front of the peer will let in.
+    private static readonly Dictionary<string, IPEndPoint> FastRoutes = new(StringComparer.Ordinal);
 
     /// Recently accepted nonces, bounded and FIFO-evicted: only one Skew window ever needs remembering,
     /// and an unbounded set reachable by anyone holding the key would itself be the denial-of-service.
@@ -163,6 +176,7 @@ public sealed class NetBus : IDisposable
             Live.Clear();
         }
         lock (Outboxes) Outboxes.Clear();
+        lock (FastRoutes) FastRoutes.Clear();
         _selfPort = 0;
         _current = null;
     }
@@ -195,7 +209,82 @@ public sealed class NetBus : IDisposable
         _selfPort = (bus._listener.LocalEndpoint as IPEndPoint)?.Port ?? port;
         _current = bus;
         new Thread(bus.AcceptLoop) { IsBackground = true, Name = "vein-net-" + self }.Start();
+
+        // Fast frames arrive on the SAME port number, over UDP (a separate port space, so it is normally
+        // free). If it is not, this program simply has no fast channel: every fast send to it falls back to
+        // TCP at the sender, which cannot tell the difference.
+        try
+        {
+            bus._udp = new UdpClient(new IPEndPoint(IPAddress.Any, _selfPort));
+            // Windows reports an earlier datagram's "port unreachable" as an exception on the NEXT receive;
+            // a peer that went away must not stop this listener hearing everyone else.
+            if (OperatingSystem.IsWindows()) bus._udp.Client.IOControl(-1744830452 /* SIO_UDP_CONNRESET */, new byte[] { 0 }, null);
+            new Thread(bus.FastLoop) { IsBackground = true, Name = "vein-net-fast-" + self }.Start();
+        }
+        catch (SocketException) { bus._udp = null; }
         return bus;
+    }
+
+    /// Serve fast frames until stopped: each datagram that decrypts, is fresh and is new is delivered, and
+    /// teaches us where to send that peer's fast replies.
+    private void FastLoop()
+    {
+        var udp = _udp!;
+        while (_running)
+        {
+            try
+            {
+                var remote = new IPEndPoint(IPAddress.Any, 0);
+                var data = udp.Receive(ref remote);
+                if (Open(data, _key) is not { } frame) continue;
+                if (!Verify(frame.Parts, frame.Nonce, remote.Address, FastMagic, out string from, out string body)) continue;
+                lock (FastRoutes) FastRoutes[from] = remote;
+                if (_running) _onMessage(from, body.TrimEnd('\r', '\n'));
+            }
+            catch when (_running) { /* one bad datagram is not the end of the channel */ }
+            catch { break; }
+        }
+    }
+
+    /// Send one FAST frame: a single datagram, no retry, no order, no report when it is lost — for a line
+    /// that the next one replaces (where a ship is now). False when it cannot go fast — no fast channel
+    /// here, no address for the peer, or too long a line — and the caller sends it reliably instead.
+    ///
+    /// The address is the one the peer's own fast frames came from, else the route it was linked at. So
+    /// the side that dialled (a client) speaks first and the side that listens (a host) answers to where
+    /// that came from, which is the shape NAT allows — the TCP story again.
+    public static bool SendFast(string to, string from, string text)
+    {
+        if (Hook is not null) return Hook(to, from, text);
+        var bus = _current;
+        if (bus?._udp is not { } udp) return false;
+
+        IPEndPoint? at;
+        lock (FastRoutes) FastRoutes.TryGetValue(to, out at);
+        string key = bus._key;
+        Route? route;
+        lock (RouteLock) Routes.TryGetValue(to, out route);
+        if (route is not null) key = route.Key;
+        if (at is null)
+        {
+            if (route is null || Resolve(route.Host) is not { } ip) return false;
+            at = new IPEndPoint(ip, route.Port);
+        }
+
+        long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var datagram = Seal(string.Join('\n', FastMagic, from, _selfPort.ToString(), ts.ToString(), text), key);
+        if (datagram.Length > MaxDatagram) return false;
+        try { udp.Send(datagram, datagram.Length, at); return true; }
+        catch (SocketException) { return false; }
+        catch (ObjectDisposedException) { return false; }
+    }
+
+    /// An address for a route's host: a literal as it is, a name looked up once (the first fast send).
+    private static IPAddress? Resolve(string host)
+    {
+        if (IPAddress.TryParse(host, out var ip)) return ip;
+        try { return Dns.GetHostAddresses(host).FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork); }
+        catch (SocketException) { return null; }
     }
 
     private void AcceptLoop()
@@ -205,6 +294,7 @@ public sealed class NetBus : IDisposable
             try
             {
                 var client = _listener!.AcceptTcpClient();
+                client.NoDelay = true;   // a line goes when it is written, not when Nagle has gathered more
                 var link = new Conn { Client = client, Stream = client.GetStream() };
                 // The connection STAYS OPEN and is served for its lifetime, so whoever dialled in can be
                 // answered down the same socket. That is the whole NAT story.
@@ -228,7 +318,7 @@ public sealed class NetBus : IDisposable
                 if (frame is null) break;                       // clean close, bad length, or wrong key
 
                 var remote = (link.Client.Client.RemoteEndPoint as IPEndPoint)?.Address ?? IPAddress.None;
-                if (!Verify(frame.Value.Parts, frame.Value.Nonce, remote, out string from, out string body)) continue;
+                if (!Verify(frame.Value.Parts, frame.Value.Nonce, remote, Magic, out string from, out string body)) continue;
 
                 if (peer is null)
                 {
@@ -261,10 +351,10 @@ public sealed class NetBus : IDisposable
     ///
     /// What decryption does NOT cover is replay — a captured frame is still a valid frame — so the
     /// timestamp window and the nonce cache stay.
-    private bool Verify(string[] frame, string nonce, IPAddress remote, out string from, out string body)
+    private bool Verify(string[] frame, string nonce, IPAddress remote, string magic, out string from, out string body)
     {
         from = ""; body = "";
-        if (frame.Length < 5 || frame[0] != Magic) return false;
+        if (frame.Length < 5 || frame[0] != magic) return false;
 
         from = frame[1];
         if (!int.TryParse(frame[2], out int peerPort) || !long.TryParse(frame[3], out long ts)) return false;
@@ -311,7 +401,7 @@ public sealed class NetBus : IDisposable
 
         try
         {
-            var client = new TcpClient();
+            var client = new TcpClient { NoDelay = true };
             if (!client.ConnectAsync(route.Host, route.Port).Wait(TimeSpan.FromSeconds(5))) { client.Dispose(); return false; }
             var fresh = new Conn { Client = client, Stream = client.GetStream() };
 
@@ -429,14 +519,7 @@ public sealed class NetBus : IDisposable
         if (key is null) return false;
 
         long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        string payload = string.Join('\n', Magic, from, _selfPort.ToString(), ts.ToString(), text);
-        var plain = new UTF8Encoding(false).GetBytes(payload);
-
-        var nonce = RandomNumberGenerator.GetBytes(NonceSize);
-        var cipher = new byte[plain.Length];
-        var tag = new byte[TagSize];
-        using (var gcm = new AesGcm(KeyFrom(key), TagSize))
-            gcm.Encrypt(nonce, plain, cipher, tag);
+        var sealedFrame = Seal(string.Join('\n', Magic, from, _selfPort.ToString(), ts.ToString(), text), key);
 
         try
         {
@@ -446,16 +529,45 @@ public sealed class NetBus : IDisposable
                 // Length-prefixed, because a persistent connection carries many frames and "read to the
                 // end of the stream" only ever worked when the stream ended after one.
                 Span<byte> header = stackalloc byte[4];
-                BinaryPrimitives.WriteInt32BigEndian(header, NonceSize + TagSize + cipher.Length);
+                BinaryPrimitives.WriteInt32BigEndian(header, sealedFrame.Length);
                 link.Stream.Write(header);
-                link.Stream.Write(nonce);
-                link.Stream.Write(tag);
-                link.Stream.Write(cipher, 0, cipher.Length);
+                link.Stream.Write(sealedFrame);
                 link.Stream.Flush();
             }
             return true;
         }
         catch { link.Dispose(); return false; }
+    }
+
+    /// nonce | tag | AES-256-GCM(payload) — one frame's bytes, the same for a TCP frame and a datagram.
+    private static byte[] Seal(string payload, string key)
+    {
+        var plain = new UTF8Encoding(false).GetBytes(payload);
+        var result = new byte[NonceSize + TagSize + plain.Length];
+        var nonce = result.AsSpan(0, NonceSize);
+        RandomNumberGenerator.Fill(nonce);
+        using (var gcm = new AesGcm(KeyFrom(key), TagSize))
+            gcm.Encrypt(nonce, plain, result.AsSpan(NonceSize + TagSize), result.AsSpan(NonceSize, TagSize));
+        return result;
+    }
+
+    /// Seal's inverse: the payload's five parts and the nonce, or null when it does not authenticate.
+    private static (string[] Parts, string Nonce)? Open(byte[] frame, string key)
+    {
+        if (frame.Length <= NonceSize + TagSize) return null;
+        var nonce = frame.AsSpan(0, NonceSize);
+        var tag = frame.AsSpan(NonceSize, TagSize);
+        var cipher = frame.AsSpan(NonceSize + TagSize);
+        var plain = new byte[cipher.Length];
+        try
+        {
+            using var gcm = new AesGcm(KeyFrom(key), TagSize);
+            gcm.Decrypt(nonce, cipher, tag, plain);
+        }
+        catch (CryptographicException) { return null; }   // wrong key, or tampered in flight
+
+        return (new UTF8Encoding(false).GetString(plain).Split('\n', 5),
+                Convert.ToBase64String(nonce));
     }
 
     /// The key to sign with on an existing connection: whatever route named this peer. A connection we
@@ -489,21 +601,7 @@ public sealed class NetBus : IDisposable
 
         var frame = new byte[length];
         if (!ReadExactly(stream, frame, length)) return null;
-
-        var nonce = frame.AsSpan(0, NonceSize);
-        var tag = frame.AsSpan(NonceSize, TagSize);
-        var cipher = frame.AsSpan(NonceSize + TagSize);
-        var plain = new byte[cipher.Length];
-
-        try
-        {
-            using var gcm = new AesGcm(KeyFrom(key), TagSize);
-            gcm.Decrypt(nonce, cipher, tag, plain);
-        }
-        catch (CryptographicException) { return null; }   // wrong key, or tampered in flight
-
-        return (new UTF8Encoding(false).GetString(plain).Split('\n', 5),
-                Convert.ToBase64String(nonce));
+        return Open(frame, key);
     }
 
     private static bool ReadExactly(NetworkStream stream, byte[] buffer, int count)
@@ -549,6 +647,7 @@ public sealed class NetBus : IDisposable
         if (!_running) return;
         _running = false;
         try { _listener?.Stop(); } catch { }
+        try { _udp?.Dispose(); } catch { }
         lock (LiveLock)
         {
             foreach (var l in Live.Values) l.Dispose();

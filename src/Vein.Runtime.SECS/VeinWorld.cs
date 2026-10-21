@@ -148,21 +148,30 @@ public sealed class VeinWorld
     /// world another unit had half-changed.
     public void Defer(Action change) => _commands.Add(change);
 
-    public void Destroy(int entity) =>
-        Defer(() =>
-        {
-            _alive.Remove(entity);
-            // Marks go with the entity: they are components now, so DestroyEntity takes them too.
-            _secs.DestroyEntity(entity);
+    public void Destroy(int entity) => Defer(() => Unmake(entity));
 
-            // SECS returns a destroyed id to a pool and hands it out again; EntityStore's ids are
-            // monotonic and never reused, so there a stale id is inert while here it could alias a NEW
-            // entity — the same reference silently meaning something else. Consuming the pooled id
-            // restores monotonicity with no bookkeeping and no cost on the hot path: CreateEntity pops
-            // the pool first, so this call takes back exactly the id just freed and drops it.
-            _secs.CreateEntity();
-            _structuralVersion++;
-        });
+    /// Destroy at once — for a HOST between frames (Vein.Hosting's VeinGame.Destroy, a co-op mirror going
+    /// away), where there is no commit point coming to apply a deferred one. Never from a unit. A dead or
+    /// unknown id is left alone.
+    public void DestroyNow(int entity)
+    {
+        if (_alive.Contains(entity)) Unmake(entity);
+    }
+
+    private void Unmake(int entity)
+    {
+        _alive.Remove(entity);
+        // Marks go with the entity: they are components now, so DestroyEntity takes them too.
+        _secs.DestroyEntity(entity);
+
+        // SECS returns a destroyed id to a pool and hands it out again; EntityStore's ids are
+        // monotonic and never reused, so there a stale id is inert while here it could alias a NEW
+        // entity — the same reference silently meaning something else. Consuming the pooled id
+        // restores monotonicity with no bookkeeping and no cost on the hot path: CreateEntity pops
+        // the pool first, so this call takes back exactly the id just freed and drops it.
+        _secs.CreateEntity();
+        _structuralVersion++;
+    }
 
     // ---- queries ---------------------------------------------------------
 
@@ -524,6 +533,39 @@ public sealed class VeinWorld
         catch (Exception ex) { FileMissing?.Invoke(path, ex.Message, tag); return; }
         FileWritten?.Invoke(path, text.Length, tag);
     }
+
+    // ---- the network: `@Listen` / `@Link` / `@Send` (Interp's rules, carried out by the HOST) ------------
+    //
+    // The sockets are the host's (Vein.Hosting wires NetBus here); this world only says what the program
+    // asked and hears the answers. They arrive on the host's thread between frames, QUEUED like a file's.
+    // With no host wired — `veinc emit` run bare — each request says so on Err rather than vanishing.
+
+    /// `@Listen { as, at, key }`, `@Link { name, at, key }`, `@Send { to, text, fast }` — set by a host.
+    public Action<string, long, string>? Listening;
+    public Action<string, string, string>? Linking;
+    public Action<string, string, bool>? Sending;
+
+    public void Listen(string self, long port, string key)
+    {
+        if (Listening is null) { Err.WriteLine("(@Listen failed: no network here — run this program in a host)"); return; }
+        Listening(self, port, key);
+    }
+
+    public void Link(string name, string at, string key)
+    {
+        if (Linking is null) { Err.WriteLine("(@Link failed: no network here — run this program in a host)"); return; }
+        Linking(name, at, key);
+    }
+
+    public void Send(string to, string text, bool fast)
+    {
+        if (Sending is null) { Err.WriteLine("(@Send failed: no network here — run this program in a host)"); return; }
+        Sending(to, text, fast);
+    }
+
+    /// `@Message { from, text }` and `@Undelivered { to, text }`, set by the program when it hears them.
+    public Action<string, string>? Message;
+    public Action<string, string>? Undelivered;
 
     /// `@PrintError { text }` — stderr unless a host redirects it.
     public TextWriter Err { get; set; } = Console.Error;

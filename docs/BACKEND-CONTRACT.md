@@ -24,7 +24,10 @@ network, `every N`) stays on the interpreter, where the work is I/O-bound and in
 nothing measurable. The transport a GAME needs is bridged to the host through VeinWorld hooks: `@Print`
 (so a generated program can be diffed against the interpreter at all), and since 2026-10-13 `@PlaySound`
 (`VeinWorld.Sound`), `@PrintError` (`Err`) and `@Quit` (`ExitCode`, `Quitting`) — they were notes, and a
-compiled game was silent and could not end. Every program also gets `Program.Create()` (the world, not
+compiled game was silent and could not end. Since 2026-10-21 the network too: `@Listen`/`@Link`/`@Send`
+call `VeinWorld.Listen/Link/Send`, which a host carries out (Vein.Hosting's `HostedNet`, Interp's rules line
+for line), and `@Message`/`@Undelivered` come back queued through `VeinWorld.Message`/`Undelivered` — a
+networked game used to run 14–25× slower on the interpreter. Every program also gets `Program.Create()` (the world, not
 started) and a generated `__Host : IVeinCompiledProgram`, through which an engine (Vein.Hosting) steps and
 reads it with no reflection per frame; `src/Vein.Tests/RuntimeParityTests.cs` holds it to the interpreter.
 Anything outside the subset emits a **note**, never silent wrong code (rule 4) — and a host treats any
