@@ -1,0 +1,5 @@
+// Example:  K|bob|ann|10|spam, again
+// One record per line, values cut at `|` in parameter order. The last value keeps commas and spaces.
+format Pipes {
+    values "|"
+}

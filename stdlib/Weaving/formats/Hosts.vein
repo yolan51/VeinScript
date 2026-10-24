@@ -1,0 +1,6 @@
+// Example:  127.0.0.1  box  box.lan b1
+// A hosts file: an address, a name, then any number of aliases (a `list<string>` last parameter takes
+// them all). `#` comments.
+format Hosts {
+    comments "#"
+}

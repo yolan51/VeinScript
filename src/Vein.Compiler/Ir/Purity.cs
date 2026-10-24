@@ -75,8 +75,6 @@ public static class Purity
                 case IrWeave w:
                     Expr(w.Source, where);
                     Stmt(w.Record, where);
-                    foreach (var f in w.FanOuts) { foreach (var a in f.Args) Expr(a, where); Stmt(f.Bring, where); }
-                    if (w.Else is { } we) Stmt(we, where);
                     break;
                 case IrLet l: if (l.Init is { } init) Expr(init, where); break;
                 case IrAssign a: Expr(a.Target, where); Expr(a.Value, where); break;

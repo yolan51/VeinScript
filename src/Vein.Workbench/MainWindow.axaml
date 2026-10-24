@@ -273,6 +273,9 @@
         <TabItem Header="Flow">
           <local:EventFlowPanel Name="Flow" />
         </TabItem>
+        <TabItem Header="Formats">
+          <local:FormatsPanel Name="Formats" />
+        </TabItem>
       </TabControl>
     </Grid>
   </DockPanel>

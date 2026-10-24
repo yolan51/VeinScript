@@ -1,0 +1,40 @@
+// stdlib/Weaving/Weaving.vein — VeinScript Standard Library : Vein.Weaving
+// Everything `weave` (D23): the two events a weave answers with, and the official formats a `loom<…>` can
+// read beyond the four every program has (Json, Csv, Ini, KeyValue).
+// Discover:  veinc formats <your program>      or the Workbench's Formats tab
+//
+//     need "Vein.Weaving"                                  // for the formats in formats/
+//     loom<Tsv> Item { $Item  mark #Shop }
+//     run once { weave Item(text) }
+//     hear @Woven   as w { … target $Item #Shop … }        // heard bare, like every runtime event
+//     hear @Unwoven as u { do print("! " + u.why) }
+//
+// WHY ITS OWN BUNDLE. A weave's results are not diagnostics: a record that does not fit is data the program
+// reads, and "these identities are queryable now" is control flow. So they live here, beside the formats,
+// rather than next to @DiagnosticRaised.
+//
+// WHY A FOLDER, AND WHY NOT `stdlib/Formats/`. Each format is one file in formats/ beside this one — the
+// fragment folder that makes a format shared, the way publicators/ makes members API. A fragment folder
+// joins every main file in its directory, so a formats/ directly under stdlib/ would have merged into all
+// the standard bundles. And the folder cannot itself be called `Formats`: a folder named like a fragment
+// folder (case aside — Windows ignores it) makes its own main file read as a fragment.
+//
+// TO CHANGE A FORMAT: `format MyTsv from Tsv { comments "#" }` in your own formats/ — a `from` takes every
+// line and yours override. Nothing here needs copying.
+
+bundle Weaving by Vein {
+
+    publicator Weave {
+
+        // Raised by the runtime after `weave Loom(text)`, queued like any emit — so when it is handled the
+        // identities have committed and a `target` sees them. That is why it doubles as "queryable now":
+        //     hear @Woven as w { if w.loom == "Server" { target $Server #Listed as s { … } } }
+        shared("A weave finished: `count` records of loom `loom` were woven, and can be queried now.")
+        event @Woven { loom: string, count: int }
+
+        // One per record that could not be woven, in the order found, before @Woven; the rest are woven
+        // anyway. `why` names the record:  "S1=9811:S7": `peers`: no record named "S7"
+        shared("A record of a weave could not be woven: which loom, the record's text, and why.")
+        event @Unwoven { loom: string, record: string, why: string }
+    }
+}

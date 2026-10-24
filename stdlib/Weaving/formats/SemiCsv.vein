@@ -1,0 +1,6 @@
+// Example:  Rat;3;small
+// Semicolon-separated values — what a spreadsheet saves where `,` is the decimal comma. The first line
+// names the columns.
+format SemiCsv from Csv {
+    delimiter ";"
+}

@@ -92,23 +92,15 @@ public sealed record IrOrderedBring(IrExpr Key, IrBlock Body) : IrStmt;
 
 public sealed record IrBlock(IReadOnlyList<IrStmt> Statements, bool Transparent = false) : IrStmt;
 
-/// `weave Builder from text` (D23). The records are read at run time; what each one DOES is lowered here,
-/// once, as the bring a person would write: `Record` is `bring Builder(__wv_p1, __wv_p2, …) as __wself`,
-/// preceded by the default of every parameter whose `__wm_<p>` (missing) is set. The interpreter sets
-/// those locals per record and runs it — so a woven record and a hand-written bring are the same IR.
+/// `weave Loom(text) [as x]` (D23). The records are read at run time through `Format`; what each one DOES
+/// is lowered here, once, as the bring a person would write: `Record` is `bring Loom(__wv_p1, …) as
+/// __wself` ONTO the identity in `__wpre` (spawned in pass 1, so a record further down can be named),
+/// preceded by the default of every parameter whose `__wm_<p>` (missing) is set. The interpreter sets those
+/// locals per record — so a woven record and a hand-written bring are the same IR.
 public sealed record IrWeave(
-    string Builder, IrExpr Source, string? Form,
-    IReadOnlyList<IrWeaveParam> Params, IReadOnlyList<IrWeaveFanOut> FanOuts,
-    IrBlock Record, string? ElseBind, IrBlock? Else, string File, long Line) : IrStmt;
+    string Loom, IrExpr Source, WeaveFormat Format, IReadOnlyList<WeaveParam> Params,
+    IrBlock Record, string? Bind, string File, long Line) : IrStmt;
 
-/// A woven builder's parameter, in binding order: what its text converts to, and whether it may be left out.
-public sealed record IrWeaveParam(string Name, string Type, bool HasDefault);
-
-/// `weave hole by "sep" into Child(args)`: per piece, `Args` are evaluated with `__wself` (the record's
-/// identity) and `__wpiece` set, converted to `ArgTypes` (text naming a record becomes its identity), bound
-/// to `__wa0…`, and `Bring` — `bring Child(__wa0, …)` — runs.
-public sealed record IrWeaveFanOut(string Hole, string Separator, IReadOnlyList<IrExpr> Args,
-                                   IReadOnlyList<string> ArgTypes, IrBlock Bring);
 public sealed record IrLet(string Name, IrTypeRef? Type, IrExpr? Init, bool Mutable) : IrStmt;
 public sealed record IrAssign(IrExpr Target, IrExpr Value) : IrStmt;
 public sealed record IrIf(IrExpr Cond, IrBlock Then, IrBlock? Else) : IrStmt;

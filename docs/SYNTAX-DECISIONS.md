@@ -175,8 +175,9 @@ paragraph went stale in turn, and it steered a design again (2026-10-23, the mes
 struck rather than deleted. Today, verified by running it: `list<T>` is a field type — a shape field
 (`near: list<string>`), an event field, an `fn` parameter and return — and a list grows with `+=`, is set
 with `xs[i] = v`, and has `sort`/`remove`/`slice` (RULES 28h). What remains true is the COMPILED path:
-growing or setting a list is interpreter-only, and `veinc emit` says so. For many-of between identities —
-links — prefer identities (D23).
+growing or setting a list is interpreter-only, and `veinc emit` says so. A `list<Entity>` field is how one
+identity refers to any number of others (D23 weaves them, with forward names); links that need data of
+their own — a latency, a `#Down` mark — are better as identities.
 
 *Rationale for recording it now:* the stale text was believed and repeated. It was quoted as fact in
 `samples/rows_in_order.vein` ("no list type exists — the lexer has no `[` `]`"), which was wrong on the
@@ -667,53 +668,66 @@ frame.
 
 ---
 
-## D23 — `weave Builder from text`: identities from a string, each record the bring you would write {#weave}
+## D23 — `format` · `loom<Format>` · `weave Loom(text)`: identities from a string {#weave}
 
-> **Reported as `VS0365`** (weaving what builds no identity, or `weave` in an event), **`VS0366`** (a
-> `weave as` pattern that cannot be read), **`VS0367`** (a fan-out on a parameter, twice, or with an empty
-> separator) and **`VS0368`** (a warning: a fan-out the form never fills).
+> **Reported as** `VS0365` (nothing to weave: a loom with no shape or mark, or `weave` of a builder),
+> `VS0366` (a format that cannot be read: an unknown word, a word said twice or empty, `delimiter` without
+> a Csv base, a `from` cycle), `VS0367` (an unknown format in `loom<…>`, or an unknown `from` base),
+> `VS0368` (a warning: a `columns` name the loom lacks), `VS0369` (the a310032 spellings, naming the new
+> one) and `VS0370` (`weave X(…)` with anything but one argument).
 
-**DECIDED.** A program that already has its builders should come alive from a string loaded from
-anywhere — a setting, a file, a network message — without cutting it by hand:
+**DECIDED.** A program that already has its shapes should come alive from a string loaded from anywhere — a
+setting, a file, a network message — without cutting it by hand:
 
 ```
-builder Server {
-    $Server  mark #Listed
-    weave as "{name}=[{host}:]{port}[:{peers}]"      // how a record is written
-    weave peers by "+" into Peering(self, piece)     // one Peering per neighbour
-}
+format MeshList { records ";"  name "="  values ":"  lists "+" }       // formats/MeshList.vein
 
-weave Server from servers else as why { do print("servers: " + why) }
+shape $Server { name: string, host: string = "", port: int, peers: list<Entity> = [] }
+loom<MeshList> Server { $Server  mark #Listed }
+
+run once { weave Server(servers) }
+hear @Woven   as w { … target $Server #Listed … }        // queryable now
+hear @Unwoven as u { do print("! " + u.why) }
 ```
 
-**A woven record means exactly the brings a person would write.** `S1=9811:S2` is
-`bring Server("S1", 9811) as s1` and, once S2 exists, `bring Peering(s1, s2)`. It is LOWERED as that
-bring — `bring Server(__wv_name, __wv_port, __wv_host) as __wself`, once — and the interpreter sets the
-locals per record, so the two cannot drift: the same attaches, marks, defaults and vein.lock lines.
+**A woven record means exactly the bring a person would write.** `S1=9811:S2` is
+`bring Server("S1", "", 9811, [s2])` once S2 exists. It is LOWERED as that bring —
+`bring Server(__wv_name, __wv_host, __wv_port, __wv_peers) as __wself`, once — landing on an identity the
+weave spawned in its first pass; the interpreter sets the locals per record. So the two cannot drift: the
+same attaches, marks, defaults and vein.lock lines.
 
-*Why the builder owns its form.* The form describes the builder's parameters, so it lives beside them,
-and every program weaving that builder reads the same text the same way. Without one, the standard
-notation is a command line: values in parameter order or `name=value`, `"…"` around spaces.
+*Why the syntax is NAMED.* A loom says which format its records are in, `loom<MeshList>`, so a reader knows
+what comes in without reading a parser — and the format is one declaration every loom and every program
+shares, rather than a pattern restated in each builder. (a310032 put a `{hole}` pattern inside the builder;
+the same format then had to be rewritten for every builder that read it.)
 
-*Why holes are typed.* `{port}` is the parameter `port: int`, so it only matches a whole number — which
-is what makes `[{host}:]{port}` unambiguous. Untyped, `S1=9811` would read `9811` as a host or a port
-depending on what the regex engine tried first.
+*Why a loom is not a builder.* Two jobs, one declaration each: a FORMAT says how text is cut, a LOOM says what
+a record becomes. A loom IS an identity template — it is a builder in every other respect, so `bring
+Server(…)` brings one and `need`, `shared`, arity and vein.lock know it — but only a loom can be woven
+(`weave` of a builder is VS0365), because only a loom names its format.
 
-*Why many-of is a fan-out into identities, not a list.* A neighbour is a LINK between two identities.
-As a `$Peering` it can be targeted from either side, marked `#Down`, given a `$Latency`, destroyed to
-unlink — and graph rules (a self-loop, a link listed twice) are two `target`s. In a `list<string>` field
-it is a string inside one side, growing it is interpreter-only (RULES 28h), and no fold reducer merges
-two shards' appends. So the language has lists for VALUES one identity owns, and fan-outs for links.
+*Why a format is a file in `formats/`.* It is shared like an event: a bundle's `formats/<Name>.vein` is public
+with no `shared` line, found through `need`, and changed by `format Mine from Theirs { … }` rather than by
+copying. Four are built in (Json, Csv, Ini, KeyValue) and `need "Vein.Weaving"` brings the official library.
 
-*Why a problem is a message.* The text is data, and data is not checked by the compiler (RULES 26). A
-record that fits no form, a number that is not one, a name no record has, a second record by one name:
-each skips what it concerns and runs `else as why` once, or — with no `else` — is @DiagnosticRaised with
-the statement's file and line. The rest is woven anyway.
+*Why values are placed by TYPE.* A positional value fills the parameters in order, a parameter with a default
+may be missing, and which one is decided by trying the arrangements — the trailing optional ones left out
+first, as every language treats optional arguments — keeping the first in which every value converts. So
+`S6=box.lan:9816` gives `box.lan` to the host, because it is not a port.
 
-**Two passes.** Records are cut at line ends and `;`; pass 1 brings each in order and names it by its
-first parameter, pass 2 runs the fan-outs — so a fan-out may name a record further down. An `Entity`
-PARAMETER names a record woven before (by this weave or an earlier one: names last for the run, and
-each is woven once). Interpreter-only for now; `veinc emit` says so.
+*Why many-of is `list<Entity>`, with forward names.* One identity often refers to any number of others. Every
+record's identity is spawned in a first pass, so `S1=9811:S4` may come before S4's line; an unknown name is
+dropped from the list with one @Unwoven. A list FIELD is right here because the links belong to the server
+that lists them and one weave writes them; links that need data of their own are still identities.
+
+*Why results are events.* The text is data, and data is not checked by the compiler (RULES 26). Each record
+that cannot be woven is one @Unwoven { loom, record, why }, the rest are woven anyway, and @Woven { loom,
+count } follows — queued, so it is handled after the commit, when a `target` sees the identities. It doubles
+as "queryable now", which is what every program needed a hand-made `emit @Begin` for. Both live in
+`stdlib/Weaving` beside the formats, not with the diagnostics: a weave's results are control flow.
+
+Interpreter-only for now; `veinc emit` says so. `veinc formats` and the Workbench's Formats tab list every
+format a program can name and dry-run any of them against pasted text.
 
 ## Reserved-word disposition
 

@@ -8,7 +8,7 @@ namespace Vein.Compiler.Project;
 // discovery/reference mechanism can list them and disambiguate name collisions between authors.
 // This is the surface + tooling layer: it does NOT link or run the bundles.
 
-public enum SymbolKind { Bundle, Publicator, Shape, Mark, Event, Builder, Shard, ShardView, Bridge, SF, Fn, Var }
+public enum SymbolKind { Bundle, Publicator, Shape, Mark, Event, Builder, Shard, ShardView, Bridge, SF, Fn, Var, Format }
 
 /// Where a declaration is written: a full path, and the line and column within it.
 ///

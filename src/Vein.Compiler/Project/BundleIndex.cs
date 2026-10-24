@@ -32,6 +32,9 @@ public sealed class BundleIndex
     {
         /// Unshared events, `author.Bundle.Name` (BundleIndex.UnsharedEvents).
         public IReadOnlySet<string> Unshared { get; init; } = new HashSet<string>();
+
+        /// Shared formats (D23), keyed like the rest.
+        public IReadOnlyDictionary<string, FormatDecl> Formats { get; init; } = new Dictionary<string, FormatDecl>();
     }
 
     /// One parse pass per folder, reused by every composite that includes it.
@@ -49,6 +52,11 @@ public sealed class BundleIndex
     /// and a misspelled import was silent until each call site failed separately.
     public required IReadOnlyDictionary<string, string> Owners { get; init; }
     public required IReadOnlyDictionary<string, BuilderDecl> Builders { get; init; }
+
+    /// Shared formats (D23) — a `formats/<Name>.vein` file, or `shared("…") format …` in a publicator — keyed
+    /// `Author.Bundle[.Publicator].Name`, so `loom<Tsv>` resolves through `need` the way a builder does.
+    public IReadOnlyDictionary<string, FormatDecl> Formats { get; init; } = new Dictionary<string, FormatDecl>();
+
     public required IReadOnlyDictionary<string, ShapeDecl> Shapes { get; init; }
 
     /// Shared marks, keyed like the rest. A `MarkDecl` carries no fields — the value is the declaration
@@ -101,6 +109,7 @@ public sealed class BundleIndex
 
         var symbols = new List<QualifiedSymbol>();
         var builders = new Dictionary<string, BuilderDecl>(StringComparer.Ordinal);
+        var formats = new Dictionary<string, FormatDecl>(StringComparer.Ordinal);
         var shapes = new Dictionary<string, ShapeDecl>(StringComparer.Ordinal);
         var marks = new Dictionary<string, MarkDecl>(StringComparer.Ordinal);
         var events = new Dictionary<string, EventDecl>(StringComparer.Ordinal);
@@ -124,6 +133,7 @@ public sealed class BundleIndex
                     else shadowed.Add((k, into[k]!.ToString() ?? "", root));
             }
             Merge(folder.Builders, builders);
+            Merge(folder.Formats, formats);
             Merge(folder.Shapes, shapes);
             Merge(folder.Marks, marks);
             Merge(folder.Events, events);
@@ -146,7 +156,7 @@ public sealed class BundleIndex
 
         var index = new BundleIndex
         {
-            Roots = roots, Symbols = symbols, Builders = builders, Shapes = shapes, Marks = marks, Events = events, Functions = functions,
+            Roots = roots, Symbols = symbols, Builders = builders, Formats = formats, Shapes = shapes, Marks = marks, Events = events, Functions = functions,
             Owners = owners, Shadowed = shadowed, Duplicates = duplicates,
             Installed = installed, InstalledRoot = installedRoot, UnsharedEvents = unshared,
         };
@@ -270,6 +280,7 @@ public sealed class BundleIndex
 
         var symbols = new List<QualifiedSymbol>();
         var builders = new Dictionary<string, BuilderDecl>(StringComparer.Ordinal);
+        var formats = new Dictionary<string, FormatDecl>(StringComparer.Ordinal);
         var shapes = new Dictionary<string, ShapeDecl>(StringComparer.Ordinal);
         var marks = new Dictionary<string, MarkDecl>(StringComparer.Ordinal);
         var unshared = new HashSet<string>(StringComparer.Ordinal);
@@ -299,7 +310,7 @@ public sealed class BundleIndex
                 {
                     string author = b.Author ?? "local";
                     owners.TryAdd($"{author}.{b.Name}", file);
-                    Collect(b.Members, author, b.Name, null, sources, symbols, builders, shapes, marks, events, functions);
+                    Collect(b.Members, author, b.Name, null, sources, symbols, builders, shapes, marks, events, functions, formats);
                     foreach (var p in b.Members.OfType<PublicatorDecl>())
                         foreach (var e in p.Members.OfType<EventDecl>().Where(e => !e.Shared))
                             unshared.Add($"{author}.{b.Name}.{e.Name}");
@@ -308,7 +319,7 @@ public sealed class BundleIndex
             catch { /* skip a malformed file rather than fail the whole index */ }
         }
 
-        var index = new FolderIndex(folder, Stamp(folder), symbols, builders, shapes, marks, events, functions, owners) { Unshared = unshared };
+        var index = new FolderIndex(folder, Stamp(folder), symbols, builders, shapes, marks, events, functions, owners) { Unshared = unshared, Formats = formats };
         _folders[folder] = index;
         return index;
     }
@@ -325,7 +336,8 @@ public sealed class BundleIndex
         Dictionary<string, ShapeDecl> shapes,
         Dictionary<string, MarkDecl> marks,
         Dictionary<string, EventDecl> events,
-        Dictionary<string, FuncDecl> functions)
+        Dictionary<string, FuncDecl> functions,
+        Dictionary<string, FormatDecl> formats)
     {
         string Key(string name) => pub is null ? $"{author}.{bundle}.{name}" : $"{author}.{bundle}.{pub}.{name}";
 
@@ -338,7 +350,7 @@ public sealed class BundleIndex
         {
             if (m is PublicatorDecl p)
             {
-                Collect(p.Members, author, bundle, p.Name, sources, symbols, builders, shapes, marks, events, functions);
+                Collect(p.Members, author, bundle, p.Name, sources, symbols, builders, shapes, marks, events, functions, formats);
                 continue;
             }
             if (!m.Shared) continue;
@@ -358,6 +370,10 @@ public sealed class BundleIndex
                 case EventDecl e:
                     events[Key(e.Name)] = e;
                     symbols.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Event, e.Name, Doc: e.Doc, At: At(e)));
+                    break;
+                case FormatDecl fm:
+                    formats[Key(fm.Name)] = fm;
+                    symbols.Add(new QualifiedSymbol(author, bundle, pub, SymbolKind.Format, fm.Name, Doc: fm.Doc, At: At(fm)));
                     break;
                 case BuilderDecl bl:
                     builders[Key(bl.Name)] = bl;

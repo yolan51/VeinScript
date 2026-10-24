@@ -118,13 +118,11 @@ public sealed class Resolve
             case IrOrdered o: Block(o.Collect); return;
             case IrOrderedBring ob: Expr(ob.Key); Block(ob.Body); return;
 
-            // `weave X from text else as why { … }` — `why` is the problem's text (D23).
+            // `weave X(text) as x` — `x` is the identity the one record became (D23).
             case IrWeave w:
                 Expr(w.Source);
                 Block(w.Record);
-                foreach (var f in w.FanOuts) { foreach (var a in f.Args) Expr(a); Block(f.Bring); }
-                if (w.ElseBind is not null) _locals[w.ElseBind] = IrTypeRef.Of("string");
-                if (w.Else is not null) Block(w.Else);
+                if (w.Bind is not null) _locals[w.Bind] = IrTypeRef.Of("Entity");
                 return;
 
             case IrMatch m:

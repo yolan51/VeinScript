@@ -49,11 +49,14 @@ public static class AstPrinter
                 break;
             case EnumDecl e: Line(sb, ind, $"enum {e.Name} {{ {string.Join(", ", e.Cases)} }}"); break;
             case BuilderDecl bl:
-                Line(sb, ind, tag($"builder {bl.Name}") + Doc(d));
+                Line(sb, ind, tag(bl.Loom is null ? $"builder {bl.Name}" : $"loom<{bl.Loom}> {bl.Name}") + Doc(d));
                 foreach (var m in bl.Members) Line(sb, ind + 1, SigMember(m));
-                if (bl.Weave is not null) Line(sb, ind + 1, $"weave as \"{bl.Weave.Pattern}\"");
-                foreach (var f in bl.FanOuts)
-                    Line(sb, ind + 1, $"weave {f.Hole} by \"{f.Separator}\" into {f.Child}({string.Join(", ", f.Args.Select(Ex))})");
+                break;
+            case FormatDecl fm:
+                Line(sb, ind, tag($"format {fm.Name}{(fm.Base is null ? "" : " from " + fm.Base)}") + Doc(d));
+                foreach (var l in fm.Lines)
+                    Line(sb, ind + 1, l.Columns is null ? $"{l.Word} \"{l.Text}\""
+                        : "columns " + string.Join(", ", l.Columns.Select(c => c.Optional ? $"[{c.Name}]" : c.Name)));
                 break;
             case FuncDecl fn:
                 Line(sb, ind, tag($"{(fn.IsPure ? "SF" : "fn")} {fn.Name}({string.Join(", ", fn.Params.Select(p => p.Name + ": " + Type(p.Type)))}) return {(fn.Return is null ? "void" : Type(fn.Return))}"));
@@ -131,8 +134,7 @@ public static class AstPrinter
             case ChanceStmt c: Line(sb, ind, $"chance {c.Probability:P0}"); PrintBlock(sb, c.Body, ind + 1); break;
             case BringStmt br: Line(sb, ind, $"bring {(br.Count is null ? "" : Ex(br.Count) + " ")}{br.Builder}({string.Join(", ", br.Args.Select(Ex).Append(br.FillRest ? "?" : null).Where(x => x is not null))})"); break;
             case WeaveStmt ws:
-                Line(sb, ind, $"weave {ws.Builder} from {Ex(ws.Source)}{(ws.Else is null ? "" : $" else as {ws.ElseBind}")}");
-                if (ws.Else is not null) PrintBlock(sb, ws.Else, ind + 1);
+                Line(sb, ind, $"weave {ws.Loom}({string.Join(", ", ws.Args.Select(Ex))}){(ws.Bind is null ? "" : " as " + ws.Bind)}");
                 break;
             case ExprStmt e: Line(sb, ind, Ex(e.Expr)); break;
         }

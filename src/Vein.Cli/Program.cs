@@ -12,7 +12,7 @@ if (args.Length > 0 && args[0] is "add" or "remove" or "restore" or "packages") 
 
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("usage: veinc <add|remove|restore|packages> …   or   veinc <new|check|lock|settings|test|tokens|ast|ir|render|serve|run|build|emit|graph|events|flow|scaffold|symbols|exec> <file.vein> [arg]");
+    Console.Error.WriteLine("usage: veinc <add|remove|restore|packages> …   or   veinc <new|check|lock|settings|test|tokens|ast|ir|render|serve|run|build|emit|graph|events|flow|formats|scaffold|symbols|exec> <file.vein> [arg]");
     return 2;
 }
 
@@ -429,6 +429,24 @@ switch (command)
         else
             Console.Write(flow.Render(includeStdlib: args.Contains("--all")));
         return flow.Problems.Count == 0 ? 0 : 1;
+    }
+
+    // `veinc formats` — every format the program can name (built in, Vein.Weaving, a needed bundle's, its own),
+    // with an example and the looms that use it: the data the Workbench's Formats tab shows (D23).
+    case "formats":
+    {
+        var catalog = FormatCatalog.For(path);
+        if (args.Contains("--json"))
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                program = catalog.Program,
+                formats = catalog.Formats.Select(f => new { f.Name, f.Group, f.File, f.Line, f.Base, f.Label, f.Example, f.Code, f.UsedBy, f.Editable }),
+                looms = catalog.Looms.Select(l => new { l.Name, l.Format, l.File, l.Line, Params = l.Params.Select(p => new { p.Name, p.Type, p.Element, p.HasDefault }) }),
+                catalog.Problems,
+            }, new JsonSerializerOptions { WriteIndented = true }));
+        else
+            Console.Write(catalog.Render());
+        return catalog.Problems.Count == 0 ? 0 : 1;
     }
 
     case "scaffold":

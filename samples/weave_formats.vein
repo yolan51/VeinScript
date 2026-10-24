@@ -1,0 +1,131 @@
+// samples/weave_formats.vein — every built-in format, and a handful of hand-made ones to copy (D23).
+//     veinc run samples/weave_formats.vein
+//
+// A FORMAT says how a record is written; a LOOM says what a record becomes; `weave Loom(text)` does it. Each
+// section below is one format reading one text. Copy the format you need — or open the Workbench's Formats
+// tab, paste your own text, and press "Infer from samples".
+//
+//   BUILT IN — nothing to declare:
+//     Json       each object of a top-level array (or the one object); fields by key
+//     Csv        a header line names the columns; "…" keeps a comma
+//     Ini        each [section] is a record named by its title; key = value lines
+//     KeyValue   values in parameter order, or name=value; a record per line or per ;
+//
+//   HAND-MADE — the words a format may say:
+//     records ";"   a record also ends here      name "="     the name is the text before this
+//     values ":"    the rest is cut here          pairs ":"    key:value fills the parameter it names
+//     lists "+"     a list<…> value is cut here   quotes "\""  a quoted value keeps separators
+//     comments "#"  such a record is skipped      delimiter    a Csv's cell separator (from Csv only)
+//     columns a, [b]   names the values in order, when that is not the parameters' order
+//
+// In a project each hand-made format is its own file, formats/<Name>.vein (`veinc new format <Name>` writes
+// one). Here they are inline, because a samples/formats/ folder would join every sample in this folder.
+//
+// Expected output:
+//
+//     Json: Rope x3 at 1.5
+//     Json: Lamp x1 at 0
+//     Csv: Torch, small x4 at 2.25
+//     Ini: Map x1 at 9
+//     KeyValue: Rag x2 at 0
+//     KeyValue: Coin x50 at 0.1
+//     ! SemiCsvItem: "Gem;lots;5": `qty`: "lots" is not a whole number
+//     SemiCsv: Bread x2 at 1.5
+//     S1 port 9811 near S2 S4
+//     S6 port 9816 near S5
+//     kick bob by ann for 10 min: spam, again
+//     Goblin hp 30 at 4,2
+//     GREETING = hello there
+//     PORT = 9811
+
+bundle WeaveFormats by you {
+
+    need "Vein.Console"
+
+    shape $Item    { name: string, qty: int, price: float = 0.0 }
+    shape $Node    { name: string, port: int, near: list<string> = [] }
+    shape $Kick    { kind: string, who: string, by: string, minutes: int, why: string }
+    shape $Mob     { name: string, hp: int, x: int = 0, y: int = 0 }
+    shape $Setting { key: string, value: string }
+
+    mark #FromJson
+    mark #FromCsv
+    mark #FromIni
+    mark #FromKeyValue
+    mark #FromSemi
+    mark #Woven
+
+    // ---- the built-ins ---------------------------------------------------------------------------------
+
+    loom<Json>     JsonItem     { $Item  mark #FromJson }
+    loom<Csv>      CsvItem      { $Item  mark #FromCsv }
+    loom<Ini>      IniItem      { $Item  mark #FromIni }
+    loom<KeyValue> KeyValueItem { $Item  mark #FromKeyValue }
+
+    // ---- hand-made formats -----------------------------------------------------------------------------
+
+    // Example:  Bread;2;1.5          — a Csv whose cells are cut at `;` (a spreadsheet with a decimal comma)
+    format SemiCsv from Csv {
+        delimiter ";"
+    }
+
+    // Example:  S1=9811:S2+S4; S6=9816:S5      — named records on one line
+    format NamedList {
+        records ";"
+        name "="
+        values ":"
+        lists "+"
+    }
+
+    // Example:  K|bob|ann|10|spam, again       — values cut at `|`, in parameter order
+    format Pipes {
+        values "|"
+    }
+
+    // Example:  Goblin hp:30 x:4 y:2           — words, and key:value pairs
+    format Colons {
+        pairs ":"
+    }
+
+    // Example:  GREETING="hello there"         — an .env file; `#` lines are skipped
+    format Env {
+        name "="
+        comments "#"
+        quotes "\""
+    }
+
+    loom<SemiCsv>   SemiCsvItem { $Item  mark #FromSemi }
+    loom<NamedList> Node        { $Node  mark #Woven }
+    loom<Pipes>     Kick        { $Kick  mark #Woven }
+    loom<Colons>    Mob         { $Mob  mark #Woven }
+    loom<Env>       Setting     { $Setting  mark #Woven }
+
+    shard Setup {
+        run once {
+            weave JsonItem("[{\"name\": \"Rope\", \"qty\": 3, \"price\": 1.5}, {\"name\": \"Lamp\", \"qty\": 1}]")
+            weave CsvItem("name,qty,price\n\"Torch, small\",4,2.25\n")
+            weave IniItem("[Map]\nqty = 1\nprice = 9\n; a comment\n")
+            weave KeyValueItem("Rag 2; Coin qty=50 price=0.1")
+            weave SemiCsvItem("name;qty;price\nBread;2;1.5\nGem;lots;5")
+            weave Node("S1=9811:S2+S4; S6=9816:S5")
+            weave Kick("K|bob|ann|10|spam, again")
+            weave Mob("Goblin hp:30 x:4 y:2")
+            weave Setting("# greeting shown at login\nGREETING=\"hello there\"\nPORT=9811")
+        }
+
+        hear @Unwoven as u { do print("! " + u.loom + ": " + u.why) }
+
+        // Each weave's records are queryable once its @Woven arrives.
+        hear @Woven as w {
+            if w.loom == "JsonItem" { target $Item #FromJson as i { do print("Json: " + i.Item.name + " x" + i.Item.qty + " at " + i.Item.price) } }
+            if w.loom == "CsvItem" { target $Item #FromCsv as i { do print("Csv: " + i.Item.name + " x" + i.Item.qty + " at " + i.Item.price) } }
+            if w.loom == "IniItem" { target $Item #FromIni as i { do print("Ini: " + i.Item.name + " x" + i.Item.qty + " at " + i.Item.price) } }
+            if w.loom == "KeyValueItem" { target $Item #FromKeyValue as i { do print("KeyValue: " + i.Item.name + " x" + i.Item.qty + " at " + i.Item.price) } }
+            if w.loom == "SemiCsvItem" { target $Item #FromSemi as i { do print("SemiCsv: " + i.Item.name + " x" + i.Item.qty + " at " + i.Item.price) } }
+            if w.loom == "Node" { target $Node as n { do print(n.Node.name + " port " + n.Node.port + " near " + join(n.Node.near, " ")) } }
+            if w.loom == "Kick" { target $Kick as k { do print("kick " + k.Kick.who + " by " + k.Kick.by + " for " + k.Kick.minutes + " min: " + k.Kick.why) } }
+            if w.loom == "Mob" { target $Mob as m { do print(m.Mob.name + " hp " + m.Mob.hp + " at " + m.Mob.x + "," + m.Mob.y) } }
+            if w.loom == "Setting" { target $Setting as s { do print(s.Setting.key + " = " + s.Setting.value) } }
+        }
+    }
+}

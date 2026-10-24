@@ -1,0 +1,5 @@
+// Example:  Rat	3	small
+// Tab-separated values: a Csv whose cells are cut at a tab. The first line names the columns.
+format Tsv from Csv {
+    delimiter "\t"
+}

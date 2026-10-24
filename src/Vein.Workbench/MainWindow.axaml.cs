@@ -69,6 +69,7 @@ public partial class MainWindow : Window
     private SymbolsPanel _symbolsPanel = null!;
     private TunePanel _tunePanel = null!;
     private EventFlowPanel _flowPanel = null!;
+    private FormatsPanel _formatsPanel = null!;
     private ScrollViewer _execPanel = null!;
     private Grid _topCols = null!;
     private Grid _mainRows = null!;
@@ -140,6 +141,7 @@ public partial class MainWindow : Window
     private const int TabPreview = 11;
     private const int TabTune = 12;
     private const int TabFlow = 13;
+    private const int TabFormats = 14;
 
     private ComboBox _runConfigs = null!;
     private TextBlock _runHint = null!;
@@ -175,6 +177,8 @@ public partial class MainWindow : Window
         _tunePanel.Navigate = (file, line) => GoTo(file, line, 1);
         _flowPanel = this.FindControl<EventFlowPanel>("Flow")!;
         _flowPanel.Navigate = (file, line) => GoTo(file, line, 1);
+        _formatsPanel = this.FindControl<FormatsPanel>("Formats")!;
+        _formatsPanel.Navigate = (file, line) => GoTo(file, line, 1);
         _execPanel = this.FindControl<ScrollViewer>("ExecPanel")!;
         _topCols = this.FindControl<Grid>("TopCols")!;
         _mainRows = this.FindControl<Grid>("MainRows")!;
@@ -187,6 +191,7 @@ public partial class MainWindow : Window
             if (_bottomPanel.SelectedIndex == TabSymbols) _symbolsPanel.Update(_rootFolder, _currentPath);
             if (_bottomPanel.SelectedIndex == TabTune) _tunePanel.Update(RunPath);
             if (_bottomPanel.SelectedIndex == TabFlow) _flowPanel.Update(RunPath);
+            if (_bottomPanel.SelectedIndex == TabFormats) _formatsPanel.Update(RunPath);
         };
         _statusBar = this.FindControl<TextBlock>("StatusBar")!;
         _bundleInspector = this.FindControl<Border>("BundleInspector")!;
@@ -1802,6 +1807,7 @@ public partial class MainWindow : Window
 
             // The map is read from disk, so a save — of any bundle the app links — is when it can change.
             if (_bottomPanel.SelectedIndex == TabFlow) _flowPanel.Update(RunPath);
+            if (_bottomPanel.SelectedIndex == TabFormats) _formatsPanel.Update(RunPath);
 
             // Live reload. `veinc serve` reads the file once at boot and the runtime has no reload path
             // to ask for, so the honest implementation is a restart — and only of a serve that is
@@ -3715,6 +3721,30 @@ public partial class MainWindow : Window
         _hoverScope = _hoverAst is null ? null : Signatures.For(_hoverAst, ProjectDir);
     }
 
+    /// `loom<MeshList>` / `format X from MeshList`: the format named, as code — this file's own, a needed
+    /// bundle's (the index), or a built-in's one-line description. Null anywhere else.
+    private string? FormatHover(string text, int start, string word)
+    {
+        string before = text[..start].TrimEnd();
+        int dot = before.Length;
+        while (dot > 0 && (char.IsLetterOrDigit(before[dot - 1]) || before[dot - 1] is '.' or '*' or '_')) dot--;   // `*Vein.Weaving.`
+        string head = before[..dot].TrimEnd();
+        if (!head.EndsWith("loom<", StringComparison.Ordinal) && !head.EndsWith(" from", StringComparison.Ordinal)) return null;
+        if (head.EndsWith(" from", StringComparison.Ordinal) && !System.Text.RegularExpressions.Regex.IsMatch(head, @"format\s+\w+\s+from$")) return null;
+
+        if (FormatCatalog.DescribeBuiltIn(word) is { } builtIn) return builtIn;
+        IEnumerable<Decl> All(IEnumerable<Decl> ms) => ms.SelectMany(m => m is PublicatorDecl p ? All(p.Members) : new[] { m });
+        if (_hoverAst!.Bundles.SelectMany(b => All(b.Members)).OfType<FormatDecl>().FirstOrDefault(f => f.Name == word) is { } local)
+            return FormatCatalog.Code(local).TrimEnd();
+        try
+        {
+            if (BundleIndex.For(ProjectDir).Formats.FirstOrDefault(kv => kv.Value.Name == word) is { Value: { } shared } hit)
+                return $"{FormatCatalog.Code(shared).TrimEnd()}\n— from {hit.Key[..hit.Key.LastIndexOf('.')]}";
+        }
+        catch { }
+        return null;
+    }
+
     private string? ResolveHover(int offset)
     {
         string text = _editor.Text;
@@ -3722,6 +3752,9 @@ public partial class MainWindow : Window
         if (word is null) return null;
         EnsureHoverModel();
         if (_hoverModel is null || _hoverAst is null) return null;
+
+        // D23: the name in `loom<MeshList>`, or after `from` in a format — show the format itself, as code.
+        if (FormatHover(text, start, word) is { } format) return format;
 
         // 0) Anything about a signature — a field in an `emit`/`attach` body, a slot in a `bring`, or an
         //    @Event / &Builder / $Shape itself — from ANY bundle, through the compiler's own lookup. What is

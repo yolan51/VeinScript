@@ -229,6 +229,8 @@ public sealed class Parser
             case TokenKind.KwSf: return ParseFunc();
             case TokenKind.KwFn: return ParseFunc();
             case TokenKind.KwBuilder: return ParseBuilder();
+            case TokenKind.KwLoom: return ParseLoom();       // D23
+            case TokenKind.KwFormat: return ParseFormat();   // D23
             case TokenKind.KwLet: return ParseVar(mutable: false);
             case TokenKind.KwVar: return ParseVar(mutable: true);
             case TokenKind.KwStart: return ParseStart();   // bundle-level boot event
@@ -361,10 +363,7 @@ public sealed class Parser
     {
         var s = Here; Advance();
         string name = Expect(TokenKind.EventRef, "@EventName").Text;
-        var members = ParseSigBody();
-        foreach (var w in members.Where(m => m is WeaveForm or WeaveFanOut))
-            _diag.Error("VS0365", $"Only a builder can be woven — @{name} is an event. Put `weave` in the builder that brings it.", w.Span);
-        return new EventDecl(name, members.Where(m => m is not (WeaveForm or WeaveFanOut)).ToList(), s);
+        return new EventDecl(name, ParseSigBody(), s);
     }
 
     /// The shared `{ members }` body of an event/builder: fields, vars, and `$Shape` includes,
@@ -376,7 +375,7 @@ public sealed class Parser
         SkipTerms();
         while (!Check(TokenKind.RBrace) && !AtEnd)
         {
-            members.Add(ParseSigMember());
+            if (ParseSigMember() is { } member) members.Add(member);
             Match(TokenKind.Comma);
             SkipTerms();
         }
@@ -384,11 +383,18 @@ public sealed class Parser
         return members;
     }
 
-    private Node ParseSigMember()
+    private Node? ParseSigMember()
     {
         var s = Here;
-        // D23: how this builder's records are written as text. Lifted out of the members by ParseBuilder.
-        if (Check(TokenKind.KwWeave)) return ParseWeaveMember();
+        // a310032 wrote the text syntax INSIDE a builder (`weave as "…"`, `weave h by "+" into …`). It moved
+        // out: the syntax is a `format`, the shapes a `loom<Format>` (D23). Read the line, say where it went.
+        if (Check(TokenKind.KwWeave))
+        {
+            _diag.Error("VS0369", "`weave` inside a builder is the old spelling. Move the text syntax to a `format Name { … }` " +
+                "(a file formats/<Name>.vein) and the shapes to a `loom<Name> X { … }` — then `weave X(text)`.", s);
+            SkipRestOfMember();
+            return null;
+        }
         // `mark #A #B` — the marks the identity this builder builds will wear. No target: inside a
         // template the target is the identity being built. Its presence is also what tells `bring` this
         // builder constructs an identity rather than emitting a fragment or an event.
@@ -621,39 +627,78 @@ public sealed class Parser
         // VARIANT: it takes the base's members and fixes some of its parameters by name.
         string name = Expect(TokenKind.Ident, "builder name").Text;
         string? bass = Match(TokenKind.KwFrom) ? Expect(TokenKind.Ident, "base builder name").Text : null;
-
-        // `weave as "…"` and `weave h by "+" into …` are read by the same member loop, then lifted out:
-        // they say how the parameters are WRITTEN, and are not parameters themselves (D23).
-        var members = ParseSigBody();
-        var forms = members.OfType<WeaveForm>().ToList();
-        foreach (var extra in forms.Skip(1))
-            _diag.Error("VS0366", $"Builder '{name}' already says how it is woven — a builder has one `weave as` form.", extra.Span);
-        return new BuilderDecl(name, members.Where(m => m is not (WeaveForm or WeaveFanOut)).ToList(), s)
-        {
-            Base = bass,
-            Weave = forms.FirstOrDefault(),
-            FanOuts = members.OfType<WeaveFanOut>().ToList(),
-        };
+        return new BuilderDecl(name, ParseSigBody(), s) { Base = bass };
     }
 
-    /// `weave as "<pattern>"` or `weave <hole> by "<sep>" into Child(args)` inside a builder (D23).
-    private Node ParseWeaveMember()
+    /// `loom<Format> Name { members }` (D23) — a builder's body, and a format its records are written in.
+    /// It is a BuilderDecl with `Loom` set, so everything that knows builders knows looms.
+    private BuilderDecl ParseLoom()
     {
         var s = Here; Advance();
-        if (Match(TokenKind.KwAs))
-            return new WeaveForm(Expect(TokenKind.String, "a quoted pattern after `weave as`").Value as string ?? "", s);
+        Expect(TokenKind.Lt, "'<' and the format this loom reads (`loom<Csv> Item { … }`)");
+        var (format, path) = ParseFormatRef();
+        Expect(TokenKind.Gt, "'>'");
+        string name = Expect(TokenKind.Ident, "loom name").Text;
+        return new BuilderDecl(name, ParseSigBody(), s) { Loom = format, LoomPath = path };
+    }
 
-        string hole = ExpectName("a hole name, or `as`, after `weave`").Text;
-        Expect(TokenKind.KwBy, "`by` and a quoted separator");
-        string sep = Expect(TokenKind.String, "a quoted separator after `by`").Value as string ?? "";
-        ExpectContextual("into");
-        var (child, path) = ParseBuilderRef();
-        var args = new List<Expr>();
-        Expect(TokenKind.LParen, "'('");
-        if (!Check(TokenKind.RParen))
-            do args.Add(ParseExpr()); while (Match(TokenKind.Comma));
-        Expect(TokenKind.RParen, "')'");
-        return new WeaveFanOut(hole, sep, child, args, s) { ChildPath = path };
+    /// `format Name [from Base] { word "text" … columns a, [b] }` (D23). Lines are separated by newlines or
+    /// commas; which words exist, and what they need, is checked where it lowers (VS0366).
+    private FormatDecl ParseFormat()
+    {
+        var s = Here; Advance();
+        string name = Expect(TokenKind.Ident, "format name").Text;
+        string? bass = null;
+        IReadOnlyList<string> basePath = Array.Empty<string>();
+        if (Match(TokenKind.KwFrom)) (bass, basePath) = ParseFormatRef();
+
+        Expect(TokenKind.LBrace, "'{'");
+        var lines = new List<FormatLine>();
+        SkipTerms();
+        while (!Check(TokenKind.RBrace) && !AtEnd)
+        {
+            var at = Here;
+            string word = ExpectName("a format word (records, name, values, pairs, lists, quotes, delimiter, comments, columns)").Text;
+            if (word == "columns")
+            {
+                var columns = new List<(string, bool)>();
+                do
+                {
+                    bool optional = Match(TokenKind.LBracket);
+                    columns.Add((ExpectName("a column name").Text, optional));
+                    if (optional) Expect(TokenKind.RBracket, "']'");
+                } while (Match(TokenKind.Comma));
+                lines.Add(new FormatLine(word, null, columns, at));
+            }
+            else
+                lines.Add(new FormatLine(word, Expect(TokenKind.String, $"a quoted text after `{word}`").Value as string ?? "", null, at));
+            Match(TokenKind.Comma);
+            SkipTerms();
+        }
+        Expect(TokenKind.RBrace, "'}'");
+        return new FormatDecl(name, bass, lines, s) { BasePath = basePath };
+    }
+
+    /// A format reference: bare `Csv`, or qualified `*Vein.Formats.Tsv` (the last segment is the name).
+    private (string Name, IReadOnlyList<string> Path) ParseFormatRef()
+    {
+        if (!Match(TokenKind.Star)) return (Expect(TokenKind.Ident, "a format name").Text, Array.Empty<string>());
+        var parts = new List<string> { ExpectName("qualified path after '*'").Text };
+        while (Match(TokenKind.Dot)) parts.Add(ExpectName("path segment or format name").Text);
+        return (parts[^1], parts.Take(parts.Count - 1).ToList());
+    }
+
+    /// Skips the rest of a member line — up to the end of the line or the body's `}` — keeping parentheses
+    /// balanced, so an old-spelling line costs one diagnostic and not a cascade.
+    private void SkipRestOfMember()
+    {
+        int depth = 0;
+        while (!AtEnd && !(depth == 0 && (Check(TokenKind.Term) || Check(TokenKind.RBrace))))
+        {
+            if (Check(TokenKind.LParen)) depth++;
+            if (Check(TokenKind.RParen)) depth--;
+            Advance();
+        }
     }
 
     /// A builder reference: bare `Name`, sigil'd `&Name`, or qualified `*Author.Bundle.Publicator.&Name`.
@@ -674,23 +719,37 @@ public sealed class Parser
         return (Expect(TokenKind.Ident, "builder name").Text, Array.Empty<string>());
     }
 
-    /// `weave Server from text [else as why { … }]` (D23). `else` on the same line as the text, as
-    /// everywhere (RULES 2b).
-    private WeaveStmt ParseWeave()
+    /// `weave Server(text) [as s]` (D23) — written like a `bring`, with the text as its argument.
+    ///
+    /// The a310032 spelling (`weave Server from text else as why { … }`) is read so it can be reported
+    /// with the new one named (VS0369), and is not kept.
+    private Stmt ParseWeave()
     {
         var s = Here; Advance();
         var (name, path) = ParseBuilderRef();
-        Expect(TokenKind.KwFrom, "`from` and the text to weave");
-        var source = ParseExpr();
-        string? why = null;
-        Block? els = null;
-        if (Match(TokenKind.KwElse))
+
+        if (Check(TokenKind.KwFrom))
         {
-            Expect(TokenKind.KwAs, "`as` and a name for each problem (`else as why { … }`)");
-            why = ExpectName("a name for the problem").Text;
-            els = ParseBlock();
+            _diag.Error("VS0369", $"`weave {name} from …` is the old spelling — write `weave {name}(text)`, and hear @Unwoven for the problems.", s);
+            Advance();
+            ParseExpr();
+            if (Match(TokenKind.KwElse))
+            {
+                _diag.Error("VS0369", "`else as why { … }` after a weave is the old spelling — problems arrive as @Unwoven: " +
+                    "`hear @Unwoven as u { … u.why … }`.", s);
+                if (Match(TokenKind.KwAs)) ExpectName("a name");
+                ParseBlock();
+            }
+            return new ExprStmt(new LiteralExpr(null, LiteralKind.Int, s), s);
         }
-        return new WeaveStmt(name, source, why, els, s) { BuilderPath = path };
+
+        var args = new List<Expr>();
+        Expect(TokenKind.LParen, $"'(' and the text to weave (`weave {name}(text)`)");
+        if (!Check(TokenKind.RParen))
+            do args.Add(ParseExpr()); while (Match(TokenKind.Comma));
+        Expect(TokenKind.RParen, "')'");
+        string? bind = Match(TokenKind.KwAs) ? ExpectName("a name after 'as'").Text : null;
+        return new WeaveStmt(name, args, bind, s) { LoomPath = path };
     }
 
     private ViewDecl ParseView()

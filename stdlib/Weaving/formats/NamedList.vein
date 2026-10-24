@@ -1,0 +1,9 @@
+// Example:  S1=9811:S2+S4; S6=box.lan:9816:S5+S2
+// Named records on one line: `;` between records, the name before `=`, values cut at `:`, a list cut at
+// `+`. An optional value is placed by type, so `box.lan` above finds the host and `9816` the port.
+format NamedList {
+    records ";"
+    name "="
+    values ":"
+    lists "+"
+}

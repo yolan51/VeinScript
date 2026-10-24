@@ -1,0 +1,5 @@
+// Example:  Goblin hp:30 x:4 y:2
+// Words with `name:value` pairs: a pair fills the parameter it names, the rest go in order.
+format Colons {
+    pairs ":"
+}

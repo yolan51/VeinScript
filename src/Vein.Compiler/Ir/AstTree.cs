@@ -52,7 +52,9 @@ public sealed class AstTree
         ShardDecl sh => WithAttrs(Node("Shard", sh.Name, sh.Span, sh.Members.Select(Member)), Carries(sh.CarriedShapes, sh.CarriedMarks)),
         ViewDecl vw => WithAttrs(Node("ShardView", vw.Name, vw.Span, vw.Members.Select(Member)), Carries(vw.CarriedShapes, vw.CarriedMarks)),
         BridgeDecl br => WithAttrs(Node("Bridge", br.Name, br.Span, br.Members.Select(Member)), Carries(br.CarriedShapes, br.CarriedMarks)),
-        BuilderDecl bl => WithAttrs(Node("Builder", bl.Name, bl.Span, bl.Members.Select(SigMember).Concat(WeaveMembers(bl))), BuilderKind(bl)),
+        BuilderDecl { Loom: { } loom } lm => WithAttrs(Node("Loom", lm.Name, lm.Span, lm.Members.Select(SigMember)), ("format", loom)),
+        BuilderDecl bl => WithAttrs(Node("Builder", bl.Name, bl.Span, bl.Members.Select(SigMember)), BuilderKind(bl)),
+        FormatDecl fm => Format(fm),
         _ => Leaf(d.GetType().Name, "", d.Span)
     };
 
@@ -216,20 +218,16 @@ public sealed class AstTree
         return n;
     }
 
-    /// A builder's `weave as` form and fan-outs (D23), after its members. None for most builders, so their
-    /// golden trees are unchanged.
-    private IEnumerable<IrNode> WeaveMembers(BuilderDecl bl)
-    {
-        if (bl.Weave is not null) yield return Leaf("WeaveAs", Quote(bl.Weave.Pattern), bl.Weave.Span);
-        foreach (var f in bl.FanOuts)
-            yield return Node("WeaveFanOut", $"{f.Hole} by {Quote(f.Separator)} into {f.Child}", f.Span, f.Args.Select(ArgExpr));
-    }
+    /// `format Name [from Base] { … }` (D23): one leaf per line.
+    private IrNode Format(FormatDecl fm) =>
+        Node("Format", fm.Base is null ? fm.Name : $"{fm.Name} from {fm.Base}", fm.Span,
+            fm.Lines.Select(l => Leaf("Line", l.Columns is null ? $"{l.Word} {Quote(l.Text ?? "")}"
+                : "columns " + string.Join(", ", l.Columns.Select(c => c.Optional ? $"[{c.Name}]" : c.Name)), l.Span)));
 
     private IrNode Weave(WeaveStmt ws)
     {
-        var kids = new List<IrNode> { Wrapper("From", "", ws.Source) };
-        if (ws.Else is not null) kids.Add(Node("Else", $"as {ws.ElseBind}", ws.Else.Span, Block(ws.Else)));
-        return Node("Weave", ws.Builder, ws.Span, kids);
+        var n = Node("Weave", ws.Loom, ws.Span, ws.Args.Select(ArgExpr));
+        return ws.Bind is null ? n : WithAttrs(n, ("as", ws.Bind));
     }
 
     private IrNode Bring(BringStmt br)

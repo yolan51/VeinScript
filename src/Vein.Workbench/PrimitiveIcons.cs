@@ -68,6 +68,7 @@ internal static class PrimitiveIcons
         SymbolKind.Mark => "mark",
         SymbolKind.Event => "event",
         SymbolKind.Builder => "builder",
+        SymbolKind.Format => "import",       // D23: how text comes in
         SymbolKind.Shard or SymbolKind.ShardView => "shard",
         SymbolKind.Bridge => "bridge",
         SymbolKind.SF or SymbolKind.Fn => "function",

@@ -25,8 +25,11 @@ public static class BundleLoader
     public const string PublicatorsFolder = "publicators";
     public const string ShardsFolder = "shards";
 
+    /// `formats/<Name>.vein` — one `format` each, shared like an event and found through `need` (D23).
+    public const string FormatsFolder = "formats";
+
     /// The folders whose contents are fragments rather than standalone bundles.
-    public static readonly string[] FragmentFolders = { PublicatorsFolder, ShardsFolder };
+    public static readonly string[] FragmentFolders = { PublicatorsFolder, ShardsFolder, FormatsFolder };
 
     /// Parse `mainFile` and merge in every fragment beside it.
     ///
@@ -46,6 +49,7 @@ public static class BundleLoader
         var extra = new List<Decl>();
         extra.AddRange(Fragments(Path.Combine(dir, PublicatorsFolder), exported: true, editing, diag));
         extra.AddRange(Fragments(Path.Combine(dir, ShardsFolder), exported: false, editing, diag));
+        extra.AddRange(FormatFragments(Path.Combine(dir, FormatsFolder), editing, diag));
         if (extra.Count == 0) return unit;
 
         // FRAGMENTS EXTEND; THE MAIN FILE CLOSES. Member order is the order shards run in, and the
@@ -119,6 +123,7 @@ public static class BundleLoader
 
         files.AddRange(FragmentFiles(Path.Combine(dir, PublicatorsFolder)));
         files.AddRange(FragmentFiles(Path.Combine(dir, ShardsFolder)));
+        files.AddRange(FragmentFiles(Path.Combine(dir, FormatsFolder)));
         return files;
     }
 
@@ -151,6 +156,23 @@ public static class BundleLoader
                             .OrderBy(p => p, StringComparer.Ordinal).ToList();
         }
         catch { return new List<string>(); }
+    }
+
+    /// `formats/` (D23): each file one `format`, SHARED with no `shared("…")` line — the folder says it is
+    /// a public format, the way `publicators/` says its members are API. Anything else here is reported.
+    private static IEnumerable<Decl> FormatFragments(string folder, (string Path, string Source)? editing, DiagnosticBag diag)
+    {
+        foreach (var file in FragmentFiles(folder))
+        {
+            string? text = Text(file, editing);
+            if (text is null) continue;
+
+            foreach (var d in new Parser(new Lexer(text, Path.GetFileName(file), diag).Tokenize(), diag).ParseFragment(exported: true))
+            {
+                if (d is FormatDecl f) { yield return f with { Shared = true, Exported = true }; continue; }
+                diag.Error("VS0321", $"'{Describe(d)}' is not a format — {FormatsFolder}/ holds one `format Name {{ … }}` per file.", d.Span);
+            }
+        }
     }
 
     private static IEnumerable<Decl> Fragments(string folder, bool exported, (string Path, string Source)? editing, DiagnosticBag diag)
@@ -221,6 +243,9 @@ public static class BundleLoader
                     case MarkDecl mk: Check("#" + mk.Name, mk.Span); break;
                     case EventDecl e: Check("@" + e.Name, e.Span); break;
                     case BuilderDecl b: Check("&" + b.Name, b.Span); break;
+                    // A format shares the builders' name space: `loom<MeshList>` and `bring MeshList(…)` must
+                    // never wonder which of two things a name means.
+                    case FormatDecl fm: Check("&" + fm.Name, fm.Span); break;
                     case FuncDecl f: Check(f.Name + "()", f.Span); break;
                     case ShardDecl sh: Check("shard " + sh.Name, sh.Span); break;
                     case ViewDecl v: Check("view " + v.Name, v.Span); break;

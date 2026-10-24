@@ -175,7 +175,7 @@ public sealed class BundleModel
                 case ChanceStmt c: Block(c.Body); break;
                 case EmitStmt em: emits.Add(em.Event); break;
                 case BringStmt br: brings.Add(br.Builder); break;
-                case WeaveStmt ws: brings.Add(ws.Builder); if (ws.Else is not null) Block(ws.Else); break;
+                case WeaveStmt ws: brings.Add(ws.Loom); break;
             }
         }
         foreach (var n in members)

@@ -41,7 +41,7 @@ arm may sit on its own line — `ParseMatch` reads `else` explicitly — which i
 **3. A string literal is one line.** `\n \t \r \\ \"` are the escapes; a literal newline inside quotes is
 VS0003. To emit a multi-line string, use `\n` and wrap the source with trailing `+` per rule 1.
 
-**4. All 65 lexer keywords are reserved as EXPRESSIONS; most are still legal as field and member names.** `target` is a keyword,
+**4. All 67 lexer keywords are reserved as EXPRESSIONS; most are still legal as field and member names.** `target` is a keyword,
 so `builder Clock { target: string }` is a parse error — it was renamed to `id`. Check the map before
 choosing a name; do not count entries by line, because the table holds two per line.
 
@@ -105,35 +105,36 @@ arguments" is a default (`prefix: string = ""`); "the same thing with some argum
 the event it emits, a variant's base, an `ordered by` key and a `vein.lock` line, and each of those
 would have to say which one it means.
 
-**7e. `weave Builder from text` brings one identity per record — each one the `bring` you would write.**
-An identity template may say how its records are written, and how a record fans out into other identities
+**7e. `weave Loom(text)` brings one identity per record — each one the `bring` you would write.** A
+`format` says how a record is written, a `loom<Format>` (a builder's body) says what it becomes
 (SYNTAX-DECISIONS D23):
 
 ```
-builder Server {
-    $Server  mark #Listed
-    weave as "{name}=[{host}:]{port}[:{peers}]"      // {hole} [optional]; {{ }} [[ ]] are literal
-    weave peers by "+" into Peering(self, piece)     // one Peering per neighbour
-}
+format MeshList { records ";"  name "="  values ":"  lists "+" }     // formats/MeshList.vein
+shape $Server { name: string, host: string = "", port: int, peers: list<Entity> = [] }
+loom<MeshList> Server { $Server  mark #Listed }
 
-weave Server from "S1=9811:S2; S2=9812:S1" else as why { do print("! " + why) }
-     ==  bring Server("S1", 9811) as s1   bring Server("S2", 9812) as s2
-         bring Peering(s1, s2)            bring Peering(s2, s1)
+weave Server("S1=9811:S2; S2=9812:S1")
+     ==  bring Server("S1", "", 9811, [s2])   bring Server("S2", "", 9812, [s1])
 ```
 
-- **Holes are typed by their parameter**: `{port}` (int) matches only a whole number, which is what makes
-  `[{host}:]{port}` read `S1=9811` as a port. `{_}` reads text and drops it.
-- **No `weave as`: the standard notation**, a command line — values in parameter order, or `name=value`,
-  `"…"` around spaces (`weave Npc from "Goblin 30; Orc hp=50 x=9"`).
-- **Records** are cut at line ends and `;`. The FIRST parameter is the name a record is known by.
-- **Two passes**: every record is brought, then the fan-outs run — so `S1=9811:S4` may come before S4's
-  line. An `Entity` PARAMETER names a record already woven (here or by an earlier weave).
-- **A problem is a message**, never a skip in silence: `else as why` runs once per problem, or with no
-  `else` it is @DiagnosticRaised with the statement's line. The rest is woven anyway.
-- **Graph rules are the program's.** `S1` listing itself, or `S4` twice, is woven as written; with
-  identities the check is two `target`s (`samples/weave_topology.vein`). Many-of is identities, not a
-  list — see D23 for why.
-- Woven identities are queryable from the next event, as after any `bring` (rule 12). Interpreter-only.
+- **Four formats are built in** — Json, Csv, Ini, KeyValue — and `need "Vein.Weaving"` adds the official ones
+  (Tsv, Pipes, Env, Hosts, Colons, NamedList, …). A format of your own is a file `formats/<Name>.vein`
+  (`veinc new format <Name>`), shared like an event; `format Mine from Theirs { … }` changes one.
+- **The first parameter is the record's name.** A `list<Entity>` (or `Entity`) value is NAMES, resolved
+  across the whole text and earlier weaves — S1 may name S4 before S4's line, because every identity is
+  spawned before any is linked. An unknown name in a list is dropped, with one @Unwoven.
+- **Values are placed by type.** A parameter with a default may be missing; the trailing optional ones are
+  left out first, and the first arrangement in which every value converts wins — so `S6=box.lan:9816`
+  gives the host `box.lan`. A blank value takes the default; a last `list<…>` parameter takes every value
+  left over.
+- **Results are events, and @Woven means queryable.** Each record that cannot be woven is one
+  `@Unwoven { loom, record, why }`; the rest are woven anyway; then `@Woven { loom, count }`, handled after
+  the commit, when a `target` sees them. No hand-made "begin" event.
+- `weave Order(m.text) as o` binds the identity when the text holds exactly one record (else @Unwoven).
+- **Graph rules are the program's.** `S1` listing itself, or `S4` twice, is woven as written; check it in
+  `hear @Woven` (`samples/weave_topology.vein`). Interpreter-only. The Workbench's Formats tab dry-runs any
+  format against pasted text and infers one from samples.
 
 **8. A `$Shape` include is a COMPILE-TIME field expansion, and `bring` attaches nothing.** The include
 copies the shape's fields into the signature; it does not make the built thing carry the component. So:

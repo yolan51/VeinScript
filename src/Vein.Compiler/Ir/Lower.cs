@@ -16,6 +16,9 @@ public sealed partial class Lower
     private readonly DiagnosticBag _diag;
     private readonly SortedSet<string> _tags = new(StringComparer.Ordinal);
     private readonly Dictionary<string, BuilderDecl> _builders = new(StringComparer.Ordinal);
+
+    /// This bundle's formats (D23) — main file, publicators and `formats/` — by name.
+    private readonly Dictionary<string, FormatDecl> _formats = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<FieldDecl>> _shapeFields = new(StringComparer.Ordinal);
 
     /// The declarations behind `_shapeFields`, for tooling that shows a shape's doc as well as its fields.
@@ -204,6 +207,7 @@ public sealed partial class Lower
             switch (m)
             {
                 case BuilderDecl bd: _builders[bd.Name] = bd; break;
+                case FormatDecl fm: _formats[fm.Name] = fm; break;
                 case ShapeDecl s:
                     _shapeFields[s.Name] = s.Members.OfType<FieldDecl>().ToList();
                     _shapeDecls[s.Name] = s;
@@ -280,7 +284,8 @@ public sealed partial class Lower
             switch (m)
             {
                 case PublicatorDecl pub: foreach (var sub in pub.Members) LowerMember(sub); break;
-                case BuilderDecl bd: CheckWeave(bd); break;   // templates, not emitted to IR directly
+                case BuilderDecl bd: CheckLoom(bd); break;    // templates, not emitted to IR directly
+                case FormatDecl fm: CheckFormat(fm); break;   // D23: how text is read; nothing to emit
                 case ShapeDecl s: types.AddRange(LowerShape(s)); break;
                 case TypeDecl t: types.Add(LowerType(t)); break;
                 case EventDecl e: types.Add(LowerEvent(e)); break;
@@ -871,6 +876,9 @@ public sealed partial class Lower
     /// `bring Hero(…)` stops creating anything. Nothing would report it; the world would just be empty.
     private bool BuildsIdentity(BuilderDecl b, string? ownerKey)
     {
+        // A loom IS an identity template (D23): each record is one identity, whether or not it wears a
+        // mark — so `loom<Json> Npc { $Npc }` builds an Npc, it does not emit @Npc.
+        if (b.Loom is not null) return b.Members.Any(m => m is ShapeInclude or MarkMember);
         if (b.Members.OfType<MarkMember>().Any()) return true;
         foreach (var si in b.Members.OfType<ShapeInclude>())
             if (MarksOfShape(si.Shape, si.Path, ownerKey, si.Span).Count > 0) return true;
@@ -2388,7 +2396,9 @@ public sealed partial class Lower
 
         bool generated = br.Bind is null;
         string ent = br.Bind ?? ("__ent" + _identityDepth++);
-        stmts.Add(new IrLet(ent, null, new IrCall(new IrLocalRef("spawn"), Array.Empty<IrExpr>()), false));
+        // A woven record lands ON the identity its weave pre-spawned (D23), so a record further down the text
+        // could already be named by one above it; every other bring spawns here, as it always has.
+        stmts.Add(new IrLet(ent, null, _bringOnto ?? new IrCall(new IrLocalRef("spawn"), Array.Empty<IrExpr>()), false));
 
         int arg = 0;
         int member = 0;
@@ -2569,142 +2579,210 @@ public sealed partial class Lower
         return new IrOrderedBring(key, lowered as IrBlock ?? new IrBlock(new[] { lowered }));
     }
 
-    /// LowerBring with the ordering context suspended, so the bring itself lowers to a plain bring rather
-    /// than recursing back into LowerOrderedBring through any nested statement lowering it does.
-    // ---- weave (D23) ------------------------------------------------------------------------------------
+    // ---- weave · loom · format (D23) ---------------------------------------------------------------------
 
-    /// While a fan-out's arguments lower: `self` and `piece` → the locals the interpreter sets per piece.
-    private Dictionary<string, string>? _weaveNames;
+    /// While a loom's record lowers: the identity its bring lands ON (pre-spawned by the weave), in place
+    /// of a fresh `spawn()`. Null for every other bring.
+    private IrExpr? _bringOnto;
+
+    /// This bundle's looms and formats as checked — what tooling shows, resolved exactly as weaving will.
+    public IReadOnlyList<LoomInfo> Looms => _looms;
+    public IReadOnlyList<FormatInfo> Formats => _formatInfos;
+    private readonly List<LoomInfo> _looms = new();
+    private readonly List<FormatInfo> _formatInfos = new();
 
     /// The parameters a woven record supplies, in binding order — a bring's, less the ones a variant fixed.
     private List<(string Name, TypeRef? Type, Expr? Default, string? From)> WovenParams(BringTarget t) =>
         BringParams(t).Params.Where(p => t.Fixed is null || !t.Fixed.ContainsKey(p.Name)).ToList();
 
-    /// The `weave as` form compiled against what its holes may name — each parameter, by its type, and
-    /// each fan-out. Null with the reason when it cannot be read.
-    private static Weave.Form? CompileForm(BuilderDecl b, List<(string Name, TypeRef? Type, Expr? Default, string? From)> prms, out string? error)
+    private static WeaveParam ToWeaveParam((string Name, TypeRef? Type, Expr? Default, string? From) p) =>
+        new(p.Name, p.Type?.Name ?? "string", p.Default is not null, p.Type?.Args.FirstOrDefault()?.Name);
+
+    /// A format by name, seen from the bundle `ownerKey` belongs to (null: this one) — local, then built-in,
+    /// then `need`; a qualified `*A.B.Name` by its path. BuiltIn is true for Json/Csv/Ini/KeyValue.
+    private (FormatDecl? Decl, string? Key, bool BuiltIn)? ResolveFormat(
+        IReadOnlyList<string> path, string name, string? ownerKey, SourceSpan span, bool report = true)
+    {
+        if (path.Count > 0)
+        {
+            string refKey = RefKey(path, name);
+            foreach (var kv in Index.Formats)
+                if (kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal)) return (kv.Value, kv.Key, false);
+            return null;
+        }
+        if (ownerKey is null && _formats.TryGetValue(name, out var local)) return (local, null, false);
+        if (ownerKey is not null)
+        {
+            // A format the OWNING bundle shares — its `formats/` — before anything this bundle can see.
+            var parts = ownerKey.Split('.');
+            string prefix = parts.Length >= 2 ? parts[0] + "." + parts[1] + "." : ownerKey + ".";
+            foreach (var kv in Index.Formats)
+                if (kv.Key.StartsWith(prefix, StringComparison.Ordinal) && kv.Key.EndsWith("." + name, StringComparison.Ordinal))
+                    return (kv.Value, kv.Key, false);
+        }
+        if (Weave.BuiltIns.Contains(name)) return (null, null, true);
+        var used = ResolveUsed(Index.Formats, "format ", name, span, report);
+        return used is null ? null : (used.Value.Value, used.Value.Key, false);
+    }
+
+    /// `name` flattened through its `from` chain into what the reader needs: the built-in at its root (or ""
+    /// for a custom one) and the lines in force — a base's first, each `from` overriding. Null with the
+    /// reason and its code (VS0367 an unknown base, VS0366 a cycle) when it cannot be.
+    private WeaveFormat? FlattenFormat(string name, FormatDecl? decl, string? ownerKey, SourceSpan span, out string? error, out string code)
     {
         error = null;
-        if (b.Weave is null) return null;
-        var kinds = prms.GroupBy(p => p.Name, StringComparer.Ordinal)
-                        .ToDictionary(g => g.Key, g => g.First().Type?.Name ?? "string", StringComparer.Ordinal);
-        foreach (var f in b.FanOuts) kinds.TryAdd(f.Hole, Weave.FanOutKind);
-        return Weave.Compile(b.Weave.Pattern, h => kinds.GetValueOrDefault(h), out error);
+        code = "VS0366";
+        if (decl is null) return new WeaveFormat(name, name, new Dictionary<string, string>(StringComparer.Ordinal));
+
+        var chain = new List<FormatDecl>();
+        var seen = new HashSet<FormatDecl>(ReferenceEqualityComparer.Instance);
+        string root = "";
+        FormatDecl? cur = decl;
+        string? owner = ownerKey;
+        while (cur is not null)
+        {
+            if (!seen.Add(cur)) { error = $"`from` goes round in a circle through {cur.Name}"; return null; }
+            chain.Add(cur);
+            if (cur.Base is null) break;
+            if (ResolveFormat(cur.BasePath, cur.Base, owner, span, report: false) is not { } b)
+            {
+                error = $"no format '{cur.Base}' to start from — the built-ins are {string.Join(", ", Weave.BuiltIns)}";
+                code = "VS0367";
+                return null;
+            }
+            if (b.BuiltIn) { root = cur.Base; break; }
+            owner = b.Key ?? owner;
+            cur = b.Decl;
+        }
+
+        var lines = new Dictionary<string, string>(StringComparer.Ordinal);
+        IReadOnlyList<(string Name, bool Optional)>? columns = null;
+        foreach (var f in Enumerable.Reverse(chain))
+            foreach (var l in f.Lines)
+                if (l.Word == "columns") columns = l.Columns;
+                else if (l.Text is not null) lines[l.Word] = l.Text;
+        return new WeaveFormat(name, root, lines, columns);
     }
 
-    /// A builder that says how it is woven, checked where it is DECLARED — so a broken pattern is reported
-    /// even in a bundle that never weaves it, and once, not at every `weave`.
-    private void CheckWeave(BuilderDecl b)
+    /// A format, checked where it is DECLARED (so a broken one is reported once, used or not).
+    private void CheckFormat(FormatDecl f)
     {
-        if (b.Weave is null && b.FanOuts.Count == 0) return;
-        if (ResolveBringTarget(Array.Empty<string>(), b.Name, b.Span) is not { } target) return;
-
-        // Only an identity can be woven: a record IS an identity, named so others can point at it.
-        if (!BuildsIdentity(target.Decl, target.OwnerKey))
+        var said = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var l in f.Lines)
         {
-            _diag.Error("VS0365", $"Builder '{b.Name}' builds no identity, so it cannot be woven — `weave` brings one " +
-                "identity per record. Give it a `mark` member (RULES 7), or drop its `weave` lines.", (b.Weave?.Span ?? b.FanOuts[0].Span));
+            if (!Weave.Words.Contains(l.Word))
+                _diag.Error("VS0366", $"`{l.Word}` is not a format word — a format says {string.Join(", ", Weave.Words)}.", l.Span);
+            else if (!said.Add(l.Word))
+                _diag.Error("VS0366", $"`{l.Word}` is said twice in format {f.Name} — keep one.", l.Span);
+            else if (l.Word != "columns" && string.IsNullOrEmpty(l.Text))
+                _diag.Error("VS0366", $"`{l.Word} \"\"` says nothing — give it the text it is about.", l.Span);
+        }
+
+        var flat = FlattenFormat(f.Name, f, null, f.Span, out string? error, out string code);
+        _formatInfos.Add(new FormatInfo(f, flat));
+        if (flat is null)
+        {
+            _diag.Error(code, $"format {f.Name}: {error}.", f.Span);
             return;
         }
-
-        var prms = WovenParams(target);
-        var paramNames = prms.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
-        var holes = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var f in b.FanOuts)
-        {
-            if (paramNames.Contains(f.Hole))
-                _diag.Error("VS0367", $"`weave {f.Hole} by …`: '{f.Hole}' is a parameter of {b.Name}. A fan-out names text that " +
-                    "is cut into pieces, not a field — give the hole its own name.", f.Span);
-            else if (!holes.Add(f.Hole))
-                _diag.Error("VS0367", $"`weave {f.Hole} by …` is declared twice in {b.Name}.", f.Span);
-            if (f.Separator.Length == 0)
-                _diag.Error("VS0367", $"`weave {f.Hole} by \"\"`: an empty separator cuts nothing — say where the pieces part.", f.Span);
-            if (ResolveBringTarget(f.ChildPath, f.Child, f.Span) is null)
-                _diag.Error("VS0203", $"Unknown builder '{f.Child}' in `weave {f.Hole} by … into {f.Child}(…)`.", f.Span);
-        }
-
-        if (b.Weave is null) return;
-        var form = CompileForm(b, prms, out string? error);
-        if (form is null)
-        {
-            _diag.Error("VS0366", $"`weave as \"{b.Weave.Pattern}\"` cannot be read: {error}.", b.Weave.Span);
-            return;
-        }
-        foreach (var f in b.FanOuts.Where(f => !form.Holes.Contains(f.Hole)))
-            _diag.Warning("VS0368", $"`weave {f.Hole} by …` never brings anything: the form `{b.Weave.Pattern}` has no " +
-                $"`{{{f.Hole}}}` hole to fill it. Add one, or drop the fan-out.", f.Span);
+        if (flat.Line("delimiter") is not null && flat.Root != "Csv")
+            _diag.Error("VS0366", $"format {f.Name} says `delimiter`, which only a format `from Csv` has — " +
+                "a custom format cuts its values with `values`.", f.Lines.First(l => l.Word == "delimiter").Span);
     }
 
-    /// `weave Builder from text` → one IrWeave. Each record is the bring a person would write, lowered here
-    /// once with its arguments as locals: `bring Builder(__wv_p, …) as __wself`. The text is only read at
-    /// run time, so problems in it are messages then (`else as why`), never compile errors.
+    /// A loom, checked where it is declared: its format exists, it builds an identity, its columns name
+    /// its parameters.
+    private void CheckLoom(BuilderDecl b)
+    {
+        if (b.Loom is null) return;
+        if (!b.Members.Any(m => m is ShapeInclude or MarkMember))
+        {
+            _diag.Error("VS0365", $"loom<{b.Loom}> {b.Name} has no shape and no mark, so a record would bring nothing. " +
+                "Give it the shapes a record fills (`$Server`), as a builder has.", b.Span);
+            return;
+        }
+        if (ResolveFormat(b.LoomPath, b.Loom, null, b.Span) is not { } fr)
+        {
+            _diag.Error("VS0367", $"loom<{b.Loom}> {b.Name}: no format '{b.Loom}'. The built-ins are " +
+                $"{string.Join(", ", Weave.BuiltIns)}; a format of your own is a file formats/{b.Loom}.vein, " +
+                "or `need` the bundle that has it.", b.Span);
+            return;
+        }
+        var flat = FlattenFormat(b.Loom, fr.Decl, fr.Key, b.Span, out _, out _);
+        if (ResolveBringTarget(Array.Empty<string>(), b.Name, b.Span) is not { } target) return;
+        var prms = WovenParams(target);
+        _looms.Add(new LoomInfo(b.Name, b.Loom, flat, prms.Select(ToWeaveParam).ToList(), b.Span));
+
+        if (flat is not { Columns: { } columns }) return;
+        var names = prms.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+        foreach (var c in columns.Where(c => !names.Contains(c.Name)))
+            _diag.Warning("VS0368", $"format {b.Loom} has a column `{c.Name}`, and loom {b.Name} has no parameter of that " +
+                "name — its values will be read and dropped.", b.Span);
+    }
+
+    /// `weave Loom(text) [as x]` → one IrWeave. Each record is the bring a person would write, lowered here
+    /// once with its arguments as locals and ONTO a pre-spawned identity: `bring Loom(__wv_p, …) as
+    /// __wself`. The text is only read at run time, so problems in it are @Unwoven then, never compile errors.
     private IrStmt LowerWeave(WeaveStmt ws)
     {
-        var source = LowerExpr(ws.Source);
         var noop = new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
-        if (ResolveBringTarget(ws.BuilderPath, ws.Builder, ws.Span) is not { } target)
+        if (ws.Args.Count != 1)
         {
-            string reff = ws.BuilderPath.Count > 0 ? "*" + string.Join(".", ws.BuilderPath) + ".&" + ws.Builder : ws.Builder;
-            _diag.Error("VS0203", $"Unknown builder '{reff}'.", ws.Span);
+            _diag.Error("VS0370", $"`weave {ws.Loom}(…)` takes exactly one argument, the text — got {ws.Args.Count}.", ws.Span);
+            return noop;
+        }
+        var source = LowerExpr(ws.Args[0]);
+
+        if (ResolveBringTarget(ws.LoomPath, ws.Loom, ws.Span) is not { } target)
+        {
+            string reff = ws.LoomPath.Count > 0 ? "*" + string.Join(".", ws.LoomPath) + ".&" + ws.Loom : ws.Loom;
+            _diag.Error("VS0203", $"Unknown loom '{reff}'.", ws.Span);
             return noop;
         }
         var b = target.Decl;
-        if (!BuildsIdentity(b, target.OwnerKey))
+        if (b.Loom is null)
         {
-            _diag.Error("VS0365", $"`weave {ws.Builder} from …`: {ws.Builder} builds no identity, and `weave` brings one identity " +
-                "per record. Weave an identity template (a builder with a `mark` member, RULES 7).", ws.Span);
+            _diag.Error("VS0365", $"`weave {ws.Loom}(…)`: {ws.Loom} is a builder, and a builder is brought. To read it from " +
+                $"text, declare it `loom<Format> {ws.Loom} {{ … }}` — the same body, with the format its records are written in.", ws.Span);
+            return noop;
+        }
+
+        // A local loom's format was checked where it is declared; an imported one is reported here, the
+        // first place this bundle can see it.
+        bool imported = target.OwnerKey is not null;
+        if (ResolveFormat(b.LoomPath, b.Loom, target.OwnerKey, ws.Span, report: imported) is not { } fr)
+        {
+            if (imported) _diag.Error("VS0367", $"loom {ws.Loom}: no format '{b.Loom}' is in scope.", ws.Span);
+            return noop;
+        }
+        if (FlattenFormat(b.Loom, fr.Decl, fr.Key ?? target.OwnerKey, ws.Span, out string? error, out string code) is not { } format)
+        {
+            if (imported) _diag.Error(code, $"loom {ws.Loom}'s format {b.Loom}: {error}.", ws.Span);
             return noop;
         }
 
         var prms = WovenParams(target);
-        if (CompileForm(b, prms, out string? error) is null && b.Weave is not null)
-        {
-            // A local builder's form was reported where it is declared; an imported one is reported here,
-            // because this is the first place this bundle can see it.
-            if (target.OwnerKey is not null)
-                _diag.Error("VS0366", $"{ws.Builder}'s `weave as \"{b.Weave.Pattern}\"` cannot be read: {error}.", ws.Span);
-            return noop;
-        }
-
-        // The record: defaults for what was left out, then the bring itself.
         var record = new List<IrStmt>();
         foreach (var p in prms.Where(p => p.Default is not null))
             record.Add(new IrIf(new IrLocalRef("__wm_" + p.Name),
                 new IrBlock(new IrStmt[] { new IrAssign(new IrLocalRef("__wv_" + p.Name), LowerExpr(p.Default!)) }), null));
-        record.Add(LowerBringDirect(new BringStmt(null, ws.Builder,
-            prms.Select(p => (Expr)new NameExpr("__wv_" + p.Name, ws.Span)).ToList(), false, ws.Span)
-            { BuilderPath = ws.BuilderPath, Bind = "__wself" }));
 
-        // Each fan-out: its arguments (with `self`/`piece`) and the child's bring, arguments as locals.
-        var fanOuts = new List<IrWeaveFanOut>();
-        foreach (var f in b.FanOuts)
+        _bringOnto = new IrLocalRef("__wpre");
+        try
         {
-            if (ResolveBringTarget(f.ChildPath, f.Child, f.Span) is not { } child)
-            {
-                if (target.OwnerKey is not null) _diag.Error("VS0203", $"Unknown builder '{f.Child}' in {ws.Builder}'s `weave {f.Hole} … into`.", ws.Span);
-                continue;
-            }
-            var childParams = WovenParams(child);
-            var argTypes = f.Args.Select((_, i) => i < childParams.Count ? childParams[i].Type?.Name ?? "string" : "string").ToList();
-
-            List<IrExpr> args;
-            _weaveNames = new Dictionary<string, string>(StringComparer.Ordinal) { ["self"] = "__wself", ["piece"] = "__wpiece" };
-            try { args = f.Args.Select(LowerExpr).ToList(); }
-            finally { _weaveNames = null; }
-
-            var bring = LowerBringDirect(new BringStmt(null, f.Child,
-                f.Args.Select((_, i) => (Expr)new NameExpr("__wa" + i, f.Span)).ToList(), false, f.Span) { BuilderPath = f.ChildPath });
-            fanOuts.Add(new IrWeaveFanOut(f.Hole, f.Separator, args, argTypes,
-                bring as IrBlock ?? new IrBlock(new[] { bring })));
+            record.Add(LowerBringDirect(new BringStmt(null, ws.Loom,
+                prms.Select(p => (Expr)new NameExpr("__wv_" + p.Name, ws.Span)).ToList(), false, ws.Span)
+                { BuilderPath = ws.LoomPath, Bind = "__wself" }));
         }
+        finally { _bringOnto = null; }
 
-        return new IrWeave(ws.Builder, source, b.Weave?.Pattern,
-            prms.Select(p => new IrWeaveParam(p.Name, p.Type?.Name ?? "string", p.Default is not null)).ToList(),
-            fanOuts, new IrBlock(record, Transparent: true),
-            ws.ElseBind, ws.Else is null ? null : LowerBlock(ws.Else),
+        return new IrWeave(ws.Loom, source, format, prms.Select(ToWeaveParam).ToList(),
+            new IrBlock(record, Transparent: true), ws.Bind,
             System.IO.Path.GetFileName(ws.Span.File), ws.Span.Line);
     }
 
+    /// LowerBring with the ordering context suspended, so the bring itself lowers to a plain bring rather
+    /// than recursing back into LowerOrderedBring through any nested statement lowering it does.
     private IrStmt LowerBringDirect(BringStmt br)
     {
         var prev = _ordering;
@@ -2961,9 +3039,6 @@ public sealed partial class Lower
                 return new IrLiteral(l.Value, MapLit(l.Kind));
             // The name bound by the enclosing `target … as <bind>` IS the identity, not an ordinary local —
             // that is what makes `self.Health.hp -= 1` a fold contribution rather than a plain assignment.
-            // `self` and `piece` in a `weave … into Child(self, piece)` fan-out — first, so an enclosing
-            // `target … as self` cannot capture them (D23).
-            case NameExpr n when _weaveNames is not null && _weaveNames.TryGetValue(n.Name, out var woven): return new IrLocalRef(woven);
             case NameExpr n when IsTargetBind(n.Name): return new IrSelfRef(n.Name);
             case NameExpr n: return new IrLocalRef(n.Name);
             case EntityExpr: return new IrEntityRef();

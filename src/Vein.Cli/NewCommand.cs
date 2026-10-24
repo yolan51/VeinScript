@@ -9,7 +9,7 @@ internal static class NewCommand
     {
         if (args.Length < 3)
         {
-            Console.Error.WriteLine("usage: veinc new <bundle|app|scratch> <Name> [--author <A>] [-o <parentDir>] [--workload <cli|chat|site|site-bundles>]");
+            Console.Error.WriteLine("usage: veinc new <bundle|app|scratch|format> <Name> [--author <A>] [-o <parentDir>] [--workload <cli|chat|site|site-bundles>]");
             return 2;
         }
 
@@ -61,8 +61,30 @@ internal static class NewCommand
                         Console.Error.WriteLine($"  packages: {string.Join(", ", packages.Select(p => p.Id))} (veinc restore if the feed lacked them)");
                     return 0;
                 }
+                case "format":
+                {
+                    // D23: a format is one file, formats/<Name>.vein, beside the bundle it belongs to. Every
+                    // line of the vocabulary is written out commented, so the file teaches itself.
+                    if (name.Length == 0 || !(char.IsLetter(name[0]) || name[0] == '_') || !name.All(c => char.IsLetterOrDigit(c) || c == '_'))
+                    {
+                        Console.Error.WriteLine($"'{name}' is not a format name — letters, digits and _, starting with a letter.");
+                        return 2;
+                    }
+                    string folder = Path.Combine(parentDir, BundleLoader.FormatsFolder);
+                    string file = Path.Combine(folder, name + ".vein");
+                    if (File.Exists(file))
+                    {
+                        Console.Error.WriteLine($"{file} already exists — not overwritten.");
+                        return 1;
+                    }
+                    Directory.CreateDirectory(folder);
+                    File.WriteAllText(file, Vein.Compiler.Tooling.FormatCatalog.Template(name));
+                    Console.Error.WriteLine($"created format {name} at {file}");
+                    Console.Error.WriteLine($"  use it:  loom<{name}> X {{ $Shape }}   then   weave X(text)");
+                    return 0;
+                }
                 default:
-                    Console.Error.WriteLine($"unknown kind '{kind}' (expected 'bundle', 'app' or 'scratch').");
+                    Console.Error.WriteLine($"unknown kind '{kind}' (expected 'bundle', 'app', 'scratch' or 'format').");
                     return 2;
             }
         }

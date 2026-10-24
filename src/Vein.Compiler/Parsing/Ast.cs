@@ -118,31 +118,27 @@ public sealed record BuilderDecl(string Name, IReadOnlyList<Node> Members, Sourc
     /// its own. Null for an ordinary builder.
     public string? Base { get; init; }
 
-    /// `weave as "{name}=[{host}:]{port}"` — how a record of this builder is written as text (D23). Null
-    /// when the builder has none, and `weave X from …` then reads the standard notation: the values in
-    /// parameter order, or `param=value`.
-    ///
-    /// A PROPERTY, not a member. Members are the builder's SIGNATURE, and everything that walks them —
-    /// arity, `?`, scaffold, vein.lock — would otherwise have to learn to skip a thing that is not a
-    /// parameter. A weave form says how to WRITE the parameters; it is not one of them.
-    public WeaveForm? Weave { get; init; }
+    /// `loom<MeshList> Server { … }` — the format this LOOM's records are written in (D23); null for an
+    /// ordinary builder. A loom is an identity template whose records can also be READ, so it is a builder
+    /// in every other respect: `bring Server(…)` brings one, and everything that knows builders — `need`,
+    /// `shared`, arity, `?`, vein.lock, VS0320 — knows looms without being taught.
+    public string? Loom { get; init; }
 
-    /// `weave peers by "+" into Peering(self, piece)` — each fan-out a record of this builder makes.
-    public IReadOnlyList<WeaveFanOut> FanOuts { get; init; } = Array.Empty<WeaveFanOut>();
+    /// `loom<*Vein.Formats.Tsv> …` — the qualifier on the loom's format; empty for a bare name.
+    public IReadOnlyList<string> LoomPath { get; init; } = Array.Empty<string>();
 }
 
-/// `weave as "<pattern>"` inside a builder (D23). `{param}` is a hole, `{_}` a hole that is read and
-/// dropped, `[ … ]` an optional part; `{{ }} [[ ]]` are literal.
-public sealed record WeaveForm(string Pattern, SourceSpan Span) : Node(Span);
-
-/// `weave peers by "+" into Peering(self, piece)` inside a builder (D23): the hole `peers` is not a
-/// parameter; it is cut at `+`, and each non-blank piece brings `Peering`. `self` is the identity the
-/// record wove and `piece` the piece; an `Entity` parameter given text takes the record of that name.
-public sealed record WeaveFanOut(string Hole, string Separator, string Child, IReadOnlyList<Expr> Args, SourceSpan Span) : Node(Span)
+/// `format MeshList [from Base] { records ";"  name "="  values ":"  lists "+" … }` (D23): how a record
+/// of text is written. Every line is optional; `from` inherits the base's lines and these override them.
+/// A file `formats/<Name>.vein` holds one, and is shared like an event — found through `need`.
+public sealed record FormatDecl(string Name, string? Base, IReadOnlyList<FormatLine> Lines, SourceSpan Span) : Decl(Span)
 {
-    /// `into *Author.Bundle.Publicator.&Child(…)` — empty for a builder resolved here.
-    public IReadOnlyList<string> ChildPath { get; init; } = Array.Empty<string>();
+    /// `format X from *Vein.Formats.Tsv { … }` — the qualifier on the base; empty for a bare name.
+    public IReadOnlyList<string> BasePath { get; init; } = Array.Empty<string>();
 }
+
+/// One line of a format: `word "text"`, or `columns a, [b], c` (bare names; `[b]` may be missing).
+public sealed record FormatLine(string Word, string? Text, IReadOnlyList<(string Name, bool Optional)>? Columns, SourceSpan Span) : Node(Span);
 
 // A field or var. Type is null when inferred (`x = 5`). Default set ⇒ optional; null ⇒ required.
 // `Fold` applies only to shape fields. In a builder, a field named markup/code/css is the output.
@@ -329,13 +325,13 @@ public sealed record OrderedStmt(string Key, IReadOnlyList<Stmt> Body, SourceSpa
     public string? Shape { get; init; }
 }
 
-/// `weave Server from text [else as why { … }]` (D23): every record in `text` is brought as
-/// `bring Server(…)` would bring it. Problems — a record that fits no form, a number that is not one, a
-/// name no record has — run `else` once each with `why` bound, or are raised as @DiagnosticRaised.
-public sealed record WeaveStmt(string Builder, Expr Source, string? ElseBind, Block? Else, SourceSpan Span) : Stmt(Span)
+/// `weave Server(text) [as s]` (D23): every record in `text` is brought as `bring Server(…)` would bring
+/// it, `Server` being a `loom<Format>`. Problems arrive as @Unwoven, and @Woven says when the identities
+/// are queryable. `Args` holds what was written — exactly one is right (VS0370), checked where it lowers.
+public sealed record WeaveStmt(string Loom, IReadOnlyList<Expr> Args, string? Bind, SourceSpan Span) : Stmt(Span)
 {
-    /// `weave *Author.Bundle.Publicator.&Server from …` — empty for a builder resolved here.
-    public IReadOnlyList<string> BuilderPath { get; init; } = Array.Empty<string>();
+    /// `weave *Author.Bundle.Publicator.&Server(…)` — empty for a loom resolved here.
+    public IReadOnlyList<string> LoomPath { get; init; } = Array.Empty<string>();
 }
 
 public sealed record BringStmt(Expr? Count, string Builder, IReadOnlyList<Expr> Args, bool FillRest, SourceSpan Span) : Stmt(Span)

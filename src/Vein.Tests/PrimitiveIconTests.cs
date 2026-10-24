@@ -102,6 +102,7 @@ public class PrimitiveIconTests
         SymbolKind.Mark => "mark",
         SymbolKind.Event => "event",
         SymbolKind.Builder => "builder",
+        SymbolKind.Format => "import",
         SymbolKind.Shard or SymbolKind.ShardView => "shard",
         SymbolKind.Bridge => "bridge",
         SymbolKind.SF or SymbolKind.Fn => "function",

@@ -258,6 +258,29 @@ and out of it. Click to pin the highlight, double-click to open the source; drag
 the floor, wheel to zoom, F to fit. It reads the run entry from disk, when the tab is shown and on save.
 `samples/event_flow` is its fixture: seven bundles, a turn loop, an audience, an SF and two dead ends.
 
+## `veinc formats <file> [--json]` and `veinc new format <Name>` — the Workbench's Formats tab
+
+`weave Loom(text)` reads text through a `format` (D23). `veinc formats` lists every format the program can
+name, grouped by where it comes from — Built-in (Json, Csv, Ini, KeyValue), Vein.Weaving, each needed
+bundle's `formats/`, and the program's own — each with its example line, its base, and the looms that use
+it; then the program's looms with their parameters. `veinc new format <Name> [-o dir]` writes
+`formats/<Name>.vein` with every line of the vocabulary written out commented, and refuses to overwrite.
+
+The **Formats** tab shows the same catalog, and keeps two rules the rest of the Workbench keeps:
+
+- **A format is code.** The selected format is shown in an editor in the language's colours — editable when
+  it is this program's own `formats/<Name>.vein` (Save writes it).
+- **What it reads is shown as the `bring` each record becomes.** Pick a loom, paste a few records, and each
+  line reads `S1=9811:S2+S4  →  bring Server("S1", base, 9811, [S2, S4])`, or the problem exactly as
+  @Unwoven will say it. `base` is the language's own word for "the default". It is a dry run through the
+  same reader the program weaves with (`FormatCatalog.Bench` → `Weave.ReadAll`): no world, no program.
+
+**New** writes the commented template, **Extend** starts `format Mine from <selected> { }`, and **Infer from
+samples** makes a format BY EXAMPLE: it first tries the built-ins (and says "these read as Csv —
+`loom<Csv>` needs no new format" when one fits), then a small grid of candidates (`records`, `name`,
+`values`, `lists`), keeping the simplest that reads every sample with no problem through the loom's typed
+parameters. The proposal is ordinary code, named from a prompt, saved to `formats/<Name>.vein`.
+
 ## `veinc exec <file.vein> [--json] [--ascii]` — the derived execution model
 
 A `.vein` file says **what** a shard does. It never says when it runs, what identity state it touches, or

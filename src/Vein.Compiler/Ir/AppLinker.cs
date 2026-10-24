@@ -49,7 +49,12 @@ public static class AppLinker
 
     /// One linked bundle: its own module, the file it was read from, and where its emits sit.
     public sealed record LinkedPart(BundleDecl Decl, string File, IrModule Module,
-                                    IReadOnlyList<Lower.FlowSite> Sites, bool Needed);
+                                    IReadOnlyList<Lower.FlowSite> Sites, bool Needed)
+    {
+        /// Its looms and formats as checked (D23) — what the Formats tab and `veinc formats` show.
+        public IReadOnlyList<LoomInfo> Looms { get; init; } = Array.Empty<LoomInfo>();
+        public IReadOnlyList<FormatInfo> Formats { get; init; } = Array.Empty<FormatInfo>();
+    }
 
     /// Link `appFilePath` if it is an app manifest. Returns null when the file declares no `app`, so the
     /// caller can fall through to its ordinary single-bundle path.
@@ -95,7 +100,7 @@ public static class AppLinker
             var module = lower.LowerBundle(r.Bundle);
             modules.Add((r.Bundle.Name, module, r.Load));
             uses.AddRange(lower.OutsideUses);
-            parts.Add(new LinkedPart(r.Bundle, r.File, module, lower.FlowSites, r.Needed));
+            parts.Add(new LinkedPart(r.Bundle, r.File, module, lower.FlowSites, r.Needed) { Looms = lower.Looms, Formats = lower.Formats });
         }
 
         var principal = modules[0];

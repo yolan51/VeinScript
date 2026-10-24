@@ -1,0 +1,7 @@
+// Example:  server.port = 9811
+// A .properties file: one `key = value` per line, `#` comments. A value with spaces is written in quotes.
+format Properties {
+    name "="
+    comments "#"
+    quotes "\""
+}

@@ -59,8 +59,10 @@ public sealed class Lexer
         // D21: `tune("doc")` marks a shard var as a setting (vein.settings).
         ["tune"] = TokenKind.KwTune,
 
-        // D23: `weave Server from text` — records written as text, each brought as `bring Server(…)` would.
+        // D23: `weave Server(text)` — records written as text, each brought as `bring Server(…)` would;
+        // `loom<Format> Server { … }` is what can be woven, `format Name { … }` how a record is written.
         ["weave"] = TokenKind.KwWeave,
+        ["loom"] = TokenKind.KwLoom,           ["format"] = TokenKind.KwFormat,
     };
 
     private readonly string _src;

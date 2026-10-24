@@ -105,7 +105,15 @@ public sealed class DefinitionIndex
                 case ShapeDecl d: Def(d.Name, SymbolKind.Shape, d.Span); break;
                 case MarkDecl d: Def(d.Name, SymbolKind.Mark, d.Span); break;
                 case EventDecl d: Def(d.Name, SymbolKind.Event, d.Span); break;
-                case BuilderDecl d: Def(d.Name, SymbolKind.Builder, d.Span); break;
+                case BuilderDecl d:
+                    Def(d.Name, SymbolKind.Builder, d.Span);
+                    // `loom<MeshList> Server` names a format — a use, so find-references on a format finds its looms.
+                    if (d.Loom is not null) sites.Add(new SymbolSite(d.Loom, SymbolKind.Format, d.Span, SiteRole.Reference, owner));
+                    break;
+                case FormatDecl d:
+                    Def(d.Name, SymbolKind.Format, d.Span);
+                    if (d.Base is not null) sites.Add(new SymbolSite(d.Base, SymbolKind.Format, d.Span, SiteRole.Reference, owner));
+                    break;
 
                 case PublicatorDecl d:
                     Def(d.Name, SymbolKind.Publicator, d.Span);
@@ -196,7 +204,7 @@ public sealed class DefinitionIndex
                 case EmitStmt em: Use(em.Event, SymbolKind.Event, em.Span, SiteRole.Emit); foreach (var f in em.Fields) Ex(f.Value); break;
                 case BringStmt br: Use(br.Builder, SymbolKind.Builder, br.Span); foreach (var a in br.Args) Ex(a); break;
                 // `weave Server from …` brings Server once per record — a use of it, like a bring.
-                case WeaveStmt ws: Use(ws.Builder, SymbolKind.Builder, ws.Span); Ex(ws.Source); if (ws.Else is not null) Stm(ws.Else); break;
+                case WeaveStmt ws: Use(ws.Loom, SymbolKind.Builder, ws.Span); foreach (var a in ws.Args) Ex(a); break;
                 // `mute Physics` names a shard — at the NAME, so F12 on it lands and Shift+F12 lists it.
                 case MuteStmt { ByMark: true } mu: Use(mu.Shard, SymbolKind.Mark, mu.NameSpan); break;
                 case MuteStmt mu: Use(mu.Shard, SymbolKind.Shard, mu.NameSpan); break;
