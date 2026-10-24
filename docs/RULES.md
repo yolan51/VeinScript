@@ -901,6 +901,17 @@ hear @Pair as p { match p.tag { when #Roles { … p.key … p.value … } } }
 - **One event per piece.** A whole file through `parseLines` is fine; `parseChars` is for short input.
   To only WALK pieces, `target lines(text) as l` is cheaper.
 - `firstWord`, `afterFirstWord` and `pieceAt` are shared fns too, for an answer right now.
+- **A value with a shape of its own is cut where the `@Pair` is heard, not by another parse.**
+  `S1=9811:S2+S4` is a port and a neighbour list; an event cannot carry the list, and a second parse
+  tagged with the server's name would spread one line over three handlers. `before(text, sep)` /
+  `after(text, sep)` cut at the first `sep` (no `sep`: all of it / `""`), and `pieces(text, sep)` is
+  `split` trimmed and without blanks — because `split("", "+")` is ONE empty piece, and a server with no
+  neighbours would get one called `""`:
+
+  ```
+  let port = int(before(p.value, ":"))
+  target pieces(after(p.value, ":"), "+") as n { … }
+  ```
 
 It is written in VeinScript (`stdlib/StringParser.vein`): SFs, because the stdlib declares no shards
 (rule 18), with every name inside them qualified (18a). `samples/string_parser.vein` uses all of it.

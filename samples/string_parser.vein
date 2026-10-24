@@ -10,8 +10,9 @@
 //   4. parseWords   a room list             → @Word   { line, index }
 //   5. parseSplit   exits, by your own rule → @Piece  { text, rest }, empties kept
 //   6. parseChars   a move string           → @Char   one per character
-//   7. parseText    a message of the day    → @Line, then its @Word s
-//   8. the shared fns, called directly: firstWord, afterFirstWord, pieceAt
+//   7. parsePairs   a server mesh           → @Pair, then each value cut with before / after / pieces
+//   8. parseText    a message of the day    → @Line, then its @Word s
+//   9. the shared fns, called directly: firstWord, afterFirstWord, pieceAt
 //
 // Each parse is called with a TAG and every hear routes on it with `match`, exactly as file events do
 // (RULES 28c). A mark tag (`#Roles`) is checked — misspell it in a `when` and it does not compile. A
@@ -42,6 +43,14 @@
 //     move: up
 //     move: right
 //     moves: 3
+//     S1 port 9811 -> S2 S4
+//     S2 port 9812 -> S1 S3
+//     S3 port 9813 -> S2 S4
+//     S4 port 9814 -> S3 S1
+//     S5 port 9815 -> S6 S1
+//     S6 port 9816 -> S5 S2
+//     S7 port 9817 -> (no neighbours)
+//     servers: 7
 //     motd line 1: welcome to the dungeon (4 words)
 //     motd word: welcome
 //     motd word: to
@@ -64,6 +73,7 @@ bundle StringParserDemo by you {
     mark #Rooms
     mark #Exits
     mark #Moves
+    mark #Mesh
     mark #Motd
 
     shard Server {
@@ -75,14 +85,16 @@ bundle StringParserDemo by you {
             do parseWords("hall cave\ntower", #Rooms)                                     // 4
             do parseSplit("north,,east", ",", #Exits)                                     // 5
             do parseChars("wwd", #Moves)                                                  // 6
-            do parseText("welcome to the dungeon\nbe kind", #Motd)                        // 7
+            do parsePairs("S1=9811:S2+S4; S2=9812:S1+S3; S3=9813:S2+S4; S4=9814:S3+S1; S5=9815:S6+S1; S6=9816:S5+S2; S7=9817",
+                          ";", "=", #Mesh)                                                  // 7 — S7 has no neighbours
+            do parseText("welcome to the dungeon\nbe kind", #Motd)                        // 8
 
             // Nothing printed HERE would come out first, not last: every parse above has only QUEUED its
             // events (RULES 21), so a print written on this line lands ahead of all the prints their
-            // hears make later. Section 8 runs from the last parse's @Parsed instead — see the bottom.
+            // hears make later. Section 9 runs from the last parse's @Parsed instead — see the bottom.
         }
 
-        // 1 and 7 — a line: the first word picks the verb, `rest` is its argument (Chat's head/tail),
+        // 1 and 8 — a line: the first word picks the verb, `rest` is its argument (Chat's head/tail),
         // and `words` counts. `rest` keeps the spacing as typed.
         hear @Line as l {
             match l.tag {
@@ -97,9 +109,23 @@ bundle StringParserDemo by you {
             }
         }
 
-        // 2 — split at the FIRST `=`, so a value may contain one; both sides trimmed; `;;` skipped.
+        // 2 and 7 — split at the FIRST `=`, so a value may contain one; both sides trimmed; `;;` skipped.
         hear @Pair as p {
-            match p.tag { when #Roles { do print("role " + p.key + " = " + p.value) } }
+            match p.tag {
+                when #Roles { do print("role " + p.key + " = " + p.value) }
+
+                // 7 — the value has a shape of its own: `9811:S2+S4` is a port, then neighbours joined
+                // by `+`. Two cuts and a list, right here: `before`/`after` cut at the first `:`, and
+                // `pieces` splits the neighbours — dropping blanks, so S7 (`9817`, nothing after it)
+                // has NO neighbours rather than one called "".
+                when #Mesh {
+                    var line = p.key + " port " + int(before(p.value, ":")) + " ->"
+                    let near = pieces(after(p.value, ":"), "+")
+                    target near as n { line = line + " " + n }
+                    if len(near) == 0 { line = line + " (no neighbours)" }
+                    do print(line)
+                }
+            }
         }
 
         // 2 — malformed input is a message, not a silent drop.
@@ -120,7 +146,7 @@ bundle StringParserDemo by you {
             }
         }
 
-        // 4 and 7 — a word knows its line (1-based) and its place in that line (0-based).
+        // 4 and 8 — a word knows its line (1-based) and its place in that line (0-based).
         hear @Word as w {
             match w.tag {
                 when #Rooms { do print("room " + w.line + "." + (w.index + 1) + ": " + w.text) }
@@ -128,8 +154,15 @@ bundle StringParserDemo by you {
             }
         }
 
-        // 5 — your own splitting rule. Empties are kept: the blank exit is still exit 2. `rest` is
-        // the text after the piece.
+        // 5 — your own splitting rule. "north,,east" cut at every "," is THREE pieces, one @Piece each:
+        //
+        //     index 0   text "north"   rest ",east"     ← rest = everything after this piece
+        //     index 1   text ""        rest "east"      ← the empty piece between the two commas
+        //     index 2   text "east"    rest ""
+        //
+        // Empties are KEPT because position means something: east is exit 3, and exit 2 is blank.
+        // `words` would drop the empty one and make east exit 2. An empty piece would print as
+        // nothing, so it is shown as "(none)"; `index + 1` because people count exits from 1.
         hear @Piece as p {
             match p.tag {
                 when #Exits {
@@ -157,12 +190,13 @@ bundle StringParserDemo by you {
                 when #Roles { do print("roles: " + d.count) }
                 when #Rooms { do print("rooms: " + d.count) }
                 when #Moves { do print("moves: " + d.count) }
+                when #Mesh { do print("servers: " + d.count) }
                 when #Motd { do helpers() }
             }
         }
     }
 
-    // 8 — the cutting the parsers use, called directly. No event: an answer, now. Called from the
+    // 9 — the cutting the parsers use, called directly. No event: an answer, now. Called from the
     // LAST parse's @Parsed, because everything before it is done by then.
     SF helpers() {
         let typed = "whisper   bob hi"

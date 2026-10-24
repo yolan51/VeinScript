@@ -177,11 +177,11 @@ bundle StringParser by Vein {
 
         shared("Split by your own separator: each piece as @Piece, empties kept; then @Parsed.")
         SF parseSplit(text: string, sep: string, tag: string) {
-            let pieces = split(text, sep)
-            target pieces as p {
-                emit @Piece { tag: tag, index: Index, text: p, rest: join(slice(pieces, Index + 1), sep) }
+            let ps = split(text, sep)
+            target ps as p {
+                emit @Piece { tag: tag, index: Index, text: p, rest: join(slice(ps, Index + 1), sep) }
             }
-            emit @Parsed { tag: tag, count: len(pieces) }
+            emit @Parsed { tag: tag, count: len(ps) }
         }
 
         shared("`k=v;k=v`: each pair as @Pair, a piece with no `eq` as @Unparsed; blanks skipped; then @Parsed.")
@@ -239,6 +239,44 @@ bundle StringParser by Vein {
         fn pieceAt(ps: list<string>, i: int) return string {
             if i < len(ps) { return ps[i] }
             return ""
+        }
+
+        // ---- the value inside a value -----------------------------------------------------------------
+        //
+        // A pair's value often has a shape of its own: `S1=9811:S2+S4` is a server, its port, and its
+        // neighbours. That is not one more event — an event cannot carry the neighbour LIST, and a
+        // second parse tagged with the server's name would spread one line of config over three
+        // handlers. It is two cuts and a list, right where the @Pair is heard:
+        //
+        //     let port = int(before(p.value, ":"))
+        //     target pieces(after(p.value, ":"), "+") as n { … }
+        //
+        // Exact, like `split`: nothing is trimmed but what `pieces` says it trims.
+
+        shared("The text before the first `sep` — all of it when there is none.")
+        fn before(text: string, sep: string) return string {
+            let at = indexOf(text, sep)
+            if at < 0 { return text }
+            return substring(text, 0, at)
+        }
+
+        shared("The text after the first `sep` — \"\" when there is none.")
+        fn after(text: string, sep: string) return string {
+            let at = indexOf(text, sep)
+            if at < 0 { return "" }
+            return substring(text, at + len(sep), len(text) - at - len(sep))
+        }
+
+        // NOT `split`: `split("", "+")` is ONE empty piece, so a server with no neighbours would have
+        // a neighbour called "". `pieces` is what `words` is for spaces, for any separator.
+        shared("Split by `sep`, each piece trimmed, blank pieces dropped — so \"\" gives none.")
+        fn pieces(text: string, sep: string) return list<string> {
+            var out = []
+            target split(text, sep) as p {
+                let t = trim(p)
+                if not (t == "") { out += t }
+            }
+            return out
         }
     }
 }

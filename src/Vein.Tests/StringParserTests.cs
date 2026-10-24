@@ -110,6 +110,56 @@ public class StringParserTests
     }
 
     [Fact]
+    public void Before_and_after_cut_at_the_first_separator()
+    {
+        // The second `:` stays in what is after; a separator longer than one character works; with no
+        // separator at all, `before` is the whole text and `after` is empty.
+        Assert.Equal(new[] { "[a] [b:c] [k] [v] [abc] []" }, Run(
+            "            do *Vein.Console.Io.print(\"[\" + *Vein.StringParser.Parse.before(\"a:b:c\", \":\") + \"] [\" + " +
+            "*Vein.StringParser.Parse.after(\"a:b:c\", \":\") + \"] [\" + *Vein.StringParser.Parse.before(\"k=>v\", \"=>\") + \"] [\" + " +
+            "*Vein.StringParser.Parse.after(\"k=>v\", \"=>\") + \"] [\" + *Vein.StringParser.Parse.before(\"abc\", \":\") + \"] [\" + " +
+            "*Vein.StringParser.Parse.after(\"abc\", \":\") + \"]\")"));
+    }
+
+    [Fact]
+    public void Pieces_trims_and_drops_blanks_so_nothing_gives_nothing()
+    {
+        // The reason it exists: `split("", "+")` is one empty piece, and a server with no neighbours
+        // would get a neighbour called "".
+        Assert.Equal(new[] { "2 [a|b] 0 1" }, Run(
+            "            do *Vein.Console.Io.print(len(*Vein.StringParser.Parse.pieces(\" a + +b \", \"+\")) + \" [\" + " +
+            "join(*Vein.StringParser.Parse.pieces(\" a + +b \", \"+\"), \"|\") + \"] \" + " +
+            "len(*Vein.StringParser.Parse.pieces(\"\", \"+\")) + \" \" + len(split(\"\", \"+\")))"));
+    }
+
+    [Fact]
+    public void The_sample_prints_what_its_header_says_it_prints()
+    {
+        // samples/string_parser.vein documents its output, line by line, and is the place people look
+        // first — so the documentation is held to the program. Covers the mesh table too:
+        // pairs, then before/after/pieces on each value, and a server with no neighbours.
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "stdlib"))) dir = dir.Parent;
+        string path = Path.Combine(dir!.FullName, "samples", "string_parser.vein");
+        string source = File.ReadAllText(path);
+
+        var expected = source.Split('\n').Select(l => l.TrimEnd('\r'))
+            .SkipWhile(l => l != "// Expected output:").Skip(2)
+            .TakeWhile(l => l.StartsWith("//     ", StringComparison.Ordinal))
+            .Select(l => l["//     ".Length..].TrimEnd())
+            .ToArray();
+        Assert.NotEmpty(expected);
+
+        var r = new VeinCompilerService().Compile(new CompileRequest("string_parser.vein", source, SourcePath: path));
+        Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
+        var output = new StringWriter();
+        new Interp().Run(r.Modules[0], new StringReader(""), output);
+        var actual = output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => l.TrimEnd('\r').TrimEnd()).ToArray();
+
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
     public void Empty_text_is_one_empty_line_as_lines_says()
     {
         // The pieces are cut BY the built-ins, so they agree with them: `lines("")` is one empty line.

@@ -114,18 +114,14 @@ public sealed class EventFlow
             }
 
             // Declarations carry the span the IR dropped. Shard names are unique within a bundle (VS0320).
-            var spans = part.Decl.Members
-                .Select(m => m switch { ShardDecl s => (s.Name, s.Span), ViewDecl v => (v.Name, v.Span), BridgeDecl b => (b.Name, b.Span), _ => (null, default) })
-                .Where(x => x.Name is not null)
-                .GroupBy(x => x.Name!, StringComparer.Ordinal)
-                .ToDictionary(g => g.Key, g => g.First().Span, StringComparer.Ordinal);
-            var carries = part.Decl.Members
-                .Select(m => m switch { ShardDecl s => (s.Name, s.CarriedShapes, s.CarriedMarks), ViewDecl v => (v.Name, v.CarriedShapes, v.CarriedMarks), BridgeDecl b => (b.Name, b.CarriedShapes, b.CarriedMarks), _ => (null, null, null) })
-                .Where(x => x.Name is not null)
-                .GroupBy(x => x.Name!, StringComparer.Ordinal)
-                .ToDictionary(g => g.Key,
-                    g => string.Join(" ", g.First().CarriedShapes!.Select(s => "$" + s).Concat(g.First().CarriedMarks!.Select(m => "#" + m))),
-                    StringComparer.Ordinal);
+            var carriers = part.Decl.Members.OfType<ShardDecl>().Select(s => Carrier(s.Name, s.Span, s.CarriedShapes, s.CarriedMarks))
+                .Concat(part.Decl.Members.OfType<ViewDecl>().Select(v => Carrier(v.Name, v.Span, v.CarriedShapes, v.CarriedMarks)))
+                .Concat(part.Decl.Members.OfType<BridgeDecl>().Select(b => Carrier(b.Name, b.Span, b.CarriedShapes, b.CarriedMarks)))
+                .GroupBy(x => x.Name, StringComparer.Ordinal)
+                .Select(g => g.First())
+                .ToList();
+            var spans = carriers.ToDictionary(x => x.Name, x => x.Span, StringComparer.Ordinal);
+            var carries = carriers.ToDictionary(x => x.Name, x => x.Carries, StringComparer.Ordinal);
 
             // Sites queued per (unit, event), consumed in the order the IR reaches the emits — which is the
             // order they were lowered in, so the nth `emit @X` in a unit takes the nth site.
@@ -199,6 +195,11 @@ public sealed class EventFlow
                        ?? (IReadOnlyList<string>)Array.Empty<string>(),
         };
     }
+
+    /// A shard-like declaration's name, where it is, and what it carries as `$S #M` text.
+    private static (string Name, SourceSpan Span, string Carries) Carrier(
+        string name, SourceSpan span, IReadOnlyList<string> shapes, IReadOnlyList<string> marks) =>
+        (name, span, string.Join(" ", shapes.Select(s => "$" + s).Concat(marks.Select(m => "#" + m))));
 
     /// A `hear` or a schedule: the things the runtime starts. Anything else in `Methods` is a shard function.
     private static bool IsUnit(IrFunction m) => m.Attrs.Any(a => a.Name is "hear" or "schedule");
