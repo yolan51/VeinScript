@@ -419,6 +419,26 @@ word     := records | name | values | pairs | lists | quotes | delimiter | comme
 
 Json, Csv, Ini and KeyValue are built in; `need "Vein.Weaving"` adds the official formats.
 
+**Collections — `~<list>`, `~<set>`, `~<ring N>`.** A field that holds many of something says so with `~`,
+its kind and its element type (Entity, int, float, string, bool); it is read with its `~` everywhere
+(D24, RULES 13d):
+
+```
+shape $Guild { name: string, ~<set> members: Entity }
+target $Guild.~members as g, m { … m.Person.name … }     // one loop per (guild, member)
+add cy to g.Guild.~members        remove bob from g.Guild.~members        g.Guild.~members has cy
+```
+
+Grammar:
+
+```
+collection-field := "~" "<" ("list" | "set" | "ring" INT) ">" Name ":" Type ["=" expr]
+collection-read  := expr "." "~" Name
+collection-stmt  := "add" expr "to" collection-read | "remove" expr "from" collection-read
+collection-test  := collection-read "has" expr
+collection-walk  := "target" "$" Shape "." "~" Name { "$" Shape | "#" Mark } "as" Name "," Name block
+```
+
 **Variants — `builder BigCoin from Coin { value = 5 }`.** A builder is already a prefab: `bring` is
 instantiation by argument. A variant NAMES a set of those arguments. It takes the base's members, may add
 shapes and marks of its own, and inherits the base's marks.

@@ -57,6 +57,7 @@ public enum TokenKind
     Question,               // `?` — fill-the-rest placeholder in emit/bring
     Arrow,          // ->
     Dot, Colon, Comma, Pipe,
+    Tilde,          // `~` — a collection (D24): `~<list> peers: Entity`, `s.Server.~peers`
 
     // assignment
     Assign, PlusEq, MinusEq, StarEq, SlashEq,

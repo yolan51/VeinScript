@@ -133,6 +133,7 @@ public static class AstPrinter
             case AttachStmt at: Line(sb, ind, $"{(at.Remove ? "unattach" : "attach")} ${at.Shape}"); break;
             case ChanceStmt c: Line(sb, ind, $"chance {c.Probability:P0}"); PrintBlock(sb, c.Body, ind + 1); break;
             case BringStmt br: Line(sb, ind, $"bring {(br.Count is null ? "" : Ex(br.Count) + " ")}{br.Builder}({string.Join(", ", br.Args.Select(Ex).Append(br.FillRest ? "?" : null).Where(x => x is not null))})"); break;
+            case CollectionStmt cs: Line(sb, ind, $"{(cs.Remove ? "remove" : "add")} {Ex(cs.Value)} {(cs.Remove ? "from" : "to")} {Ex(cs.Target)}"); break;
             case WeaveStmt ws:
                 Line(sb, ind, $"weave {ws.Loom}({string.Join(", ", ws.Args.Select(Ex))}){(ws.Bind is null ? "" : " as " + ws.Bind)}");
                 break;
@@ -197,7 +198,7 @@ public static class AstPrinter
         AssignOp.StarEq => "*=", _ => "/="
     };
 
-    private static string Ex(Expr e) => e switch
+    internal static string Ex(Expr e) => e switch
     {
         LiteralExpr l => l.Kind == LiteralKind.String ? $"\"{l.Value}\"" : $"{l.Value}",
         NameExpr n => n.Name,
@@ -207,7 +208,8 @@ public static class AstPrinter
         ShapeRefExpr sr => $"${sr.Name}",
         EventRefExpr er => $"@{er.Name}",
         MarkRefExpr mr => $"#{mr.Name}",
-        MemberExpr m => $"{Ex(m.Receiver)}.{m.Name}",
+        MemberExpr m => $"{Ex(m.Receiver)}.{(m.Collection ? "~" : "")}{m.Name}",
+        HasExpr h => $"({Ex(h.Collection)} has {Ex(h.Value)})",
         IndexExpr ix => $"{Ex(ix.Receiver)}[{Ex(ix.Index)}]",
         CallExpr c => $"{Ex(c.Callee)}({string.Join(", ", c.Args.Select(Ex))})",
         BinaryExpr b => $"({b.Op} {Ex(b.Left)} {Ex(b.Right)})",

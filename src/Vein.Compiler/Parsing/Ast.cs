@@ -145,7 +145,17 @@ public sealed record FormatLine(string Word, string? Text, IReadOnlyList<(string
 public sealed record FieldDecl(string Name, TypeRef? Type, string? Fold, Expr? Default, SourceSpan Span) : Node(Span)
 {
     public bool IsVar { get; init; }
+
+    /// `~<set> members: Entity` (D24) — a COLLECTION field: its kind and element type. The parser gives such
+    /// a field the type `list<Element>` and the default `[]`, so everything that already handles a list
+    /// field (bring, weave, the IR types) handles it; this says what the runtime must also keep true — a
+    /// set's uniqueness, a ring's size — and what `add`/`remove`/`has` check against. Null otherwise.
+    public CollectionSpec? Collection { get; init; }
 }
+
+/// A collection's kind — `list` (ordered, repeats), `set` (unique, in the order added) or `ring` (the last
+/// `Size`) — and the declared type of its elements (D24).
+public sealed record CollectionSpec(string Kind, int Size, string Element);
 
 /// A `$Shape` include inside an event/builder body: pulls in all of the shape's fields, or one field
 /// with `$Shape.field`. `Default` (via `=`) makes it optional.
@@ -334,6 +344,10 @@ public sealed record WeaveStmt(string Loom, IReadOnlyList<Expr> Args, string? Bi
     public IReadOnlyList<string> LoomPath { get; init; } = Array.Empty<string>();
 }
 
+/// `add p to s.Guild.~members` / `remove p from s.Guild.~members` (D24) — a change to a collection,
+/// deferred to the commit like `attach` and `mark`, so two shards adding in one tick both land.
+public sealed record CollectionStmt(bool Remove, Expr Value, Expr Target, SourceSpan Span) : Stmt(Span);
+
 public sealed record BringStmt(Expr? Count, string Builder, IReadOnlyList<Expr> Args, bool FillRest, SourceSpan Span) : Stmt(Span)
 {
     /// Where a `?` was written, when `FillRest` — reported as VS0347: `?` is the Workbench's shortcut, not syntax.
@@ -371,7 +385,15 @@ public sealed record StarRefExpr(IReadOnlyList<string> Path, string Member, Memb
 public sealed record ShapeRefExpr(string Name, SourceSpan Span) : Expr(Span);           // $Health
 public sealed record EventRefExpr(string Name, SourceSpan Span) : Expr(Span);           // @Damaged
 public sealed record MarkRefExpr(string Name, SourceSpan Span) : Expr(Span);            // #Enemy
-public sealed record MemberExpr(Expr Receiver, string Name, SourceSpan Span) : Expr(Span);
+public sealed record MemberExpr(Expr Receiver, string Name, SourceSpan Span) : Expr(Span)
+{
+    /// `s.Server.~peers` — the field read AS a collection (D24). A `~` field must be read this way, and
+    /// only a `~` field may be.
+    public bool Collection { get; init; }
+}
+
+/// `s.Guild.~members has p` (D24) — whether a collection holds a value. Contextual, like `carries`.
+public sealed record HasExpr(Expr Collection, Expr Value, SourceSpan Span) : Expr(Span);
 public sealed record IndexExpr(Expr Receiver, Expr Index, SourceSpan Span) : Expr(Span);
 /// A call. `ViaDo` is true for `do name(…)` — the spelling an SF call must use (D13); a bare call is an
 /// fn or a built-in.

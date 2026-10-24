@@ -416,6 +416,7 @@ public sealed class Parser
         // `*Author.Bundle.Publicator.$Shape[.field]` — reuse a SHARED shape from another bundle as a
         // field group. Same qualified form as `emit`/`hear`/`bring`; only `shared` shapes resolve.
         if (Check(TokenKind.Star)) return ParseQualifiedShapeInclude();
+        if (Match(TokenKind.Tilde)) return ParseCollectionField(s);       // D24: a collection in an event/builder
         bool isVar = Match(TokenKind.KwVar);                             // optional `var`
         string name = ExpectName("member name").Text;
         TypeRef? type = Match(TokenKind.Colon) ? ParseTypeRef() : null;  // type optional (inferred)
@@ -449,9 +450,31 @@ public sealed class Parser
         return fields;
     }
 
+    /// `~<list> peers: Entity`, `~<set> members: Entity`, `~<ring 20> lines: string` (D24). The `~` has been
+    /// read. The field becomes `list<Element>` with the default `[]` — so bring, weave and the IR handle it
+    /// as the list it is — and keeps its kind and element type in `Collection`.
+    private FieldDecl ParseCollectionField(SourceSpan s)
+    {
+        Expect(TokenKind.Lt, "'<' and a collection kind (`~<list>`, `~<set>`, `~<ring 20>`)");
+        string kind = ExpectName("a collection kind: list, set or ring").Text;
+        int size = 0;
+        if (Check(TokenKind.Int)) size = (int)Convert.ToInt64(Advance().Value);
+        Expect(TokenKind.Gt, "'>'");
+        string name = ExpectName("the collection's field name").Text;
+        Expect(TokenKind.Colon, "':' and the element type (`~<list> peers: Entity`)");
+        var element = ParseTypeRef();
+        Expr? def = Match(TokenKind.Assign) ? ParseExpr() : null;
+        return new FieldDecl(name, new TypeRef("list", new[] { element }, false, element.Span), null,
+                             def ?? new ListLitExpr(Array.Empty<Expr>(), s), s)
+        {
+            Collection = new CollectionSpec(kind, size, element.Name),
+        };
+    }
+
     private FieldDecl ParseField()
     {
         var s = Here;
+        if (Match(TokenKind.Tilde)) return ParseCollectionField(s);
         string name = ExpectName("field name").Text;
         Expect(TokenKind.Colon, "':'");
         var type = ParseTypeRef();
@@ -980,7 +1003,32 @@ public sealed class Parser
             case TokenKind.KwUnmute: return ParseMute(unmute: true);
             case TokenKind.KwBring: return ParseBring();
             case TokenKind.KwWeave: return ParseWeave();
+            // D24: `add p to s.Guild.~members` / `remove p from …` — contextual: a statement only when its
+            // `to`/`from` follows on the line, so `add(1, 2)` stays a call and `add` a name.
+            case TokenKind.Ident when (Cur.Text == "add" && AheadOnLine(TokenKind.KwTo)) || (Cur.Text == "remove" && AheadOnLine(TokenKind.KwFrom)):
+            {
+                var s = Here;
+                bool remove = Advance().Text == "remove";
+                var value = ParseExpr();
+                Expect(remove ? TokenKind.KwFrom : TokenKind.KwTo, remove ? "`from` and the collection" : "`to` and the collection");
+                return new CollectionStmt(remove, value, ParseExpr(), s);
+            }
             default: return ParseAssignOrExpr();
+        }
+    }
+
+    /// Whether `kind` appears later on this line, outside parentheses and brackets — how `add … to` and
+    /// `remove … from` are told apart from a call or an assignment to a name `add`.
+    private bool AheadOnLine(TokenKind kind)
+    {
+        int depth = 0;
+        for (int k = 1; ; k++)
+        {
+            var t = Peek(k);
+            if (t.Kind is TokenKind.EndOfFile || (depth == 0 && t.Kind is TokenKind.Term or TokenKind.RBrace or TokenKind.LBrace)) return false;
+            if (t.Kind is TokenKind.LParen or TokenKind.LBracket) depth++;
+            else if (t.Kind is TokenKind.RParen or TokenKind.RBracket) depth--;
+            else if (depth == 0 && t.Kind == kind) return true;
         }
     }
 
@@ -1011,9 +1059,23 @@ public sealed class Parser
         {
             var comps = new List<string>();
             var tags = new List<string>();
+            (string Shape, string Field, SourceSpan At)? walk = null;
             while (Check(TokenKind.ShapeRef) || Check(TokenKind.MarkRef))
             {
-                if (Check(TokenKind.ShapeRef)) comps.Add(Advance().Text);
+                if (Check(TokenKind.ShapeRef))
+                {
+                    string shape = Advance().Text;
+                    comps.Add(shape);
+                    // `$Server.~peers` (D24): walk a collection of every match — one loop per (owner, element).
+                    if (Check(TokenKind.Dot) && Peek(1).Kind == TokenKind.Tilde)
+                    {
+                        var at = Here;
+                        Advance(); Advance();
+                        string field = ExpectName("the collection field after `.~`").Text;
+                        if (walk is not null) _diag.Error("VS0100", "A target walks one collection — `$Shape.~field` once.", at);
+                        walk ??= (shape, field, at);
+                    }
+                }
                 else tags.Add(Advance().Text);
             }
             // `by Shape.field` — optional, and it goes before `as` so the query reads as one clause:
@@ -1042,7 +1104,22 @@ public sealed class Parser
 
             Expect(TokenKind.KwAs, "'as'");
             string bind = Expect(TokenKind.Ident, "binding name").Text;
-            return new QueryStmt(comps, tags, bind, ParseBlock(), s)
+
+            // `as s, p` — the owner, then each element of the walked collection. Written as ONE loop, it is
+            // exactly the two it stands for: the query, and inside it `target s.Server.~peers as p`.
+            string? element = Match(TokenKind.Comma) ? Expect(TokenKind.Ident, "a name for each element").Text : null;
+            if (walk is { } w && element is null)
+                _diag.Error("VS0100", $"`$" + w.Shape + ".~" + w.Field + "` walks a collection: name the owner and each element — `as s, p`.", w.At);
+            if (walk is null && element is not null)
+                _diag.Error("VS0100", "`as s, p` names an owner and an element — the target needs a collection to walk: `$Shape.~field`.", s);
+
+            var body = ParseBlock();
+            if (walk is { } wk && element is not null)
+            {
+                var source = new MemberExpr(new MemberExpr(new NameExpr(bind, wk.At), wk.Shape, wk.At), wk.Field, wk.At) { Collection = true };
+                body = new Block(new Stmt[] { new TargetStmt(source, element, body, wk.At) }, body.Span);
+            }
+            return new QueryStmt(comps, tags, bind, body, s)
                 { OrderShape = orderShape, OrderField = orderField, On = on };
         }
         var src = ParseExpr();
@@ -1412,6 +1489,15 @@ public sealed class Parser
             // `x carries #M` / `x carries $S` (D20) — the comparison level, so `a carries #M and b` groups as
             // it reads. CONTEXTUAL, like `ordered by`: `carries` is a word only when a `#`/`$` follows,
             // so a program may still name a variable `carries`.
+            // `s.Guild.~members has p` (D24) — contextual too: `has` is a word only right after a `.~`
+            // collection, so a program may still name a variable `has`.
+            if (op is null && Cur.Kind == TokenKind.Ident && Cur.Text == "has" && e is MemberExpr { Collection: true })
+            {
+                var hs = Here;
+                Advance();
+                e = new HasExpr(e, ParseAdd(), hs);
+                continue;
+            }
             if (op is null && Cur.Kind == TokenKind.Ident && Cur.Text == "carries"
                 && Peek(1).Kind is TokenKind.MarkRef or TokenKind.ShapeRef)
             {
@@ -1489,7 +1575,12 @@ public sealed class Parser
         var e = ParsePrimary();
         while (true)
         {
-            if (Match(TokenKind.Dot)) { var n = ExpectName("member name"); e = new MemberExpr(e, n.Text, n.Span); }
+            if (Match(TokenKind.Dot))
+            {
+                bool collection = Match(TokenKind.Tilde);   // `s.Guild.~members` (D24)
+                var n = ExpectName("member name");
+                e = new MemberExpr(e, n.Text, n.Span) { Collection = collection };
+            }
             else if (Match(TokenKind.LBracket)) { var idx = ParseExpr(); Expect(TokenKind.RBracket, "']'"); e = new IndexExpr(e, idx, e.Span); }
             else if (Check(TokenKind.LParen)) { e = new CallExpr(e, ParseArgs(), e.Span); }
             else break;

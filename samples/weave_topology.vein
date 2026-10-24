@@ -1,4 +1,5 @@
-// samples/weave_topology.vein — `weave`: bring identities to life from a string (D23).
+// samples/weave_topology.vein — `weave`: bring identities to life from a string (D23), and hold many of
+// them in a `~` collection (D24).
 //     veinc run samples/weave_topology.vein
 //
 // A server mesh and a handful of NPCs, each written as ONE string — the kind that arrives in a setting, a
@@ -23,27 +24,32 @@
 //
 //   1. VALUES ARE PLACED BY TYPE. `host` has a default, so it may be missing: `S6=box.lan:9816` cannot give
 //      `box.lan` to the port (not a whole number), so it goes to the host.
-//   2. MANY OF SOMETHING IS `list<Entity>`. `peers` holds any number of servers, NAMED in the text — S1 names
-//      S4 before S4's line, because every identity is spawned before any is linked.
+//   2. MANY OF SOMETHING IS A `~` COLLECTION. `~<set> peers: Entity` holds any number of servers, each
+//      once, NAMED in the text — S1 names S4 before S4's line, because every identity is spawned before
+//      any is linked. S1 lists S4 twice; a set holds it once, and the weave says so.
 //   3. RESULTS ARE EVENTS. A record that cannot be woven is one @Unwoven, and the rest are woven anyway:
 //      S1 names S7, which does not exist, so S7 is dropped from S1's peers. Then @Woven arrives — after the
 //      commit, so a `target` sees every server. No hand-made "begin" event is needed.
-//   4. GRAPH RULES ARE THE PROGRAM'S. S1 lists ITSELF and S4 TWICE; the text says so, so that is what is
-//      woven, and the program checks its own rules over the identities.
+//   4. WALKS ARE FLAT. `target s.Server.~peers as p` gives each peer, and `p.Server.name` reads its data
+//      directly; `target $Server.~peers as s, p` gives every (server, peer) in one loop. The program's
+//      own rules — a server listing itself, a link one way only — are a `has` each.
 //
 // The NPCs use the built-in KeyValue format: values in parameter order, or `name=value`, "…" around spaces.
 //
 // Expected output:
 //
 //     ! Server: "S1=9811:S2+S4+S1+S3+S4+S5+S6+S7": `peers`: no record named "S7"
-//     S1 :9811  ->  S2 S4 S1 S3 S4 S5 S6
+//     ! Server: "S1=9811:S2+S4+S1+S3+S4+S5+S6+S7": `peers`: "S4" is listed twice
+//     S1 :9811  ->  S2 S4 S1 S3 S5 S6
 //     S2 :9812  ->  S1 S3
 //     S3 :9813  ->  S2 S4
 //     S4 :9814  ->  S3 S1
 //     S5 :9815  ->  S6 S1
 //     S6 box.lan:9816  ->  S5 S2
 //     rule: S1 lists itself
-//     rule: S1 lists S4 twice
+//     rule: S1 -> S3 is one way
+//     rule: S1 -> S6 is one way
+//     rule: S6 -> S2 is one way
 //     ! Npc: "Imp lots": `hp`: "lots" is not a whole number
 //     Goblin hp 30 at 4,2
 //     Orc hp 50 at 9,0
@@ -62,7 +68,7 @@ bundle WeaveTopology by you {
     }
 
     // The FIRST field is the name a record is known by — what `S2` in another record's peers means.
-    shape $Server { name: string, host: string = "", port: int, peers: list<Entity> = [] }
+    shape $Server { name: string, host: string = "", port: int, ~<set> peers: Entity }
     shape $Npc    { name: string, hp: int, x: float = 0.0, y: float = 0.0 }
 
     mark #Listed
@@ -87,24 +93,17 @@ bundle WeaveTopology by you {
                     var line = s.Server.name + " :" + s.Server.port
                     if not (s.Server.host == "") { line = s.Server.name + " " + s.Server.host + ":" + s.Server.port }
                     line = line + "  -> "
-                    target s.Server.peers as p {
-                        target $Server on p as q { line = line + " " + q.Server.name }
-                    }
+                    target s.Server.~peers as p { line = line + " " + p.Server.name }    // a peer's data, read directly
                     do print(line)
                 }
 
-                // Rules over identities: a peer that is its own server; a peer listed twice.
+                // The program's rules. A peer listed twice never got this far — `peers` is a ~<set>, so the
+                // weave said so above. What is left: a server that lists itself, and a link one way only.
                 target $Server #Listed as s {
-                    var seen = []
-                    target s.Server.peers as p {
-                        if p == s { do print("rule: " + s.Server.name + " lists itself") }
-                        target seen as q {
-                            if q == p {
-                                target $Server on p as dup { do print("rule: " + s.Server.name + " lists " + dup.Server.name + " twice") }
-                            }
-                        }
-                        seen += p
-                    }
+                    if s.Server.~peers has s { do print("rule: " + s.Server.name + " lists itself") }
+                }
+                target $Server.~peers #Listed as s, p {                                 // every (server, peer) — one loop
+                    if not (p.Server.~peers has s) { do print("rule: " + s.Server.name + " -> " + p.Server.name + " is one way") }
                 }
 
                 // The NPCs, now that the mesh is done.

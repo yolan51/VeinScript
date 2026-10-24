@@ -347,6 +347,7 @@ public sealed class Resolve
             => IrTypeRef.Of("void"),
         "random" => IrTypeRef.Of("float"),
         "Carries" => IrTypeRef.Of("bool"),
+        "CollHas" => IrTypeRef.Of("bool"),
         _ => null,
     };
 

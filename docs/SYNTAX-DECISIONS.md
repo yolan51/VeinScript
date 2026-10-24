@@ -682,7 +682,7 @@ setting, a file, a network message — without cutting it by hand:
 ```
 format MeshList { records ";"  name "="  values ":"  lists "+" }       // formats/MeshList.vein
 
-shape $Server { name: string, host: string = "", port: int, peers: list<Entity> = [] }
+shape $Server { name: string, host: string = "", port: int, ~<set> peers: Entity }
 loom<MeshList> Server { $Server  mark #Listed }
 
 run once { weave Server(servers) }
@@ -728,6 +728,57 @@ as "queryable now", which is what every program needed a hand-made `emit @Begin`
 
 Interpreter-only for now; `veinc emit` says so. `veinc formats` and the Workbench's Formats tab list every
 format a program can name and dry-run any of them against pasted text.
+
+## D24 — `~` collections: many of something, as a field with a declared kind and type {#collections}
+
+> **Reported as** `VS0371` (a literal of the wrong kind going into a collection — `bring`, `add`, `has`),
+> `VS0372` (`~` / `add` / `remove` on a field that is not a collection), `VS0373` (a collection read without
+> its `~`) and `VS0374` (an unknown kind, a ring with no size, a size on anything else, an element type that
+> is not Entity/int/float/string/bool).
+
+**DECIDED.** A server has neighbours, a guild members, a room exits, a chat its last lines. The C-family
+answer is an array or a `List<T>`, and walking one nested three loops (the owner, the list, a lookup of
+each element). VeinScript says what something IS with a sigil — `$` data, `#` a set it belongs to, `@` a
+message, `&` a template, `!` a shard — so many-of has one too:
+
+```
+shape $Server { name: string, port: int, ~<list> peers: Entity }    // ordered, repeats
+shape $Guild  { name: string, ~<set> members: Entity }               // each once, in the order added
+shape $Chat   { ~<ring 20> lines: string }                           // the last 20
+
+target $Server.~peers as s, p { do print(s.Server.name + " -> " + p.Server.name) }   // ONE loop
+add p to g.Guild.~members
+remove p from g.Guild.~members
+if g.Guild.~members has p { … }
+```
+
+*Why the kind and the element type are DECLARED.* The runtime keeps the kind's promise — a set never holds
+a value twice, a ring never grows past its size — so no program code enforces either; and the element type
+is checked wherever a literal goes in (`bring`, `add`, `has`), the way VS0230 checks a bring's literals.
+A non-literal is checked when `add` runs, as a fault with its place: never a collection quietly holding the
+wrong kind of thing.
+
+*Why the `~` is at every use.* A collection is read `x.Shape.~field`; a plain `.field` is VS0373. A reader
+sees that a value is many where it is used, not by looking the shape up.
+
+*Why `add` and `remove` are WORDS, and deferred.* Logic is words here (D12), and `+=` already means
+arithmetic. `add … to` has the form of `attach … to`, and like `attach` and `mark` it lands at the commit
+— which makes a collection merge: two shards adding in one event both land, the many-of half of what
+`folds` does for numbers. `has` is built like `carries` (D20), contextual, so neither word is taken from
+programs that use it as a name.
+
+*Why the walk is flat.* `$Server.~peers as s, p` is the query and the collection loop joined — and
+`p.Server.port` reads the element's data directly, because an entity plus a shape is already a handle
+(RULES 13b). Nothing new was needed to remove the third loop.
+
+*How it fits what exists.* A `~` field IS a `list<Element>` field with a default of `[]` — the parser gives
+it that type — so `bring` fills it with `[…]`, a loom weaves it (names resolved across the text; a repeat
+in a `~<set>` is an @Unwoven), and an event can carry one. A destroyed identity leaves every `~`
+collection of Entity at the commit, so nothing dangles. `list<T>` stays legal.
+
+*What is not yet.* The C# backend reports `add`/`remove`/`has` as interpreter-only (`veinc emit` says so):
+compiling them needs VeinWorld to replace a component inside a commit and to sweep destroyed ids. Comparing
+two collections (`same`, `with`, `without`, `common`, `within`) waits for a program that needs it.
 
 ## Reserved-word disposition
 

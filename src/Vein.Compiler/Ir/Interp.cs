@@ -1911,6 +1911,21 @@ public sealed class Interp
                         else Problem(record.Text, $"`{p.Name}`: no record named \"{Str(element)}\"");
                     value = linked;
                 }
+
+                // A `~<set>` holds each value once (D24). A repeat in the TEXT is said, then folded away — the
+                // runtime would fold it silently, and a typo'd duplicate is worth hearing about.
+                if (p.Kind == "set" && value is List<object?> items)
+                {
+                    var once = new List<object?>();
+                    foreach (var item in items)
+                        if (once.Any(o => LooseEq(o, item)))
+                        {
+                            string shown = item is long id && _wovenNames.FirstOrDefault(kv => Equals(kv.Value, id)).Key is { } n ? n : Str(item);
+                            Problem(record.Text, $"`{p.Name}`: \"{shown}\" is listed twice");
+                        }
+                        else once.Add(item);
+                    value = once;
+                }
                 locals["__wm_" + p.Name] = false;
                 locals["__wv_" + p.Name] = value;
             }
@@ -2601,6 +2616,28 @@ public sealed class Interp
             // Structural change. The arguments are evaluated NOW (they read the current world) but the
             // mutation is queued: it lands at CommitPhase, after the folds, so no unit in this phase can
             // observe a half-changed world and the phase's result stays order-independent.
+            // `add v to x.Shape.~field` / `remove v from …` (D24). The element is checked NOW — inside the
+            // unit, so a misfit is a fault with this unit's file and line — and the change is queued like a
+            // mark: two shards adding in one tick both land, at the commit.
+            case "CollAdd":
+            case "CollRemove":
+            {
+                long e = AsLong(Eval(rc.Args[0], self, locals));
+                string shape = Str(Eval(rc.Args[1], self, locals));
+                string field = Str(Eval(rc.Args[2], self, locals));
+                object? value = Eval(rc.Args[3], self, locals);
+                bool remove = rc.Name == "CollRemove";
+                if (_store.FieldsOf(shape)?.FirstOrDefault(f => f.Name == field)?.Collection is { } spec)
+                    value = CollectionElement(value, spec.Element, $"{shape}.~{field}");
+                _commands.Add(() => _store.ChangeCollection(e, shape, field, value, remove));
+                return null;
+            }
+            case "CollHas":
+            {
+                var items = Eval(rc.Args[0], self, locals) as List<object?>;
+                var v = Eval(rc.Args[1], self, locals);
+                return items is not null && items.Any(i => LooseEq(i, v));
+            }
             case "AddTag":
             case "RemoveTag":
             {
@@ -2801,6 +2838,22 @@ public sealed class Interp
     /// So the operands decide the comparison: two numbers compare numerically, anything else compares as
     /// text. `"5" == 5` still holds — the string arm renders both to "5" — which keeps the loose typing
     /// the language wants without letting an unparseable string collapse into a number.
+    /// A value going into a collection of `element` (D24): converted where the conversion is exact (an
+    /// integral float into `int`, an int into `float`), refused otherwise — a fault, so the program hears
+    /// it with a place, instead of a collection quietly holding the wrong kind of thing.
+    private static object? CollectionElement(object? value, string element, string where) => element switch
+    {
+        "Entity" when value is long id && id > 0 => id,
+        "int" when value is long l => l,
+        "int" when value is double d && d == Math.Floor(d) => (long)d,
+        "float" when value is double d => d,
+        "float" when value is long l => (double)l,
+        "string" when value is string s => s,
+        "bool" when value is bool b => b,
+        _ => throw new InvalidOperationException(
+            $"add to {where}: {(value is string s ? "\"" + s + "\"" : Str(value))} is not {(element == "Entity" ? "an identity" : "a " + element)}"),
+    };
+
     private static bool LooseEq(object? l, object? r) =>
         IsNumeric(l) && IsNumeric(r)
             ? AsDouble(l) == AsDouble(r)

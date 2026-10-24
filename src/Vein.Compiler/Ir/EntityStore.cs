@@ -112,6 +112,7 @@ public sealed class EntityStore
         _alive.Remove(entity);
         foreach (var table in _components.Values) table.Remove(entity);
         foreach (var set in _tags.Values) set.Remove(entity);
+        ForgetInCollections(entity);   // D24: no `~` collection is left naming it
 
         // Anything this phase contributed to a now-dead entity is meaningless.
         _contributions.RemoveAll(c => c.Entity == entity);
@@ -131,6 +132,12 @@ public sealed class EntityStore
                 row[f.Name] = f.Default is IrLiteral lit ? lit.Value : Zero(f.Type.Name);
 
         if (init is not null) foreach (var (k, v) in init) row[k] = v;
+
+        // A `~` collection keeps its kind's promise from the first value on: `bring Guild("g", [a, a])`
+        // into a set holds `a` once (D24).
+        if (t is not null)
+            foreach (var f in t.Fields.Where(f => f.Collection is not null))
+                if (row.TryGetValue(f.Name, out var v) && v is List<object?> list) row[f.Name] = Normalize(new List<object?>(list), f.Collection);
     }
 
     /// A field the RUNTIME owns, written straight to the committed store.
@@ -350,8 +357,55 @@ public sealed class EntityStore
 
     private static object? Zero(string typeName) => typeName switch
     {
-        "int" or "Entity" => 0L, "float" => 0.0, "bool" => false, "string" => "", _ => null
+        "int" or "Entity" => 0L, "float" => 0.0, "bool" => false, "string" => "", "list" => new List<object?>(), _ => null
     };
+
+    // ---- ~ collections (D24) ----------------------------------------------------------------------------
+
+    /// `add` / `remove`, applied at the commit. The list is COPIED and replaced, never changed in place —
+    /// a list a program holds elsewhere is not changed under it (RULES 28h) — and the kind's promise is
+    /// kept: a set holds a value once, a ring only its last N.
+    public void ChangeCollection(long entity, string shape, string field, object? value, bool remove)
+    {
+        if (!_alive.Contains(entity) || !_components.TryGetValue(shape, out var table) || !table.TryGetValue(entity, out var row)) return;
+        var spec = FieldsOf(shape)?.FirstOrDefault(f => f.Name == field)?.Collection;
+        var items = row.TryGetValue(field, out var cur) && cur is List<object?> l ? new List<object?>(l) : new List<object?>();
+        if (remove) items.RemoveAll(i => Same(i, value));
+        else
+        {
+            if (spec?.Kind == "set" && items.Any(i => Same(i, value))) return;
+            items.Add(value);
+        }
+        row[field] = Normalize(items, spec);
+    }
+
+    /// A collection as its kind allows: a set without repeats (first kept), a ring with its last N.
+    private static List<object?> Normalize(List<object?> items, IrCollection? spec)
+    {
+        if (spec is null) return items;
+        if (spec.Kind == "set")
+        {
+            var kept = new List<object?>();
+            foreach (var i in items) if (!kept.Any(k => Same(k, i))) kept.Add(i);
+            items = kept;
+        }
+        if (spec.Kind == "ring" && spec.Size > 0 && items.Count > spec.Size) items = items.Skip(items.Count - spec.Size).ToList();
+        return items;
+    }
+
+    private static bool Same(object? a, object? b) => OrderKey.Instance.Compare(a, b) == 0;
+
+    /// Every `~` collection of Entity that holds `entity` loses it — so a destroyed identity is never left
+    /// named in a guild, a peer list, a route.
+    private void ForgetInCollections(long entity)
+    {
+        foreach (var (shape, type) in _types)
+            foreach (var f in type.Fields.Where(f => f.Collection?.Element == "Entity"))
+                if (_components.TryGetValue(shape, out var table))
+                    foreach (var row in table.Values)
+                        if (row.TryGetValue(f.Name, out var v) && v is List<object?> list && list.Any(x => Same(x, entity)))
+                            row[f.Name] = list.Where(x => !Same(x, entity)).ToList();
+    }
 
     // Arithmetic that keeps integers integral — a `folds sum` int field must not drift into doubles.
     private static object? Add(object? a, object? b)

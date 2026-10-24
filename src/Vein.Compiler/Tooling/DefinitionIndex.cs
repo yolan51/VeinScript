@@ -164,6 +164,7 @@ public sealed class DefinitionIndex
                 case UnaryExpr u: Ex(u.Operand); break;
                 case CarriesExpr c: Ex(c.Subject); Use(c.Name, c.IsShape ? SymbolKind.Shape : SymbolKind.Mark, c.Span); break;
                 case MemberExpr me: Ex(me.Receiver); break;
+                case HasExpr h: Ex(h.Collection); Ex(h.Value); break;
                 case CallExpr c:
                     if (c.Callee is NameExpr fn) Use(fn.Name, SymbolKind.Fn, fn.Span);
                     foreach (var a in c.Args) Ex(a);
@@ -205,6 +206,7 @@ public sealed class DefinitionIndex
                 case BringStmt br: Use(br.Builder, SymbolKind.Builder, br.Span); foreach (var a in br.Args) Ex(a); break;
                 // `weave Server from …` brings Server once per record — a use of it, like a bring.
                 case WeaveStmt ws: Use(ws.Loom, SymbolKind.Builder, ws.Span); foreach (var a in ws.Args) Ex(a); break;
+                case CollectionStmt cs: Ex(cs.Value); Ex(cs.Target); break;
                 // `mute Physics` names a shard — at the NAME, so F12 on it lands and Shift+F12 lists it.
                 case MuteStmt { ByMark: true } mu: Use(mu.Shard, SymbolKind.Mark, mu.NameSpan); break;
                 case MuteStmt mu: Use(mu.Shard, SymbolKind.Shard, mu.NameSpan); break;

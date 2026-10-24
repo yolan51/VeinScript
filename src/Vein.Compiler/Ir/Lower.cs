@@ -892,7 +892,7 @@ public sealed partial class Lower
         foreach (var member in s.Members)
         {
             if (member is FieldDecl f)
-                fields.Add(new IrField(f.Name, Ty(f.Type), ParseFold(f.Fold, f.Span), LowerDefault(f.Default)));
+                fields.Add(new IrField(f.Name, Ty(f.Type), ParseFold(f.Fold, f.Span), LowerDefault(f.Default)) { Collection = CheckCollection(f) });
             else if (member is EnumDecl en)
                 extraEnums.Add(LowerEnum(en, scope: s.Name));
         }
@@ -2275,6 +2275,7 @@ public sealed partial class Lower
             case BringStmt br when _ordering is not null: return LowerOrderedBring(br, _ordering);
             case BringStmt br: return LowerBring(br);
             case WeaveStmt ws: return LowerWeave(ws);
+            case CollectionStmt cs: return LowerCollectionStmt(cs);
 
             // `ordered by k { bring … }` — each bring keeps its own lowering; what changes is the ORDER
             // they run in. The key is the argument named `k` in that bring's builder, found by expanding
@@ -2438,6 +2439,9 @@ public sealed partial class Lower
                             init.Add((f.Name, LowerExpr(pinned)));
                             continue;
                         }
+                        // `bring Server("S1", 9811, [1, 2])` into `~<list> peers: Entity` — each literal checked (D24).
+                        if (f.Collection is { } fc && arg < br.Args.Count && br.Args[arg] is ListLitExpr items)
+                            foreach (var item in items.Items) CheckElement(item, fc.Element, $"{si.Shape}.~{f.Name}");
                         IrExpr value = BindArg(arg < br.Args.Count ? br.Args[arg] : null,
                                                f.Default, f.Type, br.FillRest, b.Name, f.Name);
                         arg++;
@@ -2579,6 +2583,81 @@ public sealed partial class Lower
         return new IrOrderedBring(key, lowered as IrBlock ?? new IrBlock(new[] { lowered }));
     }
 
+    // ---- ~ collections (D24) ------------------------------------------------------------------------------
+
+    private static readonly string[] CollectionKinds = { "list", "set", "ring" };
+    private static readonly string[] ElementTypes = { "Entity", "int", "float", "string", "bool" };
+
+    /// A `~<kind> name: Element` declaration checked (VS0374) and carried into the IR. Null for any other field.
+    private IrCollection? CheckCollection(FieldDecl f)
+    {
+        if (f.Collection is not { } c) return null;
+        if (!CollectionKinds.Contains(c.Kind))
+            _diag.Error("VS0374", $"`~<{c.Kind}>` is not a collection kind — a collection is `~<list>` (ordered, repeats), " +
+                "`~<set>` (unique) or `~<ring N>` (the last N).", f.Span);
+        else if (c.Kind == "ring" && c.Size <= 0)
+            _diag.Error("VS0374", $"`~<ring>` keeps the last N — give it a size: `~<ring 20> {f.Name}: {c.Element}`.", f.Span);
+        else if (c.Kind != "ring" && c.Size != 0)
+            _diag.Error("VS0374", $"Only a ring has a size — `~<{c.Kind}> {f.Name}` grows as it needs.", f.Span);
+        if (!ElementTypes.Contains(c.Element))
+            _diag.Error("VS0374", $"A collection holds {string.Join(", ", ElementTypes)} — not `{c.Element}`. " +
+                "For records with fields, collect the identities that carry them (`~<list> items: Entity`).", f.Span);
+        return new IrCollection(c.Kind, c.Size, c.Element);
+    }
+
+    /// The declared field a `x.Shape.field` reads, when its receiver names a shape — so `.~` can be
+    /// checked against what the field IS.
+    private FieldDecl? CollectionField(MemberExpr me) =>
+        me.Receiver is MemberExpr { Name: var shape } && _shapeFields.TryGetValue(shape, out var fs)
+            ? fs.FirstOrDefault(f => f.Name == me.Name) : null;
+
+    /// `~` exactly where a field is a collection: a plain read of one is VS0373, `.~` on another field VS0372.
+    private void CheckCollectionRead(MemberExpr me)
+    {
+        if (CollectionField(me) is not { } f) return;
+        if (f.Collection is not null && !me.Collection)
+            _diag.Error("VS0373", $"`{me.Name}` is a collection — read it as `.~{me.Name}`, so a reader sees it is one.", me.Span);
+        else if (f.Collection is null && me.Collection)
+            _diag.Error("VS0372", $"`{me.Name}` is not a collection — `~` is for a field declared `~<list>`, `~<set>` or `~<ring N>`.", me.Span);
+    }
+
+    /// A literal going into a collection of `element` (VS0371). A non-literal of unknown type is not
+    /// reported — RULES 26: a warning that fires on correct code is worse than none.
+    private void CheckElement(Expr value, string element, string where)
+    {
+        if (value is not LiteralExpr lit) return;
+        bool fits = element switch
+        {
+            "Entity" => false,
+            "int" => lit.Kind == LiteralKind.Int,
+            "float" => lit.Kind is LiteralKind.Int or LiteralKind.Float,
+            "string" => lit.Kind == LiteralKind.String,
+            "bool" => lit.Kind == LiteralKind.Bool,
+            _ => true,
+        };
+        if (!fits)
+            _diag.Error("VS0371", element == "Entity"
+                ? $"{where} holds identities, and `{AstPrinter.Ex(lit)}` is a value — give it an identity (a `bring … as x`, a binding)."
+                : $"{where} holds {element}, and `{AstPrinter.Ex(lit)}` is not one.", value.Span);
+    }
+
+    /// `add v to s.Shape.~field` / `remove v from …` → a runtime call the interpreter queues for the commit.
+    private IrStmt LowerCollectionStmt(CollectionStmt cs)
+    {
+        if (cs.Target is not MemberExpr { Collection: true, Receiver: MemberExpr { Receiver: var owner, Name: var shape } } me
+            || CollectionField(me) is not { Collection: { } c })
+        {
+            _diag.Error("VS0372", $"`{(cs.Remove ? "remove … from" : "add … to")}` changes a collection — write the field as " +
+                "`x.Shape.~field`, where the field is declared `~<list>`, `~<set>` or `~<ring N>`.", cs.Span);
+            return new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
+        }
+        CheckElement(cs.Value, c.Element, $"{shape}.~{me.Name}");
+        return new IrExprStmt(new IrRuntimeCall(cs.Remove ? "CollRemove" : "CollAdd", new[]
+        {
+            LowerExpr(owner), new IrLiteral(shape, IrLiteralKind.String), new IrLiteral(me.Name, IrLiteralKind.String), LowerExpr(cs.Value),
+        }));
+    }
+
     // ---- weave · loom · format (D23) ---------------------------------------------------------------------
 
     /// While a loom's record lowers: the identity its bring lands ON (pre-spawned by the weave), in place
@@ -2595,8 +2674,10 @@ public sealed partial class Lower
     private List<(string Name, TypeRef? Type, Expr? Default, string? From)> WovenParams(BringTarget t) =>
         BringParams(t).Params.Where(p => t.Fixed is null || !t.Fixed.ContainsKey(p.Name)).ToList();
 
-    private static WeaveParam ToWeaveParam((string Name, TypeRef? Type, Expr? Default, string? From) p) =>
-        new(p.Name, p.Type?.Name ?? "string", p.Default is not null, p.Type?.Args.FirstOrDefault()?.Name);
+    private WeaveParam ToWeaveParam((string Name, TypeRef? Type, Expr? Default, string? From) p) =>
+        new(p.Name, p.Type?.Name ?? "string", p.Default is not null, p.Type?.Args.FirstOrDefault()?.Name,
+            // A `~` collection's kind (D24), so a weave reports a duplicate in a `~<set>` rather than folding it away.
+            p.From is not null && _shapeFields.TryGetValue(p.From, out var fs) ? fs.FirstOrDefault(f => f.Name == p.Name)?.Collection?.Kind : null);
 
     /// A format by name, seen from the bundle `ownerKey` belongs to (null: this one) — local, then built-in,
     /// then `need`; a qualified `*A.B.Name` by its path. BuiltIn is true for Json/Csv/Ini/KeyValue.
@@ -3078,7 +3159,14 @@ public sealed partial class Lower
 
             case MemberExpr me:
                 CheckHearRead(me);
+                CheckCollectionRead(me);
                 return new IrFieldAccess(LowerExpr(me.Receiver), me.Name);
+
+            // `s.Guild.~members has p` (D24).
+            case HasExpr has:
+                if (has.Collection is MemberExpr cm && CollectionField(cm) is { Collection: { } hc })
+                    CheckElement(has.Value, hc.Element, $"{((MemberExpr)cm.Receiver).Name}.~{cm.Name}");
+                return new IrRuntimeCall("CollHas", new[] { LowerExpr(has.Collection), LowerExpr(has.Value) });
             case IndexExpr ix: return new IrIndex(LowerExpr(ix.Receiver), LowerExpr(ix.Index));
             // `*Author.Bundle.Publicator.name(…)` — a cross-bundle call. The callee resolves to a shared
             // `fn`/`SF`, which is IMPORTED into this module under a mangled name so the runtime can find

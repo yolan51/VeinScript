@@ -43,7 +43,7 @@ bundle WeaveFormats by you {
     need "Vein.Console"
 
     shape $Item    { name: string, qty: int, price: float = 0.0 }
-    shape $Node    { name: string, port: int, near: list<string> = [] }
+    shape $Node    { name: string, port: int, ~<list> near: string }
     shape $Kick    { kind: string, who: string, by: string, minutes: int, why: string }
     shape $Mob     { name: string, hp: int, x: int = 0, y: int = 0 }
     shape $Setting { key: string, value: string }
@@ -122,7 +122,7 @@ bundle WeaveFormats by you {
             if w.loom == "IniItem" { target $Item #FromIni as i { do print("Ini: " + i.Item.name + " x" + i.Item.qty + " at " + i.Item.price) } }
             if w.loom == "KeyValueItem" { target $Item #FromKeyValue as i { do print("KeyValue: " + i.Item.name + " x" + i.Item.qty + " at " + i.Item.price) } }
             if w.loom == "SemiCsvItem" { target $Item #FromSemi as i { do print("SemiCsv: " + i.Item.name + " x" + i.Item.qty + " at " + i.Item.price) } }
-            if w.loom == "Node" { target $Node as n { do print(n.Node.name + " port " + n.Node.port + " near " + join(n.Node.near, " ")) } }
+            if w.loom == "Node" { target $Node as n { do print(n.Node.name + " port " + n.Node.port + " near " + join(n.Node.~near, " ")) } }
             if w.loom == "Kick" { target $Kick as k { do print("kick " + k.Kick.who + " by " + k.Kick.by + " for " + k.Kick.minutes + " min: " + k.Kick.why) } }
             if w.loom == "Mob" { target $Mob as m { do print(m.Mob.name + " hp " + m.Mob.hp + " at " + m.Mob.x + "," + m.Mob.y) } }
             if w.loom == "Setting" { target $Setting as s { do print(s.Setting.key + " = " + s.Setting.value) } }

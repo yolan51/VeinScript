@@ -102,6 +102,7 @@ None of this was on the original map; all of it is on the interpreter.
 | The network AS a capability — a non-principal bundle binds the socket | `veinc run samples/app_net/hub.app.vein` + `net_spoke.vein` |
 | Standalone executable | `veinc build <f>` |
 | Identities from text — `format` · `loom<Format>` · `weave Loom(text)`, @Woven/@Unwoven (D23, shipped 2026-10-24) | `samples/weave_topology.vein`, `veinc formats <f>`, the Formats tab |
+| `~` collections — `~<list>`/`~<set>`/`~<ring N>`, flat walks, `add`/`remove`/`has` (D24, shipped 2026-10-24; interpreter-only) | `samples/collections.vein` |
 
 ## Open work
 

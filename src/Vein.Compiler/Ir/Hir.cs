@@ -25,7 +25,14 @@ public sealed record IrField(string Name, IrTypeRef Type, FoldReducer? Fold, IrE
     /// A shard var under `tune("…")` (D21): its doc ("" if empty); null for ordinary state. Its Default is
     /// already the project's value when `vein.settings` overrides it.
     public string? Tune { get; init; }
+
+    /// A `~` collection field (D24): what the runtime keeps true when it changes — a set's uniqueness, a
+    /// ring's size — and the element type `add` checks. The field's Type is `list<Element>`. Null otherwise.
+    public IrCollection? Collection { get; init; }
 }
+
+/// A collection's kind (`list`, `set`, `ring`), a ring's size, and the declared element type (D24).
+public sealed record IrCollection(string Kind, int Size, string Element);
 public sealed record IrEnumCase(string Name, int Ordinal);
 
 public sealed record IrType(

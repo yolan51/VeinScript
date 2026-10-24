@@ -311,6 +311,8 @@ public sealed class Lexer
             case '.': kind = TokenKind.Dot; break;
             case ',': kind = TokenKind.Comma; break;
             case '|': kind = TokenKind.Pipe; break;
+            // D24: `~` marks a COLLECTION — `~<set> members: Entity` declares one, `s.Guild.~members` uses it.
+            case '~': kind = TokenKind.Tilde; break;
             case '*': kind = Match('=') ? TokenKind.StarEq : TokenKind.Star; break;
             case '/': kind = Match('=') ? TokenKind.SlashEq : TokenKind.Slash; break;
             case '%': kind = TokenKind.Mod; break;

@@ -174,6 +174,7 @@ public sealed class AstTree
         ChanceStmt c => Node("Chance", Pct(c.Probability), c.Span, Block(c.Body)),
         BringStmt br => Bring(br),
         WeaveStmt ws => Weave(ws),
+        CollectionStmt cs => Node(cs.Remove ? "Remove" : "Add", Path(cs.Target), cs.Span, new[] { Expr(cs.Value) }),
 
         // `return` in an `fn` body. Missing until a coverage test went looking, and the effect was that
         // every function in the tree showed a bare `ReturnStmt` — the VALUE it returns, which is the
@@ -289,6 +290,7 @@ public sealed class AstTree
             case BinaryExpr b: return ("Binary", OpSym(b.Op), new List<IrNode> { Expr(b.Left), Expr(b.Right) });
             case UnaryExpr u: return ("Unary", u.Op == UnOp.Neg ? "-" : "not", new List<IrNode> { Expr(u.Operand) });
             case CarriesExpr c: return ("Carries", (c.IsShape ? "$" : "#") + c.Name, new List<IrNode> { Expr(c.Subject) });
+            case HasExpr h: return ("Has", "", new List<IrNode> { Expr(h.Collection), Expr(h.Value) });
             case CallExpr c: return ("Call", Callee(c.Callee), c.Args.Select(Expr).ToList());
             case StructLitExpr s: return ("New", (_shapes.Contains(s.TypeName) ? "$" : "") + s.TypeName, s.Fields.Select(ArgField).ToList());
             case ListLitExpr li: return ("List", "", li.Items.Select(Expr).ToList());
@@ -312,7 +314,7 @@ public sealed class AstTree
     private string Path(Expr e) => e switch
     {
         NameExpr n => n.Name,
-        MemberExpr m => $"{Path(m.Receiver)}.{m.Name}",
+        MemberExpr m => $"{Path(m.Receiver)}.{(m.Collection ? "~" : "")}{m.Name}",
         IndexExpr i => $"{Path(i.Receiver)}[{Inline(i.Index)}]",
         ShapeRefExpr r => "$" + r.Name,
         EventRefExpr r => "@" + r.Name,

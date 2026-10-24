@@ -1,0 +1,137 @@
+// samples/collections.vein — `~` collections: many of something, as a field (D24).
+//     veinc run samples/collections.vein
+//
+// `~` in front of a field makes it a COLLECTION, with its kind and its element type declared:
+//
+//     ~<list> exits: Entity        ordered, repeats allowed
+//     ~<set>  members: Entity      each value once, in the order added
+//     ~<ring 3> lines: string      only the last 3 — the oldest drops off
+//
+// Elements are Entity, int, float, string or bool, and the compiler checks every literal that goes in.
+// Everything that already handles a field handles a collection: `bring Guild("Owls", [ann, bob])` fills
+// one; a loom weaves one; an event can carry one.
+//
+// THREE THINGS TO SEE:
+//
+//   1. THE `~` IS WHERE YOU SEE IT. A collection is read as `g.Guild.~members` — a plain `.members` is an
+//      error (VS0373) — so a reader always knows a value is many.
+//   2. WALKS ARE FLAT. `target $Room.~exits as r, x` is ONE loop over every (room, exit), and `x.Room.name`
+//      reads the exit's own data directly: no inner lookup loop.
+//   3. `add` AND `remove` LAND AT THE COMMIT, like `attach` and `mark`. Two shards adding to one guild in
+//      the same event BOTH land — a collection merges, where a plain field would fight over one slot. A
+//      destroyed identity leaves every collection that named it.
+//
+// Expected output:
+//
+//     Hall -> Cellar
+//     Hall -> Tower
+//     Cellar -> Hall
+//     Owls: Ann Bob Cy Dee
+//     Cy is an Owl: true
+//     chat: c d e
+//     Owls after Bob left: Ann Cy Dee
+//     Owls after Cy is gone: Ann Dee
+
+bundle Collections by you {
+
+    need "Vein.Console"
+
+    shape $Room   { name: string, ~<list> exits: Entity }
+    shape $Person { name: string }
+    shape $Guild  { name: string, ~<set> members: Entity }
+    shape $Chat   { ~<ring 3> lines: string }
+
+    mark #Room
+    mark #Person
+    mark #Guild
+
+    builder Room   { $Room  mark #Room }
+    builder Person { $Person  mark #Person }
+    builder Guild  { $Guild  mark #Guild }
+    builder Chat   { $Chat  mark #Guild }
+
+    event @Recruit { }
+    event @Show { }
+    event @Leave { }
+    event @Gone { }
+
+    shard World {
+        run once {
+            bring Room("Hall", []) as hall
+            bring Room("Cellar", [hall]) as cellar
+            bring Room("Tower", []) as tower
+            bring Person("Ann") as ann
+            bring Person("Bob") as bob
+            bring Person("Cy") as cy
+            bring Person("Dee") as dee
+            bring Guild("Owls", [ann, bob, ann]) as owls          // a set: Ann once
+            bring Chat([]) as chat
+
+            // bring Guild("Bad", [1])        ← VS0371: Guild.~members holds identities, and `1` is a value
+
+            emit @Recruit { }
+        }
+
+        // Hall's exits were written before the other rooms existed; add them now.
+        hear @Recruit as r {
+            target $Room as room {
+                if room.Room.name == "Hall" {
+                    target $Room as other { if not (other == room) { add other to room.Room.~exits } }
+                }
+            }
+            target $Chat as c {
+                add "a" to c.Chat.~lines
+                add "b" to c.Chat.~lines
+                add "c" to c.Chat.~lines
+                add "d" to c.Chat.~lines
+                add "e" to c.Chat.~lines
+            }
+            emit @Show { }
+        }
+
+        hear @Show as s {
+            target $Room.~exits as r, x { do print(r.Room.name + " -> " + x.Room.name) }       // one flat loop
+            target $Guild as g {
+                var names = g.Guild.name + ":"
+                target g.Guild.~members as m { names = names + " " + m.Person.name }
+                do print(names)
+            }
+        }
+    }
+
+    // TWO SHARDS ADD TO ONE GUILD IN THE SAME EVENT — and both land.
+    shard RecruiterA {
+        hear @Recruit as r {
+            target $Guild as g { target $Person as p { if p.Person.name == "Cy" { add p to g.Guild.~members } } }
+        }
+    }
+    shard RecruiterB {
+        hear @Recruit as r {
+            target $Guild as g { target $Person as p { if p.Person.name == "Dee" { add p to g.Guild.~members } } }
+        }
+        hear @Show as s {
+            target $Guild as g {
+                target $Person as p { if p.Person.name == "Cy" { do print("Cy is an Owl: " + (g.Guild.~members has p)) } }
+                target $Chat as c { do print("chat: " + join(c.Chat.~lines, " ")) }
+                target $Person as p { if p.Person.name == "Bob" { remove p from g.Guild.~members } }
+            }
+            emit @Leave { }
+        }
+        hear @Leave as l {
+            target $Guild as g {
+                var names = "Owls after Bob left:"
+                target g.Guild.~members as m { names = names + " " + m.Person.name }
+                do print(names)
+            }
+            target $Person as p { if p.Person.name == "Cy" { destroy p } }
+            emit @Gone { }
+        }
+        hear @Gone as gone {
+            target $Guild as g {
+                var names = "Owls after Cy is gone:"
+                target g.Guild.~members as m { names = names + " " + m.Person.name }
+                do print(names)
+            }
+        }
+    }
+}

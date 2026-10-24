@@ -111,7 +111,7 @@ would have to say which one it means.
 
 ```
 format MeshList { records ";"  name "="  values ":"  lists "+" }     // formats/MeshList.vein
-shape $Server { name: string, host: string = "", port: int, peers: list<Entity> = [] }
+shape $Server { name: string, host: string = "", port: int, ~<set> peers: Entity }
 loom<MeshList> Server { $Server  mark #Listed }
 
 weave Server("S1=9811:S2; S2=9812:S1")
@@ -121,7 +121,7 @@ weave Server("S1=9811:S2; S2=9812:S1")
 - **Four formats are built in** — Json, Csv, Ini, KeyValue — and `need "Vein.Weaving"` adds the official ones
   (Tsv, Pipes, Env, Hosts, Colons, NamedList, …). A format of your own is a file `formats/<Name>.vein`
   (`veinc new format <Name>`), shared like an event; `format Mine from Theirs { … }` changes one.
-- **The first parameter is the record's name.** A `list<Entity>` (or `Entity`) value is NAMES, resolved
+- **The first parameter is the record's name.** A `~` collection of Entity (or an `Entity`) value is NAMES, resolved
   across the whole text and earlier weaves — S1 may name S4 before S4's line, because every identity is
   spawned before any is linked. An unknown name in a list is dropped, with one @Unwoven.
 - **Values are placed by type.** A parameter with a default may be missing; the trailing optional ones are
@@ -240,6 +240,28 @@ touching. Anything reading world coordinates asks for `$World` by name.
 `settled`**, which is where collision reads: composing later is a one-frame lag, invisible at 60fps and
 wrong at every speed. A cycle leaves every identity in it at its own position and reports once; a parent
 that was destroyed leaves the child where it is.
+
+**13d. Many of something is a `~` collection — declared with its kind and element type, read with its `~`.**
+(SYNTAX-DECISIONS D24)
+
+```
+shape $Guild { name: string, ~<set> members: Entity }       // ~<list> ordered · ~<set> unique · ~<ring 20> last 20
+bring Guild("Owls", [ann, bob])                              // a [ … ] fills it; [] is the default
+target $Guild.~members as g, m { … m.Person.name … }         // ONE loop per (guild, member)
+target g.Guild.~members as m { … }                           // one owner's
+add cy to g.Guild.~members                                   // at the commit — two shards' adds both land
+remove bob from g.Guild.~members
+if g.Guild.~members has cy { … }
+```
+
+- **Elements are Entity, int, float, string or bool.** A literal of the wrong kind going in is VS0371; a
+  non-literal is checked when `add` runs, as a fault with its place.
+- **The `~` is at every use**: a plain `g.Guild.members` is VS0373, and `~`/`add`/`remove` on a field that
+  is not a collection is VS0372.
+- **The kind's promise is kept by the runtime**: a set holds a value once (from `bring` too), a ring only
+  its last N. A destroyed identity leaves every `~` collection of Entity.
+- `m.Person.name` reads an element's data directly — an entity plus a shape is a handle (13b) — so there
+  is no inner lookup loop. Interpreter-only for now; `veinc emit` says so. `list<T>` stays legal.
 
 **14. `target` binds ONE shape per loop, and nothing can ask an identity which shapes it carries.**
 Several shapes are an AND (`target $A $B`). There is no dispatch — a heterogeneous ordered sequence
@@ -818,7 +840,8 @@ expects an exact output. Both are interpreter-only.
   the rest. `veinc test` compares it against `name.err`.
 
 **28h. A list grows with `+=`, an element is set with `xs[i] = v`, and `remove` / `sort` make new
-lists.** D4 already said mutation is `+=`; now it applies to lists:
+lists.** D4 already said mutation is `+=`; now it applies to lists. *(This is a LOCAL list. A field that
+holds many of something is a `~` collection, changed with `add` / `remove` — rule 13d.)*
 
 ```
 var xs = [3, 1]
