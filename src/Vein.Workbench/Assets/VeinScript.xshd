@@ -52,9 +52,11 @@
     <Rule color="Event">@[A-Za-z_][A-Za-z0-9_]*</Rule>
     <Rule color="Builder">&amp;[A-Za-z_][A-Za-z0-9_]*</Rule>
     <Rule color="Shard">![A-Za-z_][A-Za-z0-9_]*</Rule>
-    <!-- `~<set>` / `~<ring 20>` where a collection is declared, `.~members` where it is used (D24) -->
-    <Rule color="Collection">~&lt;(list|set|ring)( [0-9]+)?&gt;</Rule>
-    <Rule color="Collection">\.~[A-Za-z_][A-Za-z0-9_]*</Rule>
+    <!-- `~<set>` / `~<ring 20>` / `~<map>` where a collection is declared, `.~members` and its words
+         `.add` `.remove` `.clear` `.put` `.has` where it is used, `owns` in front of an element (D24) -->
+    <Rule color="Collection">~&lt;(list|set|ring|map)( [0-9]+)?&gt;</Rule>
+    <Rule color="Collection">\.~[A-Za-z_][A-Za-z0-9_]*(\.(add|remove|clear|put|has)\b)?</Rule>
+    <Rule color="Collection">\bowns(?=\s+(\$|Entity\b))</Rule>
 
     <!-- `?` fill-the-rest placeholder in emit/bring -->
     <Rule color="Sigil">\?</Rule>

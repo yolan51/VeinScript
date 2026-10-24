@@ -419,23 +419,30 @@ word     := records | name | values | pairs | lists | quotes | delimiter | comme
 
 Json, Csv, Ini and KeyValue are built in; `need "Vein.Weaving"` adds the official formats.
 
-**Collections — `~<list>`, `~<set>`, `~<ring N>`.** A field that holds many of something says so with `~`,
-its kind and its element type (Entity, int, float, string, bool); it is read with its `~` everywhere
-(D24, RULES 13d):
+**Collections — `~<list>`, `~<set>`, `~<ring N>`, `~<map>`.** A field that holds many of something says so
+with `~`, its kind and its element type (Entity, int, float, string, bool, or `$Shape` — identities that
+carry it, linked or `owns`); it is read with its `~` everywhere (D24, RULES 13d):
 
 ```
-shape $Guild { name: string, ~<set> members: Entity }
+shape $Guild { name: string, ~<set> members: $Person }
+shape $Bag   { ~<list> items: owns $Item }
+shape $Board { ~<map> scores: string | int }
 target $Guild.~members as g, m { … m.Person.name … }     // one loop per (guild, member)
-add cy to g.Guild.~members        remove bob from g.Guild.~members        g.Guild.~members has cy
+g.Guild.~members.add(cy)    g.Guild.~members.remove(bob)    g.Guild.~members.clear()    g.Guild.~members.has(cy)
+b.Board.~scores.put("ann", 3)    b.Board.~scores["ann"]    target $Board.~scores as b, e { e.key … e.value }
 ```
 
 Grammar:
 
 ```
-collection-field := "~" "<" ("list" | "set" | "ring" INT) ">" Name ":" Type ["=" expr]
+collection-field := "~" "<" ("list" | "set" | "ring" INT) ">" Name ":" element ["=" expr]
+                  | "~" "<" "map" ">" Name ":" element "|" element
+element          := ["owns"] (Type | "$" Shape)
 collection-read  := expr "." "~" Name
-collection-stmt  := "add" expr "to" collection-read | "remove" expr "from" collection-read
-collection-test  := collection-read "has" expr
+collection-stmt  := collection-read "." ("add" | "remove") "(" expr { "," expr } ")"
+                  | collection-read "." "clear" "(" ")" | collection-read "." "put" "(" expr "," expr ")"
+                  | "add" expr { "," expr } "to" collection-read | "remove" expr { "," expr } "from" collection-read
+collection-test  := collection-read "has" expr | collection-read "." "has" "(" expr ")"
 collection-walk  := "target" "$" Shape "." "~" Name { "$" Shape | "#" Mark } "as" Name "," Name block
 ```
 

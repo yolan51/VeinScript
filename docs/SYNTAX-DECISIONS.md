@@ -733,8 +733,10 @@ format a program can name and dry-run any of them against pasted text.
 
 > **Reported as** `VS0371` (a literal of the wrong kind going into a collection — `bring`, `add`, `has`),
 > `VS0372` (`~` / `add` / `remove` on a field that is not a collection), `VS0373` (a collection read without
-> its `~`) and `VS0374` (an unknown kind, a ring with no size, a size on anything else, an element type that
-> is not Entity/int/float/string/bool).
+> its `~`), `VS0374` (an unknown kind, a ring with no size, a size on anything else, an element type that
+> is not Entity/int/float/string/bool/`$Shape`, `owns` on a value, a bad map key type) and `VS0375` (a
+> word a collection does not have — `.Add`, `.push`, `.add` on a map, `.put` on a list, `.clear(x)`).
+> An unknown `$Shape` element is VS0233.
 
 **DECIDED.** A server has neighbours, a guild members, a room exits, a chat its last lines. The C-family
 answer is an array or a `List<T>`, and walking one nested three loops (the owner, the list, a lookup of
@@ -776,9 +778,40 @@ it that type — so `bring` fills it with `[…]`, a loom weaves it (names resol
 in a `~<set>` is an @Unwoven), and an event can carry one. A destroyed identity leaves every `~`
 collection of Entity at the commit, so nothing dangles. `list<T>` stays legal.
 
-*What is not yet.* The C# backend reports `add`/`remove`/`has` as interpreter-only (`veinc emit` says so):
+*The method forms (part 2).* Filling a ring took five `add` lines, so the collection's words are also written
+ON it, with any number of values: `c.Chat.~lines.add("a", "b", "c")`, `.remove(x, y)`, `.clear()`, `.has(x)`.
+They mean exactly the keyword forms (which stay, and take comma lists too): one change per value, in the
+order written, each landing at the commit. They are LOWERCASE like every built-in (`len`, `print`); `.Add`
+and any other name are VS0375. A word only after `.~field` — `clear` and `put` stay legal as names.
+
+*`$Shape` elements.* `~<set> members: $Person` holds identities that must CARRY `$Person`. It is still an
+Entity collection — bring, the flat walk, destroy cleanup and weave are unchanged — and an add of an
+identity without the shape is refused at the commit (so one brought earlier in the same event counts),
+as a fault with the place it was written. Records with fields and NO identity were declined: data with
+fields is an identity here, so it can be targeted, marked and destroyed like any other.
+
+*`owns` versus a link.* A collection of identities means one of two things, and only the declaration can
+say which. A guild's members exist on their own: `.remove(bob)` must not end Bob. A bag's items exist
+because of the bag: an item taken out and left alive would sit in the world with no holder. So
+`~<list> items: owns $Item` OWNS: what leaves it ends (removed, cleared, trimmed off a ring, replaced in a
+map), and destroying — or unattaching — the owner ends what it owns, in turn. An add into an owned
+collection MOVES the identity out of any other owned collection, alive: one owner at a time, which is how
+an item goes from one bag to another. Ownership was not built into `destroy` or `.clear()`: the same word
+meaning "take out" on one field and "end" on another, decided by the element type, is the confusion the
+declaration avoids. `owns` on a value element is VS0374 — a value has no identity to end.
+
+*`~<map>`.* `~<map> scores: string | int` — key type `|` value type; a key is string, int, Entity or
+`$Shape`, a value any element type (and may be `owns`). `.put(k, v)` sets one key (a second put replaces,
+in the key's old place), `m[k]` reads one (a missing key reads as the value type's zero), `.has(k)` asks
+about a key, `.remove(k)` / `.clear()` as on a list, `len` counts keys. A walk sees each pair as a record:
+`target $Board.~scores as b, e { e.key … e.value }`, in first-put order. `.add` on a map and `.put` on
+anything else are VS0375. A map has no literal yet: it takes no bring argument, starts empty and fills
+through `.put`.
+
+*What is not yet.* The C# backend reports the collection words as interpreter-only (`veinc emit` says so):
 compiling them needs VeinWorld to replace a component inside a commit and to sweep destroyed ids. Comparing
-two collections (`same`, `with`, `without`, `common`, `within`) waits for a program that needs it.
+two collections (`same`, `with`, `without`, `common`, `within`) waits for a program that needs it, and so do
+a map literal and weaving into a map.
 
 ## Reserved-word disposition
 

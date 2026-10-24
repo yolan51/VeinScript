@@ -245,17 +245,28 @@ that was destroyed leaves the child where it is.
 (SYNTAX-DECISIONS D24)
 
 ```
-shape $Guild { name: string, ~<set> members: Entity }       // ~<list> ordered · ~<set> unique · ~<ring 20> last 20
+shape $Guild { name: string, ~<set> members: $Person }      // ~<list> ordered · ~<set> unique · ~<ring 20> last 20
+shape $Bag   { ~<list> items: owns $Item }                   // OWNED: what leaves it ends
+shape $Board { ~<map> scores: string | int }                 // key type | value type
 bring Guild("Owls", [ann, bob])                              // a [ … ] fills it; [] is the default
 target $Guild.~members as g, m { … m.Person.name … }         // ONE loop per (guild, member)
 target g.Guild.~members as m { … }                           // one owner's
-add cy to g.Guild.~members                                   // at the commit — two shards' adds both land
-remove bob from g.Guild.~members
-if g.Guild.~members has cy { … }
+g.Guild.~members.add(cy, dee)                                // at the commit — two shards' adds both land
+g.Guild.~members.remove(bob)                                 // keyword forms too: add cy to … / remove bob from …
+g.Guild.~members.clear()
+if g.Guild.~members.has(cy) { … }                            // or: g.Guild.~members has cy
+b.Board.~scores.put("ann", 3)    b.Board.~scores["ann"]     target $Board.~scores as b, e { e.key … e.value }
 ```
 
-- **Elements are Entity, int, float, string or bool.** A literal of the wrong kind going in is VS0371; a
-  non-literal is checked when `add` runs, as a fault with its place.
+- **Elements are Entity, int, float, string, bool — or `$Shape`**, identities that carry it (checked at the
+  commit, so one brought in the same event counts). A literal of the wrong kind going in is VS0371; a
+  non-literal is checked when the change runs, as a fault with its place.
+- **A link or `owns`.** `~<set> members: $Person` is a link: `.remove`/`.clear` only take identities out.
+  `~<list> items: owns $Item` owns: what leaves it ENDS, and so does everything it owns when the owner is
+  destroyed or the shape unattached; an add into an owned collection MOVES the identity, alive.
+- **The words are lowercase and on the collection**: `.add(…)` `.remove(…)` `.clear()` `.has(x)`, and a
+  map's `.put(k, v)`. Anything else (`.Add`, `.push`, `.add` on a map) is VS0375. A map takes no bring
+  argument: it starts empty.
 - **The `~` is at every use**: a plain `g.Guild.members` is VS0373, and `~`/`add`/`remove` on a field that
   is not a collection is VS0372.
 - **The kind's promise is kept by the runtime**: a set holds a value once (from `bring` too), a ring only

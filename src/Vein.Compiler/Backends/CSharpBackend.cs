@@ -1603,11 +1603,11 @@ public sealed class CSharpBackend : IVeinBackend
             case "DestroyEntity":
                 return $"World.Destroy({Expr(c.Args[0])})";
 
-            // D24: `add`/`remove`/`has` on a `~` collection. A compiled collection needs VeinWorld to replace a
+            // D24: `.add`/`.remove`/`.clear`/`.put`/`.has` on a `~` collection. A compiled collection needs VeinWorld to replace a
             // component inside a commit and to sweep destroyed ids out of every `~` field — not there yet.
             // Said, never approximated: the program stays on the interpreter.
-            case "CollAdd" or "CollRemove" or "CollHas":
-                _notes.Add($"`{(c.Name == "CollHas" ? "has" : c.Name == "CollAdd" ? "add" : "remove")}` on a `~` collection is interpreter-only — " +
+            case "CollAdd" or "CollRemove" or "CollHas" or "CollClear" or "CollPut":
+                _notes.Add($"`.{c.Name[4..].ToLowerInvariant()}` on a `~` collection is interpreter-only — " +
                            "this file will not compile; keep the program on `veinc run` (D24).");
                 return $"__VeinCollection_InterpreterOnly(\"{c.Name}\")";
 

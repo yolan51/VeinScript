@@ -2182,6 +2182,7 @@ public sealed class Interp
                 if (recv is IReadOnlyList<object?> list)
                 { long i = AsLong(key); return i >= 0 && i < list.Count ? list[(int)i] : null; }
                 if (recv is IDictionary<string, object?> map) return map.TryGetValue(Str(key), out var mv) ? mv : null;
+                if (recv is VeinMap vm) return vm[key];   // `b.Board.~scores["ann"]` — the value type's zero when missing
                 if (recv is string str)
                 { long i = AsLong(key); return i >= 0 && i < str.Length ? str[(int)i].ToString() : null; }
                 return null;
@@ -2621,22 +2622,43 @@ public sealed class Interp
             // mark: two shards adding in one tick both land, at the commit.
             case "CollAdd":
             case "CollRemove":
+            case "CollClear":
+            case "CollPut":
             {
                 long e = AsLong(Eval(rc.Args[0], self, locals));
                 string shape = Str(Eval(rc.Args[1], self, locals));
                 string field = Str(Eval(rc.Args[2], self, locals));
-                object? value = Eval(rc.Args[3], self, locals);
-                bool remove = rc.Name == "CollRemove";
-                if (_store.FieldsOf(shape)?.FirstOrDefault(f => f.Name == field)?.Collection is { } spec)
-                    value = CollectionElement(value, spec.Element, $"{shape}.~{field}");
-                _commands.Add(() => _store.ChangeCollection(e, shape, field, value, remove));
+                object? value = rc.Args.Count > 3 ? Eval(rc.Args[3], self, locals) : null;
+                object? put = rc.Args.Count > 4 ? Eval(rc.Args[4], self, locals) : null;
+                string op = rc.Name switch { "CollAdd" => "add", "CollRemove" => "remove", "CollClear" => "clear", _ => "put" };
+                var spec = _store.FieldsOf(shape)?.FirstOrDefault(f => f.Name == field)?.Collection;
+                if (spec is not null && op != "clear")
+                {
+                    string where = $"{shape}.~{field}";
+                    if (spec.Key is not null)
+                    {
+                        value = CollectionElement(value, spec.Key, where, op == "put" ? "key of" : "remove from");
+                        if (op == "put") put = CollectionElement(put, spec.Element, where, "value of");
+                    }
+                    else value = CollectionElement(value, spec.Element, where, op == "add" ? "add to" : "remove from");
+                }
+                // A `$Shape` element is checked AT the commit, after the commands queued before it — so an
+                // identity brought earlier in this event counts — and refused with this unit's place.
+                var unit = _unit;
+                _commands.Add(() =>
+                {
+                    if (_store.ChangeCollection(e, shape, field, op, value, put)) return;
+                    var (bad, need) = op == "put" && !CarriesNow(value, spec?.KeyCarries) ? (value, spec?.KeyCarries) : (op == "put" ? put : value, spec?.Carries);
+                    CommitFault(unit, $"{op} {shape}.~{field}: identity {Str(bad)} does not carry ${need}");
+                });
                 return null;
             }
             case "CollHas":
             {
-                var items = Eval(rc.Args[0], self, locals) as List<object?>;
+                var coll = Eval(rc.Args[0], self, locals);
                 var v = Eval(rc.Args[1], self, locals);
-                return items is not null && items.Any(i => LooseEq(i, v));
+                if (coll is VeinMap map) return map.Keys.Any(k => LooseEq(k, v));   // a map is asked about a KEY
+                return coll is List<object?> items && items.Any(i => LooseEq(i, v));
             }
             case "AddTag":
             case "RemoveTag":
@@ -2841,7 +2863,23 @@ public sealed class Interp
     /// A value going into a collection of `element` (D24): converted where the conversion is exact (an
     /// integral float into `int`, an int into `float`), refused otherwise — a fault, so the program hears
     /// it with a place, instead of a collection quietly holding the wrong kind of thing.
-    private static object? CollectionElement(object? value, string element, string where) => element switch
+    private bool CarriesNow(object? value, string? shape) => shape is null || (value is long id && _store.Has(id, shape));
+
+    /// A collection change refused at the commit (D24) — reported as a fault of the unit that wrote it.
+    private void CommitFault((string Shard, string Phase, SourceAt? At)? unit, string message)
+    {
+        var (shard, phase, at) = unit ?? ("", "", null);
+        string where = shard == "" ? "" : Where(shard, phase, at) + ": ";
+        Fault?.Invoke(new InterpFault(_tick, shard, phase, null, new InvalidOperationException(message)));
+        Emit("DiagnosticRaised", new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["severity"] = 2L, ["message"] = where + message,
+            ["shard"] = shard, ["phase"] = phase, ["file"] = at?.File ?? "", ["line"] = at?.Line ?? 0L,
+            ["origin"] = null, ["bundle"] = _bundle,
+        });
+    }
+
+    private static object? CollectionElement(object? value, string element, string where, string verb = "add to") => element switch
     {
         "Entity" when value is long id && id > 0 => id,
         "int" when value is long l => l,
@@ -2851,7 +2889,7 @@ public sealed class Interp
         "string" when value is string s => s,
         "bool" when value is bool b => b,
         _ => throw new InvalidOperationException(
-            $"add to {where}: {(value is string s ? "\"" + s + "\"" : Str(value))} is not {(element == "Entity" ? "an identity" : "a " + element)}"),
+            $"{verb} {where}: {(value is string s ? "\"" + s + "\"" : Str(value))} is not {(element == "Entity" ? "an identity" : "a " + element)}"),
     };
 
     private static bool LooseEq(object? l, object? r) =>
@@ -2873,6 +2911,7 @@ public sealed class Interp
         double d => d.ToString(CultureInfo.InvariantCulture),
         bool b => b ? "true" : "false",
         List<object?> xs => "[" + string.Join(", ", xs.ConvertAll(Str)) + "]",
+        VeinMap m => "{" + string.Join(", ", m.Entries.Select(e => Str(e.Key) + ": " + Str(e.Value))) + "}",
         _ => o.ToString() ?? ""
     };
     private static object? Default(string typeName) => typeName switch { "string" or "Mark" => "", "int" => 0L, "float" => 0.0, "bool" => false, _ => null };

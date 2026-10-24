@@ -462,13 +462,41 @@ public sealed class Parser
         Expect(TokenKind.Gt, "'>'");
         string name = ExpectName("the collection's field name").Text;
         Expect(TokenKind.Colon, "':' and the element type (`~<list> peers: Entity`)");
-        var element = ParseTypeRef();
+        if (kind == "map")
+        {
+            // `~<map> scores: string | int` — the key type, then the value type.
+            var (key, keyCarries, keyOwns) = ParseCollectionElement();
+            if (keyOwns) _diag.Error("VS0374", "`owns` goes on a map's VALUE — `~<map> slots: string | owns $Item`.", s);
+            Expect(TokenKind.Pipe, "'|' and the value type (`~<map> scores: string | int`)");
+            var (value, valueCarries, owns) = ParseCollectionElement();
+            Expr? mdef = Match(TokenKind.Assign) ? ParseExpr() : null;
+            return new FieldDecl(name, new TypeRef("map", new[] { key, value }, false, key.Span), null, mdef, s)
+            {
+                Collection = new CollectionSpec(kind, size, value.Name, valueCarries, owns) { Key = key.Name, KeyCarries = keyCarries },
+            };
+        }
+        var (element, carries, owned) = ParseCollectionElement();
         Expr? def = Match(TokenKind.Assign) ? ParseExpr() : null;
         return new FieldDecl(name, new TypeRef("list", new[] { element }, false, element.Span), null,
                              def ?? new ListLitExpr(Array.Empty<Expr>(), s), s)
         {
-            Collection = new CollectionSpec(kind, size, element.Name),
+            Collection = new CollectionSpec(kind, size, element.Name, carries, owned),
         };
+    }
+
+    /// A collection's element type: `int`, `Entity`, `owns $Item` (D24). A `$Shape` element is an identity
+    /// that must carry the shape — Entity, with the shape kept in Carries. `owns` is a word only here.
+    private (TypeRef Type, string? Carries, bool Owns) ParseCollectionElement()
+    {
+        bool owns = Cur.Kind == TokenKind.Ident && Cur.Text == "owns"
+                    && Peek(1).Kind is TokenKind.ShapeRef or TokenKind.Ident or TokenKind.KwEntity;
+        if (owns) Advance();
+        if (Check(TokenKind.ShapeRef))
+        {
+            var t = Advance();
+            return (new TypeRef("Entity", Array.Empty<TypeRef>(), false, t.Span), t.Text, owns);
+        }
+        return (ParseTypeRef(), null, owns);
     }
 
     private FieldDecl ParseField()
@@ -1009,9 +1037,10 @@ public sealed class Parser
             {
                 var s = Here;
                 bool remove = Advance().Text == "remove";
-                var value = ParseExpr();
+                var values = new List<Expr> { ParseExpr() };
+                while (Match(TokenKind.Comma)) values.Add(ParseExpr());
                 Expect(remove ? TokenKind.KwFrom : TokenKind.KwTo, remove ? "`from` and the collection" : "`to` and the collection");
-                return new CollectionStmt(remove, value, ParseExpr(), s);
+                return new CollectionStmt(remove ? CollectionOp.Remove : CollectionOp.Add, values, ParseExpr(), s);
             }
             default: return ParseAssignOrExpr();
         }
@@ -1441,6 +1470,30 @@ public sealed class Parser
         return new ExprStmt(call with { ViaDo = true }, s);
     }
 
+    /// `s.Chat.~lines.add("a", "b")` / `.remove(x)` / `.clear()` / `.put(k, v)` (D24) — the method forms of a
+    /// collection change, as the statement they are. Null when `e` is not one.
+    private Stmt? CollectionCall(Expr e, SourceSpan s)
+    {
+        if (e is not CallExpr { Callee: MemberExpr { Receiver: MemberExpr { Collection: true } coll, Name: var m } } call)
+            return null;
+        if (m is not ("add" or "remove" or "clear" or "put")) return null;   // misspellings are reported where read
+        var (op, ok) = m switch
+        {
+            "add" => (CollectionOp.Add, call.Args.Count > 0),
+            "remove" => (CollectionOp.Remove, call.Args.Count > 0),
+            "clear" => (CollectionOp.Clear, call.Args.Count == 0),
+            _ => (CollectionOp.Put, call.Args.Count == 2),
+        };
+        if (!ok)
+            _diag.Error("VS0375", m switch
+            {
+                "clear" => "`.clear()` empties the collection — it takes nothing.",
+                "put" => "`.put(key, value)` takes a key and a value.",
+                _ => $"`.{m}(…)` takes one or more values: `.{m}(x)`, `.{m}(x, y)`.",
+            }, s);
+        return new CollectionStmt(op, call.Args, coll, s);
+    }
+
     private Stmt ParseAssignOrExpr()
     {
         var s = Here;
@@ -1454,7 +1507,7 @@ public sealed class Parser
             TokenKind.SlashEq => AssignOp.SlashEq,
             _ => null
         };
-        if (op is null) return new ExprStmt(lhs, s);
+        if (op is null) return CollectionCall(lhs, s) ?? new ExprStmt(lhs, s);
         Advance();
         return new AssignStmt(lhs, op.Value, ParseExpr(), s);
     }
@@ -1579,6 +1632,24 @@ public sealed class Parser
             {
                 bool collection = Match(TokenKind.Tilde);   // `s.Guild.~members` (D24)
                 var n = ExpectName("member name");
+                if (e is MemberExpr { Collection: true } && !collection)
+                {
+                    // `.~members.add(…)` — a collection has these and nothing else.
+                    if (n.Text is not ("add" or "remove" or "clear" or "put" or "has") || !Check(TokenKind.LParen))
+                    {
+                        string lower = n.Text.ToLowerInvariant();
+                        _diag.Error("VS0375", lower is "add" or "remove" or "clear" or "put" or "has" && lower != n.Text
+                            ? $"Write `.{lower}(…)` — a collection's words are lowercase, like every built-in."
+                            : $"A collection has `.add(…)`, `.remove(…)`, `.clear()`, `.has(x)` — and a `~<map>` `.put(key, value)` — not `.{n.Text}`.", n.Span);
+                    }
+                    else if (n.Text == "has")
+                    {
+                        var args = ParseArgs();
+                        if (args.Count != 1) _diag.Error("VS0375", "`.has(x)` asks about one value.", n.Span);
+                        e = new HasExpr(e, args.Count > 0 ? args[0] : new LiteralExpr(false, LiteralKind.Bool, n.Span), n.Span);
+                        continue;
+                    }
+                }
                 e = new MemberExpr(e, n.Text, n.Span) { Collection = collection };
             }
             else if (Match(TokenKind.LBracket)) { var idx = ParseExpr(); Expect(TokenKind.RBracket, "']'"); e = new IndexExpr(e, idx, e.Span); }

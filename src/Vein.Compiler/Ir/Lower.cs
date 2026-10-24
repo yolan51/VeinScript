@@ -964,7 +964,7 @@ public sealed partial class Lower
                         else if (report) _diag.Warning("VS0211", $"Shape '{RefText(si)}' has no field '{si.Field}'.", si.Span);
                     }
                     else
-                        foreach (var sf in fs)
+                        foreach (var sf in fs.Where(BringsAValue))
                         {
                             list.Add((sf.Name, sf.Type, sf.Default, si.Shape));
                             slots?.Add(new Slot(sf.Name, sf.Type, sf.Default is not null, key, true, fs, member, si.Path.Count > 0));
@@ -2425,7 +2425,7 @@ public sealed partial class Lower
                     RegisterImportedShape(si.Shape, fields);
 
                     // `$Shape.field` includes ONE field; the rest of the shape keeps its declared default.
-                    var take = si.Field is null ? fields : fields.Where(f => f.Name == si.Field).ToList();
+                    var take = si.Field is null ? fields.Where(BringsAValue).ToList() : fields.Where(f => f.Name == si.Field).ToList();
                     var init = new List<(string, IrExpr)>();
                     foreach (var f in take)
                     {
@@ -2585,7 +2585,12 @@ public sealed partial class Lower
 
     // ---- ~ collections (D24) ------------------------------------------------------------------------------
 
-    private static readonly string[] CollectionKinds = { "list", "set", "ring" };
+    private static readonly string[] CollectionKinds = { "list", "set", "ring", "map" };
+
+    /// Whether a bring of the shape takes a value for this field. A `~<map>` does not: it has no literal
+    /// yet, starts empty and fills through `.put` — so it takes no argument slot.
+    private static bool BringsAValue(FieldDecl f) => f.Collection is not { Kind: "map" };
+    private static readonly string[] KeyTypes = { "string", "int", "Entity" };
     private static readonly string[] ElementTypes = { "Entity", "int", "float", "string", "bool" };
 
     /// A `~<kind> name: Element` declaration checked (VS0374) and carried into the IR. Null for any other field.
@@ -2600,9 +2605,17 @@ public sealed partial class Lower
         else if (c.Kind != "ring" && c.Size != 0)
             _diag.Error("VS0374", $"Only a ring has a size — `~<{c.Kind}> {f.Name}` grows as it needs.", f.Span);
         if (!ElementTypes.Contains(c.Element))
-            _diag.Error("VS0374", $"A collection holds {string.Join(", ", ElementTypes)} — not `{c.Element}`. " +
-                "For records with fields, collect the identities that carry them (`~<list> items: Entity`).", f.Span);
-        return new IrCollection(c.Kind, c.Size, c.Element);
+            _diag.Error("VS0374", $"A collection holds {string.Join(", ", ElementTypes)} or `$Shape` — not `{c.Element}`. " +
+                "For records with fields, collect the identities that carry them: `~<list> items: $Item`.", f.Span);
+        if (c.Owns && c.Element != "Entity")
+            _diag.Error("VS0374", $"`owns` is for identities — a `{c.Element}` has no identity to end. Drop `owns`, or collect " +
+                "identities: `~<list> items: owns $Item`.", f.Span);
+        if (c.Kind == "map" && c.Key is not null && !KeyTypes.Contains(c.Key))
+            _diag.Error("VS0374", $"A map's key is string, int, Entity or `$Shape` — not `{c.Key}`.", f.Span);
+        foreach (var shape in new[] { c.Carries, c.KeyCarries })
+            if (shape is not null && !_shapeFields.ContainsKey(shape) && ResolveUsed(Index.Shapes, "$", shape, f.Span) is null)
+                _diag.Error("VS0233", $"Unknown shape '${shape}' — `{f.Name}` collects identities that carry it.", f.Span);
+        return new IrCollection(c.Kind, c.Size, c.Element, c.Carries, c.Owns) { Key = c.Key, KeyCarries = c.KeyCarries };
     }
 
     /// The declared field a `x.Shape.field` reads, when its receiver names a shape — so `.~` can be
@@ -2618,7 +2631,7 @@ public sealed partial class Lower
         if (f.Collection is not null && !me.Collection)
             _diag.Error("VS0373", $"`{me.Name}` is a collection — read it as `.~{me.Name}`, so a reader sees it is one.", me.Span);
         else if (f.Collection is null && me.Collection)
-            _diag.Error("VS0372", $"`{me.Name}` is not a collection — `~` is for a field declared `~<list>`, `~<set>` or `~<ring N>`.", me.Span);
+            _diag.Error("VS0372", $"`{me.Name}` is not a collection — `~` is for a field declared `~<list>`, `~<set>`, `~<ring N>` or `~<map>`.", me.Span);
     }
 
     /// A literal going into a collection of `element` (VS0371). A non-literal of unknown type is not
@@ -2644,18 +2657,41 @@ public sealed partial class Lower
     /// `add v to s.Shape.~field` / `remove v from …` → a runtime call the interpreter queues for the commit.
     private IrStmt LowerCollectionStmt(CollectionStmt cs)
     {
+        string verb = cs.Op.ToString().ToLowerInvariant();
         if (cs.Target is not MemberExpr { Collection: true, Receiver: MemberExpr { Receiver: var owner, Name: var shape } } me
             || CollectionField(me) is not { Collection: { } c })
         {
-            _diag.Error("VS0372", $"`{(cs.Remove ? "remove … from" : "add … to")}` changes a collection — write the field as " +
-                "`x.Shape.~field`, where the field is declared `~<list>`, `~<set>` or `~<ring N>`.", cs.Span);
+            _diag.Error("VS0372", $"`.{verb}(…)` changes a collection — write the field as " +
+                "`x.Shape.~field`, where the field is declared `~<list>`, `~<set>`, `~<ring N>` or `~<map>`.", cs.Span);
             return new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
         }
-        CheckElement(cs.Value, c.Element, $"{shape}.~{me.Name}");
-        return new IrExprStmt(new IrRuntimeCall(cs.Remove ? "CollRemove" : "CollAdd", new[]
+        string where = $"{shape}.~{me.Name}";
+        bool map = c.Kind == "map";
+        if (map && cs.Op == CollectionOp.Add)
+            _diag.Error("VS0375", $"{where} is a `~<map>` — it takes `.put(key, value)`.", cs.Span);
+        if (!map && cs.Op == CollectionOp.Put)
+            _diag.Error("VS0375", $"`.put(key, value)` is for a `~<map>` — {where} is a `~<{c.Kind}>`: `.add(x)`.", cs.Span);
+
+        IrExpr[] Head() => new IrExpr[] { LowerExpr(owner), new IrLiteral(shape, IrLiteralKind.String), new IrLiteral(me.Name, IrLiteralKind.String) };
+        IrStmt Call(string name, params IrExpr[] rest) => new IrExprStmt(new IrRuntimeCall(name, Head().Concat(rest).ToArray()));
+
+        switch (cs.Op)
         {
-            LowerExpr(owner), new IrLiteral(shape, IrLiteralKind.String), new IrLiteral(me.Name, IrLiteralKind.String), LowerExpr(cs.Value),
-        }));
+            case CollectionOp.Clear: return Call("CollClear");
+            case CollectionOp.Put:
+                if (cs.Values.Count != 2) return new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
+                CheckElement(cs.Values[0], map ? c.Key! : c.Element, $"{where}'s keys");
+                CheckElement(cs.Values[1], c.Element, where);
+                return Call("CollPut", LowerExpr(cs.Values[0]), LowerExpr(cs.Values[1]));
+        }
+        // One change per value, in the order written — `.add("a", "b")` is `.add("a")` then `.add("b")`.
+        var stmts = new List<IrStmt>();
+        foreach (var v in cs.Values)
+        {
+            CheckElement(v, map ? c.Key! : c.Element, map ? $"{where}'s keys" : where);
+            stmts.Add(Call(cs.Op == CollectionOp.Add ? "CollAdd" : "CollRemove", LowerExpr(v)));
+        }
+        return stmts.Count == 1 ? stmts[0] : new IrBlock(stmts, Transparent: true);
     }
 
     // ---- weave · loom · format (D23) ---------------------------------------------------------------------
@@ -3165,7 +3201,7 @@ public sealed partial class Lower
             // `s.Guild.~members has p` (D24).
             case HasExpr has:
                 if (has.Collection is MemberExpr cm && CollectionField(cm) is { Collection: { } hc })
-                    CheckElement(has.Value, hc.Element, $"{((MemberExpr)cm.Receiver).Name}.~{cm.Name}");
+                    CheckElement(has.Value, hc.Kind == "map" ? hc.Key! : hc.Element, $"{((MemberExpr)cm.Receiver).Name}.~{cm.Name}");
                 return new IrRuntimeCall("CollHas", new[] { LowerExpr(has.Collection), LowerExpr(has.Value) });
             case IndexExpr ix: return new IrIndex(LowerExpr(ix.Receiver), LowerExpr(ix.Index));
             // `*Author.Bundle.Publicator.name(…)` — a cross-bundle call. The callee resolves to a shared

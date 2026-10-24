@@ -95,7 +95,7 @@ Held so they aren't accidentally repurposed. Assign a meaning or cut before v1.0
 | `weave` | `weave Loom(text) [as x]` brings one identity per record of the text, each the `bring` a person would write; results arrive as `@Woven` / `@Unwoven` (D23, RULES 7e) |
 | `loom` | `loom<Format> Name { $Shape  mark #M }` — a builder's body whose records can be read from text written in `Format` (D23) |
 | `format` | `format Name [from Base] { records ";"  name "="  values ":"  lists "+" … }` — how a record of text is written; a file `formats/<Name>.vein`, shared like an event (D23) |
-| `~` *(sigil)* | `~<list> peers: Entity` · `~<set> members: Entity` · `~<ring 20> lines: string` declares a collection field; `x.Shape.~field` reads it; `target $Shape.~field as s, p` walks it flat. With it, three CONTEXTUAL words — not keywords, still legal as names: `add v to c`, `remove v from c`, `c has v` (D24, RULES 13d) |
+| `~` *(sigil)* | `~<list> peers: $Server` · `~<set> members: Entity` · `~<ring 20> lines: string` · `~<map> scores: string | int` declares a collection field (`owns $Item` for owned identities); `x.Shape.~field` reads it; `target $Shape.~field as s, p` walks it flat. Its words are CONTEXTUAL — not keywords, still legal as names: `.add(…)` `.remove(…)` `.clear()` `.has(x)` `.put(k, v)`, the forms `add v to c` / `remove v from c` / `c has v`, and `owns` (D24, RULES 13d) |
 | `transform` | AST macro / source transform, or Transform component sugar |
 
 ### Cut (gone from the lexer and the language)

@@ -206,7 +206,7 @@ public sealed class DefinitionIndex
                 case BringStmt br: Use(br.Builder, SymbolKind.Builder, br.Span); foreach (var a in br.Args) Ex(a); break;
                 // `weave Server from …` brings Server once per record — a use of it, like a bring.
                 case WeaveStmt ws: Use(ws.Loom, SymbolKind.Builder, ws.Span); foreach (var a in ws.Args) Ex(a); break;
-                case CollectionStmt cs: Ex(cs.Value); Ex(cs.Target); break;
+                case CollectionStmt cs: foreach (var v in cs.Values) Ex(v); Ex(cs.Target); break;
                 // `mute Physics` names a shard — at the NAME, so F12 on it lands and Shift+F12 lists it.
                 case MuteStmt { ByMark: true } mu: Use(mu.Shard, SymbolKind.Mark, mu.NameSpan); break;
                 case MuteStmt mu: Use(mu.Shard, SymbolKind.Shard, mu.NameSpan); break;

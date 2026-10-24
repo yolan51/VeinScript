@@ -174,7 +174,7 @@ public sealed class AstTree
         ChanceStmt c => Node("Chance", Pct(c.Probability), c.Span, Block(c.Body)),
         BringStmt br => Bring(br),
         WeaveStmt ws => Weave(ws),
-        CollectionStmt cs => Node(cs.Remove ? "Remove" : "Add", Path(cs.Target), cs.Span, new[] { Expr(cs.Value) }),
+        CollectionStmt cs => Node(cs.Op.ToString(), Path(cs.Target), cs.Span, cs.Values.Select(Expr)),
 
         // `return` in an `fn` body. Missing until a coverage test went looking, and the effect was that
         // every function in the tree showed a bare `ReturnStmt` — the VALUE it returns, which is the

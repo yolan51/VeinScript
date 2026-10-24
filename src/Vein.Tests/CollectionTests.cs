@@ -186,12 +186,15 @@ public class CollectionTests
         Assert.Equal(new[] { "! \"bob 5+x\": `points`: \"x\" is not a whole number", "ann 3,4" }, lines);
     }
 
-    [Fact]
-    public void The_sample_prints_what_its_header_says_it_prints()
+    [Theory]
+    [InlineData("collections.vein")]
+    [InlineData("collections_values.vein")]
+    [InlineData("collections_shapes.vein")]
+    public void The_sample_prints_what_its_header_says_it_prints(string file)
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "stdlib"))) dir = dir.Parent;
-        string path = Path.Combine(dir!.FullName, "samples", "collections.vein");
+        string path = Path.Combine(dir!.FullName, "samples", file);
         string source = File.ReadAllText(path);
         var expected = source.Split('\n').Select(l => l.TrimEnd('\r'))
             .SkipWhile(l => l != "// Expected output:").Skip(2)
@@ -199,7 +202,7 @@ public class CollectionTests
             .Select(l => l["//     ".Length..].TrimEnd()).ToArray();
         Assert.NotEmpty(expected);
 
-        var r = new VeinCompilerService().Compile(new CompileRequest("collections.vein", source, SourcePath: path));
+        var r = new VeinCompilerService().Compile(new CompileRequest(file, source, SourcePath: path));
         Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
         var output = new StringWriter();
         new Interp().Run(r.Modules[0], new StringReader(""), output);

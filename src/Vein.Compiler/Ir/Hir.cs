@@ -31,8 +31,14 @@ public sealed record IrField(string Name, IrTypeRef Type, FoldReducer? Fold, IrE
     public IrCollection? Collection { get; init; }
 }
 
-/// A collection's kind (`list`, `set`, `ring`), a ring's size, and the declared element type (D24).
-public sealed record IrCollection(string Kind, int Size, string Element);
+/// A collection's kind (`list`, `set`, `ring`), a ring's size, and the declared element type (D24) — with
+/// the shape each identity must carry (`$Person`), and whether the collection owns its identities.
+public sealed record IrCollection(string Kind, int Size, string Element, string? Carries = null, bool Owns = false)
+{
+    /// A map's key type, and the shape a `$Shape` key carries. Null for list/set/ring.
+    public string? Key { get; init; }
+    public string? KeyCarries { get; init; }
+}
 public sealed record IrEnumCase(string Name, int Ordinal);
 
 public sealed record IrType(

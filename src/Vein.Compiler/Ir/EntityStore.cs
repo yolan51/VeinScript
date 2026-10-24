@@ -109,13 +109,17 @@ public sealed class EntityStore
 
     public void Destroy(long entity)
     {
-        _alive.Remove(entity);
+        bool wasAlive = _alive.Remove(entity);
+        // What it OWNS ends with it (D24) — read before its rows go. A dead identity owns nothing, which is
+        // also what stops a cycle of owners.
+        var owned = wasAlive ? Owned(entity, shape: null) : new List<long>();
         foreach (var table in _components.Values) table.Remove(entity);
         foreach (var set in _tags.Values) set.Remove(entity);
         ForgetInCollections(entity);   // D24: no `~` collection is left naming it
 
         // Anything this phase contributed to a now-dead entity is meaningless.
         _contributions.RemoveAll(c => c.Entity == entity);
+        foreach (var id in owned) if (_alive.Contains(id)) Destroy(id);
     }
 
     // ---- components and marks ---------------------------------------------------------------
@@ -137,7 +141,20 @@ public sealed class EntityStore
         // into a set holds `a` once (D24).
         if (t is not null)
             foreach (var f in t.Fields.Where(f => f.Collection is not null))
-                if (row.TryGetValue(f.Name, out var v) && v is List<object?> list) row[f.Name] = Normalize(new List<object?>(list), f.Collection);
+            {
+                if (f.Collection!.Key is not null)
+                {
+                    // A map knows its value type's zero, so a missing key reads 0 rather than empty.
+                    row[f.Name] = row.TryGetValue(f.Name, out var m) && m is VeinMap map ? map.WithZero(Zero(f.Collection.Element)) : new VeinMap(Zero(f.Collection.Element));
+                    continue;
+                }
+                if (row.TryGetValue(f.Name, out var v) && v is List<object?> list)
+                {
+                    if (f.Collection.Owns)   // `bring Bag([sword])` takes sword from whatever owned it before
+                        foreach (var id in list.OfType<long>()) TakeFromOwners(id, entity, shape, f.Name);
+                    row[f.Name] = Normalize(new List<object?>(list), f.Collection);
+                }
+            }
     }
 
     /// A field the RUNTIME owns, written straight to the committed store.
@@ -156,7 +173,12 @@ public sealed class EntityStore
         row[field] = value;
     }
 
-    public void RemoveComponent(long entity, string shape) => Table(shape).Remove(entity);
+    public void RemoveComponent(long entity, string shape)
+    {
+        var owned = Owned(entity, shape);   // `unattach` of the shape that holds an owned collection ends what it owns
+        Table(shape).Remove(entity);
+        foreach (var id in owned) if (_alive.Contains(id)) Destroy(id);
+    }
 
     public bool Has(long entity, string shape) => _components.TryGetValue(shape, out var t) && t.ContainsKey(entity);
 
@@ -362,22 +384,92 @@ public sealed class EntityStore
 
     // ---- ~ collections (D24) ----------------------------------------------------------------------------
 
-    /// `add` / `remove`, applied at the commit. The list is COPIED and replaced, never changed in place —
-    /// a list a program holds elsewhere is not changed under it (RULES 28h) — and the kind's promise is
-    /// kept: a set holds a value once, a ring only its last N.
-    public void ChangeCollection(long entity, string shape, string field, object? value, bool remove)
+    /// `.add` / `.remove` / `.clear` / `.put`, applied at the commit (D24). The value is COPIED and replaced,
+    /// never changed in place — a list a program holds elsewhere is not changed under it (RULES 28h) — and
+    /// the kind's promise is kept: a set holds a value once, a ring only its last N.
+    ///
+    /// An `owns` collection ends the identities that leave it — removed, cleared, trimmed off a ring,
+    /// replaced in a map — and an add MOVES an identity out of whatever owned collection held it before.
+    ///
+    /// False when an identity does not carry the shape a `$Shape` element (or key) names: nothing changes,
+    /// and the caller reports it with the place the change was written.
+    public bool ChangeCollection(long entity, string shape, string field, string op, object? value, object? put = null)
     {
-        if (!_alive.Contains(entity) || !_components.TryGetValue(shape, out var table) || !table.TryGetValue(entity, out var row)) return;
+        if (!_alive.Contains(entity) || !_components.TryGetValue(shape, out var table) || !table.ContainsKey(entity)) return true;
         var spec = FieldsOf(shape)?.FirstOrDefault(f => f.Name == field)?.Collection;
-        var items = row.TryGetValue(field, out var cur) && cur is List<object?> l ? new List<object?>(l) : new List<object?>();
-        if (remove) items.RemoveAll(i => Same(i, value));
-        else
+        var leaving = new List<object?>();
+
+        if (spec?.Key is not null)
         {
-            if (spec?.Kind == "set" && items.Any(i => Same(i, value))) return;
-            items.Add(value);
+            if (op == "put")
+            {
+                if (!Carries(value, spec.KeyCarries) || !Carries(put, spec.Carries)) return false;
+                if (spec.Owns && put is long moving) TakeFromOwners(moving, entity, shape, field);
+            }
+            var row = table[entity];
+            var map = row.TryGetValue(field, out var cur) && cur is VeinMap m ? m : new VeinMap(Zero(spec.Element));
+            switch (op)
+            {
+                case "put":
+                    if (map.TryGet(value, out var old) && !Same(old, put)) leaving.Add(old);
+                    map = map.With(value, put);
+                    break;
+                case "remove":
+                    if (map.TryGet(value, out var gone)) leaving.Add(gone);
+                    map = map.Without(value);
+                    break;
+                case "clear":
+                    leaving.AddRange(map.Values);
+                    map = map.Cleared();
+                    break;
+            }
+            row[field] = map;
+            if (spec.Owns) EndLeaving(leaving, map.Values);
+            return true;
         }
-        row[field] = Normalize(items, spec);
+
+        if (op == "add")
+        {
+            if (!Carries(value, spec?.Carries)) return false;
+            if (spec?.Owns == true && value is long moving) TakeFromOwners(moving, entity, shape, field);
+        }
+        {
+            var row = table[entity];
+            var items = row.TryGetValue(field, out var cur) && cur is List<object?> l ? new List<object?>(l) : new List<object?>();
+            switch (op)
+            {
+                case "add":
+                    if (spec?.Kind == "set" && items.Any(i => Same(i, value))) return true;
+                    items.Add(value);
+                    break;
+                case "remove":
+                    leaving.AddRange(items.Where(i => Same(i, value)));
+                    items.RemoveAll(i => Same(i, value));
+                    break;
+                case "clear":
+                    leaving.AddRange(items);
+                    items.Clear();
+                    break;
+            }
+            var kept = Normalize(items, spec);
+            if (spec?.Kind == "ring") leaving.AddRange(items.Take(items.Count - kept.Count));
+            row[field] = kept;
+            if (spec?.Owns == true) EndLeaving(leaving, kept);
+            return true;
+        }
     }
+
+    /// The owned identities that left a collection and are not still in it end (D24).
+    private void EndLeaving(List<object?> leaving, IEnumerable<object?> still)
+    {
+        var stay = still.ToList();
+        foreach (var id in leaving.OfType<long>().Distinct())
+            if (!stay.Any(x => Same(x, id)) && _alive.Contains(id)) Destroy(id);
+    }
+
+    /// Whether `value` may go where a `$Shape` element (or key) is declared: an identity carrying the shape.
+    private bool Carries(object? value, string? shape) =>
+        shape is null || (value is long id && _alive.Contains(id) && Has(id, shape));
 
     /// A collection as its kind allows: a set without repeats (first kept), a ring with its last N.
     private static List<object?> Normalize(List<object?> items, IrCollection? spec)
@@ -395,16 +487,62 @@ public sealed class EntityStore
 
     private static bool Same(object? a, object? b) => OrderKey.Instance.Compare(a, b) == 0;
 
+    /// Every owned collection field (of `Entity`/`$Shape`) the module declares: list elements, or map values.
+    private IEnumerable<(string Shape, IrField Field)> OwnedFields() =>
+        _types.SelectMany(t => t.Value.Fields.Where(f => f.Collection is { Owns: true, Element: "Entity" }).Select(f => (t.Key, f)));
+
+    /// The identities `owner` owns — in every shape, or in the one about to be unattached.
+    private List<long> Owned(long owner, string? shape)
+    {
+        var ids = new List<long>();
+        foreach (var (s, f) in OwnedFields())
+        {
+            if (shape is not null && s != shape) continue;
+            if (!_components.TryGetValue(s, out var table) || !table.TryGetValue(owner, out var row)) continue;
+            if (row.TryGetValue(f.Name, out var v))
+                ids.AddRange(v switch
+                {
+                    List<object?> list => list.OfType<long>(),
+                    VeinMap map => map.Values.OfType<long>(),
+                    _ => Enumerable.Empty<long>(),
+                });
+        }
+        return ids;
+    }
+
+    /// One owner at a time: `id` leaves every OTHER owned collection that holds it, alive — a move.
+    private void TakeFromOwners(long id, long toEntity, string toShape, string toField)
+    {
+        foreach (var (s, f) in OwnedFields())
+        {
+            if (!_components.TryGetValue(s, out var table)) continue;
+            foreach (var (owner, row) in table)
+            {
+                if (owner == toEntity && s == toShape && f.Name == toField) continue;
+                if (!row.TryGetValue(f.Name, out var v)) continue;
+                if (v is List<object?> list && list.Any(x => Same(x, id))) row[f.Name] = list.Where(x => !Same(x, id)).ToList();
+                else if (v is VeinMap map && map.Values.Any(x => Same(x, id))) row[f.Name] = map.Where(e => !Same(e.Value, id));
+            }
+        }
+    }
+
     /// Every `~` collection of Entity that holds `entity` loses it — so a destroyed identity is never left
-    /// named in a guild, a peer list, a route.
+    /// named in a guild, a peer list, a route — and every map entry it is the key or the value of.
     private void ForgetInCollections(long entity)
     {
         foreach (var (shape, type) in _types)
-            foreach (var f in type.Fields.Where(f => f.Collection?.Element == "Entity"))
+            foreach (var f in type.Fields.Where(f => f.Collection is { } c && (c.Element == "Entity" || c.Key == "Entity")))
                 if (_components.TryGetValue(shape, out var table))
                     foreach (var row in table.Values)
-                        if (row.TryGetValue(f.Name, out var v) && v is List<object?> list && list.Any(x => Same(x, entity)))
+                    {
+                        if (!row.TryGetValue(f.Name, out var v)) continue;
+                        if (v is List<object?> list && list.Any(x => Same(x, entity)))
                             row[f.Name] = list.Where(x => !Same(x, entity)).ToList();
+                        else if (v is VeinMap map && map.Entries.Any(e => (f.Collection!.Key == "Entity" && Same(e.Key, entity))
+                                                                      || (f.Collection!.Element == "Entity" && Same(e.Value, entity))))
+                            row[f.Name] = map.Where(e => !((f.Collection!.Key == "Entity" && Same(e.Key, entity))
+                                                        || (f.Collection!.Element == "Entity" && Same(e.Value, entity))));
+                    }
     }
 
     // Arithmetic that keeps integers integral — a `folds sum` int field must not drift into doubles.

@@ -24,7 +24,7 @@
 //
 //   1. VALUES ARE PLACED BY TYPE. `host` has a default, so it may be missing: `S6=box.lan:9816` cannot give
 //      `box.lan` to the port (not a whole number), so it goes to the host.
-//   2. MANY OF SOMETHING IS A `~` COLLECTION. `~<set> peers: Entity` holds any number of servers, each
+//   2. MANY OF SOMETHING IS A `~` COLLECTION. `~<set> peers: $Server` holds any number of servers, each
 //      once, NAMED in the text — S1 names S4 before S4's line, because every identity is spawned before
 //      any is linked. S1 lists S4 twice; a set holds it once, and the weave says so.
 //   3. RESULTS ARE EVENTS. A record that cannot be woven is one @Unwoven, and the rest are woven anyway:
@@ -68,7 +68,7 @@ bundle WeaveTopology by you {
     }
 
     // The FIRST field is the name a record is known by — what `S2` in another record's peers means.
-    shape $Server { name: string, host: string = "", port: int, ~<set> peers: Entity }
+    shape $Server { name: string, host: string = "", port: int, ~<set> peers: $Server }
     shape $Npc    { name: string, hp: int, x: float = 0.0, y: float = 0.0 }
 
     mark #Listed

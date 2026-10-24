@@ -154,8 +154,15 @@ public sealed record FieldDecl(string Name, TypeRef? Type, string? Fold, Expr? D
 }
 
 /// A collection's kind — `list` (ordered, repeats), `set` (unique, in the order added) or `ring` (the last
-/// `Size`) — and the declared type of its elements (D24).
-public sealed record CollectionSpec(string Kind, int Size, string Element);
+/// `Size`) — and the declared type of its elements (D24). `~<set> members: $Person` is Element "Entity" with
+/// Carries "Person": identities that must carry that shape. `owns` makes the collection the reason its
+/// identities exist — leaving it, or its owner ending, destroys them.
+public sealed record CollectionSpec(string Kind, int Size, string Element, string? Carries = null, bool Owns = false)
+{
+    /// A `~<map> scores: string | int` key type (and the shape a `$Shape` key carries). Null for list/set/ring.
+    public string? Key { get; init; }
+    public string? KeyCarries { get; init; }
+}
 
 /// A `$Shape` include inside an event/builder body: pulls in all of the shape's fields, or one field
 /// with `$Shape.field`. `Default` (via `=`) makes it optional.
@@ -344,9 +351,12 @@ public sealed record WeaveStmt(string Loom, IReadOnlyList<Expr> Args, string? Bi
     public IReadOnlyList<string> LoomPath { get; init; } = Array.Empty<string>();
 }
 
-/// `add p to s.Guild.~members` / `remove p from s.Guild.~members` (D24) — a change to a collection,
-/// deferred to the commit like `attach` and `mark`, so two shards adding in one tick both land.
-public sealed record CollectionStmt(bool Remove, Expr Value, Expr Target, SourceSpan Span) : Stmt(Span);
+/// `s.Guild.~members.add(p, q)` / `.remove(p)` / `.clear()`, or the keyword forms `add p, q to …` /
+/// `remove p from …` (D24) — a change to a collection, deferred to the commit like `attach` and `mark`, so
+/// two shards adding in one tick both land. `Values` is empty for Clear.
+public sealed record CollectionStmt(CollectionOp Op, IReadOnlyList<Expr> Values, Expr Target, SourceSpan Span) : Stmt(Span);
+
+public enum CollectionOp { Add, Remove, Clear, Put }
 
 public sealed record BringStmt(Expr? Count, string Builder, IReadOnlyList<Expr> Args, bool FillRest, SourceSpan Span) : Stmt(Span)
 {
