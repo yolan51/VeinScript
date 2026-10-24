@@ -1827,8 +1827,157 @@ public sealed class Interp
             case IrBreak: throw BreakSignal.It;
             case IrContinue: throw ContinueSignal.It;
             case IrMatch m: ExecMatch(m, self, locals); break;
+            case IrWeave w: ExecWeave(w, self, locals); break;
             // break/continue not exercised by the render path yet
             default: break;
+        }
+    }
+
+    /// Compiled `weave as` forms, by the statement that uses them — compiled once, read every time.
+    private readonly Dictionary<IrWeave, Weave.Form?> _weaveForms = new(ReferenceEqualityComparer.Instance);
+
+    /// Every woven record's name → its identity, for the whole run: a later weave may point at a record an
+    /// earlier one wove (`weave Minion from "Grunt 10 leader=Orc"` after the weave that made Orc). A name
+    /// is woven once — a second record by that name, in any weave, is a problem, never a silent shadow.
+    private readonly Dictionary<string, object?> _wovenNames = new(StringComparer.Ordinal);
+
+    /// <summary>`weave Builder from text` (D23): every record brought as `bring Builder(…)` brings it.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>TWO PASSES.</b> The first brings each record, in order, and names it by its first parameter;
+    /// the second runs the fan-outs. So a fan-out may name ANY record — `S1=9811:S4` before S4's line —
+    /// while an `Entity` parameter of the record itself can only name one above it, because the record it
+    /// names must already exist when this one is brought.
+    /// </para>
+    /// <para>
+    /// <b>A PROBLEM IS A MESSAGE.</b> A record that fits no form, a number that is not one, a name no
+    /// record has, a second record with one name: each skips what it concerns and is handed to
+    /// `else as why`, or — with no `else` — raised as @DiagnosticRaised with this statement's file and
+    /// line, so it is never silent. They are reported after the weave, in the order found.
+    /// </para>
+    /// </remarks>
+    private void ExecWeave(IrWeave w, Instance self, Dictionary<string, object?> locals)
+    {
+        string text = Str(Eval(w.Source, self, locals));
+        var problems = new List<string>();
+        var paramNames = w.Params.Select(p => p.Name).ToList();
+        var holes = w.FanOuts.Select(f => f.Hole).ToHashSet(StringComparer.Ordinal);
+
+        if (!_weaveForms.TryGetValue(w, out var form))
+        {
+            if (w.Form is not null)
+            {
+                var kinds = w.Params.GroupBy(p => p.Name, StringComparer.Ordinal)
+                                    .ToDictionary(g => g.Key, g => g.First().Type, StringComparer.Ordinal);
+                foreach (var h in holes) kinds.TryAdd(h, Weave.FanOutKind);
+                form = Weave.Compile(w.Form, h => kinds.GetValueOrDefault(h), out _);
+            }
+            _weaveForms[w] = form;
+        }
+
+        string Problem(string record, string what) => $"\"{record}\": {what}";
+
+        var names = _wovenNames;
+        var woven = new List<(string Record, object? Self, Dictionary<string, string> Values)>();
+
+        // ---- pass 1: each record, brought and named ----
+        foreach (string record in Weave.Records(text))
+        {
+            string? problem = null;
+            var values = form is null ? Weave.ReadStandard(record, paramNames, holes, out problem) : Weave.Read(form, record);
+            if (values is null) { problems.Add(Problem(record, $"it is not written as \"{w.Form}\"")); continue; }
+            if (problem is not null) { problems.Add(Problem(record, problem)); continue; }
+
+            bool ok = true;
+            foreach (var p in w.Params)
+            {
+                if (!values.TryGetValue(p.Name, out string? raw))
+                {
+                    if (!p.HasDefault) { problems.Add(Problem(record, $"`{p.Name}` is missing")); ok = false; break; }
+                    locals["__wm_" + p.Name] = true;
+                    locals["__wv_" + p.Name] = null;
+                    continue;
+                }
+
+                object? value;
+                if (p.Type == "Entity")
+                {
+                    if (!names.TryGetValue(raw, out value))
+                    {
+                        problems.Add(Problem(record, $"`{p.Name}`: no record named \"{raw}\" woven before this one"));
+                        ok = false;
+                        break;
+                    }
+                }
+                else if (!Weave.TryConvert(raw, p.Type, out value, out string? why))
+                {
+                    problems.Add(Problem(record, $"`{p.Name}`: {why}"));
+                    ok = false;
+                    break;
+                }
+                locals["__wm_" + p.Name] = false;
+                locals["__wv_" + p.Name] = value;
+            }
+            if (!ok) continue;
+
+            string? name = paramNames.Count > 0 && values.TryGetValue(paramNames[0], out string? n) ? n : null;
+            if (name is not null && names.ContainsKey(name))
+            {
+                problems.Add(Problem(record, $"a record named \"{name}\" was already woven"));
+                continue;
+            }
+
+            Exec(w.Record, self, locals);
+            object? identity = locals.GetValueOrDefault("__wself");
+            if (name is not null) names[name] = identity;
+            woven.Add((record, identity, values));
+        }
+
+        // ---- pass 2: the fan-outs, now that every record has a name ----
+        foreach (var (record, identity, values) in woven)
+            foreach (var f in w.FanOuts)
+            {
+                if (!values.TryGetValue(f.Hole, out string? cut)) continue;
+                foreach (string piece in Weave.Pieces(cut, f.Separator))
+                {
+                    locals["__wself"] = identity;
+                    locals["__wpiece"] = piece;
+                    bool ok = true;
+                    for (int i = 0; i < f.Args.Count && ok; i++)
+                    {
+                        object? v = Eval(f.Args[i], self, locals);
+                        string type = f.ArgTypes[i];
+                        if (v is string s && type == "Entity")
+                        {
+                            if (names.TryGetValue(s, out object? target)) v = target;
+                            else { problems.Add(Problem(record, $"`{f.Hole}`: no record named \"{s}\"")); ok = false; }
+                        }
+                        else if (v is string t && type is "int" or "float" or "percent" or "bool")
+                        {
+                            if (Weave.TryConvert(t, type, out object? converted, out string? why)) v = converted;
+                            else { problems.Add(Problem(record, $"`{f.Hole}`: {why}")); ok = false; }
+                        }
+                        locals["__wa" + i.ToString(System.Globalization.CultureInfo.InvariantCulture)] = v;
+                    }
+                    if (ok) Exec(f.Bring, self, locals);
+                }
+            }
+
+        // ---- the problems, once each ----
+        foreach (string p in problems)
+        {
+            if (w.Else is not null && w.ElseBind is not null)
+            {
+                locals[w.ElseBind] = p;
+                Exec(w.Else, self, locals);
+                continue;
+            }
+            Emit("DiagnosticRaised", new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["severity"] = 2L, ["message"] = $"weave {w.Builder}: {p}",
+                ["shard"] = self.Name, ["phase"] = "weave", ["file"] = w.File, ["line"] = w.Line,
+                ["origin"] = null, ["bundle"] = _bundle,
+            });
         }
     }
 

@@ -84,6 +84,17 @@ public static class IrPrinter
                 foreach (var arm in m.Arms) { sb.AppendLine($"{Ind(ind + 1)}when {arm.CaseName}"); PrintBlock(sb, arm.Body, ind + 2); }
                 if (m.Else is not null) { sb.AppendLine($"{Ind(ind + 1)}else"); PrintBlock(sb, m.Else, ind + 2); }
                 break;
+            case IrWeave w:
+                sb.AppendLine($"{Ind(ind)}weave {w.Builder} from {E(w.Source)}{(w.Form is null ? " (standard notation)" : $" as \"{w.Form}\"")}");
+                sb.AppendLine($"{Ind(ind + 1)}record ({string.Join(", ", w.Params.Select(p => p.Name + ": " + p.Type + (p.HasDefault ? " = …" : "")))})");
+                PrintBlock(sb, w.Record, ind + 2);
+                foreach (var f in w.FanOuts)
+                {
+                    sb.AppendLine($"{Ind(ind + 1)}fan-out {f.Hole} by \"{f.Separator}\" ({string.Join(", ", f.Args.Select(E))})");
+                    PrintBlock(sb, f.Bring, ind + 2);
+                }
+                if (w.Else is not null) { sb.AppendLine($"{Ind(ind + 1)}else as {w.ElseBind}"); PrintBlock(sb, w.Else, ind + 2); }
+                break;
             case IrReturn r: sb.AppendLine($"{Ind(ind)}return{(r.Value is null ? "" : " " + E(r.Value))}"); break;
             case IrBreak: sb.AppendLine($"{Ind(ind)}break"); break;
             case IrContinue: sb.AppendLine($"{Ind(ind)}continue"); break;

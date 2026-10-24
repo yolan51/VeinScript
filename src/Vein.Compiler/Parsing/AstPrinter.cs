@@ -51,6 +51,9 @@ public static class AstPrinter
             case BuilderDecl bl:
                 Line(sb, ind, tag($"builder {bl.Name}") + Doc(d));
                 foreach (var m in bl.Members) Line(sb, ind + 1, SigMember(m));
+                if (bl.Weave is not null) Line(sb, ind + 1, $"weave as \"{bl.Weave.Pattern}\"");
+                foreach (var f in bl.FanOuts)
+                    Line(sb, ind + 1, $"weave {f.Hole} by \"{f.Separator}\" into {f.Child}({string.Join(", ", f.Args.Select(Ex))})");
                 break;
             case FuncDecl fn:
                 Line(sb, ind, tag($"{(fn.IsPure ? "SF" : "fn")} {fn.Name}({string.Join(", ", fn.Params.Select(p => p.Name + ": " + Type(p.Type)))}) return {(fn.Return is null ? "void" : Type(fn.Return))}"));
@@ -127,6 +130,10 @@ public static class AstPrinter
             case AttachStmt at: Line(sb, ind, $"{(at.Remove ? "unattach" : "attach")} ${at.Shape}"); break;
             case ChanceStmt c: Line(sb, ind, $"chance {c.Probability:P0}"); PrintBlock(sb, c.Body, ind + 1); break;
             case BringStmt br: Line(sb, ind, $"bring {(br.Count is null ? "" : Ex(br.Count) + " ")}{br.Builder}({string.Join(", ", br.Args.Select(Ex).Append(br.FillRest ? "?" : null).Where(x => x is not null))})"); break;
+            case WeaveStmt ws:
+                Line(sb, ind, $"weave {ws.Builder} from {Ex(ws.Source)}{(ws.Else is null ? "" : $" else as {ws.ElseBind}")}");
+                if (ws.Else is not null) PrintBlock(sb, ws.Else, ind + 1);
+                break;
             case ExprStmt e: Line(sb, ind, Ex(e.Expr)); break;
         }
     }

@@ -117,6 +117,31 @@ public sealed record BuilderDecl(string Name, IReadOnlyList<Node> Members, Sourc
     /// A variant takes the base's members, fixes some parameters BY NAME, and may add shapes and marks of
     /// its own. Null for an ordinary builder.
     public string? Base { get; init; }
+
+    /// `weave as "{name}=[{host}:]{port}"` — how a record of this builder is written as text (D23). Null
+    /// when the builder has none, and `weave X from …` then reads the standard notation: the values in
+    /// parameter order, or `param=value`.
+    ///
+    /// A PROPERTY, not a member. Members are the builder's SIGNATURE, and everything that walks them —
+    /// arity, `?`, scaffold, vein.lock — would otherwise have to learn to skip a thing that is not a
+    /// parameter. A weave form says how to WRITE the parameters; it is not one of them.
+    public WeaveForm? Weave { get; init; }
+
+    /// `weave peers by "+" into Peering(self, piece)` — each fan-out a record of this builder makes.
+    public IReadOnlyList<WeaveFanOut> FanOuts { get; init; } = Array.Empty<WeaveFanOut>();
+}
+
+/// `weave as "<pattern>"` inside a builder (D23). `{param}` is a hole, `{_}` a hole that is read and
+/// dropped, `[ … ]` an optional part; `{{ }} [[ ]]` are literal.
+public sealed record WeaveForm(string Pattern, SourceSpan Span) : Node(Span);
+
+/// `weave peers by "+" into Peering(self, piece)` inside a builder (D23): the hole `peers` is not a
+/// parameter; it is cut at `+`, and each non-blank piece brings `Peering`. `self` is the identity the
+/// record wove and `piece` the piece; an `Entity` parameter given text takes the record of that name.
+public sealed record WeaveFanOut(string Hole, string Separator, string Child, IReadOnlyList<Expr> Args, SourceSpan Span) : Node(Span)
+{
+    /// `into *Author.Bundle.Publicator.&Child(…)` — empty for a builder resolved here.
+    public IReadOnlyList<string> ChildPath { get; init; } = Array.Empty<string>();
 }
 
 // A field or var. Type is null when inferred (`x = 5`). Default set ⇒ optional; null ⇒ required.
@@ -302,6 +327,15 @@ public sealed record OrderedStmt(string Key, IReadOnlyList<Stmt> Body, SourceSpa
     /// `&Row.$Row.rank` — which include contributed the parameter. Null unless spelled, and only
     /// meaningful alongside a builder: it disambiguates two includes carrying the same field name.
     public string? Shape { get; init; }
+}
+
+/// `weave Server from text [else as why { … }]` (D23): every record in `text` is brought as
+/// `bring Server(…)` would bring it. Problems — a record that fits no form, a number that is not one, a
+/// name no record has — run `else` once each with `why` bound, or are raised as @DiagnosticRaised.
+public sealed record WeaveStmt(string Builder, Expr Source, string? ElseBind, Block? Else, SourceSpan Span) : Stmt(Span)
+{
+    /// `weave *Author.Bundle.Publicator.&Server from …` — empty for a builder resolved here.
+    public IReadOnlyList<string> BuilderPath { get; init; } = Array.Empty<string>();
 }
 
 public sealed record BringStmt(Expr? Count, string Builder, IReadOnlyList<Expr> Args, bool FillRest, SourceSpan Span) : Stmt(Span)

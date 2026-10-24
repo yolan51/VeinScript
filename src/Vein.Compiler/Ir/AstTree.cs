@@ -52,7 +52,7 @@ public sealed class AstTree
         ShardDecl sh => WithAttrs(Node("Shard", sh.Name, sh.Span, sh.Members.Select(Member)), Carries(sh.CarriedShapes, sh.CarriedMarks)),
         ViewDecl vw => WithAttrs(Node("ShardView", vw.Name, vw.Span, vw.Members.Select(Member)), Carries(vw.CarriedShapes, vw.CarriedMarks)),
         BridgeDecl br => WithAttrs(Node("Bridge", br.Name, br.Span, br.Members.Select(Member)), Carries(br.CarriedShapes, br.CarriedMarks)),
-        BuilderDecl bl => WithAttrs(Node("Builder", bl.Name, bl.Span, bl.Members.Select(SigMember)), BuilderKind(bl)),
+        BuilderDecl bl => WithAttrs(Node("Builder", bl.Name, bl.Span, bl.Members.Select(SigMember).Concat(WeaveMembers(bl))), BuilderKind(bl)),
         _ => Leaf(d.GetType().Name, "", d.Span)
     };
 
@@ -171,6 +171,7 @@ public sealed class AstTree
         AttachStmt at => AttachNode(at),
         ChanceStmt c => Node("Chance", Pct(c.Probability), c.Span, Block(c.Body)),
         BringStmt br => Bring(br),
+        WeaveStmt ws => Weave(ws),
 
         // `return` in an `fn` body. Missing until a coverage test went looking, and the effect was that
         // every function in the tree showed a bare `ReturnStmt` — the VALUE it returns, which is the
@@ -213,6 +214,22 @@ public sealed class AstTree
         var n = Node(at.Remove ? "Unattach" : "Attach", primary, at.Span, Enumerable.Empty<IrNode>());
         if (at.Init is not null) foreach (var f in at.Init) n.Add(ArgField(f));
         return n;
+    }
+
+    /// A builder's `weave as` form and fan-outs (D23), after its members. None for most builders, so their
+    /// golden trees are unchanged.
+    private IEnumerable<IrNode> WeaveMembers(BuilderDecl bl)
+    {
+        if (bl.Weave is not null) yield return Leaf("WeaveAs", Quote(bl.Weave.Pattern), bl.Weave.Span);
+        foreach (var f in bl.FanOuts)
+            yield return Node("WeaveFanOut", $"{f.Hole} by {Quote(f.Separator)} into {f.Child}", f.Span, f.Args.Select(ArgExpr));
+    }
+
+    private IrNode Weave(WeaveStmt ws)
+    {
+        var kids = new List<IrNode> { Wrapper("From", "", ws.Source) };
+        if (ws.Else is not null) kids.Add(Node("Else", $"as {ws.ElseBind}", ws.Else.Span, Block(ws.Else)));
+        return Node("Weave", ws.Builder, ws.Span, kids);
     }
 
     private IrNode Bring(BringStmt br)

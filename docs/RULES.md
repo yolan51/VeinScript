@@ -41,7 +41,7 @@ arm may sit on its own line — `ParseMatch` reads `else` explicitly — which i
 **3. A string literal is one line.** `\n \t \r \\ \"` are the escapes; a literal newline inside quotes is
 VS0003. To emit a multi-line string, use `\n` and wrap the source with trailing `+` per rule 1.
 
-**4. All 64 lexer keywords are reserved as EXPRESSIONS; most are still legal as field and member names.** `target` is a keyword,
+**4. All 65 lexer keywords are reserved as EXPRESSIONS; most are still legal as field and member names.** `target` is a keyword,
 so `builder Clock { target: string }` is a parse error — it was renamed to `id`. Check the map before
 choosing a name; do not count entries by line, because the table holds two per line.
 
@@ -104,6 +104,36 @@ arguments" is a default (`prefix: string = ""`); "the same thing with some argum
 (7c). Overloading by signature is an open design question, not a bug left in — a builder's name is also
 the event it emits, a variant's base, an `ordered by` key and a `vein.lock` line, and each of those
 would have to say which one it means.
+
+**7e. `weave Builder from text` brings one identity per record — each one the `bring` you would write.**
+An identity template may say how its records are written, and how a record fans out into other identities
+(SYNTAX-DECISIONS D23):
+
+```
+builder Server {
+    $Server  mark #Listed
+    weave as "{name}=[{host}:]{port}[:{peers}]"      // {hole} [optional]; {{ }} [[ ]] are literal
+    weave peers by "+" into Peering(self, piece)     // one Peering per neighbour
+}
+
+weave Server from "S1=9811:S2; S2=9812:S1" else as why { do print("! " + why) }
+     ==  bring Server("S1", 9811) as s1   bring Server("S2", 9812) as s2
+         bring Peering(s1, s2)            bring Peering(s2, s1)
+```
+
+- **Holes are typed by their parameter**: `{port}` (int) matches only a whole number, which is what makes
+  `[{host}:]{port}` read `S1=9811` as a port. `{_}` reads text and drops it.
+- **No `weave as`: the standard notation**, a command line — values in parameter order, or `name=value`,
+  `"…"` around spaces (`weave Npc from "Goblin 30; Orc hp=50 x=9"`).
+- **Records** are cut at line ends and `;`. The FIRST parameter is the name a record is known by.
+- **Two passes**: every record is brought, then the fan-outs run — so `S1=9811:S4` may come before S4's
+  line. An `Entity` PARAMETER names a record already woven (here or by an earlier weave).
+- **A problem is a message**, never a skip in silence: `else as why` runs once per problem, or with no
+  `else` it is @DiagnosticRaised with the statement's line. The rest is woven anyway.
+- **Graph rules are the program's.** `S1` listing itself, or `S4` twice, is woven as written; with
+  identities the check is two `target`s (`samples/weave_topology.vein`). Many-of is identities, not a
+  list — see D23 for why.
+- Woven identities are queryable from the next event, as after any `bring` (rule 12). Interpreter-only.
 
 **8. A `$Shape` include is a COMPILE-TIME field expansion, and `bring` attaches nothing.** The include
 copies the shape's fields into the signature; it does not make the built thing carry the component. So:
@@ -838,8 +868,10 @@ The events are named `@ReadFile` and not `@Read` because the runtime routes on t
 a host-handled name is taken for every program at once — and `@Read`/`@Write` are the two most likely
 names for an event a program would declare itself.
 
-Writing creates missing folders on the way. There is no sandbox, no directory listing (the answer would
-be a list and a payload field holds a scalar) and no binary mode (`text` is a string).
+Writing creates missing folders on the way. There is no sandbox, no directory listing and no binary mode
+(`text` is a string). *(This said the listing was missing because "a payload field holds a scalar". It
+does not: an event field may be a `list<string>` in the interpreter (D9). The listing is simply not
+written yet.)*
 
 **28c. Route files by `tag`, not by path.** `hear @FileLoaded` fires for **every** file the program ever
 reads. With one file that is invisible; with nineteen, every handler opens `if f.path == "…"` — and
@@ -902,8 +934,8 @@ hear @Pair as p { match p.tag { when #Roles { … p.key … p.value … } } }
   To only WALK pieces, `target lines(text) as l` is cheaper.
 - `firstWord`, `afterFirstWord` and `pieceAt` are shared fns too, for an answer right now.
 - **A value with a shape of its own is cut where the `@Pair` is heard, not by another parse.**
-  `S1=9811:S2+S4` is a port and a neighbour list; an event cannot carry the list, and a second parse
-  tagged with the server's name would spread one line over three handlers. `before(text, sep)` /
+  `S1=9811:S2+S4` is a port and a neighbour list; a second parse tagged with the server's name would
+  spread one line over three handlers. (To make the servers IDENTITIES, use `weave` — rule 7e.) `before(text, sep)` /
   `after(text, sep)` cut at the first `sep` (no `sep`: all of it / `""`), and `pieces(text, sep)` is
   `split` trimmed and without blanks — because `split("", "+")` is ONE empty piece, and a server with no
   neighbours would get one called `""`:

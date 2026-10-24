@@ -40,6 +40,10 @@ public enum TokenKind
     // without opening the source. Inside the IsKeyword range, like `shared`, so `tune` stays legal as
     // a field or member name.
     KwTune,
+    // D23: `weave Server from text` brings records to life from a string, and `weave as "…"` / `weave h by
+    // "+" into …` inside a builder say how they are written. Inside the IsKeyword range, so `weave` stays
+    // legal as a field or member name.
+    KwWeave,
     KwShardView,    // output-assembly construct: hears fragment events, concatenates a page
     KwEntity,       // the ECS entity type; as an expression, the nearest entity's int id
     KwIndex,        // as an expression, the nearest loop's 0-based iteration counter

@@ -170,9 +170,13 @@ xs[0]                            // 3
 target xs as x { … }             // iterates, and `Index` counts the positions
 ```
 
-So option **(a)** is what exists. What is still missing is a `list<T>` TYPE — a list is a value you can
-build, index, measure and iterate, but not declare as a field type — and any mutation: no append, no
-sort. `pick` and `join` are the only other operations, both builtins.
+So option **(a)** is what exists. ~~What is still missing is a `list<T>` TYPE … and any mutation.~~ That
+paragraph went stale in turn, and it steered a design again (2026-10-23, the mesh's neighbours), so it is
+struck rather than deleted. Today, verified by running it: `list<T>` is a field type — a shape field
+(`near: list<string>`), an event field, an `fn` parameter and return — and a list grows with `+=`, is set
+with `xs[i] = v`, and has `sort`/`remove`/`slice` (RULES 28h). What remains true is the COMPILED path:
+growing or setting a list is interpreter-only, and `veinc emit` says so. For many-of between identities —
+links — prefer identities (D23).
 
 *Rationale for recording it now:* the stale text was believed and repeated. It was quoted as fact in
 `samples/rows_in_order.vein` ("no list type exists — the lexer has no `[` `]`"), which was wrong on the
@@ -660,6 +664,56 @@ that never sends a clock still gives a frame number (the tick count) and the fix
 interpreter's frame rate). `as` is the word every other binding uses (`hear … as`, `target … as`), so
 nothing new is learned. Only `each tick` and `each frame` bind it: the other schedules do not run once a
 frame.
+
+---
+
+## D23 — `weave Builder from text`: identities from a string, each record the bring you would write {#weave}
+
+> **Reported as `VS0365`** (weaving what builds no identity, or `weave` in an event), **`VS0366`** (a
+> `weave as` pattern that cannot be read), **`VS0367`** (a fan-out on a parameter, twice, or with an empty
+> separator) and **`VS0368`** (a warning: a fan-out the form never fills).
+
+**DECIDED.** A program that already has its builders should come alive from a string loaded from
+anywhere — a setting, a file, a network message — without cutting it by hand:
+
+```
+builder Server {
+    $Server  mark #Listed
+    weave as "{name}=[{host}:]{port}[:{peers}]"      // how a record is written
+    weave peers by "+" into Peering(self, piece)     // one Peering per neighbour
+}
+
+weave Server from servers else as why { do print("servers: " + why) }
+```
+
+**A woven record means exactly the brings a person would write.** `S1=9811:S2` is
+`bring Server("S1", 9811) as s1` and, once S2 exists, `bring Peering(s1, s2)`. It is LOWERED as that
+bring — `bring Server(__wv_name, __wv_port, __wv_host) as __wself`, once — and the interpreter sets the
+locals per record, so the two cannot drift: the same attaches, marks, defaults and vein.lock lines.
+
+*Why the builder owns its form.* The form describes the builder's parameters, so it lives beside them,
+and every program weaving that builder reads the same text the same way. Without one, the standard
+notation is a command line: values in parameter order or `name=value`, `"…"` around spaces.
+
+*Why holes are typed.* `{port}` is the parameter `port: int`, so it only matches a whole number — which
+is what makes `[{host}:]{port}` unambiguous. Untyped, `S1=9811` would read `9811` as a host or a port
+depending on what the regex engine tried first.
+
+*Why many-of is a fan-out into identities, not a list.* A neighbour is a LINK between two identities.
+As a `$Peering` it can be targeted from either side, marked `#Down`, given a `$Latency`, destroyed to
+unlink — and graph rules (a self-loop, a link listed twice) are two `target`s. In a `list<string>` field
+it is a string inside one side, growing it is interpreter-only (RULES 28h), and no fold reducer merges
+two shards' appends. So the language has lists for VALUES one identity owns, and fan-outs for links.
+
+*Why a problem is a message.* The text is data, and data is not checked by the compiler (RULES 26). A
+record that fits no form, a number that is not one, a name no record has, a second record by one name:
+each skips what it concerns and runs `else as why` once, or — with no `else` — is @DiagnosticRaised with
+the statement's file and line. The rest is woven anyway.
+
+**Two passes.** Records are cut at line ends and `;`; pass 1 brings each in order and names it by its
+first parameter, pass 2 runs the fan-outs — so a fan-out may name a record further down. An `Entity`
+PARAMETER names a record woven before (by this weave or an earlier one: names last for the run, and
+each is woven once). Interpreter-only for now; `veinc emit` says so.
 
 ## Reserved-word disposition
 

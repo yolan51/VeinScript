@@ -21,8 +21,8 @@
 //
 // WHY EVENTS, AND NOT A FUNCTION THAT RETURNS THE PIECES. Text arrives the way a file does
 // (`@ReadFile` → `@FileLoaded`) and a failure is a message, not a fault — the language's idiom, with no
-// list to index and no `catch` to write. And a payload field holds a value, not a list, so an event per
-// piece is how a piece gets NAMED fields at all.
+// list to index and no `catch` to write. And an event per piece is how a piece gets NAMED fields: `p.key`
+// and `p.value`, where a list would hand back `ps[0]` and `ps[1]` again.
 //
 // WHY A `tag`. Every `hear @Pair` hears EVERY parse in the program, exactly as every `hear @FileLoaded`
 // hears every file. Pass a mark (`#Roles`) and route with `match p.tag { when #Roles { … } }`: a
@@ -244,9 +244,9 @@ bundle StringParser by Vein {
         // ---- the value inside a value -----------------------------------------------------------------
         //
         // A pair's value often has a shape of its own: `S1=9811:S2+S4` is a server, its port, and its
-        // neighbours. That is not one more event — an event cannot carry the neighbour LIST, and a
-        // second parse tagged with the server's name would spread one line of config over three
-        // handlers. It is two cuts and a list, right where the @Pair is heard:
+        // neighbours. That is not one more event — a second parse tagged with the server's name would
+        // spread one line of config over three handlers. It is two cuts and a list, right where the
+        // @Pair is heard (and when the records should become IDENTITIES, `weave` does all of it, D23):
         //
         //     let port = int(before(p.value, ":"))
         //     target pieces(after(p.value, ":"), "+") as n { … }

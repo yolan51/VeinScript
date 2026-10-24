@@ -1,0 +1,117 @@
+// samples/weave_topology.vein — `weave`: bring identities to life from a string (D23).
+//     veinc run samples/weave_topology.vein
+//
+// A server mesh and a handful of NPCs, each written as ONE string — the kind that arrives in a setting, a
+// file or a network message — and brought to life by one statement each. A woven record means exactly
+// the brings you would write by hand:
+//
+//     weave Server from "S1=9811:S2; S2=9812:S1"
+//
+//         ==  bring Server("S1", 9811) as s1          (a $Server, marked #Listed)
+//             bring Server("S2", 9812) as s2
+//             bring Peering(s1, s2)                   (one per neighbour: `weave peers … into`)
+//             bring Peering(s2, s1)
+//
+// THREE THINGS TO SEE:
+//
+//   1. A BUILDER SAYS HOW IT IS WRITTEN. `weave as "{name}=[{host}:]{port}[:{peers}]"`: `{…}` holes,
+//      `[…]` optional parts. Holes are TYPED by the parameter — `{port}` only matches a whole number —
+//      which is how `S6=box.lan:9816` finds its host while `S1=9811` has none.
+//   2. MANY OF SOMETHING IS IDENTITIES, NOT A LIST. `weave peers by "+" into Peering(self, piece)` brings
+//      one $Peering per neighbour. A link is then a thing of its own: it can be targeted, marked,
+//      destroyed — and the graph rules below are two `target`s, not a loop over a string.
+//   3. A PROBLEM IS A MESSAGE. A record that fits no form, a number that is not one, a neighbour no
+//      record is named: each goes to `else as why`, and the rest is woven anyway. S1 names S7, which
+//      does not exist. S1 also names ITSELF and S4 TWICE — that is not the weave's business (the text
+//      says exactly that), so the program checks its own rules once the mesh exists.
+//
+// The NPCs have no `weave as`, so they use the standard notation: values in parameter order, or
+// `name=value`, with "…" around a value that has spaces.
+//
+// Expected output:
+//
+//     ! servers: "S1=9811:S2+S4+S1+S3+S4+S5+S6+S7": `peers`: no record named "S7"
+//     ! npcs: "Imp lots": `hp`: "lots" is not a whole number
+//     S1 :9811  ->  S2 S4 S1 S3 S4 S5 S6
+//     S2 :9812  ->  S1 S3
+//     S3 :9813  ->  S2 S4
+//     S4 :9814  ->  S3 S1
+//     S5 :9815  ->  S6 S1
+//     S6 box.lan:9816  ->  S5 S2
+//     rule: S1 lists S4 twice
+//     rule: S1 lists itself
+//     Goblin hp 30 at 4,2
+//     Orc hp 50 at 9,0
+//     Cave Troll hp 80 at 0,0
+
+bundle WeaveTopology by you {
+
+    need "Vein.Console"
+
+    shape $Server  { name: string, port: int, host: string = "" }
+    shape $Peering { server: Entity, peer: Entity }
+    shape $Npc     { name: string, hp: int, x: float = 0.0, y: float = 0.0 }
+
+    mark #Listed
+    mark #Npc
+
+    builder Peering { $Peering  mark #Listed }
+
+    // The FIRST parameter is the name a record is known by — what `S2` in another record's peers means.
+    builder Server {
+        $Server  mark #Listed
+        weave as "{name}=[{host}:]{port}[:{peers}]"
+        weave peers by "+" into Peering(self, piece)
+    }
+
+    builder Npc { $Npc  mark #Npc }
+
+    shard Setup {
+        run once {
+            weave Server from "S1=9811:S2+S4+S1+S3+S4+S5+S6+S7; S2=9812:S1+S3; S3=9813:S2+S4; S4=9814:S3+S1; S5=9815:S6+S1; S6=box.lan:9816:S5+S2" else as why {
+                do print("! servers: " + why)
+            }
+            weave Npc from "Goblin 30 4 2; Orc hp=50 x=9; \"Cave Troll\" 80; Imp lots" else as why {
+                do print("! npcs: " + why)
+            }
+
+            // Woven identities are queryable from the NEXT event, as after any `bring` (RULES 12).
+            emit @Begin { }
+        }
+    }
+
+    event @Begin { }
+
+    shard Map {
+        hear @Begin as b {
+            // Each server and its neighbours, in the order the text gave them (RULES 14b).
+            target $Server #Listed as s {
+                var line = s.Server.name + " :" + s.Server.port
+                if not (s.Server.host == "") { line = s.Server.name + " " + s.Server.host + ":" + s.Server.port }
+                line = line + "  -> "
+                target $Peering as l {
+                    if l.Peering.server == s {
+                        target $Server on l.Peering.peer as p { line = line + " " + p.Server.name }
+                    }
+                }
+                do print(line)
+            }
+
+            // The program's own graph rules — over identities, so two `target`s each.
+            target $Peering as l {
+                if l.Peering.server == l.Peering.peer {
+                    target $Server on l.Peering.server as a { do print("rule: " + a.Server.name + " lists itself") }
+                }
+                target $Peering as m {
+                    if l < m and l.Peering.server == m.Peering.server and l.Peering.peer == m.Peering.peer {
+                        target $Server on l.Peering.server as a {
+                            target $Server on l.Peering.peer as p { do print("rule: " + a.Server.name + " lists " + p.Server.name + " twice") }
+                        }
+                    }
+                }
+            }
+
+            target $Npc #Npc as n { do print(n.Npc.name + " hp " + n.Npc.hp + " at " + n.Npc.x + "," + n.Npc.y) }
+        }
+    }
+}

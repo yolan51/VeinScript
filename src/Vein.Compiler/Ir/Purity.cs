@@ -71,6 +71,13 @@ public static class Purity
                 case IrBlock b: foreach (var x in b.Statements) Stmt(x, where); break;
                 case IrOrdered o: Stmt(o.Collect, where); break;
                 case IrOrderedBring ob: Expr(ob.Key, where); Stmt(ob.Body, where); break;
+                // What a weave reads is its text; what it does is brings. Both are checked like any other.
+                case IrWeave w:
+                    Expr(w.Source, where);
+                    Stmt(w.Record, where);
+                    foreach (var f in w.FanOuts) { foreach (var a in f.Args) Expr(a, where); Stmt(f.Bring, where); }
+                    if (w.Else is { } we) Stmt(we, where);
+                    break;
                 case IrLet l: if (l.Init is { } init) Expr(init, where); break;
                 case IrAssign a: Expr(a.Target, where); Expr(a.Value, where); break;
                 case IrIf i: Expr(i.Cond, where); Stmt(i.Then, where); if (i.Else is { } e) Stmt(e, where); break;

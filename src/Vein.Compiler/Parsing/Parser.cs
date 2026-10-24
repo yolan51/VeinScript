@@ -361,7 +361,10 @@ public sealed class Parser
     {
         var s = Here; Advance();
         string name = Expect(TokenKind.EventRef, "@EventName").Text;
-        return new EventDecl(name, ParseSigBody(), s);
+        var members = ParseSigBody();
+        foreach (var w in members.Where(m => m is WeaveForm or WeaveFanOut))
+            _diag.Error("VS0365", $"Only a builder can be woven — @{name} is an event. Put `weave` in the builder that brings it.", w.Span);
+        return new EventDecl(name, members.Where(m => m is not (WeaveForm or WeaveFanOut)).ToList(), s);
     }
 
     /// The shared `{ members }` body of an event/builder: fields, vars, and `$Shape` includes,
@@ -384,6 +387,8 @@ public sealed class Parser
     private Node ParseSigMember()
     {
         var s = Here;
+        // D23: how this builder's records are written as text. Lifted out of the members by ParseBuilder.
+        if (Check(TokenKind.KwWeave)) return ParseWeaveMember();
         // `mark #A #B` — the marks the identity this builder builds will wear. No target: inside a
         // template the target is the identity being built. Its presence is also what tells `bring` this
         // builder constructs an identity rather than emitting a fragment or an event.
@@ -616,7 +621,76 @@ public sealed class Parser
         // VARIANT: it takes the base's members and fixes some of its parameters by name.
         string name = Expect(TokenKind.Ident, "builder name").Text;
         string? bass = Match(TokenKind.KwFrom) ? Expect(TokenKind.Ident, "base builder name").Text : null;
-        return new BuilderDecl(name, ParseSigBody(), s) { Base = bass };
+
+        // `weave as "…"` and `weave h by "+" into …` are read by the same member loop, then lifted out:
+        // they say how the parameters are WRITTEN, and are not parameters themselves (D23).
+        var members = ParseSigBody();
+        var forms = members.OfType<WeaveForm>().ToList();
+        foreach (var extra in forms.Skip(1))
+            _diag.Error("VS0366", $"Builder '{name}' already says how it is woven — a builder has one `weave as` form.", extra.Span);
+        return new BuilderDecl(name, members.Where(m => m is not (WeaveForm or WeaveFanOut)).ToList(), s)
+        {
+            Base = bass,
+            Weave = forms.FirstOrDefault(),
+            FanOuts = members.OfType<WeaveFanOut>().ToList(),
+        };
+    }
+
+    /// `weave as "<pattern>"` or `weave <hole> by "<sep>" into Child(args)` inside a builder (D23).
+    private Node ParseWeaveMember()
+    {
+        var s = Here; Advance();
+        if (Match(TokenKind.KwAs))
+            return new WeaveForm(Expect(TokenKind.String, "a quoted pattern after `weave as`").Value as string ?? "", s);
+
+        string hole = ExpectName("a hole name, or `as`, after `weave`").Text;
+        Expect(TokenKind.KwBy, "`by` and a quoted separator");
+        string sep = Expect(TokenKind.String, "a quoted separator after `by`").Value as string ?? "";
+        ExpectContextual("into");
+        var (child, path) = ParseBuilderRef();
+        var args = new List<Expr>();
+        Expect(TokenKind.LParen, "'('");
+        if (!Check(TokenKind.RParen))
+            do args.Add(ParseExpr()); while (Match(TokenKind.Comma));
+        Expect(TokenKind.RParen, "')'");
+        return new WeaveFanOut(hole, sep, child, args, s) { ChildPath = path };
+    }
+
+    /// A builder reference: bare `Name`, sigil'd `&Name`, or qualified `*Author.Bundle.Publicator.&Name`.
+    private (string Name, IReadOnlyList<string> Path) ParseBuilderRef()
+    {
+        if (Check(TokenKind.Star))
+        {
+            Advance();
+            var p = new List<string> { ExpectName("qualified path after '*'").Text };
+            while (true)
+            {
+                Expect(TokenKind.Dot, "'.'");
+                if (Check(TokenKind.BuilderRef)) return (Advance().Text, p);
+                p.Add(ExpectName("path segment or &Builder").Text);
+            }
+        }
+        if (Check(TokenKind.BuilderRef)) return (Advance().Text, Array.Empty<string>());
+        return (Expect(TokenKind.Ident, "builder name").Text, Array.Empty<string>());
+    }
+
+    /// `weave Server from text [else as why { … }]` (D23). `else` on the same line as the text, as
+    /// everywhere (RULES 2b).
+    private WeaveStmt ParseWeave()
+    {
+        var s = Here; Advance();
+        var (name, path) = ParseBuilderRef();
+        Expect(TokenKind.KwFrom, "`from` and the text to weave");
+        var source = ParseExpr();
+        string? why = null;
+        Block? els = null;
+        if (Match(TokenKind.KwElse))
+        {
+            Expect(TokenKind.KwAs, "`as` and a name for each problem (`else as why { … }`)");
+            why = ExpectName("a name for the problem").Text;
+            els = ParseBlock();
+        }
+        return new WeaveStmt(name, source, why, els, s) { BuilderPath = path };
     }
 
     private ViewDecl ParseView()
@@ -846,6 +920,7 @@ public sealed class Parser
             case TokenKind.KwMute: return ParseMute(unmute: false);
             case TokenKind.KwUnmute: return ParseMute(unmute: true);
             case TokenKind.KwBring: return ParseBring();
+            case TokenKind.KwWeave: return ParseWeave();
             default: return ParseAssignOrExpr();
         }
     }

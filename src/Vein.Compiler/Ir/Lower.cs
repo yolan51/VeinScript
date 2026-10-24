@@ -280,7 +280,7 @@ public sealed partial class Lower
             switch (m)
             {
                 case PublicatorDecl pub: foreach (var sub in pub.Members) LowerMember(sub); break;
-                case BuilderDecl: break;   // templates, not emitted to IR directly
+                case BuilderDecl bd: CheckWeave(bd); break;   // templates, not emitted to IR directly
                 case ShapeDecl s: types.AddRange(LowerShape(s)); break;
                 case TypeDecl t: types.Add(LowerType(t)); break;
                 case EventDecl e: types.Add(LowerEvent(e)); break;
@@ -2266,6 +2266,7 @@ public sealed partial class Lower
 
             case BringStmt br when _ordering is not null: return LowerOrderedBring(br, _ordering);
             case BringStmt br: return LowerBring(br);
+            case WeaveStmt ws: return LowerWeave(ws);
 
             // `ordered by k { bring … }` — each bring keeps its own lowering; what changes is the ORDER
             // they run in. The key is the argument named `k` in that bring's builder, found by expanding
@@ -2570,6 +2571,140 @@ public sealed partial class Lower
 
     /// LowerBring with the ordering context suspended, so the bring itself lowers to a plain bring rather
     /// than recursing back into LowerOrderedBring through any nested statement lowering it does.
+    // ---- weave (D23) ------------------------------------------------------------------------------------
+
+    /// While a fan-out's arguments lower: `self` and `piece` → the locals the interpreter sets per piece.
+    private Dictionary<string, string>? _weaveNames;
+
+    /// The parameters a woven record supplies, in binding order — a bring's, less the ones a variant fixed.
+    private List<(string Name, TypeRef? Type, Expr? Default, string? From)> WovenParams(BringTarget t) =>
+        BringParams(t).Params.Where(p => t.Fixed is null || !t.Fixed.ContainsKey(p.Name)).ToList();
+
+    /// The `weave as` form compiled against what its holes may name — each parameter, by its type, and
+    /// each fan-out. Null with the reason when it cannot be read.
+    private static Weave.Form? CompileForm(BuilderDecl b, List<(string Name, TypeRef? Type, Expr? Default, string? From)> prms, out string? error)
+    {
+        error = null;
+        if (b.Weave is null) return null;
+        var kinds = prms.GroupBy(p => p.Name, StringComparer.Ordinal)
+                        .ToDictionary(g => g.Key, g => g.First().Type?.Name ?? "string", StringComparer.Ordinal);
+        foreach (var f in b.FanOuts) kinds.TryAdd(f.Hole, Weave.FanOutKind);
+        return Weave.Compile(b.Weave.Pattern, h => kinds.GetValueOrDefault(h), out error);
+    }
+
+    /// A builder that says how it is woven, checked where it is DECLARED — so a broken pattern is reported
+    /// even in a bundle that never weaves it, and once, not at every `weave`.
+    private void CheckWeave(BuilderDecl b)
+    {
+        if (b.Weave is null && b.FanOuts.Count == 0) return;
+        if (ResolveBringTarget(Array.Empty<string>(), b.Name, b.Span) is not { } target) return;
+
+        // Only an identity can be woven: a record IS an identity, named so others can point at it.
+        if (!BuildsIdentity(target.Decl, target.OwnerKey))
+        {
+            _diag.Error("VS0365", $"Builder '{b.Name}' builds no identity, so it cannot be woven — `weave` brings one " +
+                "identity per record. Give it a `mark` member (RULES 7), or drop its `weave` lines.", (b.Weave?.Span ?? b.FanOuts[0].Span));
+            return;
+        }
+
+        var prms = WovenParams(target);
+        var paramNames = prms.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+        var holes = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var f in b.FanOuts)
+        {
+            if (paramNames.Contains(f.Hole))
+                _diag.Error("VS0367", $"`weave {f.Hole} by …`: '{f.Hole}' is a parameter of {b.Name}. A fan-out names text that " +
+                    "is cut into pieces, not a field — give the hole its own name.", f.Span);
+            else if (!holes.Add(f.Hole))
+                _diag.Error("VS0367", $"`weave {f.Hole} by …` is declared twice in {b.Name}.", f.Span);
+            if (f.Separator.Length == 0)
+                _diag.Error("VS0367", $"`weave {f.Hole} by \"\"`: an empty separator cuts nothing — say where the pieces part.", f.Span);
+            if (ResolveBringTarget(f.ChildPath, f.Child, f.Span) is null)
+                _diag.Error("VS0203", $"Unknown builder '{f.Child}' in `weave {f.Hole} by … into {f.Child}(…)`.", f.Span);
+        }
+
+        if (b.Weave is null) return;
+        var form = CompileForm(b, prms, out string? error);
+        if (form is null)
+        {
+            _diag.Error("VS0366", $"`weave as \"{b.Weave.Pattern}\"` cannot be read: {error}.", b.Weave.Span);
+            return;
+        }
+        foreach (var f in b.FanOuts.Where(f => !form.Holes.Contains(f.Hole)))
+            _diag.Warning("VS0368", $"`weave {f.Hole} by …` never brings anything: the form `{b.Weave.Pattern}` has no " +
+                $"`{{{f.Hole}}}` hole to fill it. Add one, or drop the fan-out.", f.Span);
+    }
+
+    /// `weave Builder from text` → one IrWeave. Each record is the bring a person would write, lowered here
+    /// once with its arguments as locals: `bring Builder(__wv_p, …) as __wself`. The text is only read at
+    /// run time, so problems in it are messages then (`else as why`), never compile errors.
+    private IrStmt LowerWeave(WeaveStmt ws)
+    {
+        var source = LowerExpr(ws.Source);
+        var noop = new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
+        if (ResolveBringTarget(ws.BuilderPath, ws.Builder, ws.Span) is not { } target)
+        {
+            string reff = ws.BuilderPath.Count > 0 ? "*" + string.Join(".", ws.BuilderPath) + ".&" + ws.Builder : ws.Builder;
+            _diag.Error("VS0203", $"Unknown builder '{reff}'.", ws.Span);
+            return noop;
+        }
+        var b = target.Decl;
+        if (!BuildsIdentity(b, target.OwnerKey))
+        {
+            _diag.Error("VS0365", $"`weave {ws.Builder} from …`: {ws.Builder} builds no identity, and `weave` brings one identity " +
+                "per record. Weave an identity template (a builder with a `mark` member, RULES 7).", ws.Span);
+            return noop;
+        }
+
+        var prms = WovenParams(target);
+        if (CompileForm(b, prms, out string? error) is null && b.Weave is not null)
+        {
+            // A local builder's form was reported where it is declared; an imported one is reported here,
+            // because this is the first place this bundle can see it.
+            if (target.OwnerKey is not null)
+                _diag.Error("VS0366", $"{ws.Builder}'s `weave as \"{b.Weave.Pattern}\"` cannot be read: {error}.", ws.Span);
+            return noop;
+        }
+
+        // The record: defaults for what was left out, then the bring itself.
+        var record = new List<IrStmt>();
+        foreach (var p in prms.Where(p => p.Default is not null))
+            record.Add(new IrIf(new IrLocalRef("__wm_" + p.Name),
+                new IrBlock(new IrStmt[] { new IrAssign(new IrLocalRef("__wv_" + p.Name), LowerExpr(p.Default!)) }), null));
+        record.Add(LowerBringDirect(new BringStmt(null, ws.Builder,
+            prms.Select(p => (Expr)new NameExpr("__wv_" + p.Name, ws.Span)).ToList(), false, ws.Span)
+            { BuilderPath = ws.BuilderPath, Bind = "__wself" }));
+
+        // Each fan-out: its arguments (with `self`/`piece`) and the child's bring, arguments as locals.
+        var fanOuts = new List<IrWeaveFanOut>();
+        foreach (var f in b.FanOuts)
+        {
+            if (ResolveBringTarget(f.ChildPath, f.Child, f.Span) is not { } child)
+            {
+                if (target.OwnerKey is not null) _diag.Error("VS0203", $"Unknown builder '{f.Child}' in {ws.Builder}'s `weave {f.Hole} … into`.", ws.Span);
+                continue;
+            }
+            var childParams = WovenParams(child);
+            var argTypes = f.Args.Select((_, i) => i < childParams.Count ? childParams[i].Type?.Name ?? "string" : "string").ToList();
+
+            List<IrExpr> args;
+            _weaveNames = new Dictionary<string, string>(StringComparer.Ordinal) { ["self"] = "__wself", ["piece"] = "__wpiece" };
+            try { args = f.Args.Select(LowerExpr).ToList(); }
+            finally { _weaveNames = null; }
+
+            var bring = LowerBringDirect(new BringStmt(null, f.Child,
+                f.Args.Select((_, i) => (Expr)new NameExpr("__wa" + i, f.Span)).ToList(), false, f.Span) { BuilderPath = f.ChildPath });
+            fanOuts.Add(new IrWeaveFanOut(f.Hole, f.Separator, args, argTypes,
+                bring as IrBlock ?? new IrBlock(new[] { bring })));
+        }
+
+        return new IrWeave(ws.Builder, source, b.Weave?.Pattern,
+            prms.Select(p => new IrWeaveParam(p.Name, p.Type?.Name ?? "string", p.Default is not null)).ToList(),
+            fanOuts, new IrBlock(record, Transparent: true),
+            ws.ElseBind, ws.Else is null ? null : LowerBlock(ws.Else),
+            System.IO.Path.GetFileName(ws.Span.File), ws.Span.Line);
+    }
+
     private IrStmt LowerBringDirect(BringStmt br)
     {
         var prev = _ordering;
@@ -2826,6 +2961,9 @@ public sealed partial class Lower
                 return new IrLiteral(l.Value, MapLit(l.Kind));
             // The name bound by the enclosing `target … as <bind>` IS the identity, not an ordinary local —
             // that is what makes `self.Health.hp -= 1` a fold contribution rather than a plain assignment.
+            // `self` and `piece` in a `weave … into Child(self, piece)` fan-out — first, so an enclosing
+            // `target … as self` cannot capture them (D23).
+            case NameExpr n when _weaveNames is not null && _weaveNames.TryGetValue(n.Name, out var woven): return new IrLocalRef(woven);
             case NameExpr n when IsTargetBind(n.Name): return new IrSelfRef(n.Name);
             case NameExpr n: return new IrLocalRef(n.Name);
             case EntityExpr: return new IrEntityRef();

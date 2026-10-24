@@ -1087,6 +1087,13 @@ public sealed class CSharpBackend : IVeinBackend
                 break;
             }
 
+            // D23: reading records out of text at run time needs the weave reader, which only the
+            // interpreter has. Said, not approximated — like `fromJson`.
+            case IrWeave w:
+                _notes.Add($"`weave {w.Builder} from …` is interpreter-only — not emitted; keep this program on `veinc run`.");
+                sb.AppendLine($"{pad}// not emitted: weave {w.Builder} (interpreter-only)");
+                break;
+
             default:
                 _notes.Add($"statement {stmt.GetType().Name} not emitted.");
                 sb.AppendLine($"{pad}// [unsupported: {stmt.GetType().Name}]");

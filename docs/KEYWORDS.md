@@ -92,6 +92,7 @@ Held so they aren't accidentally repurposed. Assign a meaning or cut before v1.0
 | `bridge` | interop / FFI boundary |
 | `bring` | instantiate a `builder` (`bring [N] Name(args)`), binding args positionally + emitting its output event |
 | `builder` | a reusable template: signature body (params + one `markup`/`code`/`css`/`line` output field), or a `mark` member making it an identity template |
+| `weave` | `weave Builder from text [else as why { … }]` brings one identity per record, each the `bring` a person would write; a builder says how it is written with `weave as "{a}=[{b}:]{c}"` and fans out with `weave h by "+" into Child(self, piece)` (D23, RULES 7e) |
 | `transform` | AST macro / source transform, or Transform component sugar |
 
 ### Cut (gone from the lexer and the language)

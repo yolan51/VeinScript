@@ -395,6 +395,20 @@ error (**VS0206**): it would consume an argument and put it nowhere. A template 
 and **no** `mark` keeps the old meaning — it emits `@<BuilderName>` — so this changed no existing
 program.
 
+**Weaving — `weave Server from text`.** An identity template may say how its records are written as text,
+and the program brings one identity per record — each the `bring` a person would write (D23, RULES 7e):
+
+```
+builder Server {
+    $Server  mark #Listed
+    weave as "{name}=[{host}:]{port}[:{peers}]"     // typed {holes}, [optional] parts
+    weave peers by "+" into Peering(self, piece)    // one child identity per piece
+}
+weave Server from servers else as why { do print("! " + why) }
+```
+
+Without `weave as`, a record is a command line: values in parameter order, or `name=value`.
+
 **Variants — `builder BigCoin from Coin { value = 5 }`.** A builder is already a prefab: `bring` is
 instantiation by argument. A variant NAMES a set of those arguments. It takes the base's members, may add
 shapes and marks of its own, and inherits the base's marks.

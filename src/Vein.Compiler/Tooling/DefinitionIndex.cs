@@ -195,6 +195,8 @@ public sealed class DefinitionIndex
                 case AttachStmt a: Use(a.Shape, SymbolKind.Shape, a.Span); break;
                 case EmitStmt em: Use(em.Event, SymbolKind.Event, em.Span, SiteRole.Emit); foreach (var f in em.Fields) Ex(f.Value); break;
                 case BringStmt br: Use(br.Builder, SymbolKind.Builder, br.Span); foreach (var a in br.Args) Ex(a); break;
+                // `weave Server from …` brings Server once per record — a use of it, like a bring.
+                case WeaveStmt ws: Use(ws.Builder, SymbolKind.Builder, ws.Span); Ex(ws.Source); if (ws.Else is not null) Stm(ws.Else); break;
                 // `mute Physics` names a shard — at the NAME, so F12 on it lands and Shift+F12 lists it.
                 case MuteStmt { ByMark: true } mu: Use(mu.Shard, SymbolKind.Mark, mu.NameSpan); break;
                 case MuteStmt mu: Use(mu.Shard, SymbolKind.Shard, mu.NameSpan); break;
