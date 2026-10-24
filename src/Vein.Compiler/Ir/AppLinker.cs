@@ -40,7 +40,16 @@ public static class AppLinker
         /// What the app's own bundles used from `bundles/`, as `vein.lock` lines — one lock per project.
         /// A kit linked from `bundles/` contributes nothing: its calls into another kit are its own.
         public IReadOnlyList<LockEntry> OutsideUses { get; init; } = Array.Empty<LockEntry>();
+
+        /// Each bundle as it was lowered, BEFORE the merge, principal first. The merge qualifies a
+        /// repeated shard name and forgets which bundle a shard came from; a tool drawing the app
+        /// (`Tooling/EventFlow`) needs both.
+        public IReadOnlyList<LinkedPart> Parts { get; init; } = Array.Empty<LinkedPart>();
     }
+
+    /// One linked bundle: its own module, the file it was read from, and where its emits sit.
+    public sealed record LinkedPart(BundleDecl Decl, string File, IrModule Module,
+                                    IReadOnlyList<Lower.FlowSite> Sites, bool Needed);
 
     /// Link `appFilePath` if it is an app manifest. Returns null when the file declares no `app`, so the
     /// caller can fall through to its ordinary single-bundle path.
@@ -79,11 +88,14 @@ public static class AppLinker
         // loaded before it. The index behind a Lower is cached, so a fresh one costs nothing.
         var modules = new List<(string Name, IrModule Module, AppLoad? Load)>();
         var uses = new List<LockEntry>();
+        var parts = new List<LinkedPart>();
         foreach (var r in resolved)
         {
             var lower = new Lower(diag, baseDir);
-            modules.Add((r.Bundle.Name, lower.LowerBundle(r.Bundle), r.Load));
+            var module = lower.LowerBundle(r.Bundle);
+            modules.Add((r.Bundle.Name, module, r.Load));
             uses.AddRange(lower.OutsideUses);
+            parts.Add(new LinkedPart(r.Bundle, r.File, module, lower.FlowSites, r.Needed));
         }
 
         var principal = modules[0];
@@ -95,6 +107,7 @@ public static class AppLinker
         {
             Needed = resolved.Where(r => r.Needed).Select(r => r.Bundle.Name).ToList(),
             OutsideUses = uses,
+            Parts = parts,
         };
     }
 

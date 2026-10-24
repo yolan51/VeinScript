@@ -1,0 +1,46 @@
+//   NOT RUN ON ITS OWN — it is one bundle of samples/event_flow/event_flow.app.vein. Run that (open it and press ▶), or set it as the
+//   Entry with the button at the top right, and ▶ runs the app from here.
+// The PRINCIPAL. It boots the app and runs the turn loop — and it is the one bundle that hears a
+// capability back: Combat's @Damaged decides whether there is another turn. That edge, from a bundle
+// loaded after this one back into it, is the cycle the Flow tab should make obvious.
+
+bundle Game by you {
+
+    publicator Turns {
+        shared("The run begins, with the hero's name.")
+        event @Begin { hero: string }
+
+        shared("A new turn starts.")
+        event @TurnStarted { hero: string, turn: int }
+
+        shared("The hero entered a room.")
+        event @Moved { who: string, room: string, turn: int }
+    }
+
+    start @Begin { hero: "Ayla" }
+
+    // Owns the turn counter. It starts turn 1, and starts the next one for as long as the boss stands.
+    shard Director {
+        var hero = ""
+        var turn = 0
+
+        hear @Begin as b {
+            hero = b.hero
+            turn = 1
+            emit @TurnStarted { hero: hero, turn: turn }
+        }
+
+        hear *you.Combat.Fight.@Damaged as d {
+            if d.left > 0 {
+                turn += 1
+                emit @TurnStarted { hero: hero, turn: turn }
+            }
+        }
+    }
+
+    shard Walker {
+        hear @TurnStarted as t {
+            emit @Moved { who: t.hero, room: "hall " + t.turn, turn: t.turn }
+        }
+    }
+}

@@ -12,7 +12,7 @@ if (args.Length > 0 && args[0] is "add" or "remove" or "restore" or "packages") 
 
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("usage: veinc <add|remove|restore|packages> …   or   veinc <new|check|lock|settings|test|tokens|ast|ir|render|serve|run|build|emit|graph|events|scaffold|symbols|exec> <file.vein> [arg]");
+    Console.Error.WriteLine("usage: veinc <add|remove|restore|packages> …   or   veinc <new|check|lock|settings|test|tokens|ast|ir|render|serve|run|build|emit|graph|events|flow|scaffold|symbols|exec> <file.vein> [arg]");
     return 2;
 }
 
@@ -417,6 +417,18 @@ switch (command)
                 Console.Write(EventCatalog.Render(events));
         }
         break;
+    }
+
+    // `veinc flow` — who emits what and who hears it, across every bundle the program links: the data the
+    // Workbench's Flow tab draws. `--all` keeps the standard library's events (`@Print`, `@Ticked`, …).
+    case "flow":
+    {
+        var flow = EventFlow.For(path);
+        if (args.Contains("--json"))
+            Console.WriteLine(JsonSerializer.Serialize(flow, new JsonSerializerOptions { WriteIndented = true }));
+        else
+            Console.Write(flow.Render(includeStdlib: args.Contains("--all")));
+        return flow.Problems.Count == 0 ? 0 : 1;
     }
 
     case "scaffold":

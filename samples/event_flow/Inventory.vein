@@ -1,0 +1,20 @@
+//   NOT RUN ON ITS OWN — it is one bundle of samples/event_flow/event_flow.app.vein. Run that (open it and press ▶), or set it as the
+//   Entry with the button at the top right, and ▶ runs the app from here.
+// What the hero is carrying. One shard, one event in, one event out — the simplest box on the map.
+
+bundle Inventory by you {
+
+    publicator Bag {
+        shared("The contents of a bag changed.")
+        event @InventoryChanged { who: string, item: string, count: int }
+    }
+
+    shard Satchel {
+        var carried = 0
+
+        hear *you.Loot.Drops.@ItemPicked as p {
+            carried += 1
+            emit @InventoryChanged { who: p.who, item: p.item, count: carried }
+        }
+    }
+}

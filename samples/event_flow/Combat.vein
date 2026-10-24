@@ -1,0 +1,41 @@
+//   NOT RUN ON ITS OWN — it is one bundle of samples/event_flow/event_flow.app.vein. Run that (open it and press ▶), or set it as the
+//   Entry with the button at the top right, and ▶ runs the app from here.
+// The fight. Two shards, so the map has an edge INSIDE a bundle as well as edges leaving it: Arena
+// turns a move into an attack, Resolver turns an attack into damage — and, on the third hit, a death.
+
+bundle Combat by you {
+
+    publicator Fight {
+        shared("Someone swung at someone.")
+        event @Attacked { attacker: string, target: string, amount: int }
+
+        shared("A hit landed; `left` is what the target has left.")
+        event @Damaged { target: string, amount: int, left: int }
+
+        shared("Something died, and who did it.")
+        event @Died { who: string, by: string }
+
+        // DECLARED AND NEVER EMITTED — deliberately. Hud already hears it, waiting for a healer that
+        // does not exist yet, so the map shows that handler in red: it can never run.
+        shared("Someone was healed.")
+        event @Healed { who: string, amount: int }
+    }
+
+    shard Arena {
+        hear *you.Game.Turns.@Moved as m {
+            emit @Attacked { attacker: m.who, target: "Grub", amount: 4 }
+        }
+    }
+
+    shard Resolver {
+        var hp = 10
+
+        hear @Attacked as a {
+            hp -= a.amount
+            emit @Damaged { target: a.target, amount: a.amount, left: hp }
+            if hp <= 0 {
+                emit @Died { who: a.target, by: a.attacker }
+            }
+        }
+    }
+}

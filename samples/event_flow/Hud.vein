@@ -1,0 +1,46 @@
+//   NOT RUN ON ITS OWN — it is one bundle of samples/event_flow/event_flow.app.vein. Run that (open it and press ▶), or set it as the
+//   Entry with the button at the top right, and ▶ runs the app from here.
+// The screen. It hears from every other bundle and emits only @Print — the hub a map has to keep from
+// becoming a hairball, which is why the Flow tab hides standard-library events until asked.
+
+bundle Hud by you {
+
+    // An SF runs inline in its caller (RULES 20b), so the @Print inside it is drawn as each caller's,
+    // "via show()".
+    SF show(msg: string) {
+        do *Vein.Console.Io.print("[hud] " + msg)
+    }
+
+    shard Screen {
+        // A unit no event starts. The map shows it as a trigger of its own.
+        run once {
+            do show("— the dungeon —")
+        }
+
+        hear *you.Game.Turns.@Moved as m {
+            do show(m.who + " enters " + m.room)
+        }
+
+        // AN AUDIENCE: only Combat's Resolver may deliver this. The map writes the barrier on the wire.
+        hear *you.Combat.Fight.@Damaged as d audience *you.Combat.!Resolver {
+            do show(d.target + " takes " + d.amount + ", " + d.left + " left")
+        }
+
+        // NEVER RUNS — nothing emits @Healed (see Combat.vein). Red on the map.
+        hear *you.Combat.Fight.@Healed as h {
+            do show(h.who + " healed " + h.amount)
+        }
+
+        hear *you.Inventory.Bag.@InventoryChanged as c {
+            do show(c.who + " now carries " + c.count + " item(s): " + c.item)
+        }
+
+        hear *you.Quests.Journal.@QuestAdvanced as q {
+            do show("quest: " + q.quest + " (step " + q.step + ")")
+        }
+
+        hear *you.Quests.Journal.@QuestCompleted as q {
+            do show("quest complete: " + q.quest)
+        }
+    }
+}

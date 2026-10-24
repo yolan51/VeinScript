@@ -1,0 +1,26 @@
+//   NOT RUN ON ITS OWN — it is one bundle of samples/event_flow/event_flow.app.vein. Run that (open it and press ▶), or set it as the
+//   Entry with the button at the top right, and ▶ runs the app from here.
+// What a fallen enemy leaves behind. A capability: it starts nothing, and only Combat's @Died wakes it.
+
+bundle Loot by you {
+
+    publicator Drops {
+        shared("An item fell to the floor.")
+        event @ItemDropped { item: string, finder: string }
+
+        shared("Someone picked an item up.")
+        event @ItemPicked { who: string, item: string }
+    }
+
+    shard Dropper {
+        hear *you.Combat.Fight.@Died as d {
+            emit @ItemDropped { item: "rusty key", finder: d.by }
+        }
+    }
+
+    shard Picker {
+        hear @ItemDropped as i {
+            emit @ItemPicked { who: i.finder, item: i.item }
+        }
+    }
+}

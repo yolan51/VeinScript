@@ -1,0 +1,27 @@
+//   NOT RUN ON ITS OWN — it is one bundle of samples/event_flow/event_flow.app.vein. Run that (open it and press ▶), or set it as the
+//   Entry with the button at the top right, and ▶ runs the app from here.
+// The journal. It hears TWO bundles — Combat for the kill, Inventory for the key — which is the shape
+// that is hardest to see in source: one shard whose inputs live in two other files.
+
+bundle Quests by you {
+
+    publicator Journal {
+        shared("A quest moved forward a step.")
+        event @QuestAdvanced { quest: string, step: int }
+
+        shared("A quest is done.")
+        event @QuestCompleted { quest: string }
+    }
+
+    shard Log {
+        hear *you.Combat.Fight.@Died as d {
+            emit @QuestAdvanced { quest: "Slay " + d.who, step: 1 }
+        }
+
+        hear *you.Inventory.Bag.@InventoryChanged as c {
+            if c.item == "rusty key" {
+                emit @QuestCompleted { quest: "Slay Grub" }
+            }
+        }
+    }
+}

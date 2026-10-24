@@ -68,6 +68,7 @@ public partial class MainWindow : Window
     private TreeView _depsTree = null!;
     private SymbolsPanel _symbolsPanel = null!;
     private TunePanel _tunePanel = null!;
+    private EventFlowPanel _flowPanel = null!;
     private ScrollViewer _execPanel = null!;
     private Grid _topCols = null!;
     private Grid _mainRows = null!;
@@ -138,6 +139,7 @@ public partial class MainWindow : Window
     private const int TabTranscript = 10;
     private const int TabPreview = 11;
     private const int TabTune = 12;
+    private const int TabFlow = 13;
 
     private ComboBox _runConfigs = null!;
     private TextBlock _runHint = null!;
@@ -171,6 +173,8 @@ public partial class MainWindow : Window
         // Tune (D21): the program's `tune` vars and vein.settings, read when the tab is shown.
         _tunePanel = this.FindControl<TunePanel>("Tune")!;
         _tunePanel.Navigate = (file, line) => GoTo(file, line, 1);
+        _flowPanel = this.FindControl<EventFlowPanel>("Flow")!;
+        _flowPanel.Navigate = (file, line) => GoTo(file, line, 1);
         _execPanel = this.FindControl<ScrollViewer>("ExecPanel")!;
         _topCols = this.FindControl<Grid>("TopCols")!;
         _mainRows = this.FindControl<Grid>("MainRows")!;
@@ -182,6 +186,7 @@ public partial class MainWindow : Window
         {
             if (_bottomPanel.SelectedIndex == TabSymbols) _symbolsPanel.Update(_rootFolder, _currentPath);
             if (_bottomPanel.SelectedIndex == TabTune) _tunePanel.Update(RunPath);
+            if (_bottomPanel.SelectedIndex == TabFlow) _flowPanel.Update(RunPath);
         };
         _statusBar = this.FindControl<TextBlock>("StatusBar")!;
         _bundleInspector = this.FindControl<Border>("BundleInspector")!;
@@ -1794,6 +1799,9 @@ public partial class MainWindow : Window
             // `Save As` is the one that can create a file, and it still repopulates.
 
             if (ReferenceEquals(doc, _tabs.Active)) Build();
+
+            // The map is read from disk, so a save — of any bundle the app links — is when it can change.
+            if (_bottomPanel.SelectedIndex == TabFlow) _flowPanel.Update(RunPath);
 
             // Live reload. `veinc serve` reads the file once at boot and the runtime has no reload path
             // to ask for, so the honest implementation is a restart — and only of a serve that is

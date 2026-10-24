@@ -1,0 +1,39 @@
+// samples/event_flow/event_flow.app.vein — seven bundles, one runtime, and the fixture for the
+// Workbench's Flow tab.
+//
+//   veinc run  samples/event_flow/event_flow.app.vein
+//   veinc flow samples/event_flow/event_flow.app.vein        (the map, as text; --all adds @Print)
+//
+// In the Workbench, open this file and pick the Flow tab (bottom panel) — or set it as the Entry and the
+// tab draws it from any bundle you are editing.
+//
+// A dungeon turn, told entirely in events. No shard calls another and no bundle names a shard of
+// another (except one audience, on purpose), so the only way to see that @Begin ends in a quest being
+// completed is to follow emits into hears across files — which is what the Flow tab draws:
+//
+//   Game ──@Moved──▶ Combat ──@Died──▶ Loot ──@ItemPicked──▶ Inventory ──@InventoryChanged──▶ Quests
+//     ▲                 │
+//     └────@Damaged─────┘   (the turn loop: Game starts the next turn while the boss stands)
+//
+// with Hud and Telemetry listening in from the side. What the map should show, and where:
+//
+//   * a CYCLE — Game → Combat → Game, three times, until Grub falls (Combat.vein);
+//   * a FAN-OUT — @Damaged is heard by three shards in three bundles;
+//   * an AUDIENCE — Hud hears @Damaged only from Combat's Resolver (Hud.vein);
+//   * an SF — Hud prints through `do show(…)`, so its @Print is drawn "via show()";
+//   * a SCHEDULE — Hud's `run once` banner, a unit no event starts;
+//   * TWO DELIBERATE DEFECTS, which the map paints red:
+//       @Logged is emitted by Telemetry and heard by nobody (Telemetry.vein);
+//       @Healed is heard by Hud and emitted by nobody — the healer does not exist yet (Combat.vein).
+//
+// Comment out a `load` and that bundle's boxes and wires disappear from the map, with no other edit.
+
+app EventFlow {
+    load "Game.vein"         // ★ principal — its `start @Begin` is the app's one boot event
+    load "Combat.vein"       // the fight: hears where the hero moved, says who got hurt
+    load "Loot.vein"         // what a fallen enemy leaves behind
+    load "Inventory.vein"    // what the hero is carrying
+    load "Quests.vein"       // the journal: progress from deaths and from what was picked up
+    load "Hud.vein"          // the screen: listens to almost everything, emits only @Print
+    load "Telemetry.vein"    // a recorder — and the home of the event nobody hears
+}

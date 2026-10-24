@@ -270,6 +270,9 @@
         <TabItem Header="Tune">
           <local:TunePanel Name="Tune" />
         </TabItem>
+        <TabItem Header="Flow">
+          <local:EventFlowPanel Name="Flow" />
+        </TabItem>
       </TabControl>
     </Grid>
   </DockPanel>

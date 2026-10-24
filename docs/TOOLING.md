@@ -226,6 +226,38 @@ vein.lock: 1 changed, 0 added, 0 removed — …/samples/kitdemo/vein.lock
   `veinc lock` on the app.
 - **No `bundles/`, no lock.** The standard library is never recorded — it ships with the compiler.
 
+## `veinc flow <app-or-file> [--all] [--json]` — the event flow, and the Workbench's Flow tab
+
+Shards never call each other, so the only control flow is who emits what and who hears it — and that is
+spread over every bundle the program links. `veinc flow` links the program as `run` would (a manifest, a
+bundle whose `need`s are installed, or a lone bundle) and lists, per bundle and shard, each unit of work
+(a `hear` or a schedule) with what it emits; then every event with both of its ends.
+
+```
+$ veinc flow samples/event_flow/event_flow.app.vein
+…
+  @Damaged  (you.Combat)
+      from  Combat.Resolver
+      to    Game.Director, Hud.Screen [audience !Resolver], Telemetry.Recorder
+  @Logged  (you.Telemetry)   ← emitted, heard by nobody
+```
+
+- **Edges are routing keys**, not names as written: `emit @Ordered` in Store and
+  `hear *you.Store.Orders.@Ordered` in Audit are one event, and two vendors' `@Dispatch` are two.
+- **An SF's emits are its caller's**, marked `via show()` — it runs inline (RULES 20b). The app's `start`
+  is an emitter of its own.
+- **Standard-library events are left out** unless `--all`: `@Print` touches nearly every shard.
+- **Two shapes are flagged**: emitted and heard by nobody (in a linked app there is no one else), and
+  heard and emitted by nobody (the handler never runs). Host events (`@Print`) and runtime events
+  (`@Ticked`) are exempt from the side the runtime supplies.
+
+The **Flow** tab draws the same data as a map: bundles as boxes in the order events travel, shards and
+their units inside, each event a pill wired from the rows that emit it to the rows that hear it. Hover a
+pill, a row, a shard or a bundle's title for who emits, who hears and where — on a bundle, what goes in
+and out of it. Click to pin the highlight, double-click to open the source; drag bundles and pills, pan
+the floor, wheel to zoom, F to fit. It reads the run entry from disk, when the tab is shown and on save.
+`samples/event_flow` is its fixture: seven bundles, a turn loop, an audience, an SF and two dead ends.
+
 ## `veinc exec <file.vein> [--json] [--ascii]` — the derived execution model
 
 A `.vein` file says **what** a shard does. It never says when it runs, what identity state it touches, or

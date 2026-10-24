@@ -85,6 +85,21 @@ public sealed partial class Lower
     /// out is what makes the local spelling and the imported `*A.B.P.@Name` spelling agree on one key.
     private string _ownerKey = "local";
 
+    /// <summary>Where one `emit` sits, and which unit of work it is in.</summary>
+    /// <remarks>
+    /// For tooling that draws the event flow (`Tooling/EventFlow`). The IR keeps a unit's file and line
+    /// (`@at`) and nothing at all on an emit, and putting a span on `Emit` would change every golden IR
+    /// file for a fact only an editor reads. `Unit` is `Shard:index` for a shard member — its index in
+    /// `IrShard.Methods` — and `fn:Name` for a function, named as the IR names it.
+    /// </remarks>
+    public sealed record FlowSite(string Unit, string Event, SourceSpan Span);
+
+    /// Every emit this bundle lowered, in the order lowered. Read after `LowerBundle`.
+    public IReadOnlyList<FlowSite> FlowSites => _flowSites;
+    private readonly List<FlowSite> _flowSites = new();
+    private string _unit = "";
+    private void NoteEmit(string key, SourceSpan span) => _flowSites.Add(new FlowSite(_unit, key, span));
+
     /// Every shard, ShardView and bridge this bundle declares, by name → the kinds that use it. A name
     /// can be both a shard and a bridge (VS0320 keys them apart), which `mute` reports as VS0351.
     private readonly Dictionary<string, List<string>> _shardKinds = new(StringComparer.Ordinal);
@@ -1590,12 +1605,21 @@ public sealed partial class Lower
         return LowerFuncBody(f);
     }
 
-    private IrFunction LowerFuncBody(FuncDecl f) => new(
-        _shardFuncNames.TryGetValue(f.Name, out var qualified) && _funcDecls.GetValueOrDefault(f.Name) == f ? qualified : f.Name,
-        f.Params.Select(p => new IrParam(p.Name, LowerTypeRef(p.Type))).ToList(),
-        f.Return is null ? IrTypeRef.Of("void") : LowerTypeRef(f.Return),
-        LowerBlock(f.Body), f.IsPure, f.Doc,
-        f.IsPure ? new[] { IrAttr.Of("sf") } : Array.Empty<IrAttr>());   // SF: emit-only, no return
+    private IrFunction LowerFuncBody(FuncDecl f)
+    {
+        string name = _shardFuncNames.TryGetValue(f.Name, out var qualified) && _funcDecls.GetValueOrDefault(f.Name) == f ? qualified : f.Name;
+        string outerUnit = _unit;
+        _unit = "fn:" + name;
+        try
+        {
+            return new(name,
+                f.Params.Select(p => new IrParam(p.Name, LowerTypeRef(p.Type))).ToList(),
+                f.Return is null ? IrTypeRef.Of("void") : LowerTypeRef(f.Return),
+                LowerBlock(f.Body), f.IsPure, f.Doc,
+                f.IsPure ? new[] { IrAttr.Of("sf") } : Array.Empty<IrAttr>());   // SF: emit-only, no return
+        }
+        finally { _unit = outerUnit; }
+    }
 
     // ---- shards ---------------------------------------------------------
 
@@ -1651,6 +1675,7 @@ public sealed partial class Lower
 
         foreach (var m in members)
         {
+            _unit = name + ":" + methods.Count;
             switch (m)
             {
                 case ScheduleBlock sb: methods.Add(LowerSchedule(sb)); break;
@@ -1720,6 +1745,7 @@ public sealed partial class Lower
         var methods = new List<IrFunction>();
         foreach (var m in vw.Members)
         {
+            _unit = vw.Name + ":" + methods.Count;
             switch (m)
             {
                 case HearBlock hb: methods.Add(LowerHear(hb)); break;
@@ -2167,13 +2193,17 @@ public sealed partial class Lower
                     new IrExpr[] { LowerExpr(mk.Target), new IrTypeNameExpr(mk.Mark) }));
             }
             case EmitStmt em:
+            {
                 if (em.FillRest) _diag.Error("VS0347", SavedQuestion("fields"), em.FillAt ?? em.Span);
                 CheckEmitPayload(em);
                 RegisterImportedEvent(em.EventPath, em.Event);
                 NoteEventUse(em.EventPath, em.Event);
+                string key = EventKey(em.EventPath, em.Event);
+                NoteEmit(key, em.Span);
                 return new IrExprStmt(new IrRuntimeCall("Emit",
-                    new IrExpr[] { new IrStructInit(EventKey(em.EventPath, em.Event),
+                    new IrExpr[] { new IrStructInit(key,
                         LowerNamedFields(em.Fields, () => EventFields(em.EventPath, em.Event), "@" + em.Event), em.FillRest) }));
+            }
             case DestroyStmt d:
                 return new IrExprStmt(new IrRuntimeCall("DestroyEntity", new[] { LowerExpr(d.Target) }));
             case MuteStmt mu: return LowerMute(mu);
@@ -2692,6 +2722,7 @@ public sealed partial class Lower
             ? (EventKey(Array.Empty<string>(), b.Name), prms.Select(p => (p.Name, (IrExpr)new IrLocalRef(p.Name))).ToArray())   // construct @<Builder> from params
             : (EventKey(Array.Empty<string>(), ChannelEvent(output.Name)),
                new[] { (output.Name switch { "code" => "code", "css" => "css", "line" => "text", _ => "markup" }, LowerExpr(output.Default!)) });
+        NoteEmit(ev, br.Span);
         stmts.Add(new IrExprStmt(new IrRuntimeCall("Emit", new IrExpr[] { new IrStructInit(ev, fields) })));
         var body = new IrBlock(stmts);
 
