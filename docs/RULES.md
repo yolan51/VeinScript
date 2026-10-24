@@ -872,3 +872,35 @@ on purpose, which is how "all nineteen configs" is written. `f.path` is still th
 to know which file it actually got.
 
 `samples/file_tags.vein` is five files through two handlers, including a computed tag.
+
+**28j. Text comes apart as EVENTS: `need "Vein.StringParser"`, then hear the pieces.** A line, a word, a
+`key=value` pair or a `a|b|c` record arrives with NAMED fields, so no program computes
+`substring(pair, eq + 1, len(pair) - eq - 1)` again:
+
+```
+do parsePairs(roles, ";", "=", #Roles)
+hear @Pair as p { match p.tag { when #Roles { … p.key … p.value … } } }
+```
+
+| SF | emits per piece |
+|---|---|
+| `parseLines(text, tag)` | `@Line { index, text, first, rest, words }` — `first`/`rest` are head and tail |
+| `parseWords` / `parseChars(text, tag)` | `@Word` / `@Char { index, line, text }` |
+| `parseText(text, tag)` | each `@Line`, then its `@Word`s |
+| `parseSplit(text, sep, tag)` | `@Piece { index, text, rest }` — empties kept |
+| `parsePairs(text, sep, eq, tag)` | `@Pair { index, key, value }`, at the FIRST `eq`; no `eq` is `@Unparsed` |
+| `parseFields(text, sep, tag)` | one `@Fields { count, f0 … f7, rest }` — past the eighth goes to `rest` |
+
+- **Every parse ends with `@Parsed { tag, count }`**, after its last piece and before the next parse's
+  first. A consumer collecting pieces in shard `var`s acts there.
+- **Route by `tag`, as file events do (28c).** Every `hear @Pair` hears every parse in the program.
+- **The pieces QUEUE (rule 21).** A `print` on the line after `do parseLines(…)` comes out BEFORE the
+  prints the `@Line` hears make. Do what follows a parse in its `@Parsed`.
+- **Cut by the built-ins, so they agree with them** (28a): `lines("")` is one empty line, and a Windows
+  `\r\n` is stripped.
+- **One event per piece.** A whole file through `parseLines` is fine; `parseChars` is for short input.
+  To only WALK pieces, `target lines(text) as l` is cheaper.
+- `firstWord`, `afterFirstWord` and `pieceAt` are shared fns too, for an answer right now.
+
+It is written in VeinScript (`stdlib/StringParser.vein`): SFs, because the stdlib declares no shards
+(rule 18), with every name inside them qualified (18a). `samples/string_parser.vein` uses all of it.

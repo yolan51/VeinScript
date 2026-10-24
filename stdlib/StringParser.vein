@@ -1,0 +1,244 @@
+// stdlib/StringParser.vein — VeinScript Standard Library : Vein.StringParser
+// Text handed back as events — a line, a word, a piece, a pair — so a program hears named fields
+// instead of computing positions.
+// Discover:  veinc symbols stdlib/StringParser.vein
+//
+// WHY THIS EXISTS. A chat server, a save file and a config table all start as one string, and the code
+// that takes it apart looked the same everywhere:
+//
+//     let eq = indexOf(pair, "=")
+//     let user = substring(pair, 0, eq)
+//     let card = substring(pair, eq + 1, len(pair) - eq - 1)
+//
+// Three lines of arithmetic the reader has to replay to learn that a pair is `user=card`, repeated in
+// every bundle that reads one, each with its own chance to be off by one. Here it is written once:
+//
+//     do *Vein.StringParser.Parse.parsePairs(roles, ";", "=", #Roles)
+//
+//     hear *Vein.StringParser.Parse.@Pair as p {
+//         match p.tag { when #Roles { … p.key … p.value … } }
+//     }
+//
+// WHY EVENTS, AND NOT A FUNCTION THAT RETURNS THE PIECES. Text arrives the way a file does
+// (`@ReadFile` → `@FileLoaded`) and a failure is a message, not a fault — the language's idiom, with no
+// list to index and no `catch` to write. And a payload field holds a value, not a list, so an event per
+// piece is how a piece gets NAMED fields at all.
+//
+// WHY A `tag`. Every `hear @Pair` hears EVERY parse in the program, exactly as every `hear @FileLoaded`
+// hears every file. Pass a mark (`#Roles`) and route with `match p.tag { when #Roles { … } }`: a
+// misspelt tag is then a compile error rather than a block that never runs. A computed string tag
+// (`"slot" + n`) works too.
+//
+// WHY EVERY PARSE ENDS WITH @Parsed. The pieces arrive one event at a time, so a consumer that collects
+// them in shard `var`s needs to know when there are no more. `@Parsed { tag, count }` comes after the
+// last piece of that parse, always — also when there were none.
+//
+// ORDER. These are SFs: each runs INLINE in the caller (RULES 20b), and its emits QUEUE behind what the
+// caller already emitted (RULES 21). So the pieces of one parse arrive in order, then its @Parsed, and
+// two parses called one after the other do not interleave.
+//
+// COST: ONE EVENT PER PIECE. `parseLines` on a whole file is the right size; `parseChars` is for a
+// word or a short command, not for a megabyte. When a program only needs to WALK the pieces, the
+// built-ins `lines` / `words` / `chars` / `split` in a `target` loop are cheaper (RULES 28a).
+//
+// HOW THE PIECES ARE CUT. Exactly as the built-ins cut them, because these are written with them:
+// `lines` strips the ending whichever it was (a Windows `\r\n` too), `words` splits on runs of
+// whitespace and drops empties, `split` keeps empties — a blank column is still a column. `index` is
+// 0-based, `line` is 1-based.
+
+bundle StringParser by Vein {
+
+    publicator Parse {
+
+        // ---- the pieces ---------------------------------------------------------------------------
+
+        shared("One line. `first` is its first word and `rest` everything after it; `words` counts them.")
+        event @Line {
+            tag: string
+            index: int
+            text: string
+            first: string
+            rest: string
+            words: int
+        }
+
+        shared("One word. `line` is the 1-based line it is on; `index` its 0-based place in that line.")
+        event @Word {
+            tag: string
+            index: int
+            line: int
+            text: string
+        }
+
+        shared("One character, as a one-character string (RULES 28).")
+        event @Char {
+            tag: string
+            index: int
+            line: int
+            text: string
+        }
+
+        shared("One piece of a split by your own separator. `rest` is the text after it.")
+        event @Piece {
+            tag: string
+            index: int
+            text: string
+            rest: string
+        }
+
+        shared("One `key=value` piece. Split at the FIRST separator, so a value may contain it.")
+        event @Pair {
+            tag: string
+            index: int
+            key: string
+            value: string
+        }
+
+        shared("A positional record `a|b|c`: f0…f7 in order; `rest` holds everything after the eighth.")
+        event @Fields {
+            tag: string
+            count: int
+            f0: string
+            f1: string
+            f2: string
+            f3: string
+            f4: string
+            f5: string
+            f6: string
+            f7: string
+            rest: string
+        }
+
+        shared("A piece that does not have the shape asked for — a pair with no separator.")
+        event @Unparsed {
+            tag: string
+            index: int
+            text: string
+        }
+
+        shared("A parse is over: everything it emitted has arrived. `count` is how many pieces.")
+        event @Parsed {
+            tag: string
+            count: int
+        }
+
+        // ---- the parsers ----------------------------------------------------------------------------
+
+        shared("Each line as @Line, followed by its words as @Word; then @Parsed.")
+        SF parseText(text: string, tag: string) {
+            var n = 0
+            target lines(text) as l {
+                let number = Index + 1
+                let ws = words(l)
+                emit @Line { tag: tag, index: Index, text: l, first: *Vein.StringParser.Parse.firstWord(l), rest: *Vein.StringParser.Parse.afterFirstWord(l), words: len(ws) }
+                n += 1
+                target ws as w {
+                    emit @Word { tag: tag, index: Index, line: number, text: w }
+                }
+            }
+            emit @Parsed { tag: tag, count: n }
+        }
+
+        shared("Each line as @Line — its first word and the rest already cut; then @Parsed.")
+        SF parseLines(text: string, tag: string) {
+            var n = 0
+            target lines(text) as l {
+                emit @Line { tag: tag, index: Index, text: l, first: *Vein.StringParser.Parse.firstWord(l), rest: *Vein.StringParser.Parse.afterFirstWord(l), words: len(words(l)) }
+                n += 1
+            }
+            emit @Parsed { tag: tag, count: n }
+        }
+
+        shared("Each word as @Word, numbered within its line; then @Parsed.")
+        SF parseWords(text: string, tag: string) {
+            var n = 0
+            target lines(text) as l {
+                let number = Index + 1
+                target words(l) as w {
+                    emit @Word { tag: tag, index: Index, line: number, text: w }
+                    n += 1
+                }
+            }
+            emit @Parsed { tag: tag, count: n }
+        }
+
+        shared("Each character as @Char — for short input; then @Parsed.")
+        SF parseChars(text: string, tag: string) {
+            var n = 0
+            target lines(text) as l {
+                let number = Index + 1
+                target chars(l) as c {
+                    emit @Char { tag: tag, index: Index, line: number, text: c }
+                    n += 1
+                }
+            }
+            emit @Parsed { tag: tag, count: n }
+        }
+
+        shared("Split by your own separator: each piece as @Piece, empties kept; then @Parsed.")
+        SF parseSplit(text: string, sep: string, tag: string) {
+            let pieces = split(text, sep)
+            target pieces as p {
+                emit @Piece { tag: tag, index: Index, text: p, rest: join(slice(pieces, Index + 1), sep) }
+            }
+            emit @Parsed { tag: tag, count: len(pieces) }
+        }
+
+        shared("`k=v;k=v`: each pair as @Pair, a piece with no `eq` as @Unparsed; blanks skipped; then @Parsed.")
+        SF parsePairs(text: string, sep: string, eq: string, tag: string) {
+            var n = 0
+            target split(text, sep) as piece {
+                let t = trim(piece)
+                let at = indexOf(t, eq)
+                if at > 0 {
+                    emit @Pair { tag: tag, index: Index, key: trim(substring(t, 0, at)), value: trim(substring(t, at + len(eq), len(t) - at - len(eq))) }
+                    n += 1
+                } else if not (t == "") {
+                    emit @Unparsed { tag: tag, index: Index, text: t }
+                }
+            }
+            emit @Parsed { tag: tag, count: n }
+        }
+
+        shared("A positional record `a|b|c` as one @Fields (f0…f7, then `rest`); then @Parsed.")
+        SF parseFields(text: string, sep: string, tag: string) {
+            let ps = split(text, sep)
+            emit @Fields {
+                tag: tag, count: len(ps),
+                f0: *Vein.StringParser.Parse.pieceAt(ps, 0), f1: *Vein.StringParser.Parse.pieceAt(ps, 1), f2: *Vein.StringParser.Parse.pieceAt(ps, 2), f3: *Vein.StringParser.Parse.pieceAt(ps, 3),
+                f4: *Vein.StringParser.Parse.pieceAt(ps, 4), f5: *Vein.StringParser.Parse.pieceAt(ps, 5), f6: *Vein.StringParser.Parse.pieceAt(ps, 6), f7: *Vein.StringParser.Parse.pieceAt(ps, 7),
+                rest: join(slice(ps, 8), sep)
+            }
+            emit @Parsed { tag: tag, count: 1 }
+        }
+
+        // ---- the cutting, written once ------------------------------------------------------------
+        //
+        // SHARED, AND CALLED QUALIFIED from the SFs above, because a shared SF runs inline in the
+        // CALLER (RULES 18a): a bare `firstWord(l)` would be looked for in the program that called
+        // `parseLines`, which has never heard of it. Useful on their own, too — they are the `head` and
+        // `tail` every chat bundle wrote for itself.
+
+        // The first word, by the same rule `words` uses — so `first` is always `words(l)[0]`.
+        shared("The first word of a line, or \"\" when it has none.")
+        fn firstWord(l: string) return string {
+            let ws = words(l)
+            if len(ws) == 0 { return "" }
+            return ws[0]
+        }
+
+        // The spacing between the later words is kept as typed: `say  two  spaces` keeps both.
+        shared("Everything after the first word, trimmed.")
+        fn afterFirstWord(l: string) return string {
+            let t = trim(l)
+            let first = *Vein.StringParser.Parse.firstWord(t)
+            return trim(substring(t, len(first), len(t) - len(first)))
+        }
+
+        shared("Piece `i` of a list, or \"\" past the end.")
+        fn pieceAt(ps: list<string>, i: int) return string {
+            if i < len(ps) { return ps[i] }
+            return ""
+        }
+    }
+}

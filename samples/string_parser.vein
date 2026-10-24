@@ -1,0 +1,172 @@
+// samples/string_parser.vein — EVERY part of Vein.StringParser, taking text apart by hearing it.
+//     veinc run samples/string_parser.vein
+//
+// A small chat server's input, none of it cut by hand — no `indexOf`, no `len(…) - …`, no `substring`
+// anywhere in this file. One section per parser, in this order:
+//
+//   1. parseLines   typed commands          → @Line   { first, rest, words }
+//   2. parsePairs   a roles table           → @Pair   { key, value }, @Unparsed for junk
+//   3. parseFields  wire records            → @Fields { count, f0 … f7, rest }
+//   4. parseWords   a room list             → @Word   { line, index }
+//   5. parseSplit   exits, by your own rule → @Piece  { text, rest }, empties kept
+//   6. parseChars   a move string           → @Char   one per character
+//   7. parseText    a message of the day    → @Line, then its @Word s
+//   8. the shared fns, called directly: firstWord, afterFirstWord, pieceAt
+//
+// Each parse is called with a TAG and every hear routes on it with `match`, exactly as file events do
+// (RULES 28c). A mark tag (`#Roles`) is checked — misspell it in a `when` and it does not compile. A
+// computed string tag (`"slot" + n`) works too: section 3 uses one, routed with `if`. Every parse ends
+// with @Parsed { tag, count }, after its last piece and before the next parse's first.
+//
+// Expected output:
+//
+//     > say hello   there   (3 words)
+//     > kick bob   (2 words)
+//     ? unknown command: dance
+//     commands: 3
+//     role ann = admin
+//     role bob = mod
+//     role url = a=b
+//     ! not a role: nonsense
+//     roles: 3
+//     bob kicked by ann for 10 min: spam, again
+//     slot1: 10 fields, the 8th is h, past it: i|j
+//     room 1.1: hall
+//     room 1.2: cave
+//     room 2.1: tower
+//     rooms: 3
+//     exit 1: north   then: ,east
+//     exit 2: (none)   then: east
+//     exit 3: east   then:
+//     move: up
+//     move: up
+//     move: right
+//     moves: 3
+//     motd line 1: welcome to the dungeon (4 words)
+//     motd word: welcome
+//     motd word: to
+//     motd word: the
+//     motd word: dungeon
+//     motd line 2: be kind (2 words)
+//     motd word: be
+//     motd word: kind
+//     verb [whisper] to [bob hi]
+//     third of a,b: [] — past the end is empty, never an error
+
+bundle StringParserDemo by you {
+
+    need "Vein.Console"
+    need "Vein.StringParser"
+
+    mark #Command
+    mark #Roles
+    mark #Wire
+    mark #Rooms
+    mark #Exits
+    mark #Moves
+    mark #Motd
+
+    shard Server {
+        run once {
+            do parseLines("say hello   there\r\nkick bob\ndance", #Command)                 // 1 — a Windows line end too
+            do parsePairs("ann=admin; bob = mod ;url=a=b;nonsense;;", ";", "=", #Roles)   // 2
+            do parseFields("K|bob|ann|10|spam, again", "|", #Wire)                        // 3
+            do parseFields("a|b|c|d|e|f|g|h|i|j", "|", "slot" + 1)                        // 3 — a computed tag
+            do parseWords("hall cave\ntower", #Rooms)                                     // 4
+            do parseSplit("north,,east", ",", #Exits)                                     // 5
+            do parseChars("wwd", #Moves)                                                  // 6
+            do parseText("welcome to the dungeon\nbe kind", #Motd)                        // 7
+
+            // Nothing printed HERE would come out first, not last: every parse above has only QUEUED its
+            // events (RULES 21), so a print written on this line lands ahead of all the prints their
+            // hears make later. Section 8 runs from the last parse's @Parsed instead — see the bottom.
+        }
+
+        // 1 and 7 — a line: the first word picks the verb, `rest` is its argument (Chat's head/tail),
+        // and `words` counts. `rest` keeps the spacing as typed.
+        hear @Line as l {
+            match l.tag {
+                when #Command {
+                    if l.first == "say" or l.first == "kick" {
+                        do print("> " + l.first + " " + l.rest + "   (" + l.words + " words)")
+                    } else {
+                        do print("? unknown command: " + l.first)
+                    }
+                }
+                when #Motd { do print("motd line " + (l.index + 1) + ": " + l.text + " (" + l.words + " words)") }
+            }
+        }
+
+        // 2 — split at the FIRST `=`, so a value may contain one; both sides trimmed; `;;` skipped.
+        hear @Pair as p {
+            match p.tag { when #Roles { do print("role " + p.key + " = " + p.value) } }
+        }
+
+        // 2 — malformed input is a message, not a silent drop.
+        hear @Unparsed as u {
+            match u.tag { when #Roles { do print("! not a role: " + u.text) } }
+        }
+
+        // 3 — a positional record: fields NAMED by position, the last keeping its commas. Past the
+        // eighth, everything goes to `rest` with its separators.
+        hear @Fields as f {
+            match f.tag {
+                when #Wire {
+                    if f.f0 == "K" { do print(f.f1 + " kicked by " + f.f2 + " for " + f.f3 + " min: " + f.f4) }
+                }
+            }
+            if f.tag == "slot1" {
+                do print(f.tag + ": " + f.count + " fields, the 8th is " + f.f7 + ", past it: " + f.rest)
+            }
+        }
+
+        // 4 and 7 — a word knows its line (1-based) and its place in that line (0-based).
+        hear @Word as w {
+            match w.tag {
+                when #Rooms { do print("room " + w.line + "." + (w.index + 1) + ": " + w.text) }
+                when #Motd { do print("motd word: " + w.text) }
+            }
+        }
+
+        // 5 — your own splitting rule. Empties are kept: the blank exit is still exit 2. `rest` is
+        // the text after the piece.
+        hear @Piece as p {
+            match p.tag {
+                when #Exits {
+                    var shown = p.text
+                    if shown == "" { shown = "(none)" }
+                    do print("exit " + (p.index + 1) + ": " + shown + "   then: " + p.rest)
+                }
+            }
+        }
+
+        // 6 — one character per event: for a short command, not a whole file.
+        hear @Char as c {
+            match c.tag {
+                when #Moves {
+                    if c.text == "w" { do print("move: up") }
+                    if c.text == "d" { do print("move: right") }
+                }
+            }
+        }
+
+        // Every parse ends here. Totals for the ones where a count means something.
+        hear @Parsed as d {
+            match d.tag {
+                when #Command { do print("commands: " + d.count) }
+                when #Roles { do print("roles: " + d.count) }
+                when #Rooms { do print("rooms: " + d.count) }
+                when #Moves { do print("moves: " + d.count) }
+                when #Motd { do helpers() }
+            }
+        }
+    }
+
+    // 8 — the cutting the parsers use, called directly. No event: an answer, now. Called from the
+    // LAST parse's @Parsed, because everything before it is done by then.
+    SF helpers() {
+        let typed = "whisper   bob hi"
+        do print("verb [" + firstWord(typed) + "] to [" + afterFirstWord(typed) + "]")
+        do print("third of a,b: [" + pieceAt(split("a,b", ","), 2) + "] — past the end is empty, never an error")
+    }
+}
