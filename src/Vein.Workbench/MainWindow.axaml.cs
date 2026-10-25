@@ -54,11 +54,6 @@ public partial class MainWindow : Window
     private SymbolIndex.Symbols _symbols = new(Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>());
     private CompletionWindow? _completion;
 
-    // Cached compile for hover type info (recompiled only when the text changed).
-    private string _hoverSrc = "\0";
-    private CompilationUnit? _hoverAst;
-    private MemberIndex.Model? _hoverModel;
-    private Signatures? _hoverScope;   // what an @Event, &Builder or $Shape takes, from any bundle
 
     // Resolved from the XAML name scope after load (robust regardless of generated fields).
     private TextEditor _editor = null!;
@@ -1597,8 +1592,6 @@ public partial class MainWindow : Window
     // declarations change far less often than the line being typed.
     private Signatures? _sigScope;
 
-    // The builders the `&` completion lists, refreshed each build.
-    private IReadOnlyList<BuilderEntry> _catalogBuilders = Array.Empty<BuilderEntry>();
 
     private async Task OpenAsync()
     {
@@ -2727,7 +2720,6 @@ public partial class MainWindow : Window
             try
             {
                 _sigScope = Signatures.For(result.Ast, ProjectDir);
-                _catalogBuilders = EventCatalog.Builders(result.Ast, ProjectDir);
             }
             catch { /* a half-written unit; keep the last good catalogs */ }
         }
@@ -3060,201 +3052,43 @@ public partial class MainWindow : Window
 
     // ---- go to definition / find references ------------------------------
 
-    /// F12. Resolve what the caret is on and jump to where it is declared.
+    /// F12. Resolve what the caret is on and jump to where it is declared; a `need` line opens its bundle.
+    /// The local declaration wins over a shared one of the same name (RULES 18). The answer is
+    /// EditorService's, which is what VS Code's F12 gets too.
     private void OnGoToDefinition(object? sender, RoutedEventArgs e)
     {
-        // A `need` line names a bundle, and a bundle is somewhere. Checked first because the caret is
-        // not on a symbol there, so the ordinary path would only tell you to go and find one.
-        if (NeedOnCaretLine() is { } need) { GoToNeeded(need); return; }
-
-        if (CaretSymbol() is not { } site)
+        var line = _editor.Document.GetLineByOffset(_editor.CaretOffset);
+        var found = EditorService.Definition(Snapshot(), line.LineNumber, _editor.CaretOffset - line.Offset + 1);
+        if (found is null)
         {
             SetStatus("Go to definition: put the caret on a $shape, #mark, @event, &builder, the shard after `mute`, or a `need` line.");
             return;
         }
-
-        // THE LOCAL INDEX FIRST, always. `need` only ever WIDENS what a bare name may mean (RULES 18),
-        // so a declaration in this bundle shadows a shared one of the same name — and jumping to the
-        // other bundle's would show you a declaration that is not the one this file is using.
-        var def = _definitions.Define(site.Name, site.Kind);
-        if (def is not null)
-        {
-            GoTo(def.Span.Line, def.Span.Col);
-            SetStatus($"{site.Kind} {site.Name} — declared in {def.Owner}, line {def.Span.Line}");
-            return;
-        }
-
-        if (CrossBundleDefinition(site) is { At: { } at } found)
-        {
-            if (GoTo(at.File, at.Line, at.Col))
-                SetStatus($"{site.Kind} {site.Name} — declared in {found.Origin}, {Path.GetFileName(at.File)} line {at.Line}");
-            else
-                SetStatus($"{site.Kind} {site.Name} is in {found.Origin}, but {Path.GetFileName(at.File)} cannot be opened.");
-            return;
-        }
-
-        // Not in this file and not shared by anything on the search path. Saying so beats jumping
-        // somewhere plausible and wrong — and the two halves are worth distinguishing, because a
-        // private declaration in another bundle is a `shared` problem and not a typo.
-        SetStatus($"{site.Kind} {site.Name} is not declared in this file, and no bundle here shares it.");
-    }
-
-    /// <summary>The `need` declared on the caret's line, or null when the caret is not on one.</summary>
-    /// <remarks>
-    /// Read from the AST rather than by matching the line against `need "…"`, because the editor
-    /// already has a parse and a second reader of the syntax is a second thing to keep correct. It
-    /// finds an aliased `need "kit.Movement" as M` for free, where a pattern would need widening.
-    /// </remarks>
-    private NeedDecl? NeedOnCaretLine()
-    {
-        int line = _editor.Document.GetLineByOffset(_editor.CaretOffset).LineNumber;
-
-        try
-        {
-            string name = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
-            var ast = _service.Compile(new CompileRequest(name, _editor.Text,
-                                                          ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
-            if (ast is null) return null;
-
-            return ast.Bundles
-                      .SelectMany(b => b.Members)
-                      .OfType<NeedDecl>()
-                      .FirstOrDefault(n => n.Span.Line == line);
-        }
-        catch (Exception) { return null; }
-    }
-
-    /// <summary>Open the bundle a `need` names.</summary>
-    /// <remarks>
-    /// `BundleIndex.Owners` is the same map that answers "does this bundle exist" for VS0340, so a
-    /// `need` the compiler accepts is one this can open, and a `need` it cannot open is one the build
-    /// is already complaining about. Two answers from one source rather than two that can disagree.
-    /// </remarks>
-    private void GoToNeeded(NeedDecl need)
-    {
-        string? file = null;
-        try { BundleIndex.For(ProjectDir).Owners.TryGetValue(need.Key, out file); }
-        catch (Exception) { /* no search path — reported as "not on the search path" below */ }
-
-        if (file is null)
-        {
-            SetStatus($"need \"{need.Key}\" — no bundle of that name is on the search path.");
-            return;
-        }
-
-        if (GoTo(file, 1, 1)) SetStatus($"need \"{need.Key}\" — {Path.GetFileName(file)}");
-        else SetStatus($"need \"{need.Key}\" is {file}, which cannot be opened.");
-    }
-
-    /// <summary>The shared declaration of this name in another bundle, or null when nothing shares it.</summary>
-    /// <remarks>
-    /// Goes through <c>ScopeIndex</c> rather than <c>BundleIndex</c> directly, so the jump obeys exactly
-    /// what the completion list offered: the same `shared` gate, the same `vein.discovery` filter, the
-    /// same local-wins rule. A name the editor would not suggest is not a name F12 should reach.
-    /// </remarks>
-    private ScopeIndex.ScopeEntry? CrossBundleDefinition(SymbolSite site)
-    {
-        if (site.Kind is not (SymbolKind.Shape or SymbolKind.Mark or SymbolKind.Event or SymbolKind.Builder))
-            return null;
-
-        try
-        {
-            string name = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
-            var ast = _service.Compile(new CompileRequest(name, _editor.Text,
-                                                          ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
-            if (ast is null) return null;
-
-            return ScopeIndex.For(ast, site.Kind, ProjectDir)
-                             .FirstOrDefault(en => !en.Local && en.Name == site.Name);
-        }
-        catch (Exception) { return null; }
+        if (found.Line == 0) { SetStatus(found.Text); return; }   // known, but declared nowhere reachable
+        if (found.File is null) { GoTo(found.Line, found.Col); SetStatus(found.Text); return; }
+        SetStatus(GoTo(found.File, found.Line, found.Col) ? found.Text : $"{found.Text} — but {Path.GetFileName(found.File)} cannot be opened.");
     }
 
     /// Shift+F12. List every site naming the same symbol in the Diagnostics pane, which is already the
-    /// list you double-click to jump from.
+    /// list you double-click to jump from. The bundle being edited comes from the buffer, every other file
+    /// from disk — which is why the status line says how many files were searched.
     private void OnFindReferences(object? sender, RoutedEventArgs e)
     {
-        if (CaretSymbol() is not { } site)
+        var line = _editor.Document.GetLineByOffset(_editor.CaretOffset);
+        int col = _editor.CaretOffset - line.Offset + 1;
+        var snapshot = Snapshot();
+        if (EditorService.SymbolAt(snapshot, line.LineNumber, col) is not { } site)
         {
             SetStatus("Find references: put the caret on a $shape, #mark, @event, &builder or the shard after `mute`.");
             return;
         }
-
-        var all = FindSites(site.Name, site.Kind);
+        var all = EditorService.References(snapshot, line.LineNumber, col).Select(h => new SiteHit(h.File, h.Line, h.Col, h.Text)).ToList();
         _references = all;
         _diagBox.ItemsSource = all.Select(h => h.Text).ToList();
-
         ShowBottomTab(TabDiagnostics);
         int files = all.Select(h => h.File ?? "").Distinct(StringComparer.OrdinalIgnoreCase).Count();
         SetStatus($"{site.Kind} {site.Name} — {all.Count} site(s) in {files} file(s). " +
                   "Double-click to jump; build to go back to diagnostics.");
-    }
-
-    /// <summary>Every site naming this symbol, across the project.</summary>
-    /// <remarks>
-    /// <para>
-    /// THE OPEN BUNDLE COMES FROM THE BUFFER, the rest from disk. `_definitions` was built from the
-    /// text you are editing — unsaved and all — and it already spans the whole bundle, because the
-    /// compiler service merges `publicators/` and `shards/` fragments before analysing. So that
-    /// bundle's main file is skipped in the disk walk rather than read twice and disagreed with.
-    /// </para>
-    /// <para>
-    /// Every other file is the LAST SAVED version. There is no way around that short of threading each
-    /// dirty tab through the parse, and a stale hit is better than a silently missing one — but it is
-    /// why the status line says how many files were searched rather than implying it searched a state
-    /// that exists nowhere.
-    /// </para>
-    /// <para>
-    /// Spans are resolved to real paths the same way the symbol index does it, because a span carries
-    /// only a file NAME (`BundleLoader.PathOf`) and a bundle's declarations come from several files.
-    /// </para>
-    /// </remarks>
-    private IReadOnlyList<SiteHit> FindSites(string name, SymbolKind kind)
-    {
-        var hits = new List<SiteHit>();
-        var seen = new HashSet<(string, int, int)>();
-
-        void Add(string? file, SymbolSite s)
-        {
-            if (!seen.Add((file ?? "", s.Span.Line, s.Span.Col))) return;
-            string where = file is null ? "" : Path.GetFileName(file) + "  ";
-            hits.Add(new SiteHit(file, s.Span.Line, s.Span.Col,
-                                 $"{where}{s.Span.Line}:{s.Span.Col}  {(s.IsDefinition ? "declared" : "used")} in {s.Owner}"));
-        }
-
-        string? currentMain = _currentPath is null ? null
-            : BundleLoader.IsFragment(_currentPath) ? BundleLoader.LocateMainFile(_currentPath) ?? _currentPath
-            : _currentPath;
-
-        var ownSources = currentMain is null ? Array.Empty<string>() : BundleLoader.SourceFiles(currentMain);
-        foreach (var s in _definitions.All(name, kind))
-        {
-            string? path = BundleLoader.PathOf(s.Span, ownSources);
-            Add(path is not null && string.Equals(path, _currentPath, StringComparison.OrdinalIgnoreCase)
-                    ? null            // the live buffer, not the copy on disk
-                    : path, s);
-        }
-
-        // A shard is named only from inside its own bundle (`mute`, D18), so another file's `shard Boot`
-        // is a different shard — listing it would answer a question nobody asked.
-        if (_rootFolder is null || kind is SymbolKind.Shard or SymbolKind.ShardView or SymbolKind.Bridge) return hits;
-
-        foreach (string file in ProjectVeinFiles(_rootFolder))
-        {
-            if (currentMain is not null && string.Equals(file, currentMain, StringComparison.OrdinalIgnoreCase))
-                continue;   // that bundle is already in, from the buffer
-
-            try
-            {
-                var unit = BundleLoader.Load(file, new DiagnosticBag());
-                var sources = BundleLoader.SourceFiles(file);
-                foreach (var s in DefinitionIndex.Analyze(unit).All(name, kind))
-                    Add(BundleLoader.PathOf(s.Span, sources) ?? file, s);
-            }
-            catch (Exception) { /* a malformed file is skipped, not fatal to the search */ }
-        }
-
-        return hits;
     }
 
     // ---- find in files ---------------------------------------------------
@@ -3311,38 +3145,12 @@ public partial class MainWindow : Window
     /// <remarks>
     /// The set for a TEXT search, which has no opinion about what parses: a fragment and a manifest are
     /// files somebody edits, and a search that quietly skipped them would report a name as unused when
-    /// it is used in the file next door. Contrast <see cref="ProjectVeinFiles"/>.
+    /// it is used in the file next door. Contrast <c>EditorService.ProjectVeinFiles</c>.
     /// </remarks>
     private static IEnumerable<string> AllVeinFiles(string root)
     {
         try { return Directory.EnumerateFiles(root, "*.vein", SearchOption.AllDirectories); }
         catch (Exception) { return Array.Empty<string>(); }
-    }
-
-    /// <summary>Every `.vein` in the project that can be parsed on its own.</summary>
-    /// <remarks>
-    /// Fragments are excluded because they have no `bundle` header — parsing one standalone is VS0101
-    /// and zero bundles. They are reached through their main file, which merges them, and their sites
-    /// come back carrying their own span. This is the same rule `BundleIndex` walks the search path by.
-    ///
-    /// For a text search the exclusions are wrong, and <see cref="AllVeinFiles"/> is the set to use.
-    /// </remarks>
-    private static IEnumerable<string> ProjectVeinFiles(string root)
-    {
-        foreach (string f in AllVeinFiles(root))
-        {
-            if (BundleLoader.IsFragment(f)) continue;
-            string leaf = Path.GetFileName(f);
-            if (leaf.EndsWith(".app.vein", StringComparison.OrdinalIgnoreCase)) continue;   // a manifest
-            yield return f;
-        }
-    }
-
-    /// The symbol under the caret, using the line/column the index records.
-    private SymbolSite? CaretSymbol()
-    {
-        var line = _editor.Document.GetLineByOffset(_editor.CaretOffset);
-        return _definitions.At(line.LineNumber, _editor.CaretOffset - line.Offset + 1);
     }
 
     private static string Label(IrNode n)
@@ -3557,27 +3365,11 @@ public partial class MainWindow : Window
             _completion = null;
         }
         if (e.Text == "?") { TryExpandOnQuestion(); return; }
-        if (e.Text == "~") { ShowCollectionCompletion(); return; }   // `h.Hero.~` — which collection? (D24)
-        if (e.Text == "<" && CollectionIndex.KindAt(_editor.Text, _editor.CaretOffset) is { } kindAt) { ShowKindCompletion(kindAt); return; }
-        if (e.Text == ".") { ShowMemberCompletion(); return; }
-        if (e.Text == "*") { ShowStarCompletion(); return; }   // qualified stdlib refs: *Vein.Console.Io.@Print
-        if (e.Text == "&") { ShowBuilderCompletion(); return; }  // &Elements — the Vein.Web builders and any local one
-        if (e.Text == " " && JustTypedDo()) { ShowSfCompletion(); return; }   // `do ` — which SF? (D15)
-        if (e.Text == " " && (JustTyped("emit") || JustTyped("hear"))) { ShowEventCompletionAfterKeyword(); return; }
-        if (e.Text == " " && (JustTyped("mute") || JustTyped("unmute"))) { ShowShardCompletion(); return; }   // D18
-        // `!Shard` is taken only by an `audience` list (D19), so the list opens only on such a line —
-        // a `!` anywhere else is a VS0006 typo that a popup would only dress up as valid.
-        if (e.Text == "!" && _editor.Document.GetText(_editor.Document.GetLineByOffset(_editor.CaretOffset)).Contains("audience"))
-        { ShowShardCompletion(); return; }
-        if (e.Text is not ("$" or "#" or "@")) return;
-
-        (SymbolKind kind, string label) = e.Text switch
-        {
-            "$" => (SymbolKind.Shape, "shape"),
-            "#" => (SymbolKind.Mark, "mark"),
-            _ => (SymbolKind.Event, "event"),
-        };
-        ShowScopeCompletion(kind, label);
+        // Everything else that opens a list — `$ # @ & * . ~`, `~<`, `do `/`emit `/`hear `/`mute `, an
+        // audience `!` — is decided by EditorService, the same answer `veinc lsp` gives VS Code. Asked
+        // cheaply first, so an ordinary keystroke compiles nothing.
+        if (e.Text is not { Length: 1 } typed || !EditorService.MayComplete(_editor.Text, _editor.CaretOffset, typed[0])) return;
+        ShowEditorCompletion(EditorService.Complete(Snapshot(), _editor.CaretOffset, typed[0]));
     }
 
     /// <summary>Ctrl+Space — reopen the list for the sigil already typed.</summary>
@@ -3593,96 +3385,28 @@ public partial class MainWindow : Window
     private void OnInvokeCompletion()
     {
         if (_completion is not null) return;
-
-        var doc = _editor.Document;
-        int at = _editor.CaretOffset;
-
-        int start = at;
-        while (start > 0 && (char.IsLetterOrDigit(doc.GetCharAt(start - 1)) || doc.GetCharAt(start - 1) == '_')) start--;
-        // No sigil behind the word: a plain word is a function name being typed.
-        if (start == 0) { ShowFunctionCompletion(start); return; }
-
-        switch (doc.GetCharAt(start - 1))
-        {
-            case '$': ShowScopeCompletion(SymbolKind.Shape, "shape"); break;
-            case '#': ShowScopeCompletion(SymbolKind.Mark, "mark"); break;
-            case '@': ShowScopeCompletion(SymbolKind.Event, "event"); break;
-            case '&': ShowBuilderCompletion(); break;
-            case '*': ShowStarCompletion(); break;
-            case '.': ShowMemberCompletion(); break;
-            case '~': ShowCollectionCompletion(); break;
-            case '<' when CollectionIndex.KindAt(doc.Text, at) is { } kindAt: ShowKindCompletion(kindAt); break;
-            default: ShowFunctionCompletion(start); break;
-        }
+        ShowEditorCompletion(EditorService.Complete(Snapshot(), _editor.CaretOffset, null));
     }
 
-    /// <summary>
-    /// The list behind `$`, `#`, `@` and `&amp;` — everything of that kind reachable from here, each row
-    /// naming the bundle it came from.
-    /// </summary>
+    /// <summary>A list from <see cref="EditorService.Complete"/>, in the completion window.</summary>
     /// <remarks>
-    /// <para>
-    /// <b>IT USED TO BE THE OPEN FILE AND NOTHING ELSE.</b> `SymbolIndex.Collect` walks one
-    /// `CompilationUnit`, so a dev who needed ten bundles was offered the shapes and marks of none of
-    /// them — while `&amp;` had been cross-bundle all along through `EventCatalog`. The sigils disagreed
-    /// about what "in scope" meant, and `$`/`#` were the poor relations.
-    /// </para>
-    /// <para>
-    /// <b>WHAT IS INSERTED DEPENDS ON WHERE THE CARET IS.</b> `target`, `mark`, `attach` and a `when`
-    /// arm take a BARE name — the qualified form parses there and resolves to nothing (RULES 17b), so
-    /// inserting it would write a query that matches no identity and reports nothing. The ROW still
-    /// shows the full origin, because telling two bundles' `$Health` apart is the point.
-    /// </para>
+    /// The lists themselves — what `$`, `.`, `.~`, `do ` offer, and what each row types — are EditorService's,
+    /// so VS Code gets the same rows. A pick from a bundle this file does not `need`, at a use site that takes
+    /// only a bare name (RULES 17b), also writes the `need` line: a bare name without it resolves to nothing.
     /// </remarks>
-    private void ShowScopeCompletion(SymbolKind kind, string label)
+    private void ShowEditorCompletion(EditorCompletionList? list)
     {
-        // The project dir has to be AMBIENT as well as passed: `Sig.Lookup` and friends read
-        // `BundleSearch.Current`, and without it a completion silently resolves against the
-        // Workbench's own bin/ — the trap `Build()` documents at its own scope line.
-        using var _ = BundleSearch.Scope(ProjectDir);
-
-        // Recompile lazily so completion reflects the current text, not just the last Build.
-        string name = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
-        var ast = _service.Compile(new CompileRequest(name, _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
-        if (ast is null) return;
-
-        var site = SourceContext.At(_editor.Text, _editor.CaretOffset);
-        var entries = ScopeIndex.For(ast, kind, ProjectDir);
-        if (entries.Count == 0) return;
-
-        // A shape or mark at a use site MUST be bare. Everything else takes the qualified path, which
-        // is the form that says which of ten bundles a name came from.
-        bool bareOnly = site == SourceContext.SigilSite.UseSite
-                        && kind is SymbolKind.Shape or SymbolKind.Mark;
-
-        var items = entries
-            .Select(entry => (
-                Label: entry.Label,
-                // The sigil is already typed — it opened this window — so the insertion replaces the
-                // word after it, never the sigil itself.
-                Insert: bareOnly || entry.Local
-                    ? entry.Name
-                    : entry.Qualified,          // the full `*path`; it replaces the typed sigil (SourceEdits.CompletionStart)
-                // The tooltip carries all three — kind, fields, doc. The doc goes separately into the
-                // ROW as well, because a tooltip is only read by someone who already guessed right.
-                Describe: (string?)entry.Describe(label),
-                Doc: entry.Doc))
-            .ToList();
-
-        ShowCompletion(items, label);
-        _pendingNeed = bareOnly ? entries.Where(en => !en.Needed).ToList() : null;
+        if (list is null || list.Items.Count == 0) return;
+        var sfs = list.Items.Where(i => i.NeedsDo).Select(i => i.Insert).ToHashSet(StringComparer.Ordinal);
+        int? from = list.ReplaceFrom < _editor.CaretOffset ? list.ReplaceFrom : null;
+        ShowCompletion(list.Items.Select(i => (i.Label, i.Insert, i.Describe, i.Doc)).ToList(), list.Kind, sfs, from);
+        var needs = list.Items.Where(i => i.AddNeed is not null).GroupBy(i => i.Label, StringComparer.Ordinal)
+                        .ToDictionary(g => g.Key, g => g.First().AddNeed!, StringComparer.Ordinal);
+        _pickNeeds = needs.Count == 0 ? null : needs;
     }
 
-    /// <summary>
-    /// Entries from the open list whose bundle this file does not yet `need`, so picking one can add
-    /// the line. Null when the list cannot produce that situation.
-    /// </summary>
-    /// <remarks>
-    /// A BARE NAME WITHOUT ITS `need` RESOLVES TO NOTHING. At a use site the qualified form is not
-    /// available as a fallback (RULES 17b), so the choice is between writing the import and handing
-    /// back a line that does not work. Writing it is the only one that leaves the file compiling.
-    /// </remarks>
-    private IReadOnlyList<ScopeIndex.ScopeEntry>? _pendingNeed;
+    /// Row label → the bundle whose `need` a pick of that row must add. Null when the open list has none.
+    private Dictionary<string, string>? _pickNeeds;
 
     // ---- hover: show a field's / symbol's type --------------------------
 
@@ -3719,176 +3443,16 @@ public partial class MainWindow : Window
         return null;
     }
 
-    private void EnsureHoverModel()
-    {
-        var src = _editor.Text;
-        if (src == _hoverSrc) return;
-        _hoverSrc = src;
-        _hoverAst = _service.Compile(new CompileRequest("untitled.vein", src, ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
-        _hoverModel = _hoverAst is null ? null : MemberIndex.Build(_hoverAst);
-        _hoverScope = _hoverAst is null ? null : Signatures.For(_hoverAst, ProjectDir);
-    }
-
-    /// `loom<MeshList>` / `format X from MeshList`: the format named, as code — this file's own, a needed
-    /// bundle's (the index), or a built-in's one-line description. Null anywhere else.
-    private string? FormatHover(string text, int start, string word)
-    {
-        string before = text[..start].TrimEnd();
-        int dot = before.Length;
-        while (dot > 0 && (char.IsLetterOrDigit(before[dot - 1]) || before[dot - 1] is '.' or '*' or '_')) dot--;   // `*Vein.Weaving.`
-        string head = before[..dot].TrimEnd();
-        if (!head.EndsWith("loom<", StringComparison.Ordinal) && !head.EndsWith(" from", StringComparison.Ordinal)) return null;
-        if (head.EndsWith(" from", StringComparison.Ordinal) && !System.Text.RegularExpressions.Regex.IsMatch(head, @"format\s+\w+\s+from$")) return null;
-
-        if (FormatCatalog.DescribeBuiltIn(word) is { } builtIn) return builtIn;
-        IEnumerable<Decl> All(IEnumerable<Decl> ms) => ms.SelectMany(m => m is PublicatorDecl p ? All(p.Members) : new[] { m });
-        if (_hoverAst!.Bundles.SelectMany(b => All(b.Members)).OfType<FormatDecl>().FirstOrDefault(f => f.Name == word) is { } local)
-            return FormatCatalog.Code(local).TrimEnd();
-        try
-        {
-            if (BundleIndex.For(ProjectDir).Formats.FirstOrDefault(kv => kv.Value.Name == word) is { Value: { } shared } hit)
-                return $"{FormatCatalog.Code(shared).TrimEnd()}\n— from {hit.Key[..hit.Key.LastIndexOf('.')]}";
-        }
-        catch { }
-        return null;
-    }
-
-    private string? ResolveHover(int offset)
+    /// The editor's text compiled once per version, with everything completion, hover and F12 ask of it.
+    private EditorSnapshot Snapshot()
     {
         string text = _editor.Text;
-        var (word, start) = WordAt(text, offset);
-        if (word is null) return null;
-        EnsureHoverModel();
-        if (_hoverModel is null || _hoverAst is null) return null;
-
-        // D23: the name in `loom<MeshList>`, or after `from` in a format — show the format itself, as code.
-        if (FormatHover(text, start, word) is { } format) return format;
-
-        // D24: `.~slots` — the collection as declared, since the `~` alone does not say which kind.
-        if (CollectionIndex.At(text, offset) is { } read && _hoverModel.Collections.Spec(read.Shape, read.Field) is { } spec)
-            return $"{CollectionIndex.Describe(read.Field, spec)}\n— on ${read.Shape}";
-
-        // 0) Anything about a signature — a field in an `emit`/`attach` body, a slot in a `bring`, or an
-        //    @Event / &Builder / $Shape itself — from ANY bundle, through the compiler's own lookup. What is
-        //    below covers the rest: shape declarations, struct literals, marks and functions.
-        if (_hoverScope?.DescribeAt(text, offset) is { } sig) return sig;
-
-        // 1) A field name inside an emit / struct / shape / event body → its declared type.
-        var (kind, name) = EnclosingBraceHead(text, start);
-        if (name is not null)
-        {
-            if (kind == "event" && _hoverModel.Events.TryGetValue(name, out var ef))
-            {
-                var f = ef.FirstOrDefault(x => x.Name == word);
-                if (f.Name is not null) return $"{name}.{word} : {f.Type}";
-            }
-            if (kind == "shape" && _hoverModel.Shapes.TryGetValue(name, out var sf))
-            {
-                var f = sf.FirstOrDefault(x => x.Name == word);
-                if (f.Name is not null) return $"{name}.{word} : {f.Type}";
-            }
-        }
-
-        // 2) The word itself is a declared symbol (builders and their slots were answered in step 0).
-        //
-        // THE SIGIL DECIDES, when there is one. `WordAt` returns the identifier without it, and a shape
-        // and a mark MAY SHARE A NAME (RULES 14e) — so guessing by lookup order made `#MenuItem` report
-        // "shape $MenuItem", confidently and wrongly, for every program that used the pattern the
-        // scaffold itself generates.
-        char sigil = start > 0 ? text[start - 1] : '\0';
-
-        switch (sigil)
-        {
-            case '$': return _hoverModel.Shapes.ContainsKey(word) ? Shape(word) : $"shape ${word}";
-            case '@': return _hoverModel.Events.ContainsKey(word) ? Event(word) : $"event @{word}";
-            case '#': return Mark(word);
-            case '&': return $"builder &{word}";   // a builder step 0 could not resolve
-        }
-
-        // No sigil: a bare name in an expression. Order is a fallback, not a guess about kind — a
-        // builder and a function are named without one, and a shape or event mentioned bare is rare.
-        if (_hoverModel.Shapes.ContainsKey(word)) return Shape(word);
-        if (_hoverModel.Events.ContainsKey(word)) return Event(word);
-        if (FuncIndex.Find(_hoverAst, word, ProjectDir) is { Fn: not null } hit)
-            return FuncIndex.Signature(hit.Fn, hit.Owner);
-        if (IsMark(word)) return Mark(word);
-        // `mute Physics` — the only place a bare shard name is written outside its declaration.
-        if (_definitions.Definitions.FirstOrDefault(d => d.Name == word
-                && d.Kind is SymbolKind.Shard or SymbolKind.ShardView or SymbolKind.Bridge) is { } sh)
-            return $"{ShardKindWord(sh.Kind)} {word}";
-        return null;
-
-        string Shape(string n) =>
-            $"shape ${n} {{ " +
-            string.Join(", ", _hoverModel!.Shapes[n].Select(f => $"{f.Name}: {f.Type}")) + " }";
-
-        string Event(string n) =>
-            $"event @{n} {{ " +
-            string.Join(", ", _hoverModel!.Events[n].Select(f => $"{f.Name}: {f.Type}")) + " }";
-
-        // A mark carries no fields, so the useful extra fact is whether a shape shares its name —
-        // which is legal, common, and the source of the confusion this hover used to cause.
-        string Mark(string n) =>
-            IsMark(n)
-                ? _hoverModel!.Shapes.ContainsKey(n)
-                    ? $"mark #{n}   (a shape ${n} shares this name)"
-                    : $"mark #{n}"
-                : $"mark #{n}   (not declared in this file)";
+        if (_snapshot is { } s && s.Text == text && s.Path == _currentPath) return s;
+        return _snapshot = EditorService.Analyze(_service, text, _currentPath, ProjectDir, _rootFolder);
     }
+    private EditorSnapshot? _snapshot;
 
-    /// Is `name` declared as a mark anywhere in the compiled unit? Marks have no members, so
-    /// `MemberIndex` does not carry them and the AST is the only place to ask.
-    private bool IsMark(string name) =>
-        _hoverAst is not null &&
-        _hoverAst.Bundles.SelectMany(b => Declared(b.Members)).Any(m => m.Name == name);
-
-    private static IEnumerable<MarkDecl> Declared(IEnumerable<Decl> members)
-    {
-        foreach (var member in members)
-        {
-            if (member is MarkDecl mark) yield return mark;
-            // Marks declared inside a `publicator { … }` are the shared ones, and the ones most likely
-            // to be hovered from another file.
-            else if (member is PublicatorDecl pub)
-                foreach (var nested in Declared(pub.Members)) yield return nested;
-        }
-    }
-
-
-    private static (string?, int) WordAt(string text, int offset)
-    {
-        if (offset < 0 || offset > text.Length) return (null, 0);
-        int i = offset;
-        if (i >= text.Length || !IsIdent(text[i])) { if (i > 0 && IsIdent(text[i - 1])) i--; else return (null, 0); }
-        int s = i; while (s > 0 && IsIdent(text[s - 1])) s--;
-        int e = i; while (e < text.Length && IsIdent(text[e])) e++;
-        return (text[s..e], s);
-    }
-
-    /// The kind/name of the type whose `{ … }` body encloses `pos` (`emit @E {`, `Id {`, `shape $H {`).
-    private (string, string?) EnclosingBraceHead(string text, int pos)
-    {
-        int depth = 0, i = pos - 1;
-        for (; i >= 0; i--)
-        {
-            if (text[i] == '}') depth++;
-            else if (text[i] == '{') { if (depth == 0) break; depth--; }
-        }
-        if (i < 0) return ("", null);
-        int j = i - 1; while (j >= 0 && char.IsWhiteSpace(text[j])) j--;
-        int end = j + 1;
-        while (j >= 0 && (IsIdent(text[j]) || text[j] is '$' or '@' or '#')) j--;
-        string tok = text[(j + 1)..end];
-        if (tok.Length == 0) return ("", null);
-        if (tok[0] == '@') return ("event", tok[1..]);
-        if (tok[0] == '$') return ("shape", tok[1..]);
-        if (_hoverModel!.Events.ContainsKey(tok)) return ("event", tok);
-        if (_hoverModel!.Shapes.ContainsKey(tok)) return ("shape", tok);
-        return ("", null);
-    }
-
-
-    private static bool IsIdent(char c) => char.IsLetterOrDigit(c) || c == '_';
+    private string? ResolveHover(int offset) => EditorService.Hover(Snapshot(), offset);
 
     /// `?` is the "show me the signature" key: right after `emit @E`, `start @E`, `bring X` or
     /// `attach $S to e` it writes every field with its type and origin; typed again right after the
@@ -3925,202 +3489,6 @@ public partial class MainWindow : Window
         }
     }
 
-
-    // Typing `*` offers the stdlib's cross-bundle symbols as full qualified paths (e.g.
-    // `Vein.Console.Io.@Print`); selecting one completes `*Vein.Console.Io.@Print`.
-    /// `&` completes the builders in scope — the `Vein.Web.Elements` set for a site, plus any declared
-    /// locally. The parameter names come along, because a builder's list is flattened from someone
-    /// else's shape and is not visible in this file at all.
-    /// <summary>
-    /// `&amp;Builder` — the local builders with their parameter lists, then every shared builder on the
-    /// search path with the bundle it came from.
-    /// </summary>
-    /// <remarks>
-    /// The local half keeps its signature (`Coin   x: float, y: float`), which is what makes `&amp;` worth
-    /// typing at all. The cross-bundle half adds the ones `_catalogBuilders` never had — it is built
-    /// from this unit plus its `need`s, so a builder in a bundle you have not needed yet was invisible,
-    /// which is exactly the discovery problem `$` and `#` had.
-    /// </remarks>
-    private void ShowBuilderCompletion()
-    {
-        var local = _catalogBuilders
-            .Select(b => (
-                Label: b.Fields.Count == 0
-                    ? b.Name
-                    : b.Name + "   " + string.Join(", ", b.Fields.Select(f => f.Name + ": " + f.Type)),
-                Insert: b.Name))
-            .OrderBy(x => x.Insert, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        var known = local.Select(x => x.Insert).ToHashSet(StringComparer.Ordinal);
-
-        using var _ = BundleSearch.Scope(ProjectDir);
-        string name = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
-        var ast = _service.Compile(new CompileRequest(name, _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
-
-        if (ast is not null)
-            foreach (var entry in ScopeIndex.For(ast, SymbolKind.Builder, ProjectDir))
-                if (known.Add(entry.Name))
-                    local.Add((entry.Label, entry.Qualified));   // `bring *A.B.P.&Name(…)`, replacing a typed `&`
-
-        ShowCompletion(local, "builder");
-    }
-
-    private void ShowStarCompletion()
-    {
-        string? dir = _currentPath is not null ? Path.GetDirectoryName(_currentPath) : _rootFolder;
-        // Discovery policy (vein.discovery) filters what `*` enumerates; `shared` still governs consumption.
-        var policy = DiscoveryPolicy.Load(dir);
-        var symbols = policy.Filter(StdlibIndex.Symbols(dir)).ToList();
-        string PathOf(QualifiedSymbol s) => string.Join(".", s.PathSegments) + "." + s.Sigil + s.Name;
-        var names = symbols.Select(PathOf)
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(x => x, StringComparer.Ordinal)
-            .Select(n => (n, n, (string?)null, (string?)null))
-            .ToList();
-
-        // An SF picked here gets its `do` too (D13) — you should not have to know the kind to spell the call.
-        var sfs = symbols.Where(s => s.Kind == SymbolKind.SF).Select(PathOf).ToHashSet(StringComparer.Ordinal);
-        ShowCompletion(names, "stdlib", sfs);
-    }
-
-    /// Typing `do ` at the start of a statement lists every SF that can be called there — this file's own,
-    /// then each bundle's by its qualified path, with its `shared("…")` line. `do` is the one word that
-    /// says "I want to change something", so it is the natural place to ask "with what?" — and it is how
-    /// an SF in someone else's bundle gets found without knowing it exists.
-    private void ShowSfCompletion()
-    {
-        var items = new List<(string Label, string Insert, string? Describe, string? Doc)>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach (var d in _definitions.Definitions.Where(d => d.Kind == SymbolKind.SF).OrderBy(d => d.Name, StringComparer.Ordinal))
-            if (seen.Add(d.Name)) items.Add((d.Name + "   SF, this file", d.Name, null, null));
-
-        string? dir = _currentPath is not null ? Path.GetDirectoryName(_currentPath) : _rootFolder;
-        try
-        {
-            foreach (var s in DiscoveryPolicy.Load(dir).Filter(StdlibIndex.Symbols(dir))
-                         .Where(s => s.Kind == SymbolKind.SF)
-                         .OrderBy(s => s.QualifiedName, StringComparer.Ordinal))
-                if (seen.Add(s.QualifiedName)) items.Add((s.QualifiedName, s.QualifiedName, null, s.Doc));
-        }
-        catch { /* no search path: this file's SFs are still worth offering */ }
-
-        ShowCompletion(items, "SF");
-    }
-
-    /// Typing `mute ` or `unmute ` lists this bundle's shards, ShardViews and bridges — fragments
-    /// included, because the compile that built `_definitions` merged them. Only this bundle's: `mute`
-    /// cannot reach another bundle's shard (D18), so offering one would offer a VS0350.
-    private void ShowShardCompletion()
-    {
-        var items = _definitions.Definitions
-            .Where(d => d.Kind is SymbolKind.Shard or SymbolKind.ShardView or SymbolKind.Bridge)
-            .OrderBy(d => d.Name, StringComparer.Ordinal)
-            .Select(d => (d.Name + "   " + ShardKindWord(d.Kind), d.Name))
-            .Distinct()
-            .ToList();
-        ShowCompletion(items, "shard");
-    }
-
-    private static string ShardKindWord(SymbolKind k) =>
-        k switch { SymbolKind.ShardView => "ShardView", SymbolKind.Bridge => "bridge", _ => "shard" };
-
-    /// True when the caret sits just after `do ` that starts a statement.
-    private bool JustTypedDo() => JustTyped("do");
-
-    /// True when the caret sits just after `<word> ` at the start of a statement — first on its line,
-    /// or after a `{` — so `emit ` and `hear ` open the event list and `demit ` does not.
-    private bool JustTyped(string word)
-    {
-        int caret = _editor.CaretOffset;
-        var line = _editor.Document.GetLineByOffset(caret);
-        string before = _editor.Document.GetText(line.Offset, caret - line.Offset);
-        if (!before.EndsWith(word + " ", StringComparison.Ordinal)) return false;
-        string rest = before[..^(word.Length + 1)].TrimEnd();
-        return rest.Length == 0 || rest.EndsWith('{');
-    }
-
-    /// `emit ` or `hear ` — the events you can use there, this file's own first, then every shared one
-    /// by its qualified path, each with its fields and its `shared("…")` line. The `@` list already
-    /// did this once you typed `@`; this is the same list one keystroke sooner, at the moment you know
-    /// you want an event and do not yet know which, or that the one you want is in someone else's bundle.
-    private void ShowEventCompletionAfterKeyword()
-    {
-        using var _ = BundleSearch.Scope(ProjectDir);
-        string name = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
-        var ast = _service.Compile(new CompileRequest(name, _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
-        if (ast is null) return;
-
-        var items = ScopeIndex.For(ast, SymbolKind.Event, ProjectDir)
-            .Select(e => (e.Label, e.Local || e.Needed ? e.SigilName : e.Qualified, (string?)e.Describe("event"), e.Doc))
-            .ToList();
-        ShowCompletion(items, "event");
-    }
-
-    /// Ctrl+Space on a plain word: the functions you can call — fns and SFs, this file's first, then
-    /// every shared one by its qualified path. An SF row writes its `do` when picked (D15), so the list is
-    /// also how you find out which kind a name is: the row says `SF` or `fn` before you choose it.
-    private void ShowFunctionCompletion(int wordStart)
-    {
-        using var _ = BundleSearch.Scope(ProjectDir);
-        string name = _currentPath is null ? "untitled.vein" : Path.GetFileName(_currentPath);
-        var ast = _service.Compile(new CompileRequest(name, _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
-        if (ast is null) return;
-
-        var items = new List<(string Label, string Insert, string? Describe, string? Doc)>();
-        var sfs = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var (kind, tag) in new[] { (SymbolKind.Fn, "fn"), (SymbolKind.SF, "SF") })
-            foreach (var e in ScopeIndex.For(ast, kind, ProjectDir))
-            {
-                // A bare name reaches this bundle's own functions and a `need`ed bundle's; anything else
-                // is written by its path, which also works without a `need`.
-                string insert = e.Local || e.Needed ? e.Name : e.Qualified;
-                items.Add((tag + "  " + e.Label, insert, tag + " " + e.Name + (e.Fields ?? "") +
-                           (e.Origin is null ? "" : "   " + e.Origin) + (e.Doc is { Length: > 0 } ? "\n" + e.Doc : ""), e.Doc));
-                if (kind == SymbolKind.SF) sfs.Add(insert);
-            }
-
-        // Local first (ScopeIndex's order within a kind), fns before SFs within the same tier.
-        ShowCompletion(items, "function", sfs, wordStart);
-    }
-
-    private void ShowMemberCompletion()
-    {
-        var ast = _service.Compile(new CompileRequest("untitled.vein", _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast;
-        if (ast is null) return;
-        var model = MemberIndex.Build(ast);
-
-        // `h.Hero.~slots.` — the words THIS kind of collection has: `put` on a map, `add` on the rest (D24).
-        if (CollectionIndex.At(_editor.Text, _editor.CaretOffset) is { } coll && model.Collections.Spec(coll.Shape, coll.Field) is { } spec)
-        {
-            ShowCompletion(CollectionIndex.Words(spec).Select(w => (w.Label, w.Insert, (string?)CollectionIndex.Describe(coll.Field, spec), (string?)null)).ToList(), "collection");
-            return;
-        }
-
-        int dot = _editor.CaretOffset - 1;                       // the '.' just typed
-        var tokens = ExtractChain(_editor.Text, dot).Split('.', StringSplitOptions.RemoveEmptyEntries);
-        if (tokens.Length == 0) return;
-
-        ShowCompletion(model.Items(tokens), "member");
-    }
-
-    /// `h.Hero.~` — the shape's collections only, each with its kind (D24).
-    private void ShowCollectionCompletion()
-    {
-        if (CollectionIndex.Naming(_editor.Text, _editor.CaretOffset) is not { } naming) return;
-        var ast = _service.Compile(new CompileRequest("untitled.vein", _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast ?? _lastAst;
-        var items = CollectionIndex.Build(ast).Of(naming.Shape)
-            .Select(c => ($"{c.Field}   ‹{CollectionIndex.Tag(c.Spec)}› {CollectionIndex.Types(c.Spec)}", c.Field,
-                          (string?)CollectionIndex.Describe(c.Field, c.Spec), (string?)null))
-            .ToList();
-        ShowCompletion(items, "collection", startOffset: naming.NameStart);
-    }
-
-    /// `~<` in a declaration — the four kinds, each saying what it keeps (D24).
-    private void ShowKindCompletion(int start) =>
-        ShowCompletion(CollectionIndex.Kinds.Select(k => (k.Label, k.Insert, (string?)k.Describe, (string?)k.Describe)).ToList(),
-                       "collection kind", startOffset: start);
 
     /// The kinds the last good build declared, for the inline `‹map›` hints. Redrawn only when they change.
     private void UpdateCollectionHints(CompilationUnit ast)
@@ -4166,7 +3534,7 @@ public partial class MainWindow : Window
         // matches no identity. Done after the insertion, so the offset the edit computed is still good.
         _completion.CompletionList.InsertionRequested += (_, _) => AddNeedForPick();
 
-        _completion.Closed += (_, _) => { _completion = null; _pendingNeed = null; };
+        _completion.Closed += (_, _) => { _completion = null; _pickNeeds = null; };
         _completion.Show();
         if (startOffset is { } from && from < _editor.CaretOffset)
             _completion.CompletionList.SelectItem(_editor.Document.GetText(from, _editor.CaretOffset - from));
@@ -4190,35 +3558,14 @@ public partial class MainWindow : Window
     /// <summary>Write the `need` for whichever entry the completion list just inserted, if it wants one.</summary>
     private void AddNeedForPick()
     {
-        if (_pendingNeed is not { Count: > 0 } candidates) return;
+        if (_pickNeeds is null) return;
         if (_completion?.CompletionList.SelectedItem is not VeinCompletion picked) return;
-
-        // Matched on the LABEL, which is what the row showed and what `VeinCompletion` kept — the
-        // inserted text is the bare name and two bundles may share one.
-        var entry = candidates.FirstOrDefault(e => e.Label == picked.Text);
-        if (entry?.Origin is not { } origin) return;
-
-        // `Origin` is `Author.Bundle[.Publicator]`; a `need` names the bundle, so take the first two.
-        var parts = origin.Split('.');
-        if (parts.Length < 2) return;
-
-        if (NeedEdit.For(_editor.Text, parts[0] + "." + parts[1]) is not var (offset, text)) return;
-
+        // Matched on the LABEL, which is what the row showed — the inserted text is the bare name and two
+        // bundles may share one.
+        if (!_pickNeeds.TryGetValue(picked.Text, out var bundle)) return;
+        if (NeedEdit.For(_editor.Text, bundle) is not var (offset, text)) return;
         _editor.Document.Insert(offset, text);
-        SetStatus($"Added need \"{parts[0]}.{parts[1]}\" for {entry.SigilName}.");
-    }
-
-    /// The receiver text immediately before a `.` (identifiers, dots, and a leading `::`).
-    private static string ExtractChain(string text, int dotOffset)
-    {
-        int i = dotOffset - 1;
-        while (i >= 0)
-        {
-            char c = text[i];
-            if (char.IsLetterOrDigit(c) || c is '_' or '.' or ':') i--;
-            else break;
-        }
-        return text.Substring(i + 1, dotOffset - (i + 1));
+        SetStatus($"Added need \"{bundle}\" for {picked.Text.Split(' ')[0]}.");
     }
 
     // ---- highlighting ---------------------------------------------------
