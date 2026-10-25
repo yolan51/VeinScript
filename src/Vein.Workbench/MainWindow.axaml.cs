@@ -303,7 +303,7 @@ public partial class MainWindow : Window
         // a launcher that says "open this file at line 40" wants the session it would otherwise have
         // had, plus that file focused — not a Workbench with one tab and no context.
         if (Program.Launch.AsksForAnything)
-            _ = OpenRequestedAsync(Program.Launch.Path!, Program.Launch.Line);
+            _ = OpenRequestedAsync(Program.Launch.Path!, Program.Launch.Line, Program.Launch.Tab);
     }
 
     /// `VeinScript-Workbench <path> [--line N]` — open it, focus it, put the caret there.
@@ -311,7 +311,7 @@ public partial class MainWindow : Window
     /// The seam the game editor hands a diagnostic across. It fails quietly: a path that no longer
     /// exists leaves the restored session alone and says so in the status bar, because a launcher
     /// passing a stale path should not cost somebody the tabs they had open.
-    private async Task OpenRequestedAsync(string path, int? line)
+    private async Task OpenRequestedAsync(string path, int? line, string? tab = null)
     {
         try
         {
@@ -319,6 +319,13 @@ public partial class MainWindow : Window
 
             await OpenPathAsync(Path.GetFullPath(path));
             if (line is { } n) GoToLine(n);
+            // `--tab flow` — the panel the caller asked for (VS Code's "Open in Workbench: Flow").
+            switch (tab)
+            {
+                case "flow": ShowBottomTab(TabFlow); break;
+                case "formats": ShowBottomTab(TabFormats); break;
+                case "runtime": ShowBottomTab(TabRuntime); break;
+            }
         }
         catch (Exception ex) { SetStatus($"Cannot open {path} — {ex.Message}"); }
     }

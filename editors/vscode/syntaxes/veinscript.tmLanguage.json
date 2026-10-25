@@ -1,0 +1,59 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "VeinScript",
+  "scopeName": "source.veinscript",
+  "comment": "Mirrors src/Vein.Workbench/Assets/VeinScript.xshd — a colour per sigil, the D24 collection words, every lexer keyword. EditorsTests checks the keyword list against the lexer.",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#collections" },
+    { "include": "#sigils" },
+    { "include": "#keywords" },
+    { "include": "#numbers" },
+    { "name": "keyword.operator.fill.veinscript", "match": "\\?" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-slash.veinscript", "match": "//.*$" },
+        { "name": "comment.block.veinscript", "begin": "/\\*", "end": "\\*/" }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.veinscript",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [{ "name": "constant.character.escape.veinscript", "match": "\\\\." }]
+    },
+    "collections": {
+      "patterns": [
+        { "name": "storage.type.collection.veinscript", "match": "~<(list|set|ring|map)( [0-9]+)?>" },
+        {
+          "match": "(\\.~[A-Za-z_][A-Za-z0-9_]*)(?:(\\.)(add|remove|clear|put|has)\\b)?",
+          "captures": {
+            "1": { "name": "variable.other.collection.veinscript" },
+            "3": { "name": "support.function.collection.veinscript" }
+          }
+        },
+        { "name": "storage.modifier.owns.veinscript", "match": "\\bowns(?=\\s+(\\$|Entity\\b))" }
+      ]
+    },
+    "sigils": {
+      "patterns": [
+        { "name": "entity.name.type.shape.veinscript", "match": "\\$[A-Za-z_][A-Za-z0-9_]*" },
+        { "name": "entity.name.tag.mark.veinscript", "match": "#[A-Za-z_][A-Za-z0-9_]*" },
+        { "name": "entity.name.event.veinscript", "match": "@[A-Za-z_][A-Za-z0-9_]*" },
+        { "name": "entity.name.builder.veinscript", "match": "&[A-Za-z_][A-Za-z0-9_]*" },
+        { "name": "entity.name.shard.veinscript", "match": "![A-Za-z_][A-Za-z0-9_]*" }
+      ]
+    },
+    "keywords": {
+      "name": "keyword.control.veinscript",
+      "match": "\\b(bundle|need|use|publicator|shared|tune|shape|event|shard|ShardView|bridge|target|each|tick|settled|start|hear|emit|mark|unmark|attach|unattach|to|from|destroy|chance|folds|sync|audience|as|SF|builder|bring|weave|loom|format|count|let|var|return|when|else|if|while|repeat|match|break|continue|type|enum|fn|and|or|not|true|false|map|Entity|app|by|transform|mute|unmute|on|base|Index|do)\\b"
+    },
+    "numbers": {
+      "name": "constant.numeric.veinscript",
+      "match": "\\b\\d+(\\.\\d+)?%?\\b"
+    }
+  }
+}

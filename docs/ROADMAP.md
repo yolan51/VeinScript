@@ -202,9 +202,10 @@ and writing `$View`, that draws `$World` positions.
 
 ### Tier 5 — editor and tooling
 
-- **`veinc lsp` and a VS Code extension (L).** `.vein` gets no support outside the Workbench.
-  - Reuse its completion, hover, signature help, diagnostics, F12 and Quick Fix, plus a TextMate grammar.
 - **`veinc fmt` (M); `--help` (S).**
+- **VS Code, the rest.** Done: `veinc lsp` plus `editors/vscode` (docs/EDITORS.md). Still Workbench-only:
+  `?` signature expansion, and the visual panels (Flow, Formats, Runtime…), which stay there by choice and
+  are reached through **Open in Workbench**.
 
 ### Tier 6 — runtime and platform
 
@@ -303,6 +304,7 @@ closed it. `git log --grep` on the phrase finds the full account.
 
 | What | And the part worth remembering |
 |---|---|
+| `.vein` had no support outside the Workbench | `veinc lsp` and the VS Code extension (`editors/vscode`, docs/EDITORS.md): colours, diagnostics, completion, hover, signatures, F12, references, outline, Quick Fix, `‹map›` hints. ONE editor brain — the Workbench's routines moved to `Tooling/EditorService`, which both editors render — so they cannot drift. |
 | A `.~slots` did not say WHICH kind of collection | The Workbench draws `‹map›`/`‹set›`/`‹ring 3›` after each `.~name`, shows the declaration on hover, completes `.~` with the shape's collections and `.~slots.` with that kind's words. One source, `Tooling/CollectionIndex`, lexical where it reads the text so it works on a half-typed line. |
 | An engine could not run VeinScript without a project reference into this repo | `Vein.Hosting` (docs/HOSTING.md): `VeinGame.Load` a file or app, `Step(delta)`, input, `Emit` a program event, `Entities` to draw, `Reload` that keeps the old rules on a broken edit. The stdlib rides inside the dll; `tools/pack.sh` makes versioned packages, so an engine project (Godot) stays in its own repo. |
 | A shard's marks did one thing | They are a group now (D20): `mute #Gameplay` is a standing rule over every shard carrying it, in any bundle, and `mark !Spammer #Banned` changes a shard's marks at runtime — both queued to the commit and agreed on by the interpreter and the C# backend. `x carries #M` asks it in a body, for a sender or an entity (the backend answers the entity form only). |

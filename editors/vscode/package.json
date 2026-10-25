@@ -1,0 +1,200 @@
+{
+  "name": "veinscript",
+  "displayName": "VeinScript",
+  "description": "VeinScript in VS Code: colours, diagnostics, completion, hover, signatures, go to definition, references, outline, Quick Fix and collection hints — from the same editor brain as the Workbench (veinc lsp).",
+  "version": "0.1.0",
+  "publisher": "veinscript",
+  "license": "SEE LICENSE IN LICENSE",
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "languages": [
+      {
+        "id": "veinscript",
+        "aliases": [
+          "VeinScript",
+          "veinscript"
+        ],
+        "extensions": [
+          ".vein"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "veinscript",
+        "scopeName": "source.veinscript",
+        "path": "./syntaxes/veinscript.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "veinscript.run",
+        "title": "Run file",
+        "category": "VeinScript",
+        "icon": "$(play)"
+      },
+      {
+        "command": "veinscript.openInWorkbench",
+        "title": "Open in Workbench",
+        "category": "VeinScript"
+      },
+      {
+        "command": "veinscript.openFlow",
+        "title": "Open in Workbench: Flow",
+        "category": "VeinScript"
+      },
+      {
+        "command": "veinscript.openFormats",
+        "title": "Open in Workbench: Formats",
+        "category": "VeinScript"
+      },
+      {
+        "command": "veinscript.openRuntime",
+        "title": "Open in Workbench: Runtime",
+        "category": "VeinScript"
+      },
+      {
+        "command": "veinscript.restartServer",
+        "title": "Restart language server",
+        "category": "VeinScript"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "veinscript.run",
+          "when": "editorLangId == veinscript",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "veinscript.openInWorkbench",
+          "when": "editorLangId == veinscript",
+          "group": "veinscript"
+        },
+        {
+          "command": "veinscript.openFlow",
+          "when": "editorLangId == veinscript",
+          "group": "veinscript"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "VeinScript",
+      "properties": {
+        "veinscript.veincPath": {
+          "type": "string",
+          "default": "",
+          "description": "veinc to run (`veinc.exe`, or `Vein.Cli.dll` run through dotnet). Empty: the repository's build found above the workspace, else `veinc` on PATH."
+        },
+        "veinscript.workbenchPath": {
+          "type": "string",
+          "default": "",
+          "description": "VeinScript-Workbench to open files in. Empty: the repository's build found above the workspace."
+        },
+        "veinscript.serverLog": {
+          "type": "string",
+          "default": "",
+          "description": "A file the language server records its traffic to (`veinc lsp --log`). Empty: no log."
+        }
+      }
+    },
+    "configurationDefaults": {
+      "[veinscript]": {
+        "editor.semanticHighlighting.enabled": true
+      },
+      "editor.tokenColorCustomizations": {
+        "textMateRules": [
+          {
+            "scope": "entity.name.type.shape.veinscript",
+            "settings": {
+              "foreground": "#4EC9B0"
+            }
+          },
+          {
+            "scope": "entity.name.tag.mark.veinscript",
+            "settings": {
+              "foreground": "#C586C0"
+            }
+          },
+          {
+            "scope": "entity.name.event.veinscript",
+            "settings": {
+              "foreground": "#DCDCAA"
+            }
+          },
+          {
+            "scope": "entity.name.builder.veinscript",
+            "settings": {
+              "foreground": "#E09B5A"
+            }
+          },
+          {
+            "scope": "entity.name.shard.veinscript",
+            "settings": {
+              "foreground": "#A9B8FF"
+            }
+          },
+          {
+            "scope": [
+              "storage.type.collection.veinscript",
+              "variable.other.collection.veinscript",
+              "support.function.collection.veinscript",
+              "storage.modifier.owns.veinscript"
+            ],
+            "settings": {
+              "foreground": "#82E0AA"
+            }
+          },
+          {
+            "scope": "keyword.control.veinscript",
+            "settings": {
+              "foreground": "#569CD6",
+              "fontStyle": "bold"
+            }
+          },
+          {
+            "scope": "keyword.operator.fill.veinscript",
+            "settings": {
+              "foreground": "#4EC9B0"
+            }
+          }
+        ]
+      },
+      "editor.semanticTokenColorCustomizations": {
+        "rules": {
+          "function:veinscript": "#9CDCFE",
+          "method:veinscript": "#F47067",
+          "keyword:veinscript": {
+            "foreground": "#B392F0",
+            "bold": true
+          },
+          "namespace:veinscript": {
+            "foreground": "#B8DB7A",
+            "italic": true
+          },
+          "type:veinscript": "#A9B8FF"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "package": "vsce package --allow-missing-repository"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.2.0"
+  }
+}

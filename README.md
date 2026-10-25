@@ -58,6 +58,7 @@ target. Milestones in [docs/ROADMAP.md](docs/ROADMAP.md).
 | [docs/BACKEND-CONTRACT.md](docs/BACKEND-CONTRACT.md) | `IBackend` interface + C# transpiler mapping |
 | [docs/EXAMPLE-PIPELINE.md](docs/EXAMPLE-PIPELINE.md) | `demo.vein` traced source → AST → HIR → C# |
 | [docs/ROADMAP.md](docs/ROADMAP.md)              | Milestones tying each doc to code and a `veinc` subcommand |
+| [docs/EDITORS.md](docs/EDITORS.md)              | The Workbench and VS Code (`veinc lsp`, `editors/vscode`): one editor brain, two editors |
 
 ## Layout
 

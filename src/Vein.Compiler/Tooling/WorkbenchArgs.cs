@@ -1,9 +1,13 @@
 namespace Vein.Compiler.Tooling;
 
-/// What a Workbench command line asked to open: `VeinScript-Workbench <path> [--line N]`.
+/// What a Workbench command line asked to open: `VeinScript-Workbench <path> [--line N] [--tab flow]`.
 public sealed record WorkbenchArgs(string? Path, int? Line)
 {
     public static WorkbenchArgs None { get; } = new(null, null);
+
+    /// The panel to show once the file is open — `flow`, `formats`, `runtime` — so an editor that has
+    /// no such panel (VS Code) can hand a file over and land on the view it asked for. Null: as it was.
+    public string? Tab { get; init; }
 
     public bool AsksForAnything => Path is { Length: > 0 };
 }
@@ -35,6 +39,7 @@ public static class WorkbenchLaunch
 
         string? path = null;
         int? line = null;
+        string? tab = null;
 
         for (int i = 0; i < args.Count; i++)
         {
@@ -45,6 +50,13 @@ public static class WorkbenchLaunch
                 if (i + 1 < args.Count && int.TryParse(args[++i], out int n) && n > 0) line = n;
                 continue;
             }
+
+            if (a is "--tab")
+            {
+                if (i + 1 < args.Count) tab = args[++i].ToLowerInvariant();
+                continue;
+            }
+            if (a.StartsWith("--tab=", StringComparison.Ordinal)) { tab = a["--tab=".Length..].ToLowerInvariant(); continue; }
 
             if (a.StartsWith("--line=", StringComparison.Ordinal))
             {
@@ -61,6 +73,6 @@ public static class WorkbenchLaunch
             if (System.IO.Path.HasExtension(a)) path ??= a;
         }
 
-        return new WorkbenchArgs(path, line);
+        return new WorkbenchArgs(path, line) { Tab = tab };
     }
 }

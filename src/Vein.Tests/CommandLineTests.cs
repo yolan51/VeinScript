@@ -30,6 +30,17 @@ public class CommandLineTests
         Assert.Null(line);
     }
 
+    [Theory]
+    [InlineData("flow", "game.vein", "--tab", "flow")]
+    [InlineData("formats", "game.vein", "--tab=Formats")]
+    [InlineData(null, "game.vein")]
+    public void A_tab_names_the_panel_to_show_and_is_never_the_file(string? tab, params string[] args)
+    {
+        var a = WorkbenchLaunch.Parse(args);
+        Assert.Equal("game.vein", a.Path);
+        Assert.Equal(tab, a.Tab);
+    }
+
     [Fact]
     public void A_bare_path_is_the_file_to_open()
     {
