@@ -10,9 +10,18 @@ using Vein.Compiler.Tooling;
 // Library packages for a project with no build of its own (Vein.Bundles.Web, …): no file argument.
 if (args.Length > 0 && args[0] is "add" or "remove" or "restore" or "packages") return PackageCommand.Run(args);
 
+// `veinc lsp` — the editor protocol over stdio, what the VS Code extension starts (docs/EDITORS.md). Its
+// stdout IS the protocol, so nothing else may print there; `--log <file>` records the traffic.
+if (args.Length > 0 && args[0] == "lsp")
+{
+    int logAt = Array.IndexOf(args, "--log");
+    using var log = logAt >= 0 && logAt + 1 < args.Length ? new StreamWriter(args[logAt + 1], append: true) : null;
+    return new Vein.Compiler.Lsp.LspServer(Console.OpenStandardInput(), Console.OpenStandardOutput(), log).Run();
+}
+
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("usage: veinc <add|remove|restore|packages> …   or   veinc <new|check|lock|settings|test|tokens|ast|ir|render|serve|run|build|emit|graph|events|flow|formats|scaffold|symbols|exec> <file.vein> [arg]");
+    Console.Error.WriteLine("usage: veinc <add|remove|restore|packages|lsp> …   or   veinc <new|check|lock|settings|test|tokens|ast|ir|render|serve|run|build|emit|graph|events|flow|formats|scaffold|symbols|exec> <file.vein> [arg]");
     return 2;
 }
 

@@ -53,6 +53,9 @@ public sealed record EditorCompletion(string Label, string Insert, string? Descr
 /// A list of rows, the kind it is (`shape`, `member`, `collection`…), and where the word it replaces starts.
 public sealed record EditorCompletionList(IReadOnlyList<EditorCompletion> Items, string Kind, int ReplaceFrom);
 
+/// A call's signature as one line, its parameters as they appear in that line, and the one being typed.
+public sealed record EditorSignature(string Label, IReadOnlyList<string> Parameters, int Active);
+
 /// Where something is: a file (null for the text being edited) and a 1-based line and column.
 public sealed record EditorLocation(string? File, int Line, int Col, string Text);
 
@@ -431,6 +434,40 @@ public static class EditorService
     }
 
     private static bool IsIdent(char c) => char.IsLetterOrDigit(c) || c == '_';
+
+    // ---- signature help -----------------------------------------------------------------------------
+
+    /// The call the caret is inside, and which argument is being typed: an fn / SF call (`clamp(`), or a
+    /// `bring Unit(` / `emit @Hit {` — whose parameters are flattened from shapes usually in another file,
+    /// so they are the signature most worth seeing. Null for a name nothing resolves: describing a different
+    /// function that happens to share it would be worse than saying nothing.
+    public static EditorSignature? Signature(EditorSnapshot s, int offset)
+    {
+        using var _ = BundleSearch.Scope(s.ProjectDir);
+        if (SignatureHelp.FunctionAt(s.Text, offset) is { } call)
+        {
+            var (fn, owner) = call.Path is null
+                ? FuncIndex.Find(s.Ast, call.Name, s.ProjectDir)
+                : FuncIndex.FindQualified(call.Path, call.Name, s.ProjectDir);
+            if (fn is null) return null;
+            // Find's owner for a needed bundle's function is its full key, name included.
+            if (call.Path is null && owner is not null && owner.EndsWith("." + fn.Name, StringComparison.Ordinal))
+                owner = owner[..^(fn.Name.Length + 1)];
+            return new EditorSignature(FuncIndex.Signature(fn, owner),
+                fn.Params.Select(p => p.Name + ": " + (p.Type?.Name ?? "?")).ToList(), call.ActiveSlot);
+        }
+        if (SignatureHelp.At(s.Text, offset) is { } bc && s.Signatures?.Find(new SignatureRef(bc.Kind, bc.Path, bc.Name)).Hit is { } sig)
+        {
+            var ps = sig.Fields.Select(f => f.Name + ": " + f.Type).ToList();
+            return sig.Kind switch
+            {
+                SignatureKind.Builder => new EditorSignature($"bring {sig.Name}({string.Join(", ", ps)})", ps, bc.ActiveSlot),
+                SignatureKind.Event => new EditorSignature($"emit @{sig.Name} {{ {string.Join(", ", ps)} }}", ps, bc.ActiveSlot),
+                _ => new EditorSignature($"${sig.Name} {{ {string.Join(", ", ps)} }}", ps, bc.ActiveSlot),
+            };
+        }
+        return null;
+    }
 
     // ---- go to definition / references ---------------------------------------------------------------
 
