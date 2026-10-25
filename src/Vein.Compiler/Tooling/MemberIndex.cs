@@ -19,9 +19,17 @@ public static class MemberIndex
         public Dictionary<string, List<(string Name, string Type)>> Events { get; } = new(StringComparer.Ordinal);
         public Dictionary<string, string> Bindings { get; } = new(StringComparer.Ordinal); // name -> "event:E" | "entity"
 
-        public IReadOnlyList<string> Resolve(IReadOnlyList<string> tokens)
+        /// The shapes' `~` collections (D24), so a collection field is offered as `~name` with its kind.
+        public CollectionIndex Collections { get; internal set; } = CollectionIndex.Build(null);
+
+        public IReadOnlyList<string> Resolve(IReadOnlyList<string> tokens) => Items(tokens).Select(i => i.Insert).ToList();
+
+        /// The members after a chain, as a list SHOWS them and as it TYPES them. They differ for a `~`
+        /// collection: the row reads `~slots   ‹map› string | owns $Item`, and the `~` is typed with the name,
+        /// so a collection is never read without it (VS0373).
+        public IReadOnlyList<(string Label, string Insert)> Items(IReadOnlyList<string> tokens)
         {
-            if (tokens.Count == 0) return Array.Empty<string>();
+            if (tokens.Count == 0) return Array.Empty<(string, string)>();
 
             (string k, string v) ctx;
             string first = tokens[0];
@@ -32,7 +40,11 @@ public static class MemberIndex
             else ctx = ("", "");
 
             for (int i = 1; i < tokens.Count; i++) ctx = Step(ctx, tokens[i]);
-            return Members(ctx);
+            if (ctx.k == "shape")
+                return Shapes[ctx.v].Select(x => Collections.Spec(ctx.v, x.Name) is { } c
+                    ? ($"~{x.Name}   ‹{CollectionIndex.Tag(c)}› {CollectionIndex.Types(c)}", "~" + x.Name)
+                    : (x.Name, x.Name)).ToList();
+            return Members(ctx).Select(n => (n, n)).ToList();
         }
 
         private (string, string) Step((string k, string v) ctx, string tok)
@@ -121,6 +133,7 @@ public static class MemberIndex
         }
 
         foreach (var b in unit.Bundles) Decl(b);
+        m.Collections = CollectionIndex.Build(unit);
         return m;
     }
 }

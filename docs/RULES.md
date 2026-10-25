@@ -273,6 +273,9 @@ b.Board.~scores.put("ann", 3)    b.Board.~scores["ann"]     target $Board.~score
   its last N. A destroyed identity leaves every `~` collection of Entity.
 - `m.Person.name` reads an element's data directly — an entity plus a shape is a handle (13b) — so there
   is no inner lookup loop. Interpreter-only for now; `veinc emit` says so. `list<T>` stays legal.
+- **The `~` says "many", not which kind — the Workbench says the rest**: a faint `‹map›`/`‹set›`/`‹ring 3›`
+  after each `.~name`, the declaration on hover, `.~` completing the shape's collections with their kinds,
+  `.~slots.` offering that kind's words (`put` on a map, `add` on the rest), and `~<` offering the four kinds.
 
 **14. `target` binds ONE shape per loop, and nothing can ask an identity which shapes it carries.**
 Several shapes are an AND (`target $A $B`). There is no dispatch — a heterogeneous ordered sequence

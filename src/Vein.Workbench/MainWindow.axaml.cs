@@ -33,6 +33,8 @@ public partial class MainWindow : Window
     private readonly DiagnosticRenderer _marker = new();
     private readonly BracketRenderer _brackets = new();
     private readonly SemanticColorizer _semantic = new();
+    private readonly CollectionHints _collectionHints = new();
+    private string? _collectionKey;
     private SignaturePopup _sigPopup = null!;
     private CompilationUnit? _lastAst;
     private IReadOnlyList<Diagnostic> _diags = Array.Empty<Diagnostic>();
@@ -257,6 +259,8 @@ public partial class MainWindow : Window
         LoadHighlighting();
         // After the theme, which AvaloniaEdit inserts first — this paints over it.
         _editor.TextArea.TextView.LineTransformers.Add(_semantic);
+        // `‹map›` after each `.~name` — the kind of a collection where it is used (D24).
+        _editor.TextArea.TextView.ElementGenerators.Add(_collectionHints);
 
         // Parameter hints for fn / SF calls. Hosted in the editor's DockPanel, docked Top at zero height, so it
         // is in the visual tree a Popup needs without taking the fill slot from the editor.
@@ -2713,7 +2717,7 @@ public partial class MainWindow : Window
         _live.Expect(result.Ast is null ? null : ConsoleGraph.Analyze(result.Ast), ServePort);
         _runtime.Update(result.Entry);
         _definitions = result.Ast is null ? DefinitionIndex.Empty : DefinitionIndex.Analyze(result.Ast);
-        if (result.Ast is not null) _lastAst = result.Ast;
+        if (result.Ast is not null) { _lastAst = result.Ast; UpdateCollectionHints(result.Ast); }
         _outline.Update(_definitions);
         UpdateSemanticColours();
         _eventGraph.Update(_definitions);
@@ -3553,6 +3557,8 @@ public partial class MainWindow : Window
             _completion = null;
         }
         if (e.Text == "?") { TryExpandOnQuestion(); return; }
+        if (e.Text == "~") { ShowCollectionCompletion(); return; }   // `h.Hero.~` — which collection? (D24)
+        if (e.Text == "<" && CollectionIndex.KindAt(_editor.Text, _editor.CaretOffset) is { } kindAt) { ShowKindCompletion(kindAt); return; }
         if (e.Text == ".") { ShowMemberCompletion(); return; }
         if (e.Text == "*") { ShowStarCompletion(); return; }   // qualified stdlib refs: *Vein.Console.Io.@Print
         if (e.Text == "&") { ShowBuilderCompletion(); return; }  // &Elements — the Vein.Web builders and any local one
@@ -3604,6 +3610,8 @@ public partial class MainWindow : Window
             case '&': ShowBuilderCompletion(); break;
             case '*': ShowStarCompletion(); break;
             case '.': ShowMemberCompletion(); break;
+            case '~': ShowCollectionCompletion(); break;
+            case '<' when CollectionIndex.KindAt(doc.Text, at) is { } kindAt: ShowKindCompletion(kindAt); break;
             default: ShowFunctionCompletion(start); break;
         }
     }
@@ -3755,6 +3763,10 @@ public partial class MainWindow : Window
 
         // D23: the name in `loom<MeshList>`, or after `from` in a format — show the format itself, as code.
         if (FormatHover(text, start, word) is { } format) return format;
+
+        // D24: `.~slots` — the collection as declared, since the `~` alone does not say which kind.
+        if (CollectionIndex.At(text, offset) is { } read && _hoverModel.Collections.Spec(read.Shape, read.Field) is { } spec)
+            return $"{CollectionIndex.Describe(read.Field, spec)}\n— on ${read.Shape}";
 
         // 0) Anything about a signature — a field in an `emit`/`attach` body, a slot in a `bring`, or an
         //    @Event / &Builder / $Shape itself — from ANY bundle, through the compiler's own lookup. What is
@@ -4079,11 +4091,46 @@ public partial class MainWindow : Window
         if (ast is null) return;
         var model = MemberIndex.Build(ast);
 
+        // `h.Hero.~slots.` — the words THIS kind of collection has: `put` on a map, `add` on the rest (D24).
+        if (CollectionIndex.At(_editor.Text, _editor.CaretOffset) is { } coll && model.Collections.Spec(coll.Shape, coll.Field) is { } spec)
+        {
+            ShowCompletion(CollectionIndex.Words(spec).Select(w => (w.Label, w.Insert, (string?)CollectionIndex.Describe(coll.Field, spec), (string?)null)).ToList(), "collection");
+            return;
+        }
+
         int dot = _editor.CaretOffset - 1;                       // the '.' just typed
         var tokens = ExtractChain(_editor.Text, dot).Split('.', StringSplitOptions.RemoveEmptyEntries);
         if (tokens.Length == 0) return;
 
-        ShowCompletion(model.Resolve(tokens), "member");
+        ShowCompletion(model.Items(tokens), "member");
+    }
+
+    /// `h.Hero.~` — the shape's collections only, each with its kind (D24).
+    private void ShowCollectionCompletion()
+    {
+        if (CollectionIndex.Naming(_editor.Text, _editor.CaretOffset) is not { } naming) return;
+        var ast = _service.Compile(new CompileRequest("untitled.vein", _editor.Text, ProjectDir: ProjectDir, SourcePath: _currentPath)).Ast ?? _lastAst;
+        var items = CollectionIndex.Build(ast).Of(naming.Shape)
+            .Select(c => ($"{c.Field}   ‹{CollectionIndex.Tag(c.Spec)}› {CollectionIndex.Types(c.Spec)}", c.Field,
+                          (string?)CollectionIndex.Describe(c.Field, c.Spec), (string?)null))
+            .ToList();
+        ShowCompletion(items, "collection", startOffset: naming.NameStart);
+    }
+
+    /// `~<` in a declaration — the four kinds, each saying what it keeps (D24).
+    private void ShowKindCompletion(int start) =>
+        ShowCompletion(CollectionIndex.Kinds.Select(k => (k.Label, k.Insert, (string?)k.Describe, (string?)k.Describe)).ToList(),
+                       "collection kind", startOffset: start);
+
+    /// The kinds the last good build declared, for the inline `‹map›` hints. Redrawn only when they change.
+    private void UpdateCollectionHints(CompilationUnit ast)
+    {
+        var index = CollectionIndex.Build(ast);
+        string key = string.Join("\n", index.All);
+        if (key == _collectionKey) return;
+        _collectionKey = key;
+        _collectionHints.SetIndex(index);
+        _editor.TextArea.TextView.Redraw();
     }
 
     private void ShowCompletion(IReadOnlyList<string> names, string kind) =>
