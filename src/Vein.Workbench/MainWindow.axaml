@@ -279,6 +279,9 @@
         <TabItem Header="DNA">
           <local:DnaPanel Name="Dna" />
         </TabItem>
+        <TabItem Header="Chain">
+          <local:ChainPanel Name="Chain" />
+        </TabItem>
       </TabControl>
     </Grid>
   </DockPanel>

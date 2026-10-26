@@ -68,6 +68,7 @@ public partial class MainWindow : Window
     private EventFlowPanel _flowPanel = null!;
     private FormatsPanel _formatsPanel = null!;
     private DnaPanel _dnaPanel = null!;
+    private ChainPanel _chainPanel = null!;
     private ScrollViewer _execPanel = null!;
     private Grid _topCols = null!;
     private Grid _mainRows = null!;
@@ -141,6 +142,7 @@ public partial class MainWindow : Window
     private const int TabFlow = 13;
     private const int TabFormats = 14;
     private const int TabDna = 15;
+    private const int TabChain = 16;
 
     private ComboBox _runConfigs = null!;
     private TextBlock _runHint = null!;
@@ -179,6 +181,8 @@ public partial class MainWindow : Window
         _formatsPanel = this.FindControl<FormatsPanel>("Formats")!;
         _formatsPanel.Navigate = (file, line) => GoTo(file, line, 1);
         _dnaPanel = this.FindControl<DnaPanel>("Dna")!;
+        _chainPanel = this.FindControl<ChainPanel>("Chain")!;
+        _chainPanel.Session = _session;
         _execPanel = this.FindControl<ScrollViewer>("ExecPanel")!;
         _topCols = this.FindControl<Grid>("TopCols")!;
         _mainRows = this.FindControl<Grid>("MainRows")!;
@@ -193,6 +197,7 @@ public partial class MainWindow : Window
             if (_bottomPanel.SelectedIndex == TabFlow) _flowPanel.Update(RunPath);
             if (_bottomPanel.SelectedIndex == TabFormats) _formatsPanel.Update(RunPath);
             if (_bottomPanel.SelectedIndex == TabDna) _dnaPanel.Update(_currentPath);
+            if (_bottomPanel.SelectedIndex == TabChain) { _chainPanel.Session = _session; _chainPanel.Update(_currentPath); }
         };
         _statusBar = this.FindControl<TextBlock>("StatusBar")!;
         _bundleInspector = this.FindControl<Border>("BundleInspector")!;
@@ -330,6 +335,7 @@ public partial class MainWindow : Window
                 case "formats": ShowBottomTab(TabFormats); break;
                 case "runtime": ShowBottomTab(TabRuntime); break;
                 case "dna": ShowBottomTab(TabDna); break;
+                case "chain": ShowBottomTab(TabChain); break;
             }
         }
         catch (Exception ex) { SetStatus($"Cannot open {path} — {ex.Message}"); }
