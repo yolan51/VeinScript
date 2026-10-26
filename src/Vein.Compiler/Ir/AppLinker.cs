@@ -254,7 +254,7 @@ public static class AppLinker
                             diag.Warning("VS0353",
                                 $"bundle '{name}' names shard `{key}` in an `audience`, but no bundle in app " +
                                 $"'{appName}' declares it — so it never matches. Check the spelling, or `load` " +
-                                "the bundle that declares it.", load.Span);
+                                "the bundle that declares it.", load?.Span ?? span);
 
         var principalModule = modules.First(m => string.Equals(m.Name, principal, StringComparison.Ordinal)).Module;
 

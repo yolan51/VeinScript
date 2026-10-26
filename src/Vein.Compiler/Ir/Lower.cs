@@ -985,8 +985,8 @@ public sealed partial class Lower
     /// whatever this bundle `need`s.
     private (string? Key, List<FieldDecl>? Fields) IncludeFields(ShapeInclude si, string? ownerKey, bool report = true)
     {
-        if (si.Path.Count > 0) return FindExternalShape(si.Path, si.Shape) ?? (null, null);
-        if (ownerKey is not null) return FindOwnedShape(ownerKey, si.Shape) ?? (null, null);
+        if (si.Path.Count > 0) return FindExternalShape(si.Path, si.Shape) is { } ext ? (ext.Key, ext.Fields) : (null, null);
+        if (ownerKey is not null) return FindOwnedShape(ownerKey, si.Shape) is { } own ? (own.Key, own.Fields) : (null, null);
         if (_shapeFields.TryGetValue(si.Shape, out var local)) return (null, local);
         return ResolveUsed(Index.Shapes, "$", si.Shape, si.Span, report) is { } used
             ? (used.Key, used.Value.Members.OfType<FieldDecl>().ToList())
