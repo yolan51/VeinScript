@@ -127,11 +127,13 @@ internal sealed class ChainPanel : UserControl
         catch { return null; }
     }
 
-    private string? KeyOf(string? who)
+    private string? KeyOf(string? who) => KeysOf(who) is { } keys ? VeinCrypto.PublicKey(keys) : null;
+
+    private string? KeysOf(string? who)
     {
         if (who is null || _net is null) return null;
         string file = Path.Combine(_net, "keys", who + ".key");
-        try { return File.Exists(file) ? VeinCrypto.PublicKey(File.ReadAllText(file).Trim()) : null; } catch { return null; }
+        try { return File.Exists(file) ? File.ReadAllText(file).Trim() : null; } catch { return null; }
     }
 
     /// `bundle X by author` in the open file → "author.X".
@@ -260,11 +262,16 @@ internal sealed class ChainPanel : UserControl
     {
         if (Session is not { } session) { _log.Text = "Sign in to ShardStore first (Cloud ▸ Sign In)."; return; }
         string name = "shardstore:" + (session.Handle.Length > 0 ? session.Handle : session.UserId);
-        string? key = KeyOf(who);
+        string? key = KeyOf(who), keys = KeysOf(who);
+        if (key is null || keys is null) { _log.Text = $"No key file for {who}."; return; }
         await WalletAsync("register", who, "author", name);
         try
         {
-            await global::Vein.Cloud.VeinCloudClient.PostAsync("chainLink", new { chain_key = key, chain_identity = name }, session.Token);
+            // The proof ShardStore checks: this key's owner signs a link naming this user and the time, so the
+            // link cannot be made for a key you do not hold, nor replayed (VeinDNA base44/functions/chainLink.ts).
+            long nonce = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            string signature = VeinCrypto.Sign($"vein-link-v1\nuser={session.UserId}\nnonce={nonce}\n", keys);
+            await global::Vein.Cloud.VeinCloudClient.PostAsync("chainLink", new { chain_key = key, chain_identity = name, nonce, signature }, session.Token);
             _log.Text += $"\nShardStore now knows {name} is {Short(key ?? "")}.";
         }
         catch (Exception ex)
