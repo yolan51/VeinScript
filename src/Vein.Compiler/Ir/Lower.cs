@@ -316,6 +316,7 @@ public sealed partial class Lower
         if (startDecl is { FillRest: true }) _diag.Error("VS0347", SavedQuestion("fields"), startDecl.FillAt ?? startDecl.Span);
         if (startDecl is not null)
         {
+            CheckEventRef(startDecl.EventPath, startDecl.Event, startDecl.Span);
             RegisterImportedEvent(startDecl.EventPath, startDecl.Event);
             NoteEventUse(startDecl.EventPath, startDecl.Event);
         }
@@ -1013,6 +1014,39 @@ public sealed partial class Lower
             : head + "." + string.Join(".", path.Skip(1)) + "." + name;
     }
 
+    /// Every shared event a written `*` path can mean: the path itself, or the path as a SUFFIX of
+    /// `Author.Bundle.Publicator` — which is what lets `*Banjo.Api.@Strum` stand for bob's. An exact
+    /// match is the only answer when there is one.
+    private List<KeyValuePair<string, EventDecl>> QualifiedEvents(IReadOnlyList<string> path, string name)
+    {
+        string refKey = RefKey(path, name);
+        var hits = Index.Events.Where(kv => kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal)).ToList();
+        return hits.Any(kv => kv.Key == refKey) ? hits.Where(kv => kv.Key == refKey).ToList() : hits;
+    }
+
+    /// An event reference that several bundles answer, reported ONCE, where it was written.
+    ///
+    /// Bare: two needed bundles both export it — VS0216, the warning samples/bundle_collisions explains.
+    /// The lookups behind a reference (payload check, import, key, use note) each used to report it, with
+    /// no position, so one `emit @Strum` printed `:0:0: warning VS0216` three or four times.
+    ///
+    /// Qualified: a SHORTENED path that several bundles answer is VS0306. Picking one would be a guess,
+    /// and keying it as written reached nobody — `*Api.@Strum` with three kits declaring `@Strum`
+    /// compiled cleanly and woke none of their `hear`s.
+    private void CheckEventRef(IReadOnlyList<string> path, string name, SourceSpan span)
+    {
+        if (path.Count == 0)
+        {
+            if (!_events.ContainsKey(name)) ResolveUsed(Index.Events, "@", name, span);
+            return;
+        }
+        var hits = QualifiedEvents(path, name);
+        if (hits.Count > 1)
+            _diag.Error("VS0306", $"*{string.Join(".", path)}.@{name} could be " +
+                string.Join(" or ", hits.Select(h => "*" + h.Key[..h.Key.LastIndexOf('.')] + ".@" + name)) +
+                ". Qualify further: add the author.", span);
+    }
+
     /// Resolve a BARE name against the bundles this one `need`s — the widening half of what `need` does.
     ///
     /// Called only after every local lookup has missed, so a local declaration always wins. A `need`
@@ -1034,7 +1068,7 @@ public sealed partial class Lower
 
         if (report)
             _diag.Warning("VS0216",
-                $"'{sigil}{name}' is ambiguous across the bundles in scope — {string.Join(" and ", hits.Select(h => "*" + h.Key))}. "
+                $"'{sigil}{name}' is ambiguous across the bundles in scope — {string.Join(" and ", hits.Select(h => "*" + h.Key[..(h.Key.LastIndexOf('.') + 1)] + sigil + name))}. "
                 + "Qualify the reference to choose one.", span);
         return null;
     }
@@ -1477,16 +1511,12 @@ public sealed partial class Lower
     private EventDecl? ResolveEvent(IReadOnlyList<string> path, string name)
     {
         if (path.Count > 0)
-        {
-            string refKey = RefKey(path, name);
-            return Index.Events.FirstOrDefault(kv =>
-                kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal)).Value;
-        }
+            return QualifiedEvents(path, name) is [var only] ? only.Value : null;
         if (_events.TryGetValue(name, out var local)) return local;
 
         // Then a `use`d bundle. `use Web` makes `@Request` mean *Vein.Web.Http.@Request, and the payload
         // is that declaration's — the same widening rule bare calls and marks already follow.
-        return ResolveUsed(Index.Events, "@", name, default)?.Value;
+        return ResolveUsed(Index.Events, "@", name, default, report: false)?.Value;
     }
 
     /// The same lookup as `ResolveEvent`, keeping the index KEY — the bundle that declared the event.
@@ -1499,15 +1529,10 @@ public sealed partial class Lower
     ///
     /// Null key for a local event, which needs no owner: `ExpandMembers` then resolves against this
     /// bundle, which is where the shape is.
-    private (string? Key, EventDecl? Decl) ResolveEventOwned(IReadOnlyList<string> path, string name, bool report = true)
+    private (string? Key, EventDecl? Decl) ResolveEventOwned(IReadOnlyList<string> path, string name, bool report = false)
     {
         if (path.Count > 0)
-        {
-            string refKey = RefKey(path, name);
-            var hit = Index.Events.FirstOrDefault(kv =>
-                kv.Key == refKey || kv.Key.EndsWith("." + refKey, StringComparison.Ordinal));
-            return (hit.Key, hit.Value);
-        }
+            return QualifiedEvents(path, name) is [var only] ? (only.Key, only.Value) : (null, null);
 
         if (_events.TryGetValue(name, out var local)) return (null, local);
 
@@ -1550,7 +1575,13 @@ public sealed partial class Lower
         {
             // An alias is the head of the path, not an author — `need "zenith.Courier" as C` makes
             // `*C.Post.@Dispatch` mean Courier's, and the key has to be the bundle's, not `C`'s.
+            //
+            // A SHORTENED path (`*Banjo.Api.@Strum`, `*Api.@Strum`) starts at the bundle or the
+            // publicator, not the author, so the written head is not the owner: the one bundle the index
+            // matches is. Keyed as written it was `Banjo.Api.Strum`, which nothing hears.
             string owner = _aliases.TryGetValue(path[0], out var aliased) ? aliased
+                         : path.Count < 3 && QualifiedEvents(path, name) is [var only]
+                             ? string.Join(".", only.Key.Split('.').Take(2))
                          : path.Count >= 2 ? path[0] + "." + path[1]
                          : path[0];
             return owner.StartsWith("Vein.", StringComparison.Ordinal) ? name : owner + "." + name;
@@ -2057,6 +2088,7 @@ public sealed partial class Lower
         if (Interp.HostEvents.Contains(hb.Event) && EventKey(hb.EventPath, hb.Event) == hb.Event)
             _diag.Error("VS0362", $"`@{hb.Event}` is carried out by the runtime itself (it is a transport event), so " +
                 "this `hear` would never run. To pass messages between shards, declare an event with another name.", hb.Span);
+        CheckEventRef(hb.EventPath, hb.Event, hb.Span);
         var attrs = new List<IrAttr> { IrAttr.Of("hear", EventKey(hb.EventPath, hb.Event)), At(hb.Span) };
         // An `audience #Mark` barrier names a mark too, and it is where a typo costs most: a misspelt
         // audience admits nobody, which reads exactly like a barrier doing its job.
@@ -2259,6 +2291,7 @@ public sealed partial class Lower
             case EmitStmt em:
             {
                 if (em.FillRest) _diag.Error("VS0347", SavedQuestion("fields"), em.FillAt ?? em.Span);
+                CheckEventRef(em.EventPath, em.Event, em.Span);
                 CheckEmitPayload(em);
                 RegisterImportedEvent(em.EventPath, em.Event);
                 NoteEventUse(em.EventPath, em.Event);

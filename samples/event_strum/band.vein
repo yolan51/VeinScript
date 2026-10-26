@@ -15,8 +15,10 @@
 //     [band]   heard bob's Strum: course 2, roll=true
 //     [banjo]  heard its own Strum: course 2, roll=true
 //     [harp]   heard its own Strum: C in octave 4
+//     [band]   heard bob's Strum: course 9, roll=false
+//     [banjo]  heard its own Strum: course 9, roll=false
 //
-// Only the Banjo's Strum reaches the band's `hear`, because that is the only one it named.
+// Only the Banjo's Strums reach the band's `hear`, because that is the only one it named.
 //
 // See also samples/bundle_collisions: the same idea with two kits, and why it is safe.
 
@@ -44,16 +46,20 @@ bundle Band by you {
 
             // ── 3. UNCOMMENT TO SEE THE AMBIGUITY (VS0216, a warning) ──────────────────────────
             // Guitar and Banjo both give `@Strum` as a bare name. Which payload is this? The
-            // compiler cannot know, warns, and this event reaches nobody.
+            // compiler cannot know: it warns once, at this line, and this event reaches nobody.
             //
             // emit @Strum { note: "A", fret: 5 }
 
-            // ── 4. UNCOMMENT TO SEE A KNOWN BUG (2026-10-26) ───────────────────────────────────
-            // The docs allow shortening the path while it stays unique, and only Banjo is a Banjo,
-            // so this SHOULD mean bob's Strum. Today it compiles cleanly ("ok") and reaches
-            // nobody: no `[banjo]` line appears. Use the full path until it is fixed.
+            // ── 4. A SHORTENED PATH: as few segments as stay unique ────────────────────────────
+            // Only one bundle in scope is a Banjo, so `*Banjo.Api.@Strum` is bob's. (Until
+            // 2026-10-26 this compiled cleanly and reached nobody.)
+            emit *Banjo.Api.@Strum { course: 9, roll: false }
+
+            // ── 5. UNCOMMENT TO SEE A PATH SHORTENED TOO FAR (VS0306, an error) ─────────────────
+            // All three kits have an `Api.@Strum`, so this names none of them. The error lists the
+            // three, ready to copy.
             //
-            // emit *Banjo.Api.@Strum { course: 9, roll: false }
+            // emit *Api.@Strum { course: 1, roll: false }
         }
 
         // HEAR EXACTLY ONE OF THEM. The Guitar's and the Harp's Strums never land here.
