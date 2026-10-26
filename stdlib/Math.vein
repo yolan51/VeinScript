@@ -60,10 +60,9 @@ bundle Math by Vein {
     // `if`, so the language can already say them — and a built-in is a thing you cannot read, cannot
     // step through, and cannot fix without a compiler release.
 
-    // THE INTERNAL CALLS BELOW ARE FULLY QUALIFIED, which looks redundant and is not. A `shared` fn
-    // invoked from another bundle runs where the CALLER can see, and a bare sibling name is not
-    // resolvable there — the call answers nothing and the result is empty, silently. `Rest.vein:82`
-    // already qualifies a call to a function in its own publicator for exactly this reason.
+    // THE INTERNAL CALLS BELOW ARE FULLY QUALIFIED for history: a `shared` fn invoked from another
+    // bundle used to resolve its body where the CALLER could see, and a bare sibling answered empty.
+    // Since ROADMAP Tier 1 #4 an imported body resolves against its owner, so a bare sibling works too.
     publicator Round {
         shared("Toward zero: trunc(4.7) is 4, trunc(-4.7) is -4. What `int(v)` does, named.")
         fn trunc(v: float) return float { return int(v) }

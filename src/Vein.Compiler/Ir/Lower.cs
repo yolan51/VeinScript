@@ -1085,7 +1085,63 @@ public sealed partial class Lower
             _diag.Warning("VS0213", $"Unknown function '*{refKey}' — the call will do nothing.", span);
             return null;
         }
+        return ImportFunction(hit.Key, hit.Value);
+    }
 
+    /// The owner bundle's own declarations, read once per owner: its functions (shared or not) and the bundles
+    /// it `need`s. What a bare call INSIDE a body imported from it resolves against (see OwnerCall).
+    private readonly Dictionary<string, (Dictionary<string, FuncDecl> Funcs, List<string> Needs)?> _ownerScopes = new(StringComparer.Ordinal);
+
+    private (Dictionary<string, FuncDecl> Funcs, List<string> Needs)? OwnerScope(string owner)
+    {
+        if (_ownerScopes.TryGetValue(owner, out var known)) return known;
+        (Dictionary<string, FuncDecl>, List<string>)? scope = null;
+        try
+        {
+            if (Index.Owners.TryGetValue(owner, out var file))
+            {
+                var unit = BundleLoader.Load(file, new DiagnosticBag());
+                var bundle = unit.Bundles.FirstOrDefault(b => (b.Author ?? "") + "." + b.Name == owner);
+                if (bundle is not null)
+                {
+                    IEnumerable<Decl> All(IEnumerable<Decl> ms) => ms.SelectMany(m => m is PublicatorDecl p ? All(p.Members) : new[] { m });
+                    var funcs = new Dictionary<string, FuncDecl>(StringComparer.Ordinal);
+                    foreach (var f in All(bundle.Members).OfType<FuncDecl>()) funcs.TryAdd(f.Name, f);
+                    scope = (funcs, bundle.Members.OfType<NeedDecl>().Select(n => n.Key).ToList());
+                }
+            }
+        }
+        catch { /* an unreadable owner: its bare calls resolve the old way */ }
+        _ownerScopes[owner] = scope;
+        return scope;
+    }
+
+    /// A bare `name(…)` inside a body imported from `owner`: the function it means there — the owner's own
+    /// (a sibling, shared or not), else one the owner `need`s — keyed and declared for ImportFunction. Null
+    /// when the owner does not know the name; the call then resolves the old way.
+    ///
+    /// THE BODY MEANS WHAT ITS AUTHOR WROTE. A library's fn calling its own helper, or a function of a bundle
+    /// the library needs, was resolved against the bundle that CALLED the library — which neither declares
+    /// the helper nor needs the library's dependencies — so it answered empty (VS0234, or nothing at all), and
+    /// every library author had to qualify their own calls. A package built on a package is what VeinChain
+    /// pays for, so this had to mean the same thing however deep the chain of `need`s runs.
+    private (string Key, FuncDecl Decl)? OwnerCall(string owner, string name)
+    {
+        if (OwnerScope(owner) is not { } scope) return null;
+        if (scope.Funcs.TryGetValue(name, out var own)) return (owner + "._own." + name, own);
+        var hits = Index.Functions.Where(kv =>
+        {
+            var parts = kv.Key.Split('.');
+            return parts.Length >= 3 && parts[^1] == name && scope.Needs.Contains(parts[0] + "." + parts[1]);
+        }).ToList();
+        return hits.Count == 1 ? (hits[0].Key, hits[0].Value) : null;
+    }
+
+    /// Lower a declaration from another bundle into THIS module under a collision-proof name (its key with
+    /// dots made underscores), once. Recursive: an imported function may itself call another.
+    private string ImportFunction(string key, FuncDecl decl)
+    {
+        var hit = new KeyValuePair<string, FuncDecl>(key, decl);
         string mangled = hit.Key.Replace('.', '_');
         if (_imported.ContainsKey(mangled)) return mangled;
 
@@ -3221,6 +3277,18 @@ public sealed partial class Lower
                 return imported is null
                     ? new IrCall(new IrScopeRef(string.Join(".", star.Path), star.Member), args)
                     : new IrCall(new IrLocalRef(imported), args);
+            }
+            // INSIDE A BODY IMPORTED FROM ANOTHER BUNDLE, a bare call means what it means THERE: the owner's own
+            // function, or one the owner needs (OwnerCall) — before anything this bundle declares or needs. A
+            // built-in still wins, as everywhere (`do` reaches past it).
+            case CallExpr { Callee: NameExpr on } c when _importOwner is { } io
+                                                     && (!Interp.PrebuiltNames.Contains(on.Name) || c.ViaDo)
+                                                     && OwnerCall(io, on.Name) is { } oc:
+            {
+                CheckCallArity(oc.Decl, on.Name, c.Args, c.Span);
+                CheckCallMarker(c, on.Name, oc.Decl);
+                string imported = ImportFunction(oc.Key, oc.Decl);
+                return new IrCall(new IrLocalRef(imported), c.Args.Select(LowerExpr).ToList());
             }
             // A BARE call that is not local: if a `use`d bundle exports it, import it exactly as the
             // qualified form above does — same mangling, same recursion — so `use Console` makes

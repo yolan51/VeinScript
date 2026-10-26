@@ -117,7 +117,7 @@ row was checked against the code on 2026-10-09.
 |---|---|---|---|
 | 2 | `target rows as row: $Task { row.titel }` reads empty, though RULES 27 says the fields are checked | Resolve types the binding and reports nothing | warn on a field the ascribed shape lacks |
 | 3 | `hear @E as e { e.feild }` reads empty | payload fields are typed in Resolve | the same warning for `hear` bindings (vein.lock already covers a field a bundle *removed*) |
-| 4 | a shared `fn` calling a sibling by bare name answers empty when called from another bundle | workaround at `stdlib/Math.vein` ("THE INTERNAL CALLS BELOW ARE FULLY QUALIFIED") | `ImportExternalFunction` resolves the imported body against its OWNER bundle |
+| 4 | ✅ 2026-10-25: a shared `fn` calling a sibling by bare name answered empty when called from another bundle | `Lower.OwnerCall` | an imported body's bare call resolves against its OWNER: its own fns, then the bundles it `need`s (`OwnerScopedImportTests`) |
 | 5 | `serve` lets a program read any path (`..`, absolute) while answering HTTP | `Interp.ResolvePath` | confine to the project under `serve` — security |
 | 6 | a bundle-level `let`/`var` is dropped | `Lower.LowerMember`, "not modeled yet" | an error until module state is designed |
 | 7 | recursion past 256 returns null; `while` past 100k stops | `Interp` caps | raise `@DiagnosticRaised`, so a guard sees it |
