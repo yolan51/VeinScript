@@ -67,6 +67,7 @@ public partial class MainWindow : Window
     private TunePanel _tunePanel = null!;
     private EventFlowPanel _flowPanel = null!;
     private FormatsPanel _formatsPanel = null!;
+    private DnaPanel _dnaPanel = null!;
     private ScrollViewer _execPanel = null!;
     private Grid _topCols = null!;
     private Grid _mainRows = null!;
@@ -139,6 +140,7 @@ public partial class MainWindow : Window
     private const int TabTune = 12;
     private const int TabFlow = 13;
     private const int TabFormats = 14;
+    private const int TabDna = 15;
 
     private ComboBox _runConfigs = null!;
     private TextBlock _runHint = null!;
@@ -176,6 +178,7 @@ public partial class MainWindow : Window
         _flowPanel.Navigate = (file, line) => GoTo(file, line, 1);
         _formatsPanel = this.FindControl<FormatsPanel>("Formats")!;
         _formatsPanel.Navigate = (file, line) => GoTo(file, line, 1);
+        _dnaPanel = this.FindControl<DnaPanel>("Dna")!;
         _execPanel = this.FindControl<ScrollViewer>("ExecPanel")!;
         _topCols = this.FindControl<Grid>("TopCols")!;
         _mainRows = this.FindControl<Grid>("MainRows")!;
@@ -189,6 +192,7 @@ public partial class MainWindow : Window
             if (_bottomPanel.SelectedIndex == TabTune) _tunePanel.Update(RunPath);
             if (_bottomPanel.SelectedIndex == TabFlow) _flowPanel.Update(RunPath);
             if (_bottomPanel.SelectedIndex == TabFormats) _formatsPanel.Update(RunPath);
+            if (_bottomPanel.SelectedIndex == TabDna) _dnaPanel.Update(_currentPath);
         };
         _statusBar = this.FindControl<TextBlock>("StatusBar")!;
         _bundleInspector = this.FindControl<Border>("BundleInspector")!;
@@ -325,6 +329,7 @@ public partial class MainWindow : Window
                 case "flow": ShowBottomTab(TabFlow); break;
                 case "formats": ShowBottomTab(TabFormats); break;
                 case "runtime": ShowBottomTab(TabRuntime); break;
+                case "dna": ShowBottomTab(TabDna); break;
             }
         }
         catch (Exception ex) { SetStatus($"Cannot open {path} — {ex.Message}"); }

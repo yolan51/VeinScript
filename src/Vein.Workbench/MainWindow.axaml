@@ -276,6 +276,9 @@
         <TabItem Header="Formats">
           <local:FormatsPanel Name="Formats" />
         </TabItem>
+        <TabItem Header="DNA">
+          <local:DnaPanel Name="Dna" />
+        </TabItem>
       </TabControl>
     </Grid>
   </DockPanel>
