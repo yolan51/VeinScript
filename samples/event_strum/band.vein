@@ -1,0 +1,64 @@
+// samples/event_strum/band.vein — three kits declare `@Strum`, and this bundle needs all three.
+//
+//   veinc run samples/event_strum/event_strum.app.vein --ticks 1
+//
+// THE QUESTION: three bundles in one app each declare an event called `@Strum`, each with its own
+// payload. When this bundle says `@Strum`, which payload does it mean?
+//
+// THE ANSWER: whichever one it NAMES. `*Author.Bundle.Publicator.@Strum` is one exact event, with
+// that bundle's payload, and the compiler checks the fields you write against it. The three are three
+// different events that share a word: emitting one never wakes a `hear` of another.
+//
+// What you should see:
+//
+//     [guitar] heard its own Strum: note E on fret 3
+//     [band]   heard bob's Strum: course 2, roll=true
+//     [banjo]  heard its own Strum: course 2, roll=true
+//     [harp]   heard its own Strum: C in octave 4
+//
+// Only the Banjo's Strum reaches the band's `hear`, because that is the only one it named.
+//
+// See also samples/bundle_collisions: the same idea with two kits, and why it is safe.
+
+bundle Band by you {
+
+    // TWO PLAIN NEEDS: both put their bare names in scope, so a bare `@Strum` here would be
+    // ambiguous between them (see the commented line in `Lead`).
+    need "alice.Guitar"
+    need "bob.Banjo"
+
+    // ONE ALIASED NEED (RULES 18b): Harp is reached as `*H.…` and adds NO bare name, so it is never
+    // part of the ambiguity at all.
+    need "carol.Harp" as H
+
+    shard Lead {
+        run once {
+            // ── 1. THE FULL PATH: author, bundle, publicator, event ─────────────────────────────
+            // Each one takes ITS OWN payload. Writing `course:` on the Guitar's Strum gets VS0227
+            // ("@Strum has no field 'course' … It takes: note, fret"), and the value is dropped.
+            emit *alice.Guitar.Api.@Strum { note: "E", fret: 3 }
+            emit *bob.Banjo.Api.@Strum { course: 2, roll: true }
+
+            // ── 2. THE ALIAS: `H` stands for `carol.Harp` ───────────────────────────────────────
+            emit *H.Api.@Strum { pluck: "C", octave: 4 }
+
+            // ── 3. UNCOMMENT TO SEE THE AMBIGUITY (VS0216, a warning) ──────────────────────────
+            // Guitar and Banjo both give `@Strum` as a bare name. Which payload is this? The
+            // compiler cannot know, warns, and this event reaches nobody.
+            //
+            // emit @Strum { note: "A", fret: 5 }
+
+            // ── 4. UNCOMMENT TO SEE A KNOWN BUG (2026-10-26) ───────────────────────────────────
+            // The docs allow shortening the path while it stays unique, and only Banjo is a Banjo,
+            // so this SHOULD mean bob's Strum. Today it compiles cleanly ("ok") and reaches
+            // nobody: no `[banjo]` line appears. Use the full path until it is fixed.
+            //
+            // emit *Banjo.Api.@Strum { course: 9, roll: false }
+        }
+
+        // HEAR EXACTLY ONE OF THEM. The Guitar's and the Harp's Strums never land here.
+        hear *bob.Banjo.Api.@Strum as s {
+            emit *Vein.Console.Io.@Print { text: "[band]   heard bob's Strum: course " + s.course + ", roll=" + s.roll }
+        }
+    }
+}

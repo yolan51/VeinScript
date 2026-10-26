@@ -1,0 +1,23 @@
+//   NOT RUN ON ITS OWN — it is one bundle of samples/event_strum/event_strum.app.vein. Run that (open it and press ▶), or set it as the
+//   Entry with the button at the top right, and ▶ runs the app from here.
+// samples/event_strum/bundles/Guitar.vein — the first of three kits that each declare `@Strum`.
+//
+// ITS PAYLOAD IS ITS OWN: a note and a fret. The Banjo and the Harp declare `@Strum` too, with
+// different fields, and none of the three had to know about the others. An event is
+// `Author.Bundle.Name`, so this one is `alice.Guitar.Strum`, whatever the others are called.
+
+bundle Guitar by alice {
+
+    publicator Api {
+        shared("A guitar string was strummed.")
+        event @Strum { note: string, fret: int }
+    }
+
+    // INSIDE ITS OWN BUNDLE, a bare `@Strum` means THIS bundle's `@Strum`, never another kit's.
+    // When the Band strums the Banjo, this shard hears nothing.
+    shard Player {
+        hear @Strum as s {
+            emit *Vein.Console.Io.@Print { text: "[guitar] heard its own Strum: note " + s.note + " on fret " + s.fret }
+        }
+    }
+}

@@ -1,0 +1,4 @@
+//     veinc run samples/event_strum/event_strum.app.vein
+app EventStrum {
+    load "band.vein"
+}

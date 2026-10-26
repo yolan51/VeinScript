@@ -1,0 +1,13 @@
+# vein.discovery — what `$`, `#`, `@`, `&` and `*` ENUMERATE in this sample.
+#
+# `samples/vein.discovery` one directory up says `silent all`; this file overrides it here.
+#
+# ALL THREE KITS ARE EXPOSED: type `@` in band.vein and the list shows `@Strum` three times, once
+# per owner, each row naming the bundle it came from.
+
+silent all
+
+expose Vein.Console        # `@Print`
+expose alice.Guitar        # one `@Strum`
+expose bob.Banjo           # another
+expose carol.Harp          # and the third

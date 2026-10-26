@@ -1,0 +1,20 @@
+//   NOT RUN ON ITS OWN — it is one bundle of samples/event_strum/event_strum.app.vein. Run that (open it and press ▶), or set it as the
+//   Entry with the button at the top right, and ▶ runs the app from here.
+// samples/event_strum/bundles/Harp.vein — the third `@Strum`.
+//
+// A pluck and an octave this time. The Band reaches this one through an ALIAS (`need "carol.Harp"
+// as H`), so its references are `*H.Api.@Strum`: shorter, and still exactly this event.
+
+bundle Harp by carol {
+
+    publicator Api {
+        shared("A harp string was plucked.")
+        event @Strum { pluck: string, octave: int }
+    }
+
+    shard Player {
+        hear @Strum as s {
+            emit *Vein.Console.Io.@Print { text: "[harp]   heard its own Strum: " + s.pluck + " in octave " + s.octave }
+        }
+    }
+}
