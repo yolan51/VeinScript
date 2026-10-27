@@ -15,8 +15,9 @@
 //    follows. The data identity IS its widget: a group is its column, a task is its row, so a task's checkbox
 //    and dropdown hang straight under the task.
 //
-// 3. A GROUP'S WIDGETS POINT AT IT. Its tab, badge, status, bar, box and buttons carry $For { group }, so "which
-//    group is this?" is a field, not a climb up the window.
+// 3. A GROUP OWNS ITS WIDGETS. Its tab, badge, status, bar, box and buttons carry the stdlib's
+//    *Vein.Core.Relations.$Owner { ownerId: group }, so "which group is this?" is a field, not a climb up the window.
+//    $Parent says where a widget is drawn; $Owner says what it belongs to — and `discard` takes both with it.
 //
 // 4. WHAT IS SHOWN IS DERIVED, IN `settled`. Counts, the progress bar, the badges, the priority colours and
 //    "hide done" are recomputed after every change, so no handler has to remember to repaint.
@@ -31,7 +32,6 @@ bundle Todo by you {
 
     shape $Group { name: string }
     shape $Task { group: string, text: string, done: bool = false, priority: int = 1 }
-    shape $For { group: Entity }          // a widget that belongs to a group
 
     builder Group { $Group   mark #Group }
     builder Task { $Task   mark #Task }
@@ -104,11 +104,11 @@ bundle Todo by you {
             target $Button #AddGroup on c.target as b {
                 target $Field #NewGroup as f { emit @AddGroup { name: f.Field.value } }
             }
-            target $For #Add on c.target as b {
-                emit @AddTask { group: b.For.group, text: boxText(b.For.group), priority: newPriority(b.For.group) }
+            target $Owner #Add on c.target as b {
+                emit @AddTask { group: b.Owner.ownerId, text: boxText(b.Owner.ownerId), priority: newPriority(b.Owner.ownerId) }
             }
-            target $For #Tab on c.target as t { emit @Show { group: t.For.group } }
-            target $For #DropGroup on c.target as d { emit @DropGroup { group: d.For.group } }
+            target $Owner #Tab on c.target as t { emit @Show { group: t.Owner.ownerId } }
+            target $Owner #DropGroup on c.target as d { emit @DropGroup { group: d.Owner.ownerId } }
             target $Parent #Delete on c.target as d {
                 do discard(d.Parent.of)           // the ✕'s parent is its task
                 emit @Changed { }
@@ -117,8 +117,8 @@ bundle Todo by you {
 
         hear @Submitted as s {
             target $Field #NewGroup on s.target as f { emit @AddGroup { name: s.value } }
-            target $For #Box on s.target as b {
-                emit @AddTask { group: b.For.group, text: s.value, priority: newPriority(b.For.group) }
+            target $Owner #Box on s.target as b {
+                emit @AddTask { group: b.Owner.ownerId, text: s.value, priority: newPriority(b.Owner.ownerId) }
             }
         }
 
@@ -162,16 +162,14 @@ bundle Todo by you {
             if not (a.text == "") {
                 target $Group on a.group as g { bring Task(g.Group.name, a.text, false, a.priority) }
                 emit @Changed { }
-                target $For #Box as b {
-                    if b.For.group == a.group { target $Field on b as f { f.Field.value = "" } }
+                target $Owner #Box as b {
+                    if b.Owner.ownerId == a.group { target $Field on b as f { f.Field.value = "" } }
                 }
             }
         }
 
-        // The group's column holds its tasks; its tab and badge sit in the tab row and go with it.
+        // The group's column holds its tasks; its tab and badge are owned by it, so they go with it too.
         hear @DropGroup as d {
-            target $For #Tab as t { if t.For.group == d.group { do discard(t) } }
-            target $For #TabBadge as b { if b.For.group == d.group { do discard(b) } }
             do discard(d.group)
             emit @Changed { }
             emit @ShowSome { }
@@ -182,8 +180,8 @@ bundle Todo by you {
             target $Group #Shown as g {
                 if g == s.group { unmark g #Hidden } else { mark g #Hidden }
             }
-            target $For #Tab as t {
-                if t.For.group == s.group { mark t #Accent } else { unmark t #Accent }
+            target $Owner #Tab as t {
+                if t.Owner.ownerId == s.group { mark t #Accent } else { unmark t #Accent }
             }
         }
 
@@ -217,10 +215,10 @@ bundle Todo by you {
                 target $Panel #Tabs as tabs {
                     bring Button(tabs, g.Group.name) as tab
                     mark tab #Tab
-                    attach $For to tab { group: g }
+                    attach $Owner to tab { ownerId: g }
                     bring Badge(tabs, "0") as badge
                     mark badge #TabBadge
-                    attach $For to badge { group: g }
+                    attach $Owner to badge { ownerId: g }
                 }
                 if g carries #Fresh { emit @Show { group: g } } else { emit @ShowSome { } }
             }
@@ -243,28 +241,28 @@ bundle Todo by you {
         bring Heading(head, name, 18.0)
         bring Label(head, "") as status
         mark status #Status
-        attach $For to status { group: g }
+        attach $Owner to status { ownerId: g }
         bring Button(head, "Remove group") as drop
         mark drop #DropGroup
-        attach $For to drop { group: g }
+        attach $Owner to drop { ownerId: g }
         attach $Tip to drop { text: "Remove this group and every task in it" }
         bring Progress(g, 0.0, 1.0) as bar
         mark bar #DoneBar
-        attach $For to bar { group: g }
+        attach $Owner to bar { ownerId: g }
         bring Divider(g, 1.0)
         bring Row(g, 8.0) as entry
         bring Input(entry, "", "Add a task to " + name) as box
         mark box #Box
-        attach $For to box { group: g }
+        attach $Owner to box { ownerId: g }
         bring Dropdown(entry, levels(), 0) as pick
         mark pick #NewPriority
-        attach $For to pick { group: g }
+        attach $Owner to pick { ownerId: g }
         bring Button(entry, "Add") as add
         mark add #Add
-        attach $For to add { group: g }
+        attach $Owner to add { ownerId: g }
         bring Scroll(g, 300.0, 4.0) as list
         mark list #TaskList
-        attach $For to list { group: g }
+        attach $Owner to list { ownerId: g }
     }
 
     SF taskWidgets(t: Entity, text: string, done: bool, priority: int) {
@@ -294,7 +292,7 @@ bundle Todo by you {
                 groups += 1
                 let all = total(g.Group.name)
                 let open = left(g.Group.name)
-                target $For as w { if w.For.group == g { do show(w, all, open) } }
+                target $Owner as w { if w.Owner.ownerId == g { do show(w, all, open) } }
             }
 
             target $Text #Empty as e {
@@ -412,7 +410,7 @@ bundle Todo by you {
         var list = 0
         target $Group #Shown as g {
             if g.Group.name == group {
-                target $For #TaskList as l { if l.For.group == g { list = l } }
+                target $Owner #TaskList as l { if l.Owner.ownerId == g { list = l } }
             }
         }
         return list
@@ -420,13 +418,13 @@ bundle Todo by you {
 
     fn boxText(group: Entity) return string {
         var text = ""
-        target $For #Box as b { if b.For.group == group { target $Field on b as f { text = f.Field.value } } }
+        target $Owner #Box as b { if b.Owner.ownerId == group { target $Field on b as f { text = f.Field.value } } }
         return text
     }
 
     fn newPriority(group: Entity) return int {
         var level = 1
-        target $For #NewPriority as p { if p.For.group == group { target $Choice on p as c { level = c.Choice.picked + 1 } } }
+        target $Owner #NewPriority as p { if p.Owner.ownerId == group { target $Choice on p as c { level = c.Choice.picked + 1 } } }
         return level
     }
 }

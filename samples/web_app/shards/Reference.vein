@@ -1746,7 +1746,7 @@ shard Reference {
                             "<code class=\"inline-code\">Entity</code> is responsible for or &quot;owns&quot; the identity " +
                             "carrying this shape. This is distinct from a parent/child hierarchy and is often used for " +
                             "authorization, lifetime management, or attribution.")
-            bring CodeBlock("shape $Owner { by: Entity }")
+            bring CodeBlock("shape $Owner { ownerId: Entity }")
             bring Subsubheading("Primitive Types: <code class=\"inline-code\">int</code>, <code class=\"inline-code\">string</code>, " +
                                 "<code class=\"inline-code\">Entity</code>")
             bring Paragraph("<code class=\"inline-code\">Core.vein</code> utilizes the fundamental primitive types of " +
@@ -2433,7 +2433,7 @@ shard Reference {
                 bring ListItem("<code class=\"inline-code\">shape $Counter { value: int folds sum }</code>")
                 bring ListItem("<strong>Relations:</strong>")
                 bring ListItem("<code class=\"inline-code\">shape $Parent { of: Entity }</code>")
-                bring ListItem("<code class=\"inline-code\">shape $Owner { by: Entity }</code>")
+                bring ListItem("<code class=\"inline-code\">shape $Owner { ownerId: Entity }</code>")
             bring Close("ul")
             bring Subsubheading("Vein.Math")
             bring Open("ul")

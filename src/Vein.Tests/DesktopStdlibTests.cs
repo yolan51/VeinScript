@@ -77,6 +77,46 @@ public class DesktopStdlibTests
     }
 
     [Fact]
+    public void Discard_also_takes_what_the_identity_owns_wherever_it_sits()
+    {
+        // The tab sits in another row but is owned by the group (and owns a badge in turn); the other tab is not.
+        const string source = """
+            bundle O by you {
+                need "Vein.Desktop"
+                need "Vein.UI"
+                need "Vein.Core"
+                mark #Group
+                shard Build {
+                    run once {
+                        bring Window("O", 300.0, 200.0) as w
+                        bring Row(w, 8.0) as tabs
+                        bring Column(w, 8.0) as group
+                        mark group #Group
+                        bring Label(group, "inside")
+                        bring Button(tabs, "mine") as tab
+                        attach $Owner to tab { ownerId: group }
+                        bring Badge(tabs, "3") as badge
+                        attach $Owner to badge { ownerId: tab }
+                        bring Button(tabs, "other")
+                    }
+                    hear *Vein.Time.Clock.@Ticked as t {
+                        if t.frame == 2 { target $Panel #Group as g { do discard(g) } }
+                        if t.frame == 4 {
+                            var texts = ""
+                            target $Text as x { texts = texts + x.Text.content + " " }
+                            target $Button as x { texts = texts + x.Button.label + " " }
+                            var owned = 0
+                            target $Owner as x { owned += 1 }
+                            emit *Vein.Console.Io.@Print { text: "left: " + texts + "owned=" + string(owned) }
+                        }
+                    }
+                }
+            }
+            """;
+        Assert.Contains("left: other owned=0", Run(source, 5));
+    }
+
+    [Fact]
     public void Every_widget_builder_makes_a_widget_under_its_window_with_its_shape_and_marks()
     {
         const string source = """

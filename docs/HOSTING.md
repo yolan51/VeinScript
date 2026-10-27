@@ -282,7 +282,7 @@ What the host draws, beyond the widgets' own fields:
 
 The host WRITES the two fields for the same reason it writes `$View`: they are the state of a control the
 host owns, and the program reads them like any field. Everything else — what a click means, what
-`do discard(row)` takes with it, what a window shows — is the program's. A close cannot be cancelled yet.
+`do discard(row)` takes with it (what sits under it and what it `$Owner`s), what a window shows — is the program's. A close cannot be cancelled yet.
 `veinc run` runs a desktop program's rules with no window drawn, and says so.
 
 ## Limits, said plainly

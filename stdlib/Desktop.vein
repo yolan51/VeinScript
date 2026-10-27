@@ -156,12 +156,17 @@ bundle Desktop by Vein {
 
         // REMOVAL WALKS DOWN. The runtime raises no @Destroyed (stdlib/Core.vein leaves teardown to the
         // program), so taking a row away would leave its checkbox behind, parented to nothing. This takes the
-        // identity and everything under it, at any depth. Written qualified: a shared SF runs INLINE in the
-        // caller, which may not have `need`ed this bundle by name. (`remove` is the list built-in, VS0361.)
-        shared("Remove a window or widget, and everything inside it: do discard(row).")
+        // identity and everything under it, at any depth — and everything it OWNS (*Vein.Core.Relations.$Owner):
+        // a group's tab sits in the tab row, not under the group, but it ends with the group. Written qualified:
+        // a shared SF runs INLINE in the caller, which may not have `need`ed this bundle by name. (`remove` is
+        // the list built-in, VS0361.)
+        shared("Remove a window or widget, everything inside it, and everything it owns: do discard(row).")
         SF discard(e: Entity) {
             target $Parent as child {
                 if child.Parent.of == e { do *Vein.Desktop.Widgets.discard(child) }
+            }
+            target $Owner as owned {
+                if owned.Owner.ownerId == e { do *Vein.Desktop.Widgets.discard(owned) }
             }
             destroy e
         }

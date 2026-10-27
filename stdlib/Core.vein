@@ -54,7 +54,7 @@ bundle Core by Vein {
         shape $Parent { of: Entity }
 
         shared("Ownership link: the Entity that owns this identity.")
-        shape $Owner { by: Entity }
+        shape $Owner { ownerId: Entity }
     }
 
     // No behaviour here — the publicators above are the whole bundle. A shard cannot be `shared`, so one

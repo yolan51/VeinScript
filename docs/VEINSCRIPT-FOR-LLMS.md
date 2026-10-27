@@ -450,7 +450,7 @@ Bring a bundle in with `need "Vein.X"`. Exact signatures:
 **Vein.Core** — `Lifecycle`: `@Spawned/@Destroyed/@Enabled/@Disabled { entity: Entity }`.
 `Meta`: `$Name { text }`, `$Tag { value }`, `$Layer { index: int }`. `Quantity`: `$Pool { current: int
 folds sum, max: int }`, `$Counter { value: int folds sum }`. `Relations`: `$Parent { of: Entity }`,
-`$Owner { by: Entity }`.
+`$Owner { ownerId: Entity }`.
 
 **Vein.Math** — `Values`: `$Vec2 {x,y}`, `$Vec3 {x,y,z}`, `$Vec4 {x,y,z,w}`, `$Color {r,g,b,a}`, `$Rect
 {x,y,width,height}` (all float). `Scalars`: `clamp(v,lo,hi) lerp(a,b,t) min(a,b) max(a,b) abs(v)
@@ -780,5 +780,6 @@ stepper, web preview, AI assistant that compiles suggestions before offering the
     with a literal starting value — never computed — and is changed in `vein.settings`, not by editing
     the shard.
 12. Shape it to stay readable ([RULES-OF-THUMB.md](RULES-OF-THUMB.md)): give data its own shapes; more than two
-    nested `target`s means a link (`$For { group: Entity }`) is missing; save with `toJson`, load with
+    nested `target`s means a link is missing (`$Parent { of }` = where it sits, `$Owner { ownerId }` = what it belongs
+    to, both in Vein.Core: use them before inventing one); save with `toJson`, load with
     `loom<Json>` + `weave` (built in — no `need`).
