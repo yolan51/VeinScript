@@ -779,3 +779,6 @@ stepper, web preview, AI assistant that compiles suggestions before offering the
 11. A number a designer will want to change goes in a shard as `tune("what it changes")` above a `var`
     with a literal starting value — never computed — and is changed in `vein.settings`, not by editing
     the shard.
+12. Shape it to stay readable ([RULES-OF-THUMB.md](RULES-OF-THUMB.md)): give data its own shapes; more than two
+    nested `target`s means a link (`$For { group: Entity }`) is missing; save with `toJson`, load with
+    `loom<Json>` + `weave` (built in — no `need`).
