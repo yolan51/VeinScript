@@ -426,9 +426,16 @@ internal sealed class AssistantPanel : UserControl
     {
         if (text.Length == 0) return;
 
+        // The assistant answers in Markdown: drawn, not shown raw (MarkdownView). What you typed is shown as
+        // you typed it — a `*` in a question is a character, not emphasis.
+        var foreground = new SolidColorBrush(Color.Parse("#C3C3C3"));
+        Control body = who == "assistant"
+            ? MarkdownView.Render(text, foreground)
+            : new SelectableTextBlock { Text = text, TextWrapping = TextWrapping.Wrap, Foreground = foreground };
+
         _turns.Children.Add(new StackPanel
         {
-            Spacing = 2,
+            Spacing = 4,
             Children =
             {
                 new TextBlock
@@ -438,12 +445,7 @@ internal sealed class AssistantPanel : UserControl
                     FontWeight = FontWeight.SemiBold,
                     Foreground = new SolidColorBrush(Color.Parse(colour))
                 },
-                new SelectableTextBlock
-                {
-                    Text = text,
-                    TextWrapping = TextWrapping.Wrap,
-                    Foreground = new SolidColorBrush(Color.Parse("#C3C3C3"))
-                }
+                body
             }
         });
 
