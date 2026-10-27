@@ -204,6 +204,38 @@ public class BundleIndexTests : IDisposable
         Assert.DoesNotContain(r.Diagnostics, x => x.Code == "VS0310");
     }
 
+    [Fact]
+    public void Identical_copies_in_two_roots_are_one_bundle_and_one_changed_character_is_VS0310()
+    {
+        // A library's source checkout beside the host that embeds it: the same files, found twice.
+        string a = Path.Combine(Path.GetTempPath(), "vein-dup-" + Guid.NewGuid().ToString("N"));
+        string b = Path.Combine(Path.GetTempPath(), "vein-dup-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            foreach (var root in new[] { a, b })
+            {
+                Directory.CreateDirectory(Path.Combine(root, "Lib", "publicators"));
+                File.WriteAllText(Path.Combine(root, "Lib", "Lib.vein"), AcmeLib);
+                File.WriteAllText(Path.Combine(root, "Lib", "publicators", "Extra.vein"),
+                    "shared(\"One more.\")\nfn more(x: int) return int { return x + 1 }\n");
+            }
+            Assert.Empty(BundleIndex.For(new[] { a, b }).Duplicates);
+
+            File.AppendAllText(Path.Combine(b, "Lib", "publicators", "Extra.vein"), "// edited\n");
+            BundleIndex.Invalidate(b);
+            Assert.Single(BundleIndex.For(new[] { a, b }).Duplicates);
+        }
+        finally
+        {
+            // Only the two temp directories this test just created.
+            foreach (var root in new[] { a, b })
+            {
+                BundleIndex.Invalidate(root);
+                try { Directory.Delete(root, recursive: true); } catch { }
+            }
+        }
+    }
+
     // ---- caching -----------------------------------------------------------------------------
 
     [Fact]

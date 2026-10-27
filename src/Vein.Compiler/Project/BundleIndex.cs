@@ -146,7 +146,10 @@ public sealed class BundleIndex
             // lives beside it — see SignatureLock.PathFor.
             if (!stdlib && !IsLibraryRoot(root)) installedRoot ??= root;
             foreach (var (bundle, file) in folder.Owners)
-                if (owners.TryGetValue(bundle, out var first)) duplicates.Add((bundle, first, file));
+                if (owners.TryGetValue(bundle, out var first))
+                {
+                    if (!SameSource(first, file)) duplicates.Add((bundle, first, file));
+                }
                 else
                 {
                     owners[bundle] = file;
@@ -166,6 +169,32 @@ public sealed class BundleIndex
 
     /// Where to look, in priority order: the standard library, then this project's installed bundles.
     /// stdlib first is deliberate — an installed package must never shadow `*Vein.Console.Io.print`.
+    /// THE SAME BUNDLE FOUND TWICE IS NOT TWO BUNDLES. VS0310 exists because a `*` reference carries no
+    /// version and cannot choose between copies — and when every file of the two copies says the same
+    /// thing, there is nothing to choose. That is a library's own source checkout beside the host that
+    /// ships it (VeinDesktop's samples see `bundles/desktop/Ui` AND the copy embedded in veindesktop).
+    /// The first root still wins; one character of difference in any file is still VS0310.
+    private static bool SameSource(string first, string second)
+    {
+        try
+        {
+            var a = BundleLoader.SourceFiles(first);
+            var b = BundleLoader.SourceFiles(second);
+            if (a.Count != b.Count) return false;
+            string dirA = Path.GetDirectoryName(a[0])!, dirB = Path.GetDirectoryName(b[0])!;
+            for (int i = 0; i < a.Count; i++)
+            {
+                if (!string.Equals(Path.GetRelativePath(dirA, a[i]), Path.GetRelativePath(dirB, b[i]), StringComparison.OrdinalIgnoreCase))
+                    return false;
+                if (File.ReadAllText(a[i]).ReplaceLineEndings() != File.ReadAllText(b[i]).ReplaceLineEndings())
+                    return false;
+            }
+            return true;
+        }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+    }
+
     public static IReadOnlyList<string> SearchRoots(string? startDir)
     {
         var roots = new List<string>();
