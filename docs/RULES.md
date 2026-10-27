@@ -388,6 +388,11 @@ fields stay readable too (`d.who` inside a query). So nothing needs copying into
 credit every kill to the one killed. And `each tick as t { … t.delta … }` gives a block the frame's clock,
 in place of a `var dt` kept by a `hear @Ticked`.
 
+**14g. `target $Shape not #Mark` leaves out what wears a mark** (D25). `target $Smurf not #Hidden not
+#Shtroumphe as s` visits the smurfs wearing neither; it mixes with marks a match must wear
+(`target $Item #Shop not #Sold`) and with `on`. `Index` counts only what the query kept. Only marks can be
+excluded — `not $Shape` is VS0376; test a shape in the body.
+
 **15. `$Enemy` and `#Enemy` are different things.** Different keyword, different sigil; a program may use
 both. In emitted C# the mark becomes `Marks.Enemy` and the shape `Enemy`.
 

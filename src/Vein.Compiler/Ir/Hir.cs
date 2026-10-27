@@ -57,6 +57,9 @@ public sealed record IrQuery(IReadOnlyList<string> Components, IReadOnlyList<str
 {
     /// `target $S on e as x` — the one identity looked at; null for a query of every identity (D22).
     public IrExpr? On { get; init; }
+
+    /// `not #Hidden` — marks a match must not carry (D25).
+    public IReadOnlyList<string> Excluded { get; init; } = Array.Empty<string>();
 }
 
 public sealed record IrShard(

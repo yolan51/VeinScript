@@ -33,7 +33,7 @@ bundle Graphics by Vein {
         shape $Flip { x: bool = false, y: bool = false }
 
         // A mark rather than `$Tint { a: 0 }`: a hidden identity keeps its colour for when it comes back, and
-        // `if not (x carries #Hidden)` inside a `target` finds what the player can see (RULES 17f).
+        // `target $Model not #Hidden as m` finds what the player can see (D25).
         shared("Wear this to be drawn nowhere. Unmark to show it again, as it was.")
         mark #Hidden
     }

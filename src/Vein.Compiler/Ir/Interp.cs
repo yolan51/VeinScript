@@ -2018,7 +2018,7 @@ public sealed class Interp
                     // that keeps one: the store answers `Has` per shape and mark directly.
                     IEnumerable<long> matches = q.On is { } on
                         ? OneOf(AsLong(Eval(on, self, locals)), q)
-                        : _store.Query(q.Components, q.Tags, q.OrderShape, q.OrderField);
+                        : _store.Query(q.Components, q.Tags, q.OrderShape, q.OrderField, q.Excluded);
                     foreach (long entity in matches)
                     {
                         long previous = _currentEntity;
@@ -2067,7 +2067,8 @@ public sealed class Interp
 
     private IEnumerable<long> OneOf(long id, IrQuery q)
     {
-        if (id > 0 && _store.IsAlive(id) && q.Components.All(c => _store.Has(id, c)) && q.Tags.All(t => _store.HasTag(id, t)))
+        if (id > 0 && _store.IsAlive(id) && q.Components.All(c => _store.Has(id, c)) && q.Tags.All(t => _store.HasTag(id, t))
+            && !q.Excluded.Any(t => _store.HasTag(id, t)))
             yield return id;
     }
 

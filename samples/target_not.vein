@@ -1,0 +1,58 @@
+// samples/target_not.vein — D25: `target $Shape not #Mark` finds what does NOT wear a mark.
+//
+//   veinc run samples/target_not.vein --ticks 2
+//
+// `not` excludes here exactly as it does in an `audience` (D19): `target $Smurf not #Hidden not #Shtroumphe
+// as s` visits every smurf that wears neither mark. Several `not`s are an AND of exclusions, and they mix
+// with marks a match MUST wear: `target $Smurf #Blue not #Hidden as s`.
+//
+// It was `if not (s carries #Hidden) { … }` inside the loop. That still works, and is still the way to ask
+// about one identity in a body; the query form says it where the set is chosen, so the body is only about
+// what it does — and `Index` counts only what the query kept, on both runtimes.
+
+bundle TargetNot by you {
+    shape $Smurf { name: string }
+    mark #Hidden
+    mark #Shtroumphe
+    mark #Blue
+
+    builder Smurf { $Smurf   mark #Blue }
+
+    shard Seed {
+        run once {
+            bring Smurf("Papa")
+            bring Smurf("Brainy") as brainy
+            mark brainy #Hidden
+            bring Smurf("Clumsy") as clumsy
+            mark clumsy #Shtroumphe
+            bring Smurf("Hefty") as hefty
+            mark hefty #Hidden
+            mark hefty #Shtroumphe
+            bring Smurf("Vanity")
+        }
+    }
+
+    shard Show {
+        hear *Vein.Time.Clock.@Ticked as t {
+            if t.frame == 1 {
+                target $Smurf not #Hidden as s {
+                    emit *Vein.Console.Io.@Print { text: "not hidden: " + s.Smurf.name + " (#" + string(Index) + ")" }
+                }
+                target $Smurf not #Hidden not #Shtroumphe as s {
+                    emit *Vein.Console.Io.@Print { text: "neither: " + s.Smurf.name + " (#" + string(Index) + ")" }
+                }
+                target $Smurf #Blue not #Shtroumphe as s {
+                    emit *Vein.Console.Io.@Print { text: "blue, not shtroumphe: " + s.Smurf.name }
+                }
+            }
+            if t.frame == 2 {
+                // `on` looks at one identity, and `not` still applies to it (D22).
+                target $Smurf #Shtroumphe as s {
+                    target $Smurf not #Hidden on s as x {
+                        emit *Vein.Console.Io.@Print { text: "shtroumphe, not hidden: " + x.Smurf.name }
+                    }
+                }
+            }
+        }
+    }
+}

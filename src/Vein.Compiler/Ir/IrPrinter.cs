@@ -107,7 +107,7 @@ public static class IrPrinter
         IrLoopKind.While => $"while {E(lp.Cond!)}",
         IrLoopKind.Repeat => $"repeat {E(lp.Count!)}{(lp.Var is null ? "" : " as " + lp.Var)}",
         _ => lp.Query is not null
-            ? $"target {lp.Var}: Entity in query({string.Join(",", lp.Query.Components)}{(lp.Query.Tags.Count > 0 ? " #" + string.Join(",#", lp.Query.Tags) : "")})"
+            ? $"target {lp.Var}: Entity in query({string.Join(",", lp.Query.Components)}{(lp.Query.Tags.Count > 0 ? " #" + string.Join(",#", lp.Query.Tags) : "")}{string.Concat(lp.Query.Excluded.Select(t => " not #" + t))})"
             : $"target {lp.Var} in {E(lp.Source!)}"
     };
 

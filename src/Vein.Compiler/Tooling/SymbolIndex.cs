@@ -60,7 +60,7 @@ public static class SymbolIndex
                     break;
                 case WhileStmt w: Expr(w.Cond); Block(w.Body); break;
                 case TargetStmt t: Expr(t.Source); Block(t.Body); break;
-                case QueryStmt q: AddMarks(q.Tags); Block(q.Body); break;
+                case QueryStmt q: AddMarks(q.Tags); AddMarks(q.Excluded); Block(q.Body); break;
                 case RepeatStmt r: Expr(r.Count); Block(r.Body); break;
                 case MatchStmt m:
                     Expr(m.Subject); foreach (var a in m.Arms) Block(a.Body);

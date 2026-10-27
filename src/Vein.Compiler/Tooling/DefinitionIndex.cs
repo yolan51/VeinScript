@@ -197,7 +197,7 @@ public sealed class DefinitionIndex
                 // as `$Shape` and `#Mark`, reached by a different syntax.
                 case QueryStmt q:
                     foreach (string c in q.Components) Use(c, SymbolKind.Shape, q.Span);
-                    foreach (string g in q.Tags) Use(g, SymbolKind.Mark, q.Span);
+                    foreach (string g in q.Tags.Concat(q.Excluded)) Use(g, SymbolKind.Mark, q.Span);
                     if (q.On is not null) Ex(q.On);
                     Stm(q.Body);
                     break;

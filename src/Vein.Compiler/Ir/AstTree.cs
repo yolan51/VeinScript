@@ -143,7 +143,7 @@ public sealed class AstTree
 
     private string QueryHead(QueryStmt q)
     {
-        var refs = q.Components.Select(c => "$" + c).Concat(q.Tags.Select(t => "#" + t));
+        var refs = q.Components.Select(c => "$" + c).Concat(q.Tags.Select(t => "#" + t)).Concat(q.Excluded.Select(t => "not #" + t));
         return $"{string.Join(" ", refs)}{(q.On is null ? "" : " on " + Inline(q.On))} as {q.Bind}";
     }
 

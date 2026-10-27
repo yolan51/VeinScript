@@ -194,12 +194,13 @@ public sealed class EntityStore
 
     // ---- query ------------------------------------------------------------------------------
 
-    /// Entities carrying every named component and every named mark, ascending by id.
+    /// Entities carrying every named component and every named mark — and none of the `excluded` marks
+    /// (`target $S not #Hidden`, D25) — ascending by id.
     ///
     /// MATERIALISED to an array on purpose: the caller iterates it while the body may spawn, destroy or
     /// mark, and a snapshot makes all of that safe with no dying-entity bookkeeping.
     public long[] Query(IReadOnlyList<string> shapes, IReadOnlyList<string> tags,
-                        string? orderShape = null, string? orderField = null)
+                        string? orderShape = null, string? orderField = null, IReadOnlyList<string>? excluded = null)
     {
         IEnumerable<long>? seed = null;
 
@@ -218,7 +219,8 @@ public sealed class EntityStore
 
         var matches = seed.Where(e => _alive.Contains(e)
                                    && shapes.All(s => Has(e, s))
-                                   && tags.All(m => HasTag(e, m)));
+                                   && tags.All(m => HasTag(e, m))
+                                   && (excluded is null || !excluded.Any(m => HasTag(e, m))));
 
         // Spawn order unless asked otherwise. `.OrderBy` is STABLE, so ties keep spawn order and a
         // repeated run gives the same sequence — the property golden output depends on.

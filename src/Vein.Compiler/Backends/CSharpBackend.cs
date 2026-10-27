@@ -1285,6 +1285,10 @@ public sealed class CSharpBackend : IVeinBackend
         }
         foreach (var c in comps.Skip(1))
             sb.AppendLine($"{pad}    if (!World.Has<{c}>({entVar})) continue;");
+        // `not #Hidden` (D25): skipped BEFORE the counter, as the interpreter's Query never yields it — the two
+        // runtimes agree on `Index`.
+        foreach (var t in q.Excluded)
+            sb.AppendLine($"{pad}    if (World.MarkedAs<Marks.{Ident(t)}>({entVar})) continue;");
         sb.AppendLine($"{pad}    {_indexVar}++;");
 
         // Two struct copies per component, both free. `Get` returns by value, and assigning it again gives

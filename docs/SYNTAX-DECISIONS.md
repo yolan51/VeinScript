@@ -813,6 +813,29 @@ compiling them needs VeinWorld to replace a component inside a commit and to swe
 two collections (`same`, `with`, `without`, `common`, `within`) waits for a program that needs it, and so do
 a map literal and weaving into a map.
 
+## D25 — `target $Shape not #Mark`: a query excludes marks {#targetnot}
+
+> **Reported as** `VS0376` (`not` before a shape: a query excludes marks only).
+
+**DECIDED** (2026-10-26). `target $Smurf not #Hidden not #Shtroumphe as s` visits every identity with
+`$Smurf` that wears NEITHER mark. Several `not`s are an AND of exclusions, and they mix with marks a match
+must wear: `target $Item #Shop not #Sold as i`. With `on` (D22) the one identity is looked at the same way.
+
+**Why the word `not`.** It already excludes in an `audience` (D19: `audience not *you.Billing.!Invoicer`),
+and it is how logic is spelled (D12) — so `not #Hidden` reads as English and needs no new symbol. A `!` or a
+`-#Hidden` would have been a second way to say what `not` says.
+
+**Why in the query, when `if not (s carries #Hidden)` already worked.** Three reasons, the last decisive:
+the body is then only about what it does; `Index` counts what the query KEPT, on both runtimes (the C#
+backend skips an excluded match before its counter, as the interpreter's Query never yields it); and the
+stdlib's own comment on `#Hidden` had advertised `target … not #Hidden` — the form people reach for first.
+
+**Marks only.** "Lacks a shape" is a different question (an identity without `$Health` is not a dead
+one), nothing asks it yet, and `not $Shape` is VS0376 rather than a silent guess. A shape can still be
+tested in the body.
+
+Sample: `samples/target_not.vein` (in `check-backend.sh`).
+
 ## Reserved-word disposition
 
 Every keyword currently in [Lexer.cs](../src/Vein.Compiler/Lexing/Lexer.cs) `Keywords`, classified.

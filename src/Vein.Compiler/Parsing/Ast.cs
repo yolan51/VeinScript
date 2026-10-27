@@ -285,6 +285,10 @@ public sealed record QueryStmt(IReadOnlyList<string> Components, IReadOnlyList<s
     /// `target $Life on victim as l { … }` — the query for ONE identity, already known: the body runs once
     /// when it carries every shape and mark named, and not at all otherwise (D22). Null for a query of all.
     public Expr? On { get; init; }
+
+    /// `target $Item not #Hidden not #Sold as i` — marks a match must NOT carry (D25). `not` excludes here as
+    /// it does in an `audience` (D19). Empty for a query that excludes nothing.
+    public IReadOnlyList<string> Excluded { get; init; } = Array.Empty<string>();
 }
 public sealed record RepeatStmt(Expr Count, string? Var, Block Body, SourceSpan Span) : Stmt(Span);
 public sealed record MatchStmt(Expr Subject, IReadOnlyList<MatchArm> Arms, Block? Else, SourceSpan Span) : Stmt(Span);

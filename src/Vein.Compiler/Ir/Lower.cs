@@ -2200,6 +2200,7 @@ public sealed partial class Lower
                 // reference to `Marks.Ghost` and no `Marks` class to hold it, so the generated C# did not
                 // compile. Querying a mark nothing sets is legitimate — the query is simply always empty.
                 foreach (var tag in q.Tags) UseMark(tag, q.Span);
+                foreach (var tag in q.Excluded) UseMark(tag, q.Span);   // checked like any mark, and typed for the backend
 
                 // A SHAPE THIS QUERY READS IS A SHAPE THIS MODULE NEEDS A TYPE FOR, and reading it is
                 // as much a use as attaching it. `RegisterAttachedShape` covered `attach` because that
@@ -2250,7 +2251,7 @@ public sealed partial class Lower
                 foreach (var shape in q.Components) _carried.Add((q.Bind, shape, "the target matched it"));
                 var body = LowerBlock(q.Body);
                 _carried.RemoveRange(carried, _carried.Count - carried);
-                return new IrLoop(IrLoopKind.Target, null, q.Bind, null, new IrQuery(q.Components, q.Tags, q.Bind, q.OrderShape, q.OrderField) { On = on }, null, body);
+                return new IrLoop(IrLoopKind.Target, null, q.Bind, null, new IrQuery(q.Components, q.Tags, q.Bind, q.OrderShape, q.OrderField) { On = on, Excluded = q.Excluded }, null, body);
             }
             case RepeatStmt r:
                 return new IrLoop(IrLoopKind.Repeat, null, r.Var, null, null, LowerExpr(r.Count), LowerBlock(r.Body));

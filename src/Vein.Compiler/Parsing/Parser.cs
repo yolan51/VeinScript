@@ -1088,10 +1088,25 @@ public sealed class Parser
         {
             var comps = new List<string>();
             var tags = new List<string>();
+            var excluded = new List<string>();
             (string Shape, string Field, SourceSpan At)? walk = null;
-            while (Check(TokenKind.ShapeRef) || Check(TokenKind.MarkRef))
+            while (Check(TokenKind.ShapeRef) || Check(TokenKind.MarkRef) || Check(TokenKind.KwNot))
             {
-                if (Check(TokenKind.ShapeRef))
+                // `not #Hidden` — a mark the match must NOT carry (D25), as `not` excludes in an `audience`
+                // (D19). Only a mark: "lacks a shape" is a different question, and nothing asks it yet.
+                if (Check(TokenKind.KwNot))
+                {
+                    var at = Here;
+                    Advance();
+                    if (Check(TokenKind.MarkRef)) excluded.Add(Advance().Text);
+                    else
+                    {
+                        _diag.Error("VS0376", "`not` in a target excludes a MARK: `target $Item not #Hidden as i`. " +
+                            "A query cannot exclude a shape — test it in the body instead.", at);
+                        if (Check(TokenKind.ShapeRef)) Advance();
+                    }
+                }
+                else if (Check(TokenKind.ShapeRef))
                 {
                     string shape = Advance().Text;
                     comps.Add(shape);
@@ -1149,7 +1164,7 @@ public sealed class Parser
                 body = new Block(new Stmt[] { new TargetStmt(source, element, body, wk.At) }, body.Span);
             }
             return new QueryStmt(comps, tags, bind, body, s)
-                { OrderShape = orderShape, OrderField = orderField, On = on };
+                { OrderShape = orderShape, OrderField = orderField, On = on, Excluded = excluded };
         }
         var src = ParseExpr();
         Expect(TokenKind.KwAs, "'as'");

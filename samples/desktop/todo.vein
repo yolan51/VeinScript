@@ -176,7 +176,7 @@ bundle Todo by you {
         // After a removal: if nothing is shown, show the first group left.
         hear @ShowSome as x {
             var shown = 0
-            target $Panel #Group as g { if not (g carries #Hidden) { shown += 1 } }
+            target $Panel #Group not #Hidden as g { shown += 1 }
             if shown == 0 {
                 var first = 0
                 target $Panel #Group as g {
