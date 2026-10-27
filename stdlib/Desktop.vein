@@ -44,6 +44,9 @@ bundle Desktop by Vein {
         shared("How tall to draw a picture, in pixels; its width follows the image.")
         shape $Picture { height: float = 32.0 }
 
+        shared("A dropdown: the options it offers, and which one is picked (0 is the first).")
+        shape $Choice { ~<list> options: string, picked: int = 0 }
+
         shared("Carried by every window.")
         mark #Window
 
@@ -82,6 +85,9 @@ bundle Desktop by Vein {
         shared("A checkbox inside parent: bring Check(row, \"Buy milk\", false).")
         builder Check { *Vein.Core.Relations.$Parent  $Toggle   mark #Widget }
 
+        shared("A dropdown inside parent: bring Dropdown(row, [\"Low\", \"High\"], 0) as pick. A pick arrives as @Picked.")
+        builder Dropdown { *Vein.Core.Relations.$Parent  $Choice   mark #Widget }
+
         shared("An image file beside the program, drawn height pixels tall: bring Picture(w, \"logo.png\", 32.0).")
         builder Picture { *Vein.Core.Relations.$Parent  *Vein.UI.Widgets.$Image  $Picture   mark #Widget }
 
@@ -107,6 +113,9 @@ bundle Desktop by Vein {
 
         shared("From the host: a checkbox was ticked or unticked. $Toggle.checked already holds it.")
         event @Toggled { target: Entity, checked: bool }
+
+        shared("From the host: an option was picked in a dropdown. $Choice.picked already holds it.")
+        event @Picked { target: Entity, picked: int, option: string }
 
         shared("From the host: the user closed a window. The host then removes it, and everything in it.")
         event @WindowClosed { target: Entity }

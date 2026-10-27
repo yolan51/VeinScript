@@ -258,6 +258,7 @@ the same contract:
 | types in a box | writes the box's `$Field.value`, **then** raises `@Edited { target, value }` |
 | presses Enter in a box | `@Submitted { target, value }` |
 | ticks a checkbox | writes `$Toggle.checked`, **then** raises `@Toggled { target, checked }` |
+| picks in a dropdown (`$Choice { ~<list> options, picked }`) | writes `$Choice.picked`, **then** raises `@Picked { target, picked, option }` |
 | closes a window | `@WindowClosed { target }`, then destroys the window and everything parented under it; the last one closed ends the program |
 
 What the host draws, beyond the widgets' own fields:

@@ -85,6 +85,12 @@ internal sealed class DesktopRunner
         _interp.FireHost("Toggled", Payload(("target", id), ("checked", on)));
     });
 
+    public void Pick(long id, int picked, string option) => Input(() =>
+    {
+        _interp.World.Publish(id, "Choice", "picked", (long)picked);
+        _interp.FireHost("Picked", Payload(("target", id), ("picked", (long)picked), ("option", option)));
+    });
+
     public void CloseWindow(long id) => Input(() =>
     {
         _interp.FireHost("WindowClosed", Payload(("target", id)));
@@ -232,7 +238,7 @@ internal sealed class DesktopRunner
         var property = control switch
         {
             CheckBox => Avalonia.Controls.Primitives.TemplatedControl.ForegroundProperty,   // before Button: a CheckBox IS one
-            Button => Avalonia.Controls.Primitives.TemplatedControl.BackgroundProperty,
+            Button or ComboBox => Avalonia.Controls.Primitives.TemplatedControl.BackgroundProperty,
             Panel => Panel.BackgroundProperty,
             TextBlock => TextBlock.ForegroundProperty,
             _ => null,
@@ -267,6 +273,24 @@ internal sealed class DesktopRunner
                 if (!Equals(button.Content, n.Text)) button.Content = n.Text;
                 button.Classes.Set("accent", n.Accent);   // Fluent's accent button, for `#Accent`
                 return button;
+
+            case Kind.Choice:
+                if (existing is not ComboBox combo)
+                {
+                    combo = Replace(id, new ComboBox { MinWidth = 110 });
+                    combo.SelectionChanged += (_, _) =>
+                    {
+                        if (!_syncing && combo.SelectedIndex >= 0)
+                            Pick(id, combo.SelectedIndex, combo.SelectedItem as string ?? "");
+                    };
+                }
+                // The options are the program's list: replaced only when it changed, so an open dropdown and its
+                // selection are not reset every frame.
+                if (combo.ItemsSource is not IReadOnlyList<string> shown || !shown.SequenceEqual(n.Options))
+                    combo.ItemsSource = n.Options;
+                int picked = n.Options.Count == 0 ? -1 : Math.Clamp(n.Picked, 0, n.Options.Count - 1);
+                if (combo.SelectedIndex != picked) combo.SelectedIndex = picked;
+                return combo;
 
             case Kind.Picture:
                 var image = existing as Avalonia.Controls.Image ?? Replace(id, new Avalonia.Controls.Image { Stretch = Stretch.Uniform });
@@ -351,7 +375,7 @@ internal sealed class DesktopRunner
 
     // ---- reading the world as a tree ------------------------------------------------------------------
 
-    internal enum Kind { Window, Panel, Button, Input, Check, Picture, Text }
+    internal enum Kind { Window, Panel, Button, Input, Check, Choice, Picture, Text }
 
     /// One window or widget, read from one identity. Only the fields its kind uses mean anything.
     internal sealed record Node(long Id, Kind Kind, IReadOnlyList<Node> Children)
@@ -371,6 +395,8 @@ internal sealed class DesktopRunner
         public bool Hidden { get; init; }
         public bool Accent { get; init; }
         public Color? Tint { get; init; }
+        public IReadOnlyList<string> Options { get; init; } = Array.Empty<string>();
+        public int Picked { get; init; }
 
         public IEnumerable<Node> Walk() => Children.SelectMany(c => c.Walk()).Prepend(this);
     }
@@ -408,6 +434,13 @@ internal sealed class DesktopRunner
             Kind.Input => new Node(e.Entity, kind, kids) { Value = Text(e, "Field", "value"), Placeholder = Text(e, "Field", "placeholder") },
             Kind.Check => new Node(e.Entity, kind, kids) { Text = Text(e, "Toggle", "label"), Checked = Field(e, "Toggle", "checked") is true },
             Kind.Picture => new Node(e.Entity, kind, kids) { Source = Text(e, "Image", "source"), Height = Number(e, "Picture", "height", 32) },
+            Kind.Choice => new Node(e.Entity, kind, kids)
+            {
+                Options = Field(e, "Choice", "options") is System.Collections.IEnumerable items
+                    ? items.Cast<object?>().Select(o => o?.ToString() ?? "").ToList()
+                    : Array.Empty<string>(),
+                Picked = (int)Number(e, "Choice", "picked", 0),
+            },
             _ => new Node(e.Entity, kind, kids) { Text = Text(e, "Text", "content"), FontSize = Number(e, "Font", "size", 0) },
         };
         return node with { Hidden = e.Marks.Contains("Hidden"), Tint = TintOf(e) };
@@ -426,6 +459,7 @@ internal sealed class DesktopRunner
         : e.Components.ContainsKey("Button") ? Kind.Button
         : e.Components.ContainsKey("Field") ? Kind.Input
         : e.Components.ContainsKey("Toggle") ? Kind.Check
+        : e.Components.ContainsKey("Choice") ? Kind.Choice
         : e.Components.ContainsKey("Image") ? Kind.Picture
         : e.Components.ContainsKey("Text") ? Kind.Text
         : null;

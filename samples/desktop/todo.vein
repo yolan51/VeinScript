@@ -56,7 +56,6 @@ bundle Todo by you {
 
     shape $Opens { group: Entity }   // a tab's group
     shape $Named { name: string }    // a group's name, as saved
-    shape $Priority { level: int = 1 }   // 1 low · 2 medium · 3 high · 4 very high — on a task's priority button
 
     mark #Saved         // the tag of todo.json's reads and writes (RULES 28c)
     mark #NewGroup      // the box that names a new group
@@ -73,7 +72,8 @@ bundle Todo by you {
     mark #Add           // a group's Add button
     mark #Tasks         // a group's column of tasks
     mark #Delete        // a task's Remove button
-    mark #Priority      // a task's priority button
+    mark #Priority      // a task's priority dropdown — its $Choice.picked IS the priority (0 low … 3 very high)
+    mark #NewPriority   // a group's dropdown beside its box: the priority a new task gets
     mark #Empty         // the hint shown while there is no group
 
     shard Build {
@@ -104,12 +104,15 @@ bundle Todo by you {
                 target $Field #NewGroup as f { emit @AddGroup { name: f.Field.value } }
             }
 
-            // Add sits in its group's #Entry row, beside that group's box: read the box, name the group.
+            // Add sits in its group's #Entry row, beside that group's box and priority dropdown: read both,
+            // name the group.
             target $Parent #Add on c.target as b {
                 target $Parent #Entry on b.Parent.of as entry {
                     target $Parent #NewTask as box {
                         if box.Parent.of == entry {
-                            target $Field on box as f { emit @AddTask { group: entry.Parent.of, text: f.Field.value } }
+                            target $Field on box as f {
+                                emit @AddTask { group: entry.Parent.of, text: f.Field.value, priority: newPriority(entry) }
+                            }
                         }
                     }
                 }
@@ -117,12 +120,6 @@ bundle Todo by you {
 
             // A tab opens its group.
             target $Opens #Tab on c.target as t { emit @Show { group: t.Opens.group } }
-
-            // A task's priority button steps up one level per click, and from very high back to low. What it
-            // SAYS and what colour it is are derived from the level, in `Looks`.
-            target $Priority #Priority on c.target as p {
-                if p.Priority.level >= 4 { p.Priority.level = 1 } else { p.Priority.level += 1 }
-            }
 
             // A task's Remove sits in the task's row: removing the row takes its checkbox with it.
             target $Parent #Delete on c.target as d { do discard(d.Parent.of) }
@@ -143,7 +140,9 @@ bundle Todo by you {
         hear @Submitted as s {
             target $Field #NewGroup on s.target as f { emit @AddGroup { name: s.value } }
             target $Parent #NewTask on s.target as box {
-                target $Parent #Entry on box.Parent.of as entry { emit @AddTask { group: entry.Parent.of, text: s.value } }
+                target $Parent #Entry on box.Parent.of as entry {
+                    emit @AddTask { group: entry.Parent.of, text: s.value, priority: newPriority(entry) }
+                }
             }
         }
     }
@@ -177,6 +176,8 @@ bundle Todo by you {
                     mark entry #Entry
                     bring Input(entry, "", "Add a task to " + g.name) as box
                     mark box #NewTask
+                    bring Dropdown(entry, levels(), 0) as pick
+                    mark pick #NewPriority
                     bring Button(entry, "Add") as add
                     mark add #Add
                     bring Column(group, 4.0) as tasks
@@ -223,9 +224,8 @@ bundle Todo by you {
                 target $Parent #Tasks as tasks {
                     if tasks.Parent.of == a.group {
                         bring Row(tasks, 8.0) as row
-                        bring Button(row, priorityName(a.priority)) as chip
+                        bring Dropdown(row, levels(), a.priority - 1) as chip
                         mark chip #Priority
-                        attach $Priority to chip { level: a.priority }
                         attach $Tint to chip { }
                         bring Check(row, a.text, a.done)
                         bring Button(row, "Remove") as del
@@ -296,11 +296,16 @@ bundle Todo by you {
 
     // ---- priority: one colour, four intensities ------------------------------------------------------
 
-    fn priorityName(level: int) return string {
-        if level >= 4 { return "Very high" }
-        if level == 3 { return "High" }
-        if level == 2 { return "Medium" }
-        return "Low"
+    // The four, in order: a dropdown's `picked` is the index, so the level is picked + 1.
+    fn levels() return list<string> { return ["Low", "Medium", "High", "Very high"] }
+
+    // The priority a new task gets in this group: the dropdown beside the group's box (`entry`).
+    fn newPriority(entry: Entity) return int {
+        var level = 1
+        target $Parent #NewPriority as np {
+            if np.Parent.of == entry { target $Choice on np as c { level = c.Choice.picked + 1 } }
+        }
+        return level
     }
 
     // How strong the red is: a faint wash for low, solid for very high. `$Tint.a` is the intensity.
@@ -320,12 +325,12 @@ bundle Todo by you {
         return 1
     }
 
-    // Derived, like the counts: every priority button says its level and wears its intensity.
+    // Derived, like the counts: every task's priority dropdown wears its level's intensity. Pick another level
+    // and the colour follows next frame — nothing else has to remember to repaint.
     shard Looks {
         settled {
-            target $Priority #Priority as p {
-                let level = p.Priority.level
-                target $Button on p as b { b.Button.label = priorityName(level) }
+            target $Choice #Priority as p {
+                let level = p.Choice.picked + 1
                 target $Tint on p as t {
                     t.Tint.r = 0.92
                     t.Tint.g = 0.26
@@ -397,7 +402,7 @@ bundle Todo by you {
                                                 // The checkbox's record, with its row's priority added.
                                                 var level = 1
                                                 target $Parent #Priority as pc {
-                                                    if pc.Parent.of == row { target $Priority on pc as p { level = p.Priority.level } }
+                                                    if pc.Parent.of == row { target $Choice on pc as p { level = p.Choice.picked + 1 } }
                                                 }
                                                 let record = toJson(t.Toggle)
                                                 if not (tasks == "") { tasks = tasks + "," }
