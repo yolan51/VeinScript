@@ -56,6 +56,15 @@ When you already have the identity (an event's `target`, a field holding an `Ent
 `target $Task on box.Parent.of as t { … }` (D22). Scanning every `$Task` for the one whose id matches reads all of
 them to find one.
 
+**One identity, one `target`.** When a `target` has found an identity and you need another of ITS shapes, name
+that shape in the same head; don't re-find the identity with an inner `target … on`:
+```
+target $Owner $Field #Box as b { if b.Owner.ownerId == g { b.Field.value = "" } }     // not: target $Field on b as f { … }
+```
+Two `target`s nest only when they look at TWO identities: a group, and the one column it goes into.
+
+**Spot it:** `target $X on b` where `b` is the binding of the `target` right around it.
+
 ## 5. Name roles with marks, not with text
 
 A button is "the Add button" because it wears `#Add`, not because its label says "Add". Labels get

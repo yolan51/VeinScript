@@ -162,8 +162,8 @@ bundle Todo by you {
             if not (a.text == "") {
                 target $Group on a.group as g { bring Task(g.Group.name, a.text, false, a.priority) }
                 emit @Changed { }
-                target $Owner #Box as b {
-                    if b.Owner.ownerId == a.group { target $Field on b as f { f.Field.value = "" } }
+                target $Owner $Field #Box as b {
+                    if b.Owner.ownerId == a.group { b.Field.value = "" }
                 }
             }
         }
@@ -316,13 +316,11 @@ bundle Todo by you {
     // Priority: one red, four intensities — `$Tint.a` follows the task's dropdown.
     shard Looks {
         settled {
-            target $Choice #Priority as p {
-                target $Tint on p as t {
-                    t.Tint.r = 0.92
-                    t.Tint.g = 0.26
-                    t.Tint.b = 0.21
-                    t.Tint.a = intensity(p.Choice.picked + 1)
-                }
+            target $Choice $Tint #Priority as p {
+                p.Tint.r = 0.92
+                p.Tint.g = 0.26
+                p.Tint.b = 0.21
+                p.Tint.a = intensity(p.Choice.picked + 1)
             }
         }
     }
@@ -414,13 +412,13 @@ bundle Todo by you {
 
     fn boxText(group: Entity) return string {
         var text = ""
-        target $Owner #Box as b { if b.Owner.ownerId == group { target $Field on b as f { text = f.Field.value } } }
+        target $Owner $Field #Box as b { if b.Owner.ownerId == group { text = b.Field.value } }
         return text
     }
 
     fn newPriority(group: Entity) return int {
         var level = 1
-        target $Owner #NewPriority as p { if p.Owner.ownerId == group { target $Choice on p as c { level = c.Choice.picked + 1 } } }
+        target $Owner $Choice #NewPriority as p { if p.Owner.ownerId == group { level = p.Choice.picked + 1 } }
         return level
     }
 }
