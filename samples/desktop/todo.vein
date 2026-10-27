@@ -1,44 +1,25 @@
-// samples/desktop/todo.vein — a to-do list in GROUPS, one shown at a time: name a group, pick its tab,
-// add tasks to it, tick, remove.
+// samples/desktop/todo.vein — a to-do list in groups: tabs, priorities, progress, saved beside the program.
 //
 //   In the Workbench, press ▶ (F5): its window opens, drawn from its identities.
 //   veinc run samples/desktop/todo.vein --ticks 2      (its rules alone, with no window drawn)
 //
-// THE WINDOW, AS IDENTITIES. Every box below is one identity; every line is a $Parent link.
+// DATA FIRST, THEN THE SCREEN. A group is an identity carrying $Group { name }; a task is one carrying
+// $Task { group, text, done, priority }. Everything else follows from those two shapes:
 //
-//   window ─┬─ row ── picture (vslogo.png)  heading "To-do"
-//           ├─ row ── [new group name] [Add group]
-//           ├─ row #Tabs ── [Shopping] [Work]   (one #Tab per group; the open one wears #Accent)
-//           ├─ column #Groups ── column #Group ─┬─ row #Head ── heading "Shopping"  label #Status  [Remove group]
-//           │                   (one per group)  ├─ row #Entry ── [add a task…] [Add]
-//           │                                    └─ column #Tasks ── row ── [x] task  [Remove]
-//           └─ label #Empty
+// 1. SAVING IS toJson, LOADING IS weave. groups.json and tasks.json beside the program are flat arrays, each
+//    record exactly one shape's toJson. Loading them back is the stdlib's JSON loom: `weave SavedTask(text)`
+//    brings one $Task identity per record (D23) — no parsing written here.
 //
-// FIVE IDEAS CARRY THE WHOLE APP:
+// 2. ONE PLACE BUILDS THE SCREEN. `View` gives every $Group and $Task that has no widgets yet its widgets, and
+//    marks it #Shown (`target $Task not #Shown`, D25). Loading, "Add group" and "Add" only bring DATA; the view
+//    follows. The data identity IS its widget: a group is its column, a task is its row, so a task's checkbox
+//    and dropdown hang straight under the task.
 //
-// 1. THE $Parent LINKS ARE THE DATA. Nothing keeps a list of groups or tasks. A group's tasks are the rows
-//    whose parent is its #Tasks column; "which group is this Add button in?" is two steps up its parents.
+// 3. A GROUP'S WIDGETS POINT AT IT. Its tab, badge, status, bar, box and buttons carry $For { group }, so "which
+//    group is this?" is a field, not a climb up the window.
 //
-// 2. TWO WAYS IN, ONE HANDLER. Enter in a box (@Submitted) and its button (@Clicked) both emit the same
-//    event, so "add a group" and "add a task" are each written once.
-//
-// 3. REMOVING IS ONE LINE. `do discard(group)` takes the group with its header, its box and every task in
-//    it, at any depth — the stdlib walks the $Parent links down.
-//
-// 4. WHAT IS SHOWN IS DERIVED, IN `settled`. Each group's "1 of 3 left" is counted after every commit, so
-//    no handler has to remember to update it. Counting in @AddTask would miss the new row, which is
-//    visible only from the next event (RULES 12b).
-//
-// 5. ONE GROUP AT A TIME IS A MARK. Every group but the open one wears *Vein.Graphics.Looks.#Hidden, which the
-//    host draws nowhere — the group and everything in it. @Show { group } moves the mark; a tab knows its
-//    group through $Opens, so nothing compares labels.
-//
-// 6. IT REMEMBERS, IN todo.json BESIDE THE PROGRAM. At start it reads the file and brings every group and
-//    task back through the same @AddGroup and @AddTask a click uses. After every change `settled` writes
-//    the list out again — only when the text changed. Built with `veinc build`, the file sits beside the
-//    .exe, on whichever PC it was copied to:
-//
-//        {"groups":[{"group":{"name":"Shopping"},"tasks":[{"label":"Buy milk","checked":true}]}]}
+// 4. WHAT IS SHOWN IS DERIVED, IN `settled`. Counts, the progress bar, the badges, the priority colours and
+//    "hide done" are recomputed after every change, so no handler has to remember to repaint.
 
 bundle Todo by you {
     need "Vein.Desktop"
@@ -46,42 +27,57 @@ bundle Todo by you {
     need "Vein.Core"
     need "Vein.Graphics"
 
+    // ---- the data ---------------------------------------------------------------------------------------
+
+    shape $Group { name: string }
+    shape $Task { group: string, text: string, done: bool = false, priority: int = 1 }
+    shape $For { group: Entity }          // a widget that belongs to a group
+
+    builder Group { $Group   mark #Group }
+    builder Task { $Task   mark #Task }
+
+    // The same two shapes, read back from JSON: one identity per record.
+    loom<Json> SavedGroup { $Group   mark #Group }
+    loom<Json> SavedTask { $Task   mark #Task }
+
     event @AddGroup { name: string }
-    event @AddTask { group: Entity, text: string, done: bool = false, priority: int = 1 }
+    event @AddTask { group: Entity, text: string, priority: int = 1 }
+    event @DropGroup { group: Entity }
     event @Show { group: Entity }
     event @ShowSome { }
-    event @ShowFirst { }
-    event @RestoreTasks { }
-    event @Loaded { }
+    event @Changed { }                    // something the user did; the next frame saves
 
-    shape $Opens { group: Entity }   // a tab's group
-    shape $Named { name: string }    // a group's name, as saved
-
-    mark #Saved         // the tag of todo.json's reads and writes (RULES 28c)
+    mark #Group
+    mark #Task
+    mark #Shown         // data that has its widgets
+    mark #Fresh         // a group just added by the user: open it once it is shown
     mark #NewGroup      // the box that names a new group
     mark #AddGroup      // …and its button
-    mark #Tabs          // the row of tabs, one per group
-    mark #Tab           // one tab
+    mark #HideDone      // the switch that hides done tasks
+    mark #Tabs          // the row of tabs
+    mark #Tab           // one group's tab
+    mark #TabBadge      // its count of tasks left
     mark #Groups        // the column every group lives in
-    mark #Group         // one group
-    mark #Head          // a group's header row
     mark #Status        // a group's "1 of 3 left"
-    mark #DropGroup     // a group's Remove group button
-    mark #Entry         // a group's row with its box and Add button
-    mark #NewTask       // a group's box
-    mark #Add           // a group's Add button
-    mark #Tasks         // a group's column of tasks
-    mark #Delete        // a task's Remove button
-    mark #Priority      // a task's priority dropdown — its $Choice.picked IS the priority (0 low … 3 very high)
-    mark #NewPriority   // a group's dropdown beside its box: the priority a new task gets
-    mark #Empty         // the hint shown while there is no group
-    mark #TabBadge      // a tab's count of tasks left — carries $Opens like its tab
-    mark #DoneBar       // a group's progress bar
-    mark #HideDone      // the switch that hides ticked tasks
+    mark #DoneBar       // its progress bar
+    mark #DropGroup     // its Remove group button
+    mark #Box           // its "add a task" box
+    mark #NewPriority   // the priority a new task gets
+    mark #Add           // its Add button
+    mark #TaskList      // its scrolling list of tasks
+    mark #Priority      // a task's priority dropdown
+    mark #Done          // a task's checkbox
+    mark #Delete        // a task's ✕
+    mark #Empty         // the hint while there is no group
+    mark #GroupsFile    // file tags (RULES 28c)
+    mark #TasksFile
+    mark #OldFile
+
+    // ---- the window that is always there -------------------------------------------------------------------
 
     shard Build {
         run once {
-            bring Window("To-do", 480.0, 600.0, "vslogo.png") as w
+            bring Window("To-do", 480.0, 640.0, "vslogo.png") as w
             bring Row(w, 10.0) as title
             bring Picture(title, "vslogo.png", 40.0)
             bring Heading(title, "To-do", 24.0)
@@ -101,225 +97,204 @@ bundle Todo by you {
         }
     }
 
-    // ---- what the user does ------------------------------------------------------------------------
+    // ---- what the user does: each action, one or two steps ---------------------------------------------
 
     shard Actions {
         hear *Vein.UI.Interaction.@Clicked as c {
             target $Button #AddGroup on c.target as b {
                 target $Field #NewGroup as f { emit @AddGroup { name: f.Field.value } }
             }
-
-            // Add sits in its group's #Entry row, beside that group's box and priority dropdown: read both,
-            // name the group.
-            target $Parent #Add on c.target as b {
-                target $Parent #Entry on b.Parent.of as entry {
-                    target $Parent #NewTask as box {
-                        if box.Parent.of == entry {
-                            target $Field on box as f {
-                                emit @AddTask { group: entry.Parent.of, text: f.Field.value, priority: newPriority(entry) }
-                            }
-                        }
-                    }
-                }
+            target $For #Add on c.target as b {
+                emit @AddTask { group: b.For.group, text: boxText(b.For.group), priority: newPriority(b.For.group) }
             }
-
-            // A tab opens its group.
-            target $Opens #Tab on c.target as t { emit @Show { group: t.Opens.group } }
-
-            // A task's Remove sits in the task's row: removing the row takes its checkbox with it.
-            target $Parent #Delete on c.target as d { do discard(d.Parent.of) }
-
-            // Remove group sits in the group's header row: the group is the header's parent.
-            // Its tab goes with it; if it was the open one, another opens (next event, once it is gone).
-            target $Parent #DropGroup on c.target as d {
-                target $Parent #Head on d.Parent.of as head {
-                    // Its tab and the tab's badge both carry $Opens for this group.
-                    target $Opens as t {
-                        if t.Opens.group == head.Parent.of { do discard(t) }
-                    }
-                    do discard(head.Parent.of)
-                    emit @ShowSome { }
-                }
+            target $For #Tab on c.target as t { emit @Show { group: t.For.group } }
+            target $For #DropGroup on c.target as d { emit @DropGroup { group: d.For.group } }
+            target $Parent #Delete on c.target as d {
+                do discard(d.Parent.of)           // the ✕'s parent is its task
+                emit @Changed { }
             }
         }
 
         hear @Submitted as s {
             target $Field #NewGroup on s.target as f { emit @AddGroup { name: s.value } }
-            target $Parent #NewTask on s.target as box {
-                target $Parent #Entry on box.Parent.of as entry {
-                    emit @AddTask { group: entry.Parent.of, text: s.value, priority: newPriority(entry) }
-                }
+            target $For #Box on s.target as b {
+                emit @AddTask { group: b.For.group, text: s.value, priority: newPriority(b.For.group) }
+            }
+        }
+
+        // A task's checkbox and dropdown sit under the task itself: one step up is the $Task.
+        hear @Toggled as e {
+            target $Parent #Done on e.target as box {
+                target $Task on box.Parent.of as t { t.Task.done = e.checked }
+                emit @Changed { }
+            }
+        }
+
+        hear @Picked as e {
+            target $Parent #Priority on e.target as pick {
+                target $Task on pick.Parent.of as t { t.Task.priority = e.picked + 1 }
+                emit @Changed { }
             }
         }
     }
 
-    // ---- what it changes ---------------------------------------------------------------------------
+    // ---- what it changes: data only — `View` draws it -----------------------------------------------
 
-    shard Groups {
-        hear @AddGroup as g {
-            // A name already taken opens that group instead: two "Shopping"s could not be told apart, by
-            // the user or by todo.json.
+    shard Data {
+        hear @AddGroup as a {
+            // A name already taken opens that group instead: two "Shopping"s could not be told apart.
             var taken = false
-            target $Named #Group as other {
-                if other.Named.name == g.name {
+            target $Group as g {
+                if g.Group.name == a.name {
                     taken = true
-                    emit @Show { group: other }
+                    emit @Show { group: g }
                 }
             }
-            if not (g.name == "") and not taken {
-                target $Panel #Groups as groups {
-                    bring Column(groups, 6.0) as group
-                    mark group #Group
-                    attach $Named to group { name: g.name }
-                    bring Row(group, 12.0) as head
-                    mark head #Head
-                    bring Heading(head, g.name, 18.0)
-                    bring Label(head, "") as status
-                    mark status #Status
-                    bring Button(head, "Remove group") as dropGroup
-                    mark dropGroup #DropGroup
-                    attach $Tip to dropGroup { text: "Remove this group and every task in it" }
-                    bring Progress(group, 0.0, 1.0) as bar
-                    mark bar #DoneBar
-                    bring Divider(group, 1.0)
-                    bring Row(group, 8.0) as entry
-                    mark entry #Entry
-                    bring Input(entry, "", "Add a task to " + g.name) as box
-                    mark box #NewTask
-                    bring Dropdown(entry, levels(), 0) as pick
-                    mark pick #NewPriority
-                    bring Button(entry, "Add") as add
-                    mark add #Add
-                    // A long list scrolls instead of pushing the window off the screen.
-                    bring Scroll(group, 300.0, 4.0) as tasks
-                    mark tasks #Tasks
-                    target $Panel #Tabs as tabs {
-                        bring Button(tabs, g.name) as tab
-                        mark tab #Tab
-                        attach $Opens to tab { group: group }
-                        bring Badge(tabs, "0") as badge
-                        mark badge #TabBadge
-                        attach $Opens to badge { group: group }
-                    }
-                    // A new group opens at once: the user named it to fill it.
-                    emit @Show { group: group }
-                }
-                target $Field #NewGroup as f { f.Field.value = "" }
+            if not (a.name == "") and not taken {
+                bring Group(a.name) as fresh
+                mark fresh #Fresh
+                emit @Changed { }
             }
-        }
-
-        // Exactly one group shown: the one asked for. Its tab is the accented one.
-        hear @Show as s {
-            target $Panel #Group as g {
-                if g == s.group { unmark g #Hidden } else { mark g #Hidden }
-            }
-            target $Opens #Tab as t {
-                if t.Opens.group == s.group { mark t #Accent } else { unmark t #Accent }
-            }
-        }
-
-        // After a removal: if nothing is shown, show the first group left.
-        hear @ShowSome as x {
-            var shown = 0
-            target $Panel #Group not #Hidden as g { shown += 1 }
-            if shown == 0 { emit @ShowFirst { } }
-        }
-
-        hear @ShowFirst as x {
-            var first = 0
-            target $Panel #Group as g {
-                first += 1
-                if first == 1 { emit @Show { group: g } }
-            }
+            target $Field #NewGroup as f { f.Field.value = "" }
         }
 
         hear @AddTask as a {
             if not (a.text == "") {
-                target $Parent #Tasks as tasks {
-                    if tasks.Parent.of == a.group {
-                        bring Row(tasks, 8.0) as row
-                        bring Dropdown(row, levels(), a.priority - 1) as chip
-                        mark chip #Priority
-                        attach $Tint to chip { }
-                        attach $Tip to chip { text: "Priority" }
-                        bring Check(row, a.text, a.done)
-                        bring Button(row, "✕") as del
-                        mark del #Delete
-                        attach $Tip to del { text: "Remove this task" }
-                    }
+                target $Group on a.group as g { bring Task(g.Group.name, a.text, false, a.priority) }
+                emit @Changed { }
+                target $For #Box as b {
+                    if b.For.group == a.group { target $Field on b as f { f.Field.value = "" } }
                 }
-                // Empty THIS group's box, and only this one.
-                target $Parent #Entry as entry {
-                    if entry.Parent.of == a.group {
-                        target $Parent #NewTask as box {
-                            if box.Parent.of == entry { target $Field on box as f { f.Field.value = "" } }
-                        }
-                    }
+            }
+        }
+
+        // The group's column holds its tasks; its tab and badge sit in the tab row and go with it.
+        hear @DropGroup as d {
+            target $For #Tab as t { if t.For.group == d.group { do discard(t) } }
+            target $For #TabBadge as b { if b.For.group == d.group { do discard(b) } }
+            do discard(d.group)
+            emit @Changed { }
+            emit @ShowSome { }
+        }
+
+        // Exactly one group shown: the one asked for. Its tab is the accented one.
+        hear @Show as s {
+            target $Group #Shown as g {
+                if g == s.group { unmark g #Hidden } else { mark g #Hidden }
+            }
+            target $For #Tab as t {
+                if t.For.group == s.group { mark t #Accent } else { unmark t #Accent }
+            }
+        }
+
+        // When no group is showing, show the first one.
+        hear @ShowSome as x {
+            var showing = 0
+            target $Group #Shown not #Hidden as g { showing += 1 }
+            if showing == 0 {
+                var first = 0
+                target $Group #Shown as g {
+                    first += 1
+                    if first == 1 { emit @Show { group: g } }
                 }
             }
         }
     }
 
-    // ---- what is shown, derived --------------------------------------------------------------------
+    // ---- the view: data that has no widgets yet gets them --------------------------------------------
+
+    shard View {
+        settled {
+            // A group becomes its own column inside #Groups, with a header, a progress bar, an entry row and a
+            // scrolling list; its tab and badge go in the tab row. It starts hidden: @Show decides what is seen.
+            target $Group not #Shown as g {
+                target $Panel #Groups as groups {
+                    attach $Parent to g { of: groups }
+                    attach $Panel to g { gap: 6.0 }
+                    mark g #Shown #Hidden
+                    do groupWidgets(g, g.Group.name)
+                }
+                target $Panel #Tabs as tabs {
+                    bring Button(tabs, g.Group.name) as tab
+                    mark tab #Tab
+                    attach $For to tab { group: g }
+                    bring Badge(tabs, "0") as badge
+                    mark badge #TabBadge
+                    attach $For to badge { group: g }
+                }
+                if g carries #Fresh { emit @Show { group: g } } else { emit @ShowSome { } }
+            }
+
+            // A task becomes its own row in its group's list — once that list exists.
+            target $Task not #Shown as t {
+                let list = listFor(t.Task.group)
+                if not (list == 0) {
+                    attach $Parent to t { of: list }
+                    attach $Panel to t { gap: 8.0 }
+                    mark t #Shown #Row
+                    do taskWidgets(t, t.Task.text, t.Task.done, t.Task.priority)
+                }
+            }
+        }
+    }
+
+    SF groupWidgets(g: Entity, name: string) {
+        bring Row(g, 12.0) as head
+        bring Heading(head, name, 18.0)
+        bring Label(head, "") as status
+        mark status #Status
+        attach $For to status { group: g }
+        bring Button(head, "Remove group") as drop
+        mark drop #DropGroup
+        attach $For to drop { group: g }
+        attach $Tip to drop { text: "Remove this group and every task in it" }
+        bring Progress(g, 0.0, 1.0) as bar
+        mark bar #DoneBar
+        attach $For to bar { group: g }
+        bring Divider(g, 1.0)
+        bring Row(g, 8.0) as entry
+        bring Input(entry, "", "Add a task to " + name) as box
+        mark box #Box
+        attach $For to box { group: g }
+        bring Dropdown(entry, levels(), 0) as pick
+        mark pick #NewPriority
+        attach $For to pick { group: g }
+        bring Button(entry, "Add") as add
+        mark add #Add
+        attach $For to add { group: g }
+        bring Scroll(g, 300.0, 4.0) as list
+        mark list #TaskList
+        attach $For to list { group: g }
+    }
+
+    SF taskWidgets(t: Entity, text: string, done: bool, priority: int) {
+        bring Dropdown(t, levels(), priority - 1) as chip
+        mark chip #Priority
+        attach $Tint to chip { }
+        attach $Tip to chip { text: "Priority" }
+        bring Check(t, text, done) as box
+        mark box #Done
+        bring Button(t, "✕") as del
+        mark del #Delete
+        attach $Tip to del { text: "Remove this task" }
+    }
+
+    // ---- what is shown, derived -------------------------------------------------------------------------
 
     shard Status {
         settled {
-            // The "Hide done tasks" switch, read once: a ticked task's row wears #Hidden while it is on.
-            var hideDone = false
-            target $Toggle #HideDone as h { hideDone = h.Toggle.checked }
+            var hide = false
+            target $Toggle #HideDone as h { hide = h.Toggle.checked }
+            target $Task #Shown as t {
+                if hide and t.Task.done { mark t #Hidden } else { unmark t #Hidden }
+            }
 
             var groups = 0
-            target $Panel #Group as group {
+            target $Group #Shown as g {
                 groups += 1
-
-                // Count this group's checkboxes: checkbox → row → this group's #Tasks column.
-                var all = 0
-                var left = 0
-                target $Parent #Tasks as tasks {
-                    if tasks.Parent.of == group {
-                        target $Parent as row {
-                            if row.Parent.of == tasks {
-                                target $Parent as cell {
-                                    if cell.Parent.of == row {
-                                        target $Toggle on cell as t {
-                                            all += 1
-                                            if not t.Toggle.checked { left += 1 }
-                                            if hideDone and t.Toggle.checked { mark row #Hidden } else { unmark row #Hidden }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // The same two numbers, drawn twice more: a bar that fills as tasks are done, and the tab's badge.
-                target $Parent #DoneBar as b {
-                    if b.Parent.of == group {
-                        target $Progress on b as p {
-                            p.Progress.value = float(all - left)
-                            if all == 0 { p.Progress.max = 1.0 } else { p.Progress.max = float(all) }
-                        }
-                    }
-                }
-                target $Opens #TabBadge as tb {
-                    if tb.Opens.group == group { target $Text on tb as t { t.Text.content = string(left) } }
-                }
-
-                // Write it into this group's #Status label: label → #Head row → this group.
-                target $Parent #Status as status {
-                    target $Parent #Head on status.Parent.of as head {
-                        if head.Parent.of == group {
-                            target $Text on status as s {
-                                if all == 0 {
-                                    s.Text.content = "empty"
-                                } else {
-                                    s.Text.content = string(left) + " of " + string(all) + " left"
-                                }
-                            }
-                        }
-                    }
-                }
+                let all = total(g.Group.name)
+                let open = left(g.Group.name)
+                target $For as w { if w.For.group == g { do show(w, all, open) } }
             }
 
             target $Text #Empty as e {
@@ -328,21 +303,82 @@ bundle Todo by you {
         }
     }
 
-    // ---- priority: one colour, four intensities ------------------------------------------------------
-
-    // The four, in order: a dropdown's `picked` is the index, so the level is picked + 1.
-    fn levels() return list<string> { return ["Low", "Medium", "High", "Very high"] }
-
-    // The priority a new task gets in this group: the dropdown beside the group's box (`entry`).
-    fn newPriority(entry: Entity) return int {
-        var level = 1
-        target $Parent #NewPriority as np {
-            if np.Parent.of == entry { target $Choice on np as c { level = c.Choice.picked + 1 } }
+    // One of a group's widgets, brought up to date: whichever it is — the status text, the bar, the badge.
+    SF show(w: Entity, all: int, open: int) {
+        target $Text #Status on w as s {
+            if all == 0 { s.Text.content = "empty" } else { s.Text.content = string(open) + " of " + string(all) + " left" }
         }
-        return level
+        target $Progress on w as p {
+            p.Progress.value = float(all - open)
+            if all == 0 { p.Progress.max = 1.0 } else { p.Progress.max = float(all) }
+        }
+        target $Text #TabBadge on w as b { b.Text.content = string(open) }
     }
 
-    // How strong the red is: a faint wash for low, solid for very high. `$Tint.a` is the intensity.
+    // Priority: one red, four intensities — `$Tint.a` follows the task's dropdown.
+    shard Looks {
+        settled {
+            target $Choice #Priority as p {
+                target $Tint on p as t {
+                    t.Tint.r = 0.92
+                    t.Tint.g = 0.26
+                    t.Tint.b = 0.21
+                    t.Tint.a = intensity(p.Choice.picked + 1)
+                }
+            }
+        }
+    }
+
+    // ---- what it remembers: groups.json and tasks.json, beside the program --------------------------
+
+    shard Storage {
+        var changed = false
+
+        run once {
+            emit *Vein.Files.Io.@ReadFile { path: "groups.json", tag: #GroupsFile }
+            emit *Vein.Files.Io.@ReadFile { path: "tasks.json", tag: #TasksFile }
+        }
+
+        hear *Vein.Files.Io.@FileLoaded as f {
+            if f.tag == #GroupsFile { weave SavedGroup(f.text) }
+            if f.tag == #TasksFile { weave SavedTask(f.text) }
+            if f.tag == #OldFile { do migrate(f.text) }
+        }
+
+        // No tasks.json yet: bring along a todo.json from before this version, if there is one.
+        hear *Vein.Files.Io.@FileMissing as f {
+            if f.tag == #TasksFile { emit *Vein.Files.Io.@ReadFile { path: "todo.json", tag: #OldFile } }
+        }
+
+        hear @Changed as c { changed = true }
+
+        // Written only after something the user did — so nothing is ever saved before it has been loaded.
+        settled {
+            if changed {
+                var groups = []
+                target $Group as g { groups += toJson(g.Group) }
+                var tasks = []
+                target $Task as t { tasks += toJson(t.Task) }
+                emit *Vein.Files.Io.@WriteFile { path: "groups.json", text: "[" + join(groups, ",\n ") + "]\n", tag: #GroupsFile }
+                emit *Vein.Files.Io.@WriteFile { path: "tasks.json", text: "[" + join(tasks, ",\n ") + "]\n", tag: #TasksFile }
+                changed = false
+            }
+        }
+    }
+
+    // The old one-file format: {"groups":[{"group":{"name":…},"tasks":[{"label":…,"checked":…,"priority":…}]}]}.
+    SF migrate(text: string) {
+        target fromJson(text).groups as grp {
+            bring Group(grp.group.name)
+            target grp.tasks as task { bring Task(grp.group.name, task.label, task.checked, levelOf(string(task.priority))) }
+        }
+        emit @Changed { }
+    }
+
+    // ---- small answers -------------------------------------------------------------------------------
+
+    fn levels() return list<string> { return ["Low", "Medium", "High", "Very high"] }
+
     fn intensity(level: int) return float {
         if level >= 4 { return 1.0 }
         if level == 3 { return 0.7 }
@@ -350,7 +386,7 @@ bundle Todo by you {
         return 0.18
     }
 
-    // A saved level, or Low: a todo.json from before priorities has none, and reads as "".
+    // A saved level, or Low when there is none (an old file) or it is out of range.
     fn levelOf(saved: string) return int {
         if isNumber(saved) {
             let n = int(saved)
@@ -359,105 +395,38 @@ bundle Todo by you {
         return 1
     }
 
-    // Derived, like the counts: every task's priority dropdown wears its level's intensity. Pick another level
-    // and the colour follows next frame — nothing else has to remember to repaint.
-    shard Looks {
-        settled {
-            target $Choice #Priority as p {
-                let level = p.Choice.picked + 1
-                target $Tint on p as t {
-                    t.Tint.r = 0.92
-                    t.Tint.g = 0.26
-                    t.Tint.b = 0.21
-                    t.Tint.a = intensity(level)
-                }
-            }
-        }
+    fn total(group: string) return int {
+        var n = 0
+        target $Task as t { if t.Task.group == group { n += 1 } }
+        return n
     }
 
-    // ---- what it remembers: todo.json, beside the program -----------------------------------------
-    //
-    // THE SHAPES ARE THE RECORDS. `toJson(t.Toggle)` writes a checkbox as {"label":…,"checked":…} and
-    // `toJson(g.Named)` a group's name — escaped by the language, in declaration order (RULES 24b) — and
-    // `fromJson` reads the file back into records whose fields have the same names.
+    fn left(group: string) return int {
+        var n = 0
+        target $Task as t { if t.Task.group == group and not t.Task.done { n += 1 } }
+        return n
+    }
 
-    shard Storage {
-        var loaded = false   // nothing is written until what was saved has come back
-        var saved = ""       // the text last read or written: an unchanged list is not written again
-
-        run once {
-            emit *Vein.Files.Io.@ReadFile { path: "todo.json", tag: #Saved }
-        }
-
-        // The groups first, through the same @AddGroup a click uses. Their tasks need the groups to exist,
-        // which they do from the NEXT event (RULES 12b) — so @RestoreTasks is queued after them.
-        hear *Vein.Files.Io.@FileLoaded as f {
-            if f.tag == #Saved {
-                saved = f.text
-                target fromJson(f.text).groups as grp { emit @AddGroup { name: grp.group.name } }
-                emit @RestoreTasks { }
+    // A group's task list, found by its name — 0 until the group's widgets exist.
+    fn listFor(group: string) return Entity {
+        var list = 0
+        target $Group #Shown as g {
+            if g.Group.name == group {
+                target $For #TaskList as l { if l.For.group == g { list = l } }
             }
         }
+        return list
+    }
 
-        // The first run, or the file was deleted: start empty, and save from now on.
-        hear *Vein.Files.Io.@FileMissing as f {
-            if f.tag == #Saved { emit @Loaded { } }
-        }
+    fn boxText(group: Entity) return string {
+        var text = ""
+        target $For #Box as b { if b.For.group == group { target $Field on b as f { text = f.Field.value } } }
+        return text
+    }
 
-        hear @RestoreTasks as r {
-            target fromJson(saved).groups as grp {
-                target $Named #Group as g {
-                    if g.Named.name == grp.group.name {
-                        target grp.tasks as task {
-                            emit @AddTask { group: g, text: task.label, done: task.checked, priority: levelOf(string(task.priority)) }
-                        }
-                    }
-                }
-            }
-            emit @ShowFirst { }
-            emit @Loaded { }
-        }
-
-        hear @Loaded as l { loaded = true }
-
-        // The whole list as JSON, every frame — and written only when it differs from what is on disk.
-        settled {
-            if loaded {
-                var groups = ""
-                target $Named #Group as g {
-                    var tasks = ""
-                    target $Parent #Tasks as list {
-                        if list.Parent.of == g {
-                            target $Parent as row {
-                                if row.Parent.of == list {
-                                    target $Parent as cell {
-                                        if cell.Parent.of == row {
-                                            target $Toggle on cell as t {
-                                                // The checkbox's record, with its row's priority added.
-                                                var level = 1
-                                                target $Parent #Priority as pc {
-                                                    if pc.Parent.of == row { target $Choice on pc as p { level = p.Choice.picked + 1 } }
-                                                }
-                                                let record = toJson(t.Toggle)
-                                                if not (tasks == "") { tasks = tasks + "," }
-                                                tasks = tasks + substring(record, 0, len(record) - 1) +
-                                                        ",\"priority\":" + string(level) + "}"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if not (groups == "") { groups = groups + ",\n " }
-                    groups = groups + "{\"group\":" + toJson(g.Named) + ",\"tasks\":[" + tasks + "]}"
-                }
-                let text = "{\"groups\":[\n " + groups + "\n]}\n"
-                if not (text == saved) {
-                    saved = text
-                    emit *Vein.Files.Io.@WriteFile { path: "todo.json", text: text, tag: #Saved }
-                }
-            }
-        }
+    fn newPriority(group: Entity) return int {
+        var level = 1
+        target $For #NewPriority as p { if p.For.group == group { target $Choice on p as c { level = c.Choice.picked + 1 } } }
+        return level
     }
 }
