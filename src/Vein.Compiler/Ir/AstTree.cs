@@ -149,7 +149,10 @@ public sealed class AstTree
 
     // ---- statements -----------------------------------------------------
 
-    private IEnumerable<IrNode> Block(Block b) => b.Statements.Select(Stmt);
+    // A block nested as a statement is drawn as its statements: it is only a grouping — `mark e #A #B` parses to
+    // one `mark` per name — and the tree should show the two marks, not an extra level.
+    private IEnumerable<IrNode> Block(Block b) =>
+        b.Statements.SelectMany(s => s is Block inner ? Block(inner) : new[] { Stmt(s) });
 
     private IrNode Stmt(Stmt s) => s switch
     {

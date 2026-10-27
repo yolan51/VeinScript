@@ -124,6 +124,10 @@ weave Server("S1=9811:S2; S2=9812:S1")
 - **The first parameter is the record's name.** A `~` collection of Entity (or an `Entity`) value is NAMES, resolved
   across the whole text and earlier weaves — S1 may name S4 before S4's line, because every identity is
   spawned before any is linked. An unknown name in a list is dropped, with one @Unwoven.
+- **A repeated name is refused only where names are used.** A loom whose records refer to others (an `Entity`
+  or `list<Entity>` field) refuses a name twice — which one would a reference mean? A loom whose records refer
+  to nothing keeps every record, so a JSON list of tasks may repeat `"group": "Home"` on each; a later
+  reference to such a repeated name is @Unwoven "more than one record is named …", never a guess.
 - **Values are placed by type.** A parameter with a default may be missing; the trailing optional ones are
   left out first, and the first arrangement in which every value converts wins — so `S6=box.lan:9816`
   gives the host `box.lan`. A blank value takes the default; a last `list<…>` parameter takes every value
@@ -160,6 +164,8 @@ every `target` matches nothing — which looks exactly like a query with no resu
 
 **11. `spawn` is immediate; `attach`, `unattach`, `mark`, `unmark` and `destroy` are DEFERRED** to the
 commit point, after the folds. That is what stops one unit seeing a world another half-changed.
+`mark e #Shown #Row` (and `unmark e #A #B`) applies every mark named, as a builder's `mark #A #B` does — it
+used to apply the first and silently drop the rest.
 
 **11b. A shape is ONE component per identity — `attach` REPLACES it, whole.** Attaching `$Price` to an
 identity that already carries it never adds a second copy: `p.Price.amount` would no longer say which.

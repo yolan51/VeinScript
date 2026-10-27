@@ -236,10 +236,12 @@ public sealed class FormatCatalog
     public static List<BenchLine> Bench(CatalogLoom loom, WeaveFormat format, string samples)
     {
         var records = Weave.ReadAll(samples, format, loom.Params);
+        // As the weave itself: a repeated name is refused only by a loom whose records refer to others by name.
         var names = new HashSet<string>(StringComparer.Ordinal);
         var duplicate = new HashSet<WovenRecord>();
-        foreach (var r in records.Where(r => r.Problem is null && r.Name is { Length: > 0 }))
-            if (!names.Add(r.Name!)) duplicate.Add(r);
+        if (loom.Params.Any(p => p.RefersByName))
+            foreach (var r in records.Where(r => r.Problem is null && r.Name is { Length: > 0 }))
+                if (!names.Add(r.Name!)) duplicate.Add(r);
 
         var lines = new List<BenchLine>();
         foreach (var r in records)

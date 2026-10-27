@@ -1281,15 +1281,23 @@ public sealed class Parser
         var s = Here; Advance();
         // `mark !Spammer #Banned` marks a SHARD (D20). Checked before ParseExpr, where a `!Name` is the
         // VS0006 "write `not`" error.
+        // EVERY MARK NAMED: `mark e #Shown #Row` is one `mark` per name, as a builder's `mark #A #B` is. It read
+        // the first and silently dropped the rest — `#Row` never arrived, and nothing said so.
+        List<string> Marks()
+        {
+            var names = new List<string> { Expect(TokenKind.MarkRef, "#Mark").Text };
+            while (Check(TokenKind.MarkRef)) names.Add(Advance().Text);
+            return names;
+        }
+        static Stmt OneOrMany(List<Stmt> each, SourceSpan at) => each.Count == 1 ? each[0] : new Block(each, at);
+
         if (Check(TokenKind.ShardRef))
         {
             var shard = Advance();
-            string m = Expect(TokenKind.MarkRef, "#Mark").Text;
-            return new MarkShardStmt(remove, shard.Text, shard.Span, m, s);
+            return OneOrMany(Marks().Select(m => (Stmt)new MarkShardStmt(remove, shard.Text, shard.Span, m, s)).ToList(), s);
         }
         var target = ParseExpr();
-        string mark = Expect(TokenKind.MarkRef, "#Mark").Text;
-        return new MarkStmt(remove, target, mark, s);
+        return OneOrMany(Marks().Select(m => (Stmt)new MarkStmt(remove, target, m, s)).ToList(), s);
     }
 
     private EmitStmt ParseEmit()

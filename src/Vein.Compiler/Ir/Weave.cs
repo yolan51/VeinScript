@@ -8,6 +8,9 @@ namespace Vein.Compiler.Ir;
 public sealed record WeaveParam(string Name, string Type, bool HasDefault, string? Element = null, string? Kind = null)
 {
     public bool IsList => Type == "list";
+
+    /// This parameter names OTHER records (`Entity`, `list<Entity>`) — what record names exist for.
+    public bool RefersByName => Type == "Entity" || (IsList && Element == "Entity");
 }
 
 /// <summary>A format, flattened through its <c>from</c> chain: the reader at its root (<c>Json</c>,

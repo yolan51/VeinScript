@@ -111,6 +111,35 @@ public class WeaveTests : IDisposable
         }, lines);
     }
 
+    // A record's name is its first value, and names exist so records can reach each other. A loom whose records
+    // reach nothing keeps every record, even with a repeated first value — a JSON list of tasks repeats its group.
+    private const string Tasks =
+        "    shape $Task { group: string, text: string }\n" +
+        "    mark #Task\n" +
+        "    loom<Json> SavedTask { $Task  mark #Task }\n";
+
+    private const string TwoHomeTasks =
+        @"            weave SavedTask(""[{\""group\"": \""Home\"", \""text\"": \""a\""}, {\""group\"": \""Home\"", \""text\"": \""b\""}]"")";
+
+    [Fact]
+    public void A_loom_whose_records_name_no_others_keeps_every_record_even_with_a_repeated_first_value()
+    {
+        var lines = Run(Tasks, TwoHomeTasks,
+            "        hear @Woven as w { target $Task as t { do *Vein.Console.Io.print(t.Task.group + \" \" + t.Task.text) } }\n" + Report);
+        Assert.Equal(new[] { "Home a", "Home b" }, lines);
+    }
+
+    [Fact]
+    public void A_later_reference_to_a_repeated_name_is_said_to_be_ambiguous_not_guessed()
+    {
+        string members = Tasks +
+            "    shape $Link { name: string, to: Entity }\n" +
+            "    loom<Json> Linked { $Link  mark #Task }\n";
+        var lines = Run(members, TwoHomeTasks + "\n" +
+            @"            weave Linked(""[{\""name\"": \""L\"", \""to\"": \""Home\""}]"")", Report);
+        Assert.Contains(lines, l => l.Contains("more than one record is named \"Home\""));
+    }
+
     [Fact]
     public void Too_many_or_too_few_values_are_said_by_name()
     {

@@ -1838,6 +1838,9 @@ public sealed class Interp
     /// never a silent shadow.
     private readonly Dictionary<string, object?> _wovenNames = new(StringComparer.Ordinal);
 
+    /// Names woven more than once by looms whose records refer to nothing — kept, but no reference may pick one.
+    private readonly HashSet<string> _ambiguousNames = new(StringComparer.Ordinal);
+
     /// <summary>`weave Loom(text) [as x]` (D23): every record brought as `bring Loom(…)` brings it.</summary>
     /// <remarks>
     /// <para>
@@ -1860,17 +1863,28 @@ public sealed class Interp
         void Problem(string record, string what) => problems.Add((record, $"\"{record}\": {what}"));
 
         // ---- pass 1: read, name, spawn ----
+        //
+        // A NAME MATTERS ONLY TO A RECORD THAT NAMES OTHERS. Names exist so `S1=9811:S4` can reach S4, so a loom
+        // whose records refer to others (an `Entity` or `list<Entity>` field) refuses a name twice — which S4
+        // would a reference mean? A loom whose records refer to nothing keeps them all: a JSON list of tasks
+        // repeats its first field ("group": "Shopping") on every task of a group, and refusing those dropped the
+        // data. The repeated name is remembered as ambiguous, so a LATER reference to it is said, not guessed.
+        bool refers = w.Params.Any(p => p.RefersByName);
         var woven = new List<(WovenRecord Record, long Identity)>();
         foreach (var record in Weave.ReadAll(text, w.Format, w.Params))
         {
             if (record.Problem is not null) { Problem(record.Text, record.Problem); continue; }
             if (record.Name is { Length: > 0 } name && _wovenNames.ContainsKey(name))
             {
-                Problem(record.Text, $"a record named \"{name}\" was already woven");
-                continue;
+                if (refers)
+                {
+                    Problem(record.Text, $"a record named \"{name}\" was already woven");
+                    continue;
+                }
+                _ambiguousNames.Add(name);
             }
             long identity = _store.Spawn();
-            if (record.Name is { Length: > 0 } n) _wovenNames[n] = identity;
+            if (record.Name is { Length: > 0 } n && !_wovenNames.ContainsKey(n)) _wovenNames[n] = identity;
             woven.Add((record, identity));
         }
 
@@ -1892,6 +1906,14 @@ public sealed class Interp
 
                 if (p.Type == "Entity")
                 {
+                    if (_ambiguousNames.Contains(Str(value)))
+                    {
+                        Problem(record.Text, $"`{p.Name}`: more than one record is named \"{Str(value)}\"");
+                        if (!p.HasDefault) { ok = false; break; }
+                        locals["__wm_" + p.Name] = true;
+                        locals["__wv_" + p.Name] = null;
+                        continue;
+                    }
                     if (_wovenNames.TryGetValue(Str(value), out object? target)) value = target;
                     else
                     {
@@ -1907,7 +1929,8 @@ public sealed class Interp
                     // An unknown element is dropped — one problem says which — and the rest are linked.
                     var linked = new List<object?>();
                     foreach (var element in names)
-                        if (_wovenNames.TryGetValue(Str(element), out object? target)) linked.Add(target);
+                        if (_ambiguousNames.Contains(Str(element))) Problem(record.Text, $"`{p.Name}`: more than one record is named \"{Str(element)}\"");
+                        else if (_wovenNames.TryGetValue(Str(element), out object? target)) linked.Add(target);
                         else Problem(record.Text, $"`{p.Name}`: no record named \"{Str(element)}\"");
                     value = linked;
                 }
