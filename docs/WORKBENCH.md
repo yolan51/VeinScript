@@ -16,6 +16,10 @@ dotnet run --project src/Vein.Workbench
 
 Open a `.vein` file (`Ctrl+O`) or a folder (`Ctrl+K`), edit, Build (`Ctrl+B`), Run (`F5`).
 
+**A desktop program** (one that `need`s `Vein.Desktop`) needs no run line: `F5` opens its windows, drawn
+from its identities (`DesktopRunner`), its `@Print` lines go to the Output tab, and closing its last window
+or pressing ■ ends it. See HOSTING.md, "Desktop programs".
+
 ## Layout
 
 ```

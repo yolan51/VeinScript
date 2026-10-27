@@ -1,0 +1,99 @@
+// stdlib/Desktop.vein — VeinScript Standard Library : Vein.Desktop
+// Windows and widgets as IDENTITIES. A window carries $Window; a widget carries one of Vein.UI's shapes
+// ($Text, $Button, $Field) or this bundle's $Toggle / $Panel, plus *Vein.Core.Relations.$Parent naming the
+// window or panel it sits in. The tree is nothing but those links (a relationship is a component, not a
+// pointer graph), in spawn order (D13). A host draws it as native controls — the Workbench does, on ▶ — and
+// turns what the user does into the events below.
+// Discover:  veinc symbols stdlib/Desktop.vein
+//
+//   need "Vein.Desktop"
+//   need "Vein.UI"                                     (for $Text, $Button, $Field and @Clicked)
+//   shard Build { run once {
+//       bring Window("Notes", 480.0, 360.0) as w
+//       bring Label(w, "Hello")
+//       bring Button(w, "Save") as save
+//       mark save #Save
+//   } }
+//   shard Clicks { hear *Vein.UI.Interaction.@Clicked as c {
+//       target $Button #Save on c.target as b { … }
+//   } }
+//
+// THE IDENTITIES ARE THE TRUTH. To change the screen, change a field: `t.Text.content = "3 left"` is the whole
+// of "update the label". What the user types, the host writes into the box's $Field.value before @Edited
+// arrives, and a tick into $Toggle.checked before @Toggled — the way it writes $View (docs/HOSTING.md).
+//
+// Every builder takes its PARENT FIRST, then the shape's fields in order (RULES 9). Mark a widget to tell it
+// apart from its siblings, and look at the clicked one with `on` (RULES 14f) rather than comparing ids.
+
+bundle Desktop by Vein {
+
+    publicator Widgets {
+        shared("A top-level window: its title and its starting size in pixels.")
+        shape $Window { title: string, width: float = 480.0, height: float = 360.0 }
+
+        shared("A container. Its children stack down, or across when it carries #Row; gap is the space between them.")
+        shape $Panel { gap: float = 8.0 }
+
+        shared("A checkbox: what it says, and whether it is ticked.")
+        shape $Toggle { label: string, checked: bool = false }
+
+        shared("Carried by every window.")
+        mark #Window
+
+        shared("Carried by every widget that sits inside a window.")
+        mark #Widget
+
+        shared("A panel that lays its children out across instead of down.")
+        mark #Row
+
+        shared("A window: bring Window(\"Notes\", 480.0, 360.0) as w, then bring widgets into w.")
+        builder Window { $Window   mark #Window }
+
+        shared("A column of widgets inside parent: bring Column(w, 4.0) as list.")
+        builder Column { *Vein.Core.Relations.$Parent  $Panel   mark #Widget }
+
+        shared("A row of widgets inside parent, side by side.")
+        builder Row { *Vein.Core.Relations.$Parent  $Panel   mark #Widget #Row }
+
+        shared("A line of text inside parent.")
+        builder Label { *Vein.Core.Relations.$Parent  *Vein.UI.Widgets.$Text   mark #Widget }
+
+        shared("Text at a size: bring Heading(w, \"To-do\", 22.0).")
+        builder Heading { *Vein.Core.Relations.$Parent  *Vein.UI.Widgets.$Text  *Vein.UI.Widgets.$Font   mark #Widget }
+
+        shared("A button inside parent. A click arrives as *Vein.UI.Interaction.@Clicked { target }.")
+        builder Button { *Vein.Core.Relations.$Parent  *Vein.UI.Widgets.$Button   mark #Widget }
+
+        shared("A text box inside parent: bring Input(w, \"\", \"What needs doing?\") as box.")
+        builder Input { *Vein.Core.Relations.$Parent  *Vein.UI.Widgets.$Field   mark #Widget }
+
+        shared("A checkbox inside parent: bring Check(row, \"Buy milk\", false).")
+        builder Check { *Vein.Core.Relations.$Parent  $Toggle   mark #Widget }
+
+        // REMOVAL WALKS DOWN. The runtime raises no @Destroyed (stdlib/Core.vein leaves teardown to the
+        // program), so taking a row away would leave its checkbox behind, parented to nothing. This takes the
+        // identity and everything under it, at any depth. Written qualified: a shared SF runs INLINE in the
+        // caller, which may not have `need`ed this bundle by name. (`remove` is the list built-in, VS0361.)
+        shared("Remove a window or widget, and everything inside it: do discard(row).")
+        SF discard(e: Entity) {
+            target $Parent as child {
+                if child.Parent.of == e { do *Vein.Desktop.Widgets.discard(child) }
+            }
+            destroy e
+        }
+    }
+
+    publicator Events {
+        shared("From the host: the text in a box changed. $Field.value already holds it.")
+        event @Edited { target: Entity, value: string }
+
+        shared("From the host: Enter was pressed in a box.")
+        event @Submitted { target: Entity, value: string }
+
+        shared("From the host: a checkbox was ticked or unticked. $Toggle.checked already holds it.")
+        event @Toggled { target: Entity, checked: bool }
+
+        shared("From the host: the user closed a window. The host then removes it, and everything in it.")
+        event @WindowClosed { target: Entity }
+    }
+}

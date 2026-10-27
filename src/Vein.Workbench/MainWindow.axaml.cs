@@ -938,6 +938,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        // A program that opens WINDOWS runs here, with them on screen, rather than in a terminal that would
+        // draw nothing. It needs no run line: `need "Vein.Desktop"` is what says how it runs.
+        if (DesktopProgram.Uses(result.Ast) && result.Entry is { } desktopEntry)
+        {
+            RunDesktop(desktopEntry);
+            return;
+        }
+
         if (_configs.Count == 0)
         {
             SetStatus("Nothing to run — this file declares no run line (a fragment is loaded by an app).");
@@ -1030,7 +1038,27 @@ public partial class MainWindow : Window
     private void OnStopAll(object? sender, RoutedEventArgs e)
     {
         _terminal.StopAll();
+        _desktop?.Stop();
         SetStatus("Stopped every terminal session.");
+    }
+
+    /// The desktop program ▶ started, while its windows are open. One at a time: ▶ again restarts it.
+    private DesktopRunner? _desktop;
+
+    private void RunDesktop(IrModule entry)
+    {
+        _desktop?.Stop();
+        string name = Path.GetFileName(RunPath ?? "untitled.vein");
+        string folder = ProjectDir ?? Path.GetDirectoryName(RunPath) ?? Environment.CurrentDirectory;
+
+        _runOutput.Text = "";
+        ShowBottomTab(TabOutput);
+        var runner = new DesktopRunner(entry, folder,
+            line => Dispatcher.UIThread.Post(() => _runOutput.Text += line + "\n"),
+            reason => Dispatcher.UIThread.Post(() => SetStatus($"{name} ended: {reason}.")));
+        _desktop = runner;
+        SetStatus($"Running {name} — its windows are open. Close them, or press ■, to end it.");
+        runner.Start();
     }
 
     // ---- project file, templates and checks -------------------------------

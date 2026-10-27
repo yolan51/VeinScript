@@ -293,6 +293,10 @@ switch (command)
             int flagsEnd = dashdash < 0 ? args.Length : dashdash;
             for (int i = 2; i < flagsEnd; i++) if (Ticks(args, ref i) is { } t) ticks = t;
 
+            // A live run of a program that opens windows would otherwise sit there drawing nothing. With
+            // `--ticks` it is a test stepping the rules on purpose, and needs no note.
+            if (ticks == 0 && DesktopProgram.Uses(unit)) Console.Error.WriteLine(DesktopProgram.HeadlessNote);
+
             if (linkedRun is { } la)
             {
                 LockCommand.Record(projectDir, la.OutsideUses);

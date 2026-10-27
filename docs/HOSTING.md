@@ -244,6 +244,27 @@ Values go in as the rules hold them (int as long, float as double, Entity as lon
 the program does not have is refused — and a program only has what it USES: lowering drops the parts of a
 needed bundle nothing mentions.
 
+## Desktop programs: windows as identities (`Vein.Desktop`)
+
+A program that `need`s `Vein.Desktop` describes windows and widgets as identities (stdlib/Desktop.vein): a
+window carries `$Window`, a widget carries `$Text`/`$Button`/`$Field`/`$Toggle`/`$Panel` plus
+`*Vein.Core.Relations.$Parent`, and the tree is those links in spawn order. The Workbench is its host —
+▶ on such a program opens its windows (`src/Vein.Workbench/DesktopRunner.cs`) — and any other host keeps
+the same contract:
+
+| The user | The host |
+|---|---|
+| clicks a button | `@Clicked { target }` (`FireClicked`) |
+| types in a box | writes the box's `$Field.value`, **then** raises `@Edited { target, value }` |
+| presses Enter in a box | `@Submitted { target, value }` |
+| ticks a checkbox | writes `$Toggle.checked`, **then** raises `@Toggled { target, checked }` |
+| closes a window | `@WindowClosed { target }`, then destroys the window and everything parented under it; the last one closed ends the program |
+
+The host WRITES the two fields for the same reason it writes `$View`: they are the state of a control the
+host owns, and the program reads them like any field. Everything else — what a click means, what
+`do discard(row)` takes with it, what a window shows — is the program's. A close cannot be cancelled yet.
+`veinc run` runs a desktop program's rules with no window drawn, and says so.
+
 ## Limits, said plainly
 
 - **Compiled covers most, not all.** See "Two runtimes" above for what still falls back.

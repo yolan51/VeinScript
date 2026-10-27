@@ -103,7 +103,9 @@ Vein.Graphics — $Model, $Animation, @AnimationEnded, $Tint, $Flip, #Hidden (st
 Vein.Physics  — #Collidable, CollisionShape, @Collisioned, CollisionDetection shard
 Vein.Web      — Http events + html BUILDERS (web is where markup/builders legitimately live)
 Vein.WebTheme — the LOOK: palettes, foundation, components (a separate `use`, so channels ≠ taste)
-Vein.Desktop  — Window/Clipboard/Files (platform-specific, behind the backend)
+Vein.Desktop  — windows and widgets as identities: $Window $Panel $Toggle, builders Window Column Row Label
+                Heading Button Input Check, `do discard(e)`, @Edited @Submitted @Toggled @WindowClosed
+                (stdlib/Desktop.vein; the Workbench's ▶ draws them — HOSTING.md "Desktop programs")
 ```
 
 A single conceptual identity (e.g. `Vein.Input.@MouseDown`) is defined **once**; each backend translates
