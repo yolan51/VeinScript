@@ -493,6 +493,7 @@ public partial class MainWindow : Window
             _diags = Array.Empty<Diagnostic>();
             ApplyDiagnosticFilter();
             _configs = Array.Empty<RunConfig>();
+            _participants = 0;
             _runConfigs.ItemsSource = null;
             _bundleInspector.IsVisible = false;
             Title = "VeinScript Workbench";
@@ -919,6 +920,21 @@ public partial class MainWindow : Window
         if (_project is not null)
             configs.AddRange(_project.Runs.Select(r =>
                 new RunConfig(r.Label, r.Command, r.Args, r.Env)));
+        _participants = configs.Count;
+
+        // THEN THE STANDARD COMMANDS, for a whole program. A file with no run line left the dropdown empty, so
+        // serving a web app you had just written meant knowing the Build menu had it. A bundle can always be
+        // run (or served, when it answers requests) and built; a fragment declares no bundle and gets none.
+        if (RunPath is { } path && DeclaresBundle(RunText))
+        {
+            var standard = new List<RunConfig>();
+            if (AnswersRequests(RunText))
+                standard.Add(new RunConfig("serve", "serve", new[] { path, "--port", ServePort.ToString() }, new Dictionary<string, string>()));
+            else
+                standard.Add(new RunConfig("run", "run", new[] { path }, new Dictionary<string, string>()));
+            standard.Add(new RunConfig("build", "build", new[] { path }, new Dictionary<string, string>()));
+            configs.AddRange(standard.Where(s => !configs.Any(c => c.Command == s.Command)));
+        }
         _configs = configs;
 
         var labels = _configs.Select(c => c.Label).ToList();
@@ -934,13 +950,25 @@ public partial class MainWindow : Window
 
         // A file with no header line is usually a FRAGMENT — loaded into an app, never run alone. Saying
         // so is more use than a ▶ that cannot work.
-        _runHint.Text = _configs.Count switch
+        _runHint.Text = (_participants, _configs.Count) switch
         {
-            0 => "no run line in this file's header",
-            1 => "",
-            var n => $"{n} participants"
+            (0, 0) => "no run line in this file's header",
+            (0, _) => "",
+            (1, _) => "",
+            var (n, _) => $"{n} participants"
         };
     }
+
+    /// How many of `_configs` the header (or .veinproj) declared — the participants Run All starts. The
+    /// standard commands after them are alternatives, not participants: ▶▶ must never also start a build.
+    private int _participants;
+
+    private static bool DeclaresBundle(string text) =>
+        System.Text.RegularExpressions.Regex.IsMatch(text, @"^\s*bundle\s+\w+", System.Text.RegularExpressions.RegexOptions.Multiline);
+
+    /// A program a browser talks to: it needs Vein.Web, or hears @Request itself.
+    private static bool AnswersRequests(string text) =>
+        text.Contains("\"Vein.Web\"", StringComparison.Ordinal) || text.Contains("@Request", StringComparison.Ordinal);
 
     /// Show the selected configuration as an editable command line.
     ///
@@ -984,8 +1012,11 @@ public partial class MainWindow : Window
         }
 
         // A program that opens WINDOWS runs here, with them on screen, rather than in a terminal that would
-        // draw nothing. It needs no run line: `need "Vein.Desktop"` is what says how it runs.
-        if (DesktopProgram.Uses(result.Ast) && result.Entry is { } desktopEntry)
+        // draw nothing. It needs no run line: `need "Vein.Desktop"` is what says how it runs. Unless the
+        // dropdown asks for something else — `build` of a desktop program is a build, not a window.
+        string chosen = _runConfigs.SelectedIndex >= 0 && _runConfigs.SelectedIndex < _configs.Count
+            ? _configs[_runConfigs.SelectedIndex].Command : "run";
+        if (chosen == "run" && DesktopProgram.Uses(result.Ast) && result.Entry is { } desktopEntry)
         {
             RunDesktop(desktopEntry);
             return;
@@ -1022,7 +1053,7 @@ public partial class MainWindow : Window
     /// pipe before the next one addresses it. Short enough not to feel like a wait.
     private async void OnRunAll(object? sender, RoutedEventArgs e)
     {
-        if (_configs.Count < 2) { OnRun(sender, e); return; }
+        if (_participants < 2) { OnRun(sender, e); return; }
 
         await SaveAllForRunAsync();
 
@@ -1039,15 +1070,15 @@ public partial class MainWindow : Window
 
         ShowBottomTab(TabTerminal);
 
-        for (int i = 0; i < _configs.Count; i++)
+        for (int i = 0; i < _participants; i++)
         {
             var cfg = _configs[i];
             _terminal.Run(new LaunchSpec(LaunchKind.Cli, cfg.Command, cfg.Args, cfg.Env), cfg.Label);
-            SetStatus($"Started {cfg.Label} ({i + 1} of {_configs.Count})");
-            if (i < _configs.Count - 1) await Task.Delay(900);
+            SetStatus($"Started {cfg.Label} ({i + 1} of {_participants})");
+            if (i < _participants - 1) await Task.Delay(900);
         }
 
-        SetStatus($"Started all {_configs.Count} participants — type into a session to drive it.");
+        SetStatus($"Started all {_participants} participants — type into a session to drive it.");
     }
 
     /// `veinc serve` for the open file, in a terminal session, and open a browser at it.
