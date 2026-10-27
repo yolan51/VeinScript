@@ -30,6 +30,8 @@ internal sealed class DesktopRunner
 {
     private readonly Interp _interp;
     private readonly IrModule _module;
+    private readonly string _programFolder;   // where `Picture(…, "logo.png")` and a window icon are looked up
+    private readonly Dictionary<string, Avalonia.Media.Imaging.Bitmap?> _images = new(StringComparer.OrdinalIgnoreCase);
     private readonly Action<string> _ended;
     private readonly Dictionary<long, Window> _windows = new();
     private readonly Dictionary<long, Control> _controls = new();
@@ -42,9 +44,10 @@ internal sealed class DesktopRunner
     public IReadOnlyDictionary<long, Window> Windows => _windows;
     public IReadOnlyList<Node> Tree { get; private set; } = Array.Empty<Node>();
 
-    public DesktopRunner(IrModule module, string baseDirectory, Action<string> print, Action<string> ended)
+    public DesktopRunner(IrModule module, string baseDirectory, string programFolder, Action<string> print, Action<string> ended)
     {
         _module = module;
+        _programFolder = programFolder;
         _ended = ended;
         var lines = new LineSink(print);
         _interp = new Interp { BaseDirectory = baseDirectory, Output = lines, ErrorOutput = lines };
@@ -179,6 +182,10 @@ internal sealed class DesktopRunner
             Title = w.Title, Width = w.Width, Height = w.Height,
             Content = new ScrollViewer { Content = new StackPanel { Margin = new Thickness(16), Spacing = 8 } },
         };
+        if (w.Icon.Length > 0 && Resolve(w.Icon) is { } iconPath && File.Exists(iconPath))
+        {
+            try { window.Icon = new WindowIcon(iconPath); } catch (Exception) { /* not an image: no icon, not a crash */ }
+        }
         window.Closing += (_, _) =>
         {
             if (_windows.Remove(id)) CloseWindow(id);   // the user closed it; the program hears it first
@@ -208,7 +215,15 @@ internal sealed class DesktopRunner
         }
     }
 
+    /// `#Hidden` (Vein.Graphics) keeps the control and draws it nowhere — and a hidden panel hides what is in it.
     private Control ControlFor(Node n)
+    {
+        var control = Build(n);
+        if (control.IsVisible == n.Hidden) control.IsVisible = !n.Hidden;
+        return control;
+    }
+
+    private Control Build(Node n)
     {
         _controls.TryGetValue(n.Id, out var existing);
         long id = n.Id;
@@ -227,7 +242,15 @@ internal sealed class DesktopRunner
                     button.Click += (_, _) => Click(id);
                 }
                 if (!Equals(button.Content, n.Text)) button.Content = n.Text;
+                button.Classes.Set("accent", n.Accent);   // Fluent's accent button, for `#Accent`
                 return button;
+
+            case Kind.Picture:
+                var image = existing as Avalonia.Controls.Image ?? Replace(id, new Avalonia.Controls.Image { Stretch = Stretch.Uniform });
+                image.Height = n.Height;
+                var bitmap = ImageAt(n.Source);
+                if (!ReferenceEquals(image.Source, bitmap)) image.Source = bitmap;
+                return image;
 
             case Kind.Input:
                 if (existing is not TextBox box)
@@ -262,6 +285,21 @@ internal sealed class DesktopRunner
         }
     }
 
+    /// A relative path means beside the PROGRAM — the folder its `.vein` is in — so a sample and its picture
+    /// travel together, whatever folder the Workbench has open.
+    private string? Resolve(string path) =>
+        path.Length == 0 ? null : Path.IsPathRooted(path) ? path : Path.GetFullPath(Path.Combine(_programFolder, path));
+
+    /// Loaded once per path. A missing or unreadable file draws nothing rather than ending the program.
+    private Avalonia.Media.Imaging.Bitmap? ImageAt(string source)
+    {
+        if (Resolve(source) is not { } path) return null;
+        if (_images.TryGetValue(path, out var cached)) return cached;
+        Avalonia.Media.Imaging.Bitmap? bitmap = null;
+        try { if (File.Exists(path)) bitmap = new Avalonia.Media.Imaging.Bitmap(path); } catch (Exception) { }
+        return _images[path] = bitmap;
+    }
+
     /// An identity whose kind changed gets a new control; the old one leaves the window.
     private T Replace<T>(long id, T control) where T : Control
     {
@@ -283,12 +321,14 @@ internal sealed class DesktopRunner
         try { _interp.Shutdown(); } catch (Exception) { /* ending anyway */ }
         foreach (var window in _windows.Values.ToList()) window.Close();
         _windows.Clear();
+        foreach (var bitmap in _images.Values) bitmap?.Dispose();
+        _images.Clear();
         _ended(reason);
     }
 
     // ---- reading the world as a tree ------------------------------------------------------------------
 
-    internal enum Kind { Window, Panel, Button, Input, Check, Text }
+    internal enum Kind { Window, Panel, Button, Input, Check, Picture, Text }
 
     /// One window or widget, read from one identity. Only the fields its kind uses mean anything.
     internal sealed record Node(long Id, Kind Kind, IReadOnlyList<Node> Children)
@@ -303,6 +343,10 @@ internal sealed class DesktopRunner
         public string Value { get; init; } = "";
         public string Placeholder { get; init; } = "";
         public bool Checked { get; init; }
+        public string Icon { get; init; } = "";
+        public string Source { get; init; } = "";
+        public bool Hidden { get; init; }
+        public bool Accent { get; init; }
 
         public IEnumerable<Node> Walk() => Children.SelectMany(c => c.Walk()).Prepend(this);
     }
@@ -328,18 +372,21 @@ internal sealed class DesktopRunner
             : new List<Node>();
 
         var kind = KindOf(e)!.Value;
-        return kind switch
+        var node = kind switch
         {
             Kind.Window => new Node(e.Entity, kind, kids)
             {
                 Title = Text(e, "Window", "title"), Width = Number(e, "Window", "width", 480), Height = Number(e, "Window", "height", 360),
+                Icon = Text(e, "Window", "icon"),
             },
             Kind.Panel => new Node(e.Entity, kind, kids) { Gap = Number(e, "Panel", "gap", 8), Row = e.Marks.Contains("Row") },
-            Kind.Button => new Node(e.Entity, kind, kids) { Text = Text(e, "Button", "label") },
+            Kind.Button => new Node(e.Entity, kind, kids) { Text = Text(e, "Button", "label"), Accent = e.Marks.Contains("Accent") },
             Kind.Input => new Node(e.Entity, kind, kids) { Value = Text(e, "Field", "value"), Placeholder = Text(e, "Field", "placeholder") },
             Kind.Check => new Node(e.Entity, kind, kids) { Text = Text(e, "Toggle", "label"), Checked = Field(e, "Toggle", "checked") is true },
+            Kind.Picture => new Node(e.Entity, kind, kids) { Source = Text(e, "Image", "source"), Height = Number(e, "Picture", "height", 32) },
             _ => new Node(e.Entity, kind, kids) { Text = Text(e, "Text", "content"), FontSize = Number(e, "Font", "size", 0) },
         };
+        return node with { Hidden = e.Marks.Contains("Hidden") };
     }
 
     private static Kind? KindOf(EntityStore.EntitySnapshot e) =>
@@ -348,6 +395,7 @@ internal sealed class DesktopRunner
         : e.Components.ContainsKey("Button") ? Kind.Button
         : e.Components.ContainsKey("Field") ? Kind.Input
         : e.Components.ContainsKey("Toggle") ? Kind.Check
+        : e.Components.ContainsKey("Image") ? Kind.Picture
         : e.Components.ContainsKey("Text") ? Kind.Text
         : null;
 

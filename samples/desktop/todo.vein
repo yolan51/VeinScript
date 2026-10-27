@@ -1,18 +1,20 @@
-// samples/desktop/todo.vein — a to-do list in GROUPS: name a group, add tasks to it, tick, remove.
+// samples/desktop/todo.vein — a to-do list in GROUPS, one shown at a time: name a group, pick its tab,
+// add tasks to it, tick, remove.
 //
 //   In the Workbench, press ▶ (F5): its window opens, drawn from its identities.
 //   veinc run samples/desktop/todo.vein --ticks 2      (its rules alone, with no window drawn)
 //
 // THE WINDOW, AS IDENTITIES. Every box below is one identity; every line is a $Parent link.
 //
-//   window ─┬─ heading "To-do"
+//   window ─┬─ row ── picture (vslogo.png)  heading "To-do"
 //           ├─ row ── [new group name] [Add group]
+//           ├─ row #Tabs ── [Shopping] [Work]   (one #Tab per group; the open one wears #Accent)
 //           ├─ column #Groups ── column #Group ─┬─ row #Head ── heading "Shopping"  label #Status  [Remove group]
 //           │                   (one per group)  ├─ row #Entry ── [add a task…] [Add]
 //           │                                    └─ column #Tasks ── row ── [x] task  [Remove]
 //           └─ label #Empty
 //
-// FOUR IDEAS CARRY THE WHOLE APP:
+// FIVE IDEAS CARRY THE WHOLE APP:
 //
 // 1. THE $Parent LINKS ARE THE DATA. Nothing keeps a list of groups or tasks. A group's tasks are the rows
 //    whose parent is its #Tasks column; "which group is this Add button in?" is two steps up its parents.
@@ -26,17 +28,28 @@
 // 4. WHAT IS SHOWN IS DERIVED, IN `settled`. Each group's "1 of 3 left" is counted after every commit, so
 //    no handler has to remember to update it. Counting in @AddTask would miss the new row, which is
 //    visible only from the next event (RULES 12b).
+//
+// 5. ONE GROUP AT A TIME IS A MARK. Every group but the open one wears *Vein.Graphics.Looks.#Hidden, which the
+//    host draws nowhere — the group and everything in it. @Show { group } moves the mark; a tab knows its
+//    group through $Opens, so nothing compares labels.
 
 bundle Todo by you {
     need "Vein.Desktop"
     need "Vein.UI"
     need "Vein.Core"
+    need "Vein.Graphics"
 
     event @AddGroup { name: string }
     event @AddTask { group: Entity, text: string }
+    event @Show { group: Entity }
+    event @ShowSome { }
+
+    shape $Opens { group: Entity }   // a tab's group
 
     mark #NewGroup      // the box that names a new group
     mark #AddGroup      // …and its button
+    mark #Tabs          // the row of tabs, one per group
+    mark #Tab           // one tab
     mark #Groups        // the column every group lives in
     mark #Group         // one group
     mark #Head          // a group's header row
@@ -51,13 +64,17 @@ bundle Todo by you {
 
     shard Build {
         run once {
-            bring Window("To-do", 480.0, 560.0) as w
-            bring Heading(w, "To-do", 22.0)
+            bring Window("To-do", 480.0, 600.0, "vslogo.png") as w
+            bring Row(w, 10.0) as title
+            bring Picture(title, "vslogo.png", 40.0)
+            bring Heading(title, "To-do", 24.0)
             bring Row(w, 8.0) as top
             bring Input(top, "", "New group, e.g. Shopping") as name
             mark name #NewGroup
             bring Button(top, "Add group") as addGroup
             mark addGroup #AddGroup
+            bring Row(w, 6.0) as tabs
+            mark tabs #Tabs
             bring Column(w, 16.0) as groups
             mark groups #Groups
             bring Label(w, "") as empty
@@ -84,12 +101,22 @@ bundle Todo by you {
                 }
             }
 
+            // A tab opens its group.
+            target $Opens #Tab on c.target as t { emit @Show { group: t.Opens.group } }
+
             // A task's Remove sits in the task's row: removing the row takes its checkbox with it.
             target $Parent #Delete on c.target as d { do discard(d.Parent.of) }
 
             // Remove group sits in the group's header row: the group is the header's parent.
+            // Its tab goes with it; if it was the open one, another opens (next event, once it is gone).
             target $Parent #DropGroup on c.target as d {
-                target $Parent #Head on d.Parent.of as head { do discard(head.Parent.of) }
+                target $Parent #Head on d.Parent.of as head {
+                    target $Opens #Tab as t {
+                        if t.Opens.group == head.Parent.of { do discard(t) }
+                    }
+                    do discard(head.Parent.of)
+                    emit @ShowSome { }
+                }
             }
         }
 
@@ -124,8 +151,38 @@ bundle Todo by you {
                     mark add #Add
                     bring Column(group, 4.0) as tasks
                     mark tasks #Tasks
+                    target $Panel #Tabs as tabs {
+                        bring Button(tabs, g.name) as tab
+                        mark tab #Tab
+                        attach $Opens to tab { group: group }
+                    }
+                    // A new group opens at once: the user named it to fill it.
+                    emit @Show { group: group }
                 }
                 target $Field #NewGroup as f { f.Field.value = "" }
+            }
+        }
+
+        // Exactly one group shown: the one asked for. Its tab is the accented one.
+        hear @Show as s {
+            target $Panel #Group as g {
+                if g == s.group { unmark g #Hidden } else { mark g #Hidden }
+            }
+            target $Opens #Tab as t {
+                if t.Opens.group == s.group { mark t #Accent } else { unmark t #Accent }
+            }
+        }
+
+        // After a removal: if nothing is shown, show the first group left.
+        hear @ShowSome as x {
+            var shown = 0
+            target $Panel #Group as g { if not (g carries #Hidden) { shown += 1 } }
+            if shown == 0 {
+                var first = 0
+                target $Panel #Group as g {
+                    first += 1
+                    if first == 1 { emit @Show { group: g } }
+                }
             }
         }
 

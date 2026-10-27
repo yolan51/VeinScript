@@ -260,6 +260,15 @@ the same contract:
 | ticks a checkbox | writes `$Toggle.checked`, **then** raises `@Toggled { target, checked }` |
 | closes a window | `@WindowClosed { target }`, then destroys the window and everything parented under it; the last one closed ends the program |
 
+What the host draws, beyond the widgets' own fields:
+
+| VeinScript | The host |
+|---|---|
+| `$Window { icon }` | the window's icon — an image file, relative to the program's own folder |
+| `Picture(parent, source, height)` (`$Image` + `$Picture`) | the image, `height` pixels tall; a relative `source` is beside the program |
+| `*Vein.Graphics.Looks.#Hidden` on any widget | keeps it and draws it nowhere — and nothing inside it |
+| `#Accent` on a button | draws it in the accent colour (a selected tab, the main action) |
+
 The host WRITES the two fields for the same reason it writes `$View`: they are the state of a control the
 host owns, and the program reads them like any field. Everything else — what a click means, what
 `do discard(row)` takes with it, what a window shows — is the program's. A close cannot be cancelled yet.

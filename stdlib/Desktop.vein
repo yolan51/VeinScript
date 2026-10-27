@@ -22,20 +22,26 @@
 // of "update the label". What the user types, the host writes into the box's $Field.value before @Edited
 // arrives, and a tick into $Toggle.checked before @Toggled — the way it writes $View (docs/HOSTING.md).
 //
+// To hide a widget and everything in it, mark it *Vein.Graphics.Looks.#Hidden (`need "Vein.Graphics"`); unmark
+// to show it. #Accent draws a button in the accent colour.
+//
 // Every builder takes its PARENT FIRST, then the shape's fields in order (RULES 9). Mark a widget to tell it
 // apart from its siblings, and look at the clicked one with `on` (RULES 14f) rather than comparing ids.
 
 bundle Desktop by Vein {
 
     publicator Widgets {
-        shared("A top-level window: its title and its starting size in pixels.")
-        shape $Window { title: string, width: float = 480.0, height: float = 360.0 }
+        shared("A top-level window: its title, its starting size in pixels, and an icon (an image file beside the program).")
+        shape $Window { title: string, width: float = 480.0, height: float = 360.0, icon: string = "" }
 
         shared("A container. Its children stack down, or across when it carries #Row; gap is the space between them.")
         shape $Panel { gap: float = 8.0 }
 
         shared("A checkbox: what it says, and whether it is ticked.")
         shape $Toggle { label: string, checked: bool = false }
+
+        shared("How tall to draw a picture, in pixels; its width follows the image.")
+        shape $Picture { height: float = 32.0 }
 
         shared("Carried by every window.")
         mark #Window
@@ -46,7 +52,12 @@ bundle Desktop by Vein {
         shared("A panel that lays its children out across instead of down.")
         mark #Row
 
-        shared("A window: bring Window(\"Notes\", 480.0, 360.0) as w, then bring widgets into w.")
+        // HIDING IS NOT A NEW MARK. *Vein.Graphics.Looks.#Hidden already means "keep it, draw it nowhere" to
+        // every host, so a widget wearing it — and everything inside it — is not shown until it is unmarked.
+        shared("A button drawn in the accent colour: the selected tab, the main action.")
+        mark #Accent
+
+        shared("A window: bring Window(\"Notes\", 480.0, 360.0, \"icon.png\") as w, then bring widgets into w.")
         builder Window { $Window   mark #Window }
 
         shared("A column of widgets inside parent: bring Column(w, 4.0) as list.")
@@ -69,6 +80,9 @@ bundle Desktop by Vein {
 
         shared("A checkbox inside parent: bring Check(row, \"Buy milk\", false).")
         builder Check { *Vein.Core.Relations.$Parent  $Toggle   mark #Widget }
+
+        shared("An image file beside the program, drawn height pixels tall: bring Picture(w, \"logo.png\", 32.0).")
+        builder Picture { *Vein.Core.Relations.$Parent  *Vein.UI.Widgets.$Image  $Picture   mark #Widget }
 
         // REMOVAL WALKS DOWN. The runtime raises no @Destroyed (stdlib/Core.vein leaves teardown to the
         // program), so taking a row away would leave its checkbox behind, parented to nothing. This takes the

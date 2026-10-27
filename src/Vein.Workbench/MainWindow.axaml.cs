@@ -1053,7 +1053,8 @@ public partial class MainWindow : Window
 
         _runOutput.Text = "";
         ShowBottomTab(TabOutput);
-        var runner = new DesktopRunner(entry, folder,
+        string programFolder = Path.GetDirectoryName(RunPath) ?? folder;
+        var runner = new DesktopRunner(entry, folder, programFolder,
             line => Dispatcher.UIThread.Post(() => _runOutput.Text += line + "\n"),
             reason => Dispatcher.UIThread.Post(() => SetStatus($"{name} ended: {reason}.")));
         _desktop = runner;
