@@ -105,12 +105,16 @@ internal sealed class AssistantPanel : UserControl
         _signIn.Click += (_, _) => SignInRequested?.Invoke();
 
         // Enter sends; Shift+Enter is a newline, because a question about code often wants one.
-        _ask.KeyDown += (_, e) =>
+        //
+        // On the way IN (Tunnel), not on the way out. A TextBox that AcceptsReturn handles Enter itself — it
+        // inserts the newline and marks the key handled — so a plain `KeyDown +=` never heard it, and Enter
+        // only ever made the box taller. Caught first, Enter is ours; Shift+Enter is left for the box.
+        _ask.AddHandler(KeyDownEvent, (_, e) =>
         {
             if (e.Key != Key.Enter || e.KeyModifiers.HasFlag(KeyModifiers.Shift)) return;
             e.Handled = true;
             _ = AskAsync();
-        };
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
 
         _useContext.IsCheckedChanged += (_, _) =>
         {
