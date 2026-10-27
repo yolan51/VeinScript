@@ -450,7 +450,7 @@ Bring a bundle in with `need "Vein.X"`. Exact signatures:
 **Vein.Core** — `Lifecycle`: `@Spawned/@Destroyed/@Enabled/@Disabled { entity: Entity }`.
 `Meta`: `$Name { text }`, `$Tag { value }`, `$Layer { index: int }`. `Quantity`: `$Pool { current: int
 folds sum, max: int }`, `$Counter { value: int folds sum }`. `Relations`: `$Parent { of: Entity }`,
-`$Owner { ownerId: Entity }`.
+`$Owner { ownerId: Entity }`, set with `do ownedBy(e, owner)` (`do discard(owner)` then takes e too).
 
 **Vein.Math** — `Values`: `$Vec2 {x,y}`, `$Vec3 {x,y,z}`, `$Vec4 {x,y,z,w}`, `$Color {r,g,b,a}`, `$Rect
 {x,y,width,height}` (all float). `Scalars`: `clamp(v,lo,hi) lerp(a,b,t) min(a,b) max(a,b) abs(v)

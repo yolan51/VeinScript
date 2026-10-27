@@ -143,7 +143,7 @@ runtime auto-attaches a provenance envelope (`from`, `origin`, `id`, `cause`, `t
 
 | Bundle | Publicators · shared members (API) | Bundle shards (behaviour) |
 |---|---|---|
-| **Core** | `Lifecycle` (`@Spawned`/`@Destroyed`/`@Enabled`/`@Disabled {entity}`) · `Meta` (`$Name` `$Tag` `$Layer`) · `Quantity` (`$Pool{current folds sum, max}` `$Counter{value folds sum}`) · `Relations` (`$Parent{of:Entity}` `$Owner{by:Entity}`) | `Reaper` |
+| **Core** | `Lifecycle` (`@Spawned`/`@Destroyed`/`@Enabled`/`@Disabled {entity}`) · `Meta` (`$Name` `$Tag` `$Layer`) · `Quantity` (`$Pool{current folds sum, max}` `$Counter{value folds sum}`) · `Relations` (`$Parent{of:Entity}` `$Owner{ownerId:Entity}`, `do ownedBy(e, owner)`) | `Reaper` |
 | **Math** | `Values` (`$Vec2` `$Vec3` `$Vec4` `$Color` `$Rect`) | — |
 | **Filter** | `Range` (`between` `outside` `firstN`) · `Whole` (`divisible` `even` `odd` `sign`) | — |
 | **Transform** | `Spatial` (`$Position` `$Rotation` `$Scale` `$Velocity{x,y,z folds sum}`) · `Motion` (`@Moved{entity,x,y,z}`) | `Integrator` |

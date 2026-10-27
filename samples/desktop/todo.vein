@@ -16,7 +16,7 @@
 //    and dropdown hang straight under the task.
 //
 // 3. A GROUP OWNS ITS WIDGETS. Its tab, badge, status, bar, box and buttons carry the stdlib's
-//    *Vein.Core.Relations.$Owner { ownerId: group }, so "which group is this?" is a field, not a climb up the window.
+//    *Vein.Core.Relations.$Owner (`do ownedBy(tab, g)`), so "which group is this?" is a field, not a climb up the window.
 //    $Parent says where a widget is drawn; $Owner says what it belongs to — and `discard` takes both with it.
 //
 // 4. WHAT IS SHOWN IS DERIVED, IN `settled`. Counts, the progress bar, the badges, the priority colours and
@@ -215,10 +215,10 @@ bundle Todo by you {
                 target $Panel #Tabs as tabs {
                     bring Button(tabs, g.Group.name) as tab
                     mark tab #Tab
-                    attach $Owner to tab { ownerId: g }
+                    do ownedBy(tab, g)
                     bring Badge(tabs, "0") as badge
                     mark badge #TabBadge
-                    attach $Owner to badge { ownerId: g }
+                    do ownedBy(badge, g)
                 }
                 if g carries #Fresh { emit @Show { group: g } } else { emit @ShowSome { } }
             }
@@ -241,28 +241,28 @@ bundle Todo by you {
         bring Heading(head, name, 18.0)
         bring Label(head, "") as status
         mark status #Status
-        attach $Owner to status { ownerId: g }
+        do ownedBy(status, g)
         bring Button(head, "Remove group") as drop
         mark drop #DropGroup
-        attach $Owner to drop { ownerId: g }
+        do ownedBy(drop, g)
         attach $Tip to drop { text: "Remove this group and every task in it" }
         bring Progress(g, 0.0, 1.0) as bar
         mark bar #DoneBar
-        attach $Owner to bar { ownerId: g }
+        do ownedBy(bar, g)
         bring Divider(g, 1.0)
         bring Row(g, 8.0) as entry
         bring Input(entry, "", "Add a task to " + name) as box
         mark box #Box
-        attach $Owner to box { ownerId: g }
+        do ownedBy(box, g)
         bring Dropdown(entry, levels(), 0) as pick
         mark pick #NewPriority
-        attach $Owner to pick { ownerId: g }
+        do ownedBy(pick, g)
         bring Button(entry, "Add") as add
         mark add #Add
-        attach $Owner to add { ownerId: g }
+        do ownedBy(add, g)
         bring Scroll(g, 300.0, 4.0) as list
         mark list #TaskList
-        attach $Owner to list { ownerId: g }
+        do ownedBy(list, g)
     }
 
     SF taskWidgets(t: Entity, text: string, done: bool, priority: int) {

@@ -94,9 +94,9 @@ public class DesktopStdlibTests
                         mark group #Group
                         bring Label(group, "inside")
                         bring Button(tabs, "mine") as tab
-                        attach $Owner to tab { ownerId: group }
+                        do ownedBy(tab, group)
                         bring Badge(tabs, "3") as badge
-                        attach $Owner to badge { ownerId: tab }
+                        do ownedBy(badge, tab)
                         bring Button(tabs, "other")
                     }
                     hear *Vein.Time.Clock.@Ticked as t {
@@ -114,6 +114,44 @@ public class DesktopStdlibTests
             }
             """;
         Assert.Contains("left: other owned=0", Run(source, 5));
+    }
+
+    [Fact]
+    public void OwnedBy_works_from_a_bundle_that_does_not_need_Vein_Core()
+    {
+        // ownedBy runs inline in the caller: its bare $Owner must still find Core's shape there.
+        const string source = """
+            bundle N by you {
+                need "Vein.Desktop"
+                need "Vein.UI"
+                mark #Group
+                shard Build {
+                    run once {
+                        bring Window("N", 300.0, 200.0) as w
+                        bring Column(w, 8.0) as group
+                        mark group #Group
+                        bring Label(w, "tab") as tab
+                        do *Vein.Core.Relations.ownedBy(tab, group)
+                    }
+                    hear *Vein.Time.Clock.@Ticked as t {
+                        if t.frame == 2 {
+                            var owned = 0
+                            target $Panel #Group as g { target $Owner as x { if x.Owner.ownerId == g { owned += 1 } } }
+                            emit *Vein.Console.Io.@Print { text: "owned=" + string(owned) }
+                            target $Panel #Group as g { do discard(g) }
+                        }
+                        if t.frame == 4 {
+                            var texts = 0
+                            target $Text as x { texts += 1 }
+                            emit *Vein.Console.Io.@Print { text: "texts=" + string(texts) }
+                        }
+                    }
+                }
+            }
+            """;
+        var output = Run(source, 5);
+        Assert.Contains("owned=1", output);
+        Assert.Contains("texts=0", output);
     }
 
     [Fact]

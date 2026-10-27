@@ -625,8 +625,32 @@ public sealed partial class Lower
     {
         if (_shapeFields.ContainsKey(name)) return;      // declared here — nothing to import
 
+        if (OwnerShapeDecl(name) is { } own)
+        {
+            RegisterImportedShape(name, own.Members.OfType<FieldDecl>().ToList());
+            return;
+        }
         if (ResolveUsed(Index.Shapes, "$", name, span)?.Value.Members.OfType<FieldDecl>().ToList() is { } fields)
             RegisterImportedShape(name, fields);
+    }
+
+    /// Inside a body imported from another bundle: the shape a bare `$name` means THERE — the owner's own, else
+    /// one of a bundle the owner `need`s. Null outside an imported body, or when the owner does not know it.
+    ///
+    /// THE SAME RULE AS OwnerCall, for shapes. `SF ownedBy(e, owner) { attach $Owner to e { … } }` in
+    /// stdlib/Core.vein runs inline in its caller, and a caller that never wrote `need "Vein.Core"` resolved
+    /// `$Owner` to nothing: the attach lowered with no component type, wrote nothing, and said nothing.
+    private ShapeDecl? OwnerShapeDecl(string name)
+    {
+        if (_importOwner is not { Length: > 0 } owner) return null;
+        if (FindOwnedShapeDecl(owner + ".", name) is { } own) return own;
+        if (OwnerScope(owner) is not { } scope) return null;
+        var hits = Index.Shapes.Where(kv =>
+        {
+            var parts = kv.Key.Split('.');
+            return parts.Length >= 3 && parts[^1] == name && scope.Needs.Contains(parts[0] + "." + parts[1]);
+        }).ToList();
+        return hits.Count == 1 ? hits[0].Value : null;
     }
 
     /// The marks written inside a shape body, in order, without repeats.
@@ -649,7 +673,7 @@ public sealed partial class Lower
 
         ShapeDecl? decl = path is { Count: > 0 } ? FindShapeDecl(RefKey(path, name))
                         : ownerKey is not null ? FindOwnedShapeDecl(ownerKey, name)
-                        : ResolveUsed(Index.Shapes, "$", name, span)?.Value;
+                        : OwnerShapeDecl(name) ?? ResolveUsed(Index.Shapes, "$", name, span)?.Value;
 
         var marks = decl is null ? new List<string>() : ShapeMarksOf(decl);
         _shapeMarks[name] = marks;

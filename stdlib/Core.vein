@@ -55,9 +55,16 @@ bundle Core by Vein {
 
         shared("Ownership link: the Entity that owns this identity.")
         shape $Owner { ownerId: Entity }
+
+        // Written bare: a shared SF runs INLINE in the caller, and `$Owner` resolves by its bare name there.
+        shared("Make owner the owner of e: do ownedBy(tab, group). `do discard(group)` then takes e with it.")
+        SF ownedBy(e: Entity, owner: Entity) {
+            attach $Owner to e { ownerId: owner }
+        }
     }
 
-    // No behaviour here — the publicators above are the whole bundle. A shard cannot be `shared`, so one
-    // declared here would be invisible behaviour that arrives with the import rather than API. Teardown
+    // No shard here — the publicators above are the whole bundle. A shared SF is API: it runs only when
+    // called. A shard cannot be `shared`, so one declared here would be invisible behaviour that arrives
+    // with the import rather than API. Teardown
     // on @Destroyed is the application's to write.
 }

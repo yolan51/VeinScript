@@ -29,7 +29,7 @@ target $Task as t { if t.Task.done { … } }
 ## 2. More than two `target`s deep means a link is missing
 
 Nesting is how VeinScript asks "which one?". Three or more levels deep, the program is searching for something
-it should simply be pointing at. Add the link as a field, `attach $Owner to tab { ownerId: g }` on every widget that
+it should simply be pointing at. Add the link as a field, `do ownedBy(tab, g)` on every widget that
 belongs to a group (rule 3), or make the data identity *be* the widget (a task identity is also its row), so its
 parts hang straight under it.
 
@@ -40,6 +40,7 @@ parts hang straight under it.
 Most links in a program say one of two things, and `Vein.Core` already has a shape for each:
 - **`$Parent { of }`: where it sits.** The tree: a checkbox in a row, a row in a window. Vein.Desktop draws by it.
 - **`$Owner { ownerId }`: what it belongs to.** A group's tab sits in the tab row, but it is the group's.
+  Set it with `do ownedBy(tab, g)`; read it back as `t.Owner.ownerId`.
 
 Use these before inventing a `$For` or `$BelongsTo`. A widget can carry both, and they say two different, true
 things. `do discard(g)` takes what sits under `g` *and* what `g` owns, so removing a group is one line.
