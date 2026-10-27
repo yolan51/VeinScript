@@ -1,0 +1,11 @@
+# vein.discovery — what `$`, `#`, `@`, `&` and `*` ENUMERATE in these samples.
+#
+# `samples/vein.discovery` one directory up says `silent all`; this file overrides it here, so typing `&`
+# lists Window, Row, Button… and `@` lists @Edited, @Submitted, @Clicked…
+
+silent all
+
+expose Vein.Desktop        # windows and widgets: the builders, the events, discard
+expose Vein.UI             # $Text, $Button, $Field, @Clicked
+expose Vein.Core           # $Parent
+expose Vein.Console        # @Print

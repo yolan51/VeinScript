@@ -1,0 +1,91 @@
+// samples/desktop/todo.vein — a to-do list: type, press Enter or Add, tick, remove.
+//
+//   In the Workbench, press ▶ (F5): its window opens, drawn from its identities.
+//   veinc run samples/desktop/todo.vein --ticks 2      (its rules alone, with no window drawn)
+//
+// THREE IDEAS CARRY THE WHOLE APP:
+//
+// 1. A TASK IS A ROW OF IDENTITIES. Adding one brings a Row into the #Tasks column, and a checkbox and a
+//    Remove button into that row. Nothing keeps a list of tasks: the $Parent links ARE the list.
+//
+// 2. TWO WAYS IN, ONE HANDLER. Enter in the box (@Submitted) and the Add button (@Clicked) both emit
+//    @AddTask, so "add a task" is written once.
+//
+// 3. WHAT IS SHOWN IS DERIVED, IN `settled`. The status line counts the checkboxes after every commit,
+//    so no handler has to remember to update it: tick, add or remove anything and it is right next frame.
+//    Counting in the @AddTask handler would miss the new row, which is visible only from the next event
+//    (RULES 12b).
+
+bundle Todo by you {
+    need "Vein.Desktop"
+    need "Vein.UI"
+    need "Vein.Core"
+
+    event @AddTask { text: string }
+
+    mark #NewTask
+    mark #Add
+    mark #Tasks
+    mark #Delete
+    mark #Status
+
+    shard Build {
+        run once {
+            bring Window("To-do", 420.0, 480.0) as w
+            bring Heading(w, "To-do", 22.0)
+            bring Row(w, 8.0) as entry
+            bring Input(entry, "", "What needs doing?") as box
+            mark box #NewTask
+            bring Button(entry, "Add") as add
+            mark add #Add
+            bring Column(w, 4.0) as tasks
+            mark tasks #Tasks
+            bring Label(w, "Nothing to do.") as status
+            mark status #Status
+        }
+    }
+
+    shard Tasks {
+        hear *Vein.UI.Interaction.@Clicked as c {
+            target $Button #Add on c.target as b {
+                target $Field #NewTask as box { emit @AddTask { text: box.Field.value } }
+            }
+            // A Remove button's parent is its task's row; removing the row takes the checkbox with it.
+            target $Parent #Delete on c.target as d { do discard(d.Parent.of) }
+        }
+
+        hear @Submitted as s {
+            target $Field #NewTask on s.target as box { emit @AddTask { text: s.value } }
+        }
+
+        hear @AddTask as a {
+            if not (a.text == "") {
+                target $Panel #Tasks as tasks {
+                    bring Row(tasks, 8.0) as row
+                    bring Check(row, a.text, false)
+                    bring Button(row, "Remove") as del
+                    mark del #Delete
+                }
+                target $Field #NewTask as box { box.Field.value = "" }
+            }
+        }
+    }
+
+    shard Status {
+        settled {
+            var all = 0
+            var left = 0
+            target $Toggle as t {
+                all += 1
+                if not t.Toggle.checked { left += 1 }
+            }
+            target $Text #Status as s {
+                if all == 0 {
+                    s.Text.content = "Nothing to do."
+                } else {
+                    s.Text.content = string(left) + " of " + string(all) + " left"
+                }
+            }
+        }
+    }
+}

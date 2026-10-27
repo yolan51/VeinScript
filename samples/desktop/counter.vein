@@ -1,0 +1,43 @@
+// samples/desktop/counter.vein — the smallest desktop program: a label, two buttons, a number.
+//
+//   In the Workbench, press ▶ (F5): its window opens, drawn from its identities.
+//   veinc run samples/desktop/counter.vein --ticks 2      (its rules alone, with no window drawn)
+//
+// THE SCREEN IS THE IDENTITIES. `Build` brings a window and four widgets; the host draws them. A click
+// arrives as *Vein.UI.Interaction.@Clicked, `on` looks at the clicked identity, and writing the label's
+// $Text.content is all it takes to change what the window shows.
+//
+// MARKS NAME THE WIDGETS. #Plus and #Reset tell two buttons apart without comparing ids or labels, so a
+// translated label ("Remettre à zéro") changes nothing in the logic.
+
+bundle Counter by you {
+    need "Vein.Desktop"
+    need "Vein.UI"
+
+    mark #Plus
+    mark #Reset
+    mark #Shown
+
+    shard Build {
+        run once {
+            bring Window("Counter", 320.0, 200.0) as w
+            bring Heading(w, "Clicks", 20.0)
+            bring Label(w, "0") as shown
+            mark shown #Shown
+            bring Row(w, 8.0) as buttons
+            bring Button(buttons, "+1") as plus
+            mark plus #Plus
+            bring Button(buttons, "Reset") as reset
+            mark reset #Reset
+        }
+    }
+
+    shard Clicks {
+        var n = 0
+        hear *Vein.UI.Interaction.@Clicked as c {
+            target $Button #Plus on c.target as b { n += 1 }
+            target $Button #Reset on c.target as b { n = 0 }
+            target $Text #Shown as t { t.Text.content = string(n) }
+        }
+    }
+}
