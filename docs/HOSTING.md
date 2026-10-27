@@ -268,6 +268,7 @@ What the host draws, beyond the widgets' own fields:
 | `Picture(parent, source, height)` (`$Image` + `$Picture`) | the image, `height` pixels tall; a relative `source` is beside the program |
 | `*Vein.Graphics.Looks.#Hidden` on any widget | keeps it and draws it nowhere — and nothing inside it |
 | `#Accent` on a button | draws it in the accent colour (a selected tab, the main action) |
+| `*Vein.Graphics.Looks.$Tint { r, g, b, a }` on a widget | its colour, each channel 0..1: a button's or a panel's background, a text's or a checkbox's colour; `a` is the intensity |
 
 The host WRITES the two fields for the same reason it writes `$View`: they are the state of a control the
 host owns, and the program reads them like any field. Everything else — what a click means, what

@@ -23,7 +23,8 @@
 // arrives, and a tick into $Toggle.checked before @Toggled — the way it writes $View (docs/HOSTING.md).
 //
 // To hide a widget and everything in it, mark it *Vein.Graphics.Looks.#Hidden (`need "Vein.Graphics"`); unmark
-// to show it. #Accent draws a button in the accent colour.
+// to show it. #Accent draws a button in the accent colour. Any widget takes a colour from
+// *Vein.Graphics.Looks.$Tint { r, g, b, a } — a button's or panel's background, a text's colour; `a` is how strong.
 //
 // Every builder takes its PARENT FIRST, then the shape's fields in order (RULES 9). Mark a widget to tell it
 // apart from its siblings, and look at the clicked one with `on` (RULES 14f) rather than comparing ids.

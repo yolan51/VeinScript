@@ -47,7 +47,7 @@ bundle Todo by you {
     need "Vein.Graphics"
 
     event @AddGroup { name: string }
-    event @AddTask { group: Entity, text: string, done: bool = false }
+    event @AddTask { group: Entity, text: string, done: bool = false, priority: int = 1 }
     event @Show { group: Entity }
     event @ShowSome { }
     event @ShowFirst { }
@@ -56,6 +56,7 @@ bundle Todo by you {
 
     shape $Opens { group: Entity }   // a tab's group
     shape $Named { name: string }    // a group's name, as saved
+    shape $Priority { level: int = 1 }   // 1 low · 2 medium · 3 high · 4 very high — on a task's priority button
 
     mark #Saved         // the tag of todo.json's reads and writes (RULES 28c)
     mark #NewGroup      // the box that names a new group
@@ -72,6 +73,7 @@ bundle Todo by you {
     mark #Add           // a group's Add button
     mark #Tasks         // a group's column of tasks
     mark #Delete        // a task's Remove button
+    mark #Priority      // a task's priority button
     mark #Empty         // the hint shown while there is no group
 
     shard Build {
@@ -115,6 +117,12 @@ bundle Todo by you {
 
             // A tab opens its group.
             target $Opens #Tab on c.target as t { emit @Show { group: t.Opens.group } }
+
+            // A task's priority button steps up one level per click, and from very high back to low. What it
+            // SAYS and what colour it is are derived from the level, in `Looks`.
+            target $Priority #Priority on c.target as p {
+                if p.Priority.level >= 4 { p.Priority.level = 1 } else { p.Priority.level += 1 }
+            }
 
             // A task's Remove sits in the task's row: removing the row takes its checkbox with it.
             target $Parent #Delete on c.target as d { do discard(d.Parent.of) }
@@ -215,6 +223,10 @@ bundle Todo by you {
                 target $Parent #Tasks as tasks {
                     if tasks.Parent.of == a.group {
                         bring Row(tasks, 8.0) as row
+                        bring Button(row, priorityName(a.priority)) as chip
+                        mark chip #Priority
+                        attach $Priority to chip { level: a.priority }
+                        attach $Tint to chip { }
                         bring Check(row, a.text, a.done)
                         bring Button(row, "Remove") as del
                         mark del #Delete
@@ -282,6 +294,48 @@ bundle Todo by you {
         }
     }
 
+    // ---- priority: one colour, four intensities ------------------------------------------------------
+
+    fn priorityName(level: int) return string {
+        if level >= 4 { return "Very high" }
+        if level == 3 { return "High" }
+        if level == 2 { return "Medium" }
+        return "Low"
+    }
+
+    // How strong the red is: a faint wash for low, solid for very high. `$Tint.a` is the intensity.
+    fn intensity(level: int) return float {
+        if level >= 4 { return 1.0 }
+        if level == 3 { return 0.7 }
+        if level == 2 { return 0.42 }
+        return 0.18
+    }
+
+    // A saved level, or Low: a todo.json from before priorities has none, and reads as "".
+    fn levelOf(saved: string) return int {
+        if isNumber(saved) {
+            let n = int(saved)
+            if n >= 1 and n <= 4 { return n }
+        }
+        return 1
+    }
+
+    // Derived, like the counts: every priority button says its level and wears its intensity.
+    shard Looks {
+        settled {
+            target $Priority #Priority as p {
+                let level = p.Priority.level
+                target $Button on p as b { b.Button.label = priorityName(level) }
+                target $Tint on p as t {
+                    t.Tint.r = 0.92
+                    t.Tint.g = 0.26
+                    t.Tint.b = 0.21
+                    t.Tint.a = intensity(level)
+                }
+            }
+        }
+    }
+
     // ---- what it remembers: todo.json, beside the program -----------------------------------------
     //
     // THE SHAPES ARE THE RECORDS. `toJson(t.Toggle)` writes a checkbox as {"label":…,"checked":…} and
@@ -315,7 +369,9 @@ bundle Todo by you {
             target fromJson(saved).groups as grp {
                 target $Named #Group as g {
                     if g.Named.name == grp.group.name {
-                        target grp.tasks as task { emit @AddTask { group: g, text: task.label, done: task.checked } }
+                        target grp.tasks as task {
+                            emit @AddTask { group: g, text: task.label, done: task.checked, priority: levelOf(string(task.priority)) }
+                        }
                     }
                 }
             }
@@ -338,8 +394,15 @@ bundle Todo by you {
                                     target $Parent as cell {
                                         if cell.Parent.of == row {
                                             target $Toggle on cell as t {
+                                                // The checkbox's record, with its row's priority added.
+                                                var level = 1
+                                                target $Parent #Priority as pc {
+                                                    if pc.Parent.of == row { target $Priority on pc as p { level = p.Priority.level } }
+                                                }
+                                                let record = toJson(t.Toggle)
                                                 if not (tasks == "") { tasks = tasks + "," }
-                                                tasks = tasks + toJson(t.Toggle)
+                                                tasks = tasks + substring(record, 0, len(record) - 1) +
+                                                        ",\"priority\":" + string(level) + "}"
                                             }
                                         }
                                     }

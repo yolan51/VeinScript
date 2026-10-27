@@ -220,7 +220,30 @@ internal sealed class DesktopRunner
     {
         var control = Build(n);
         if (control.IsVisible == n.Hidden) control.IsVisible = !n.Hidden;
+        Paint(control, n.Tint);
         return control;
+    }
+
+    /// `*Vein.Graphics.Looks.$Tint` is a widget's COLOUR, as it is a picture's: a button's or a panel's
+    /// background, the colour of text. `a` is how strong it is, so one hue at four `a`s is four intensities.
+    /// Without one, the theme's own colour comes back.
+    private static void Paint(Control control, Color? tint)
+    {
+        var property = control switch
+        {
+            CheckBox => Avalonia.Controls.Primitives.TemplatedControl.ForegroundProperty,   // before Button: a CheckBox IS one
+            Button => Avalonia.Controls.Primitives.TemplatedControl.BackgroundProperty,
+            Panel => Panel.BackgroundProperty,
+            TextBlock => TextBlock.ForegroundProperty,
+            _ => null,
+        };
+        if (property is null) return;
+        if (tint is { } c)
+        {
+            if (control.GetValue(property) is not SolidColorBrush { Color: var now } || now != c)
+                control.SetValue(property, new SolidColorBrush(c));
+        }
+        else if (control.IsSet(property)) control.ClearValue(property);
     }
 
     private Control Build(Node n)
@@ -347,6 +370,7 @@ internal sealed class DesktopRunner
         public string Source { get; init; } = "";
         public bool Hidden { get; init; }
         public bool Accent { get; init; }
+        public Color? Tint { get; init; }
 
         public IEnumerable<Node> Walk() => Children.SelectMany(c => c.Walk()).Prepend(this);
     }
@@ -386,7 +410,14 @@ internal sealed class DesktopRunner
             Kind.Picture => new Node(e.Entity, kind, kids) { Source = Text(e, "Image", "source"), Height = Number(e, "Picture", "height", 32) },
             _ => new Node(e.Entity, kind, kids) { Text = Text(e, "Text", "content"), FontSize = Number(e, "Font", "size", 0) },
         };
-        return node with { Hidden = e.Marks.Contains("Hidden") };
+        return node with { Hidden = e.Marks.Contains("Hidden"), Tint = TintOf(e) };
+    }
+
+    private static Color? TintOf(EntityStore.EntitySnapshot e)
+    {
+        if (!e.Components.ContainsKey("Tint")) return null;
+        byte Channel(string f) => (byte)Math.Round(Math.Clamp(Number(e, "Tint", f, 1), 0, 1) * 255);
+        return Color.FromArgb(Channel("a"), Channel("r"), Channel("g"), Channel("b"));
     }
 
     private static Kind? KindOf(EntityStore.EntitySnapshot e) =>
