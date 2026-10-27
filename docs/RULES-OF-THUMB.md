@@ -86,18 +86,24 @@ construction code then exists once, and loading can never build a screen that di
 When several inputs mean the same thing (Enter in a box, a click on Add), each emits one event (`@AddTask`) and
 one handler does the work.
 
-## 10. Save with `toJson`, load with a loom
+## 10. One loom each way: `weave` in, `toText<Format>` out
 
-Each record you save is one shape's `toJson(t.Task)`. Collect them with a list (`var tasks = []`,
-`tasks += …`, `join(tasks, ",")`). Read them back with the built-in JSON loom, one identity per record, without
-writing any parsing:
+The loom says what a record is; the format, named on both lines, says how it looks. Write no parsing and no
+joining:
 ```
 loom<Json> SavedTask { $Task   mark #Task }
-hear *Vein.Files.Io.@FileLoaded as f { weave SavedTask(f.text) }
+hear *Vein.Files.Io.@FileLoaded as f { weave SavedTask(f.text) }                                   // in
+emit *Vein.Files.Io.@WriteFile { path: "tasks.json", text: toText<Json>(SavedTask), tag: #TasksFile }  // out
 ```
-`weave`, `loom` and `Json` are part of the language; `need "Vein.Weaving"` only adds more formats. Prefer flat
-files of one record kind each (`groups.json`, `tasks.json`) to one nested document. A loom reads arrays of
-records, and flat files stay flat in the code.
+The same two lines work for a format of your own (`loom<MeshList>`, `toText<MeshList>`). Hand-building the text
+with `toJson` and `join` restates the format's separators and field order, and a later change to the format
+leaves that save writing the old one, without a word.
+
+`weave`, `loom`, `toText` and `Json` are part of the language; `need "Vein.Weaving"` only adds more formats.
+Prefer flat files of one record kind each (`groups.json`, `tasks.json`) to one nested document. A loom reads
+arrays of records, and flat files stay flat in the code.
+
+**Spot it:** `"[" + join(…) + "]"`, or a separator typed in a save that a `format` already declares.
 
 ## 11. Save after a change, not every frame
 
@@ -113,7 +119,7 @@ line that says what it asks.
 ## 13. Reach for the language before writing it
 
 Before writing a helper, check whether VeinScript already does it:
-- **JSON:** `toJson`, `fromJson`, `weave`.
+- **Files and text:** `weave Loom(text)` in, `toText<Format>(Loom)` out; `toJson`/`fromJson` for one JSON value.
 - **Removing a widget, everything inside it and everything it owns:** `do discard(e)`.
 - **Links:** `$Parent` (where it sits), `$Owner` (what it belongs to), both in `Vein.Core`.
 - **Several marks at once:** `mark t #Shown #Row`.

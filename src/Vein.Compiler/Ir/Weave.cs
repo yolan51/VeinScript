@@ -401,6 +401,190 @@ public static class Weave
         }
     }
 
+    // ---- the way out: toText<Format>(Loom) -----------------------------------------------------------------
+
+    /// <summary>The records — each a loom parameter → value map, an Entity already its record's NAME — written
+    /// through <paramref name="format"/>. A record that cannot be written so it reads back the same is left out,
+    /// and <paramref name="problems"/> says why.</summary>
+    /// <remarks>
+    /// <para><b>WHAT IS WRITTEN READS BACK.</b> Every record is re-read through <see cref="ReadAll"/> — the reader
+    /// <c>weave</c> uses — and kept only when every value comes back the same. So the rules a writer could get
+    /// wrong (a separator inside a value, a comment marker at the start, a value the format trims) are not
+    /// re-implemented here; the reader decides, and a record it would misread is refused rather than written.</para>
+    /// <para><b>A DEFAULT CAN BE LEFT OUT.</b> A value equal to its parameter's literal default is tried omitted
+    /// first — <c>S1=9811:S2</c>, not <c>S1=:9811:S2</c> — and written in full when the short form would not
+    /// read back.</para>
+    /// </remarks>
+    public static string WriteAll(IReadOnlyList<Dictionary<string, object?>> records, WeaveFormat format,
+                                  IReadOnlyList<WeaveParam> prms, IReadOnlyList<object?> defaults,
+                                  List<(string Record, string Why)> problems)
+    {
+        var written = new List<string>();
+        foreach (var values in records)
+        {
+            string label = prms.Count > 0 ? Str(values.GetValueOrDefault(prms[0].Name)) : "";
+            string? kept = null, why = null;
+            foreach (bool shorten in format.Root is "Json" or "Csv" or "Ini" ? new[] { false } : new[] { true, false })
+            {
+                string? record = WriteRecord(values, format, prms, defaults, shorten, out string? problem);
+                if (record is null) { why ??= problem; continue; }
+                if (ReadsBack(Document(new[] { record }, format, prms), values, format, prms, defaults, out problem)) { kept = record; break; }
+                why ??= problem;
+            }
+            if (kept is null) problems.Add((label, why ?? "it would not read back the same"));
+            else written.Add(kept);
+        }
+        return Document(written, format, prms);
+    }
+
+    /// The records put together as the format's text: a JSON array, a Csv with its header, Ini sections, or
+    /// records joined by the format's `records` separator (a line each when it has none).
+    private static string Document(IReadOnlyList<string> records, WeaveFormat format, IReadOnlyList<WeaveParam> prms)
+    {
+        switch (format.Root)
+        {
+            case "Json": return "[" + string.Join(",\n ", records) + "]\n";
+            case "Csv":
+                string header = string.Join(format.Line("delimiter") ?? ",", prms.Select(p => p.Name));
+                return string.Join("\n", records.Prepend(header)) + "\n";
+            case "Ini": return string.Join("\n", records);
+            default:
+                if (records.Count == 0) return "";
+                string? sep = format.Root == "" ? format.Line("records") : null;
+                return sep is null ? string.Join("\n", records) + "\n" : string.Join(sep.Trim().Length == 0 ? sep : sep + " ", records);
+        }
+    }
+
+    /// One record as text, or null with the problem. `shorten` leaves out the values equal to their default.
+    private static string? WriteRecord(Dictionary<string, object?> values, WeaveFormat format, IReadOnlyList<WeaveParam> prms,
+                                       IReadOnlyList<object?> defaults, bool shorten, out string? problem)
+    {
+        problem = null;
+        string Text(WeaveParam p) => Plain(values.GetValueOrDefault(p.Name), format);
+        bool AtDefault(int i) => shorten && prms[i].HasDefault && defaults[i] is { } d && Same(values.GetValueOrDefault(prms[i].Name), d);
+
+        switch (format.Root)
+        {
+            case "Json":
+            {
+                var obj = new Dictionary<string, object?>(StringComparer.Ordinal);
+                foreach (var p in prms) obj[p.Name] = values.GetValueOrDefault(p.Name) is { } v && v is not string && v is System.Collections.IEnumerable e ? e.Cast<object?>().ToList() : values.GetValueOrDefault(p.Name);
+                return Json.Write(obj);
+            }
+            case "Csv":
+            {
+                string delimiter = format.Line("delimiter") ?? ",";
+                string quote = format.Line("quotes") ?? "\"";
+                return string.Join(delimiter, prms.Select(p =>
+                {
+                    string t = Text(p);
+                    bool needs = t.Contains(delimiter) || t.Contains(quote) || t.Contains('\n') || t != t.Trim();
+                    return needs ? quote + t.Replace(quote, quote + quote) + quote : t;
+                }));
+            }
+            case "Ini":
+            {
+                if (prms.Count == 0) return "";
+                var sb = new StringBuilder("[" + Text(prms[0]) + "]\n");
+                foreach (var p in prms.Skip(1)) sb.Append((p.Name + " = " + Text(p)).TrimEnd()).Append('\n');
+                return sb.ToString();
+            }
+            case "KeyValue":
+            {
+                // The name first, by position; every other value by `name=value`, so no arrangement is guessed.
+                var parts = new List<string>();
+                for (int i = 0; i < prms.Count; i++)
+                {
+                    if (AtDefault(i)) continue;
+                    string t = Quoted(Text(prms[i]), "\"");
+                    parts.Add(i == 0 ? t : prms[i].Name + "=" + t);
+                }
+                return string.Join(" ", parts);
+            }
+        }
+
+        // A custom format: the name before `name`, then the values in parameter (or `columns`) order cut by
+        // `values` — by spaces when it has none — and anything `columns` does not place as a `pairs` value.
+        string? nameSep = format.Line("name");
+        string? valuesSep = format.Line("values");
+        string? pairsSep = format.Line("pairs");
+        string quoteMark = format.Line("quotes") ?? (valuesSep is null ? "\"" : "");
+
+        var order = format.Columns is { } cols
+            ? cols.Select(c => c.Name).Where(n => prms.Any(p => p.Name == n)).ToList()
+            : prms.Select(p => p.Name).ToList();
+        if (nameSep is not null && prms.Count > 0) order.Remove(prms[0].Name);
+
+        var pieces = new List<string>();
+        foreach (string n in order)
+        {
+            int i = prms.ToList().FindIndex(p => p.Name == n);
+            if (AtDefault(i)) continue;
+            string t = Text(prms[i]);
+            pieces.Add(valuesSep is null ? Quoted(t, quoteMark)
+                     : t.Contains(valuesSep) && quoteMark.Length > 0 ? quoteMark + t + quoteMark : t);
+        }
+        foreach (var p in prms.Where(p => !order.Contains(p.Name) && !(nameSep is not null && p == prms[0])))
+        {
+            if (pairsSep is null)
+            {
+                problem = $"format {format.Name} has no column for `{p.Name}` and no `pairs` to write it by name";
+                return null;
+            }
+            int i = prms.ToList().IndexOf(p);
+            if (!AtDefault(i)) pieces.Add(p.Name + pairsSep + Text(p));
+        }
+
+        string rest = string.Join(valuesSep ?? " ", pieces);
+        return nameSep is not null && prms.Count > 0 ? Text(prms[0]) + nameSep + rest : rest;
+    }
+
+    /// Whether `document` reads back as exactly one record holding `values`.
+    private static bool ReadsBack(string document, Dictionary<string, object?> values, WeaveFormat format,
+                                  IReadOnlyList<WeaveParam> prms, IReadOnlyList<object?> defaults, out string? problem)
+    {
+        problem = null;
+        var read = ReadAll(document, format, prms);
+        if (read.Count != 1) { problem = $"it would read back as {read.Count} records"; return false; }
+        if (read[0].Problem is { } p) { problem = $"it would not read back: {p}"; return false; }
+        for (int i = 0; i < prms.Count; i++)
+        {
+            var prm = prms[i];
+            object? wrote = values.GetValueOrDefault(prm.Name);
+            object? back = read[0].Missing.Contains(prm.Name) ? defaults[i] : read[0].Values.GetValueOrDefault(prm.Name);
+            if (read[0].Missing.Contains(prm.Name) && defaults[i] is null && !Blank(wrote))
+            {
+                problem = $"`{prm.Name}` would read back as its default"; return false;
+            }
+            if (!read[0].Missing.Contains(prm.Name) && !Same(wrote, back))
+            {
+                problem = $"`{prm.Name}` would read back as \"{Plain(back, format)}\", not \"{Plain(wrote, format)}\""; return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool Blank(object? v) => v is null || v is string { Length: 0 };
+
+    /// Two values the same once written: lists element by element, everything else by its text.
+    private static bool Same(object? a, object? b)
+    {
+        if (a is not string && a is System.Collections.IEnumerable la && b is not string && b is System.Collections.IEnumerable lb)
+            return la.Cast<object?>().Select(Str).SequenceEqual(lb.Cast<object?>().Select(Str));
+        if (a is not string && a is System.Collections.IEnumerable el) return !el.Cast<object?>().Any() && Blank(b);
+        if (b is not string && b is System.Collections.IEnumerable er) return !er.Cast<object?>().Any() && Blank(a);
+        return Str(a) == Str(b);
+    }
+
+    /// A value as the text a record holds: a list joined by the format's `lists` separator.
+    private static string Plain(object? v, WeaveFormat format) =>
+        v is not string && v is System.Collections.IEnumerable list
+            ? string.Join(format.ListSeparator, list.Cast<object?>().Select(Str))
+            : Str(v);
+
+    private static string Quoted(string t, string quote) =>
+        quote.Length > 0 && (t.Length == 0 || t.Any(char.IsWhiteSpace)) ? quote + t + quote : t;
+
     // ---- cutting text -------------------------------------------------------------------------------------
 
     /// <summary>The records of a text: cut at line ends and at <paramref name="separator"/>, trimmed, blanks

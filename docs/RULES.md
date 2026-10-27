@@ -139,6 +139,13 @@ weave Server("S1=9811:S2; S2=9812:S1")
 - **Graph rules are the program's.** `S1` listing itself, or `S4` twice, is woven as written; check it in
   `hear @Woven` (`samples/weave_topology.vein`). Interpreter-only. The Workbench's Formats tab dry-runs any
   format against pasted text and infers one from samples.
+- **The way out is the same loom: `toText<Format>(Loom)`.** It writes every identity carrying the loom's
+  shapes and marks, in spawn order, each as the loom's parameters, a link as its target's NAME. With no
+  `<Format>` it writes the loom's own, so `weave Server(toText(Server))` reads back the same servers. It writes
+  the identities, not the text they came from (S4 once, no S7), and leaves out a value equal to its default
+  when the record still reads back. Every record is re-read before it is kept: one the format cannot hold
+  (`a:b` in MeshList, which has no `quotes`) is left out with one @Unwoven `toText<…>: …`, the rest are
+  written. Not a loom is **VS0379**, an unknown format **VS0380**. Interpreter-only, like `weave`.
 
 **8. A `$Shape` include is a COMPILE-TIME field expansion, and `bring` attaches nothing.** The include
 copies the shape's fields into the signature; it does not make the built thing carry the component. So:

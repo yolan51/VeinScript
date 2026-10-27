@@ -191,3 +191,11 @@ public sealed record IrUnary(IrUnOp Op, IrExpr Operand) : IrExpr;
 
 public sealed record IrStructInit(string TypeName, IReadOnlyList<(string Field, IrExpr Value)> Fields, bool FillRest = false) : IrExpr;
 public sealed record IrList(IReadOnlyList<IrExpr> Items) : IrExpr;
+
+/// `toText<Format>(Loom)` (D23, the way out): the identities carrying every one of `Shapes` and `Marks`, in
+/// query order, each written as the loom's `Params` — read back from the shape each came `From` — through
+/// `Format`. `Defaults` holds a parameter's default when it is a literal (null otherwise), so a custom format
+/// may leave out a value that equals it.
+public sealed record IrToText(
+    string Loom, WeaveFormat Format, IReadOnlyList<WeaveParam> Params, IReadOnlyList<string?> From,
+    IReadOnlyList<object?> Defaults, IReadOnlyList<string> Shapes, IReadOnlyList<string> Marks) : IrExpr;

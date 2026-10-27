@@ -294,6 +294,7 @@ public sealed class AstTree
             case UnaryExpr u: return ("Unary", u.Op == UnOp.Neg ? "-" : "not", new List<IrNode> { Expr(u.Operand) });
             case CarriesExpr c: return ("Carries", (c.IsShape ? "$" : "#") + c.Name, new List<IrNode> { Expr(c.Subject) });
             case HasExpr h: return ("Has", "", new List<IrNode> { Expr(h.Collection), Expr(h.Value) });
+            case ToTextExpr tt: return ("ToText", (tt.Format is null ? "" : "<" + tt.Format + ">") + (tt.Loom ?? "?"), New());
             case CallExpr c: return ("Call", Callee(c.Callee), c.Args.Select(Expr).ToList());
             case StructLitExpr s: return ("New", (_shapes.Contains(s.TypeName) ? "$" : "") + s.TypeName, s.Fields.Select(ArgField).ToList());
             case ListLitExpr li: return ("List", "", li.Items.Select(Expr).ToList());

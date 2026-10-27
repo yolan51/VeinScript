@@ -1429,8 +1429,16 @@ public sealed class CSharpBackend : IVeinBackend
             => $"Fns.{Ident(fnRef.Name)}({string.Join(", ", fc.Args.Select((a, i) => Argument(fnRef.Name, i, a)))})",
         IrCall c => $"{Expr(c.Callee)}({string.Join(", ", c.Args.Select(Expr))})",
         IrList l => ListLiteral(l),
+        // D23's way out writes through the weave reader's formats, which only the interpreter has — said, like `weave`.
+        IrToText tt => InterpreterOnly($"`toText<{tt.Format.Name}>({tt.Loom})`"),
         _ => Unsupported(e)
     };
+
+    private string InterpreterOnly(string what)
+    {
+        _notes.Add($"{what} is interpreter-only — not emitted; keep this program on `veinc run`.");
+        return "\"\"";
+    }
 
     /// An argument to a module function, converted to the parameter's type when it is UNTYPED in C#. `s[i]`
     /// (`__VeinText.At`) is an `object`: passed to `fn isDigit(c: string)` it did not compile (CS1503), where

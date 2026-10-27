@@ -395,9 +395,9 @@ error (**VS0206**): it would consume an argument and put it nowhere. A template 
 and **no** `mark` keeps the old meaning — it emits `@<BuilderName>` — so this changed no existing
 program.
 
-**Weaving — `format`, `loom<Format>`, `weave Loom(text)`.** A format says how a record of text is written; a
+**Weaving — `format`, `loom<Format>`, `weave Loom(text)`, `toText<Format>(Loom)`.** A format says how a record of text is written; a
 loom — a builder's body — says what a record becomes; `weave` brings one identity per record, each the
-`bring` a person would write (D23, RULES 7e):
+`bring` a person would write; `toText` writes them back out, in the loom's format or another (D23, RULES 7e):
 
 ```
 format MeshList { records ";"  name "="  values ":"  lists "+" }      // a file formats/MeshList.vein
@@ -405,6 +405,7 @@ loom<MeshList> Server { $Server  mark #Listed }
 run once { weave Server(servers) }
 hear @Woven   as w { … }                                              // the records are queryable now
 hear @Unwoven as u { do print("! " + u.why) }
+let text = toText<MeshList>(Server)                                  // every #Listed server, as text again
 ```
 
 Grammar:
@@ -414,6 +415,7 @@ format   := "format" Name ["from" FormatRef] "{" { word STRING | "columns" col {
 col      := Name | "[" Name "]"
 loom     := "loom" "<" FormatRef ">" Name "{" builder-members "}"
 weave    := "weave" LoomRef "(" expr ")" ["as" Name]          // a statement, wherever `bring` is
+totext   := "toText" ["<" FormatRef ">"] "(" LoomRef ")"           // an expression: a string; no <…> = the loom's own
 word     := records | name | values | pairs | lists | quotes | delimiter | comments
 ```
 

@@ -674,7 +674,8 @@ frame.
 > `VS0366` (a format that cannot be read: an unknown word, a word said twice or empty, `delimiter` without
 > a Csv base, a `from` cycle), `VS0367` (an unknown format in `loom<…>`, or an unknown `from` base),
 > `VS0368` (a warning: a `columns` name the loom lacks), `VS0369` (the a310032 spellings, naming the new
-> one) and `VS0370` (`weave X(…)` with anything but one argument).
+> one) and `VS0370` (`weave X(…)` with anything but one argument). The way out: `VS0379` (`toText(…)` of
+> something that is not a loom) and `VS0380` (`toText<F>` of an unknown format).
 
 **DECIDED.** A program that already has its shapes should come alive from a string loaded from anywhere — a
 setting, a file, a network message — without cutting it by hand:
@@ -728,6 +729,46 @@ as "queryable now", which is what every program needed a hand-made `emit @Begin`
 
 Interpreter-only for now; `veinc emit` says so. `veinc formats` and the Workbench's Formats tab list every
 format a program can name and dry-run any of them against pasted text.
+
+### D23, the way out — `toText<Format>(Loom)` (DECIDED 2026-10-27)
+
+A loom read, and nothing wrote. `samples/desktop/todo.vein` read its files with `loom<Json>` and wrote them with
+`toJson` and a hand-made `"[" + join(…) + "]"`, so the format was said twice. A custom format was worse: about
+eight lines of string assembly restating its separators, its field order and which identities count. Changing
+`lists "+"` in the format changed the reading and left the save writing `+`, silently.
+
+```
+format Mesh  { records ";"  name "="  values ":"  lists "+" }
+format Lines { values "|"  lists "," }
+loom<Mesh> Server { $Server  mark #Listed }
+
+weave Server(text)                    // in
+toText<Mesh>(Server)                  // S1=9811:S2+S4; S2=9812:S1; S6=box.lan:9816:S2
+toText<Lines>(Server)                 // the same servers, converted
+toText(Server)                        // no <F>: the loom's own format
+```
+
+*Why the format goes in angle brackets on the way out too.* Reading names it, `loom<Mesh>`, and so does writing:
+a reader sees on the line how the text will look. Naming it also makes conversion one line (weave as Mesh,
+write as Lines).
+
+*Why the argument is the LOOM.* The loom already says what a record is: which identities (its shapes and
+marks), which values (its parameters, in order), and which one is the name. A value could not say any of that.
+Anything else is VS0379.
+
+*Why a built-in function and not a keyword.* It produces a value, the text, which may go to `@WriteFile`, a
+network send or a label. Writing a file is an action, and it stays the event it already is. No word was added
+to the language.
+
+*What it writes, so it reads back.*
+- **The identities, not the text they came from.** S4 listed twice comes out once; the missing S7 is gone.
+- **A link as its target's name** (the first parameter), the inverse of weave's forward names.
+- **A value equal to its literal default is left out** where reading places values by type (an empty host).
+- **Every record is re-read through the weave reader before it is kept.** One that would not read back the
+  same (a separator inside a value with no `quotes`) is left out with one `@Unwoven`, and the rest are written.
+  So the writer cannot drift from the reader: the reader decides.
+
+`toJson(shape)` stays: it writes one shape's JSON, for a reply or a payload. Interpreter-only, like `weave`.
 
 ## D24 — `~` collections: many of something, as a field with a declared kind and type {#collections}
 

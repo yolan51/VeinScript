@@ -1982,6 +1982,66 @@ public sealed class Interp
         Emit("Woven", new Dictionary<string, object?>(StringComparer.Ordinal) { ["loom"] = w.Loom, ["count"] = (long)count });
     }
 
+    /// <summary>`toText<Format>(Loom)` (D23, the way out): every identity the loom would make, as text.</summary>
+    /// <remarks>
+    /// The identities are the ones carrying all of the loom's shapes and marks, in query order — spawn order, so
+    /// the order `weave` brought them in. Each parameter is read back from the shape it came from. A LINK is
+    /// written as the NAME of the identity it points at (its first parameter, the inverse of weave's forward
+    /// names); one that has no such name cannot be written, and is said rather than guessed. Problems arrive as
+    /// @Unwoven, like a weave's — the record is left out, the rest are written.
+    /// </remarks>
+    private string ToText(IrToText t)
+    {
+        var problems = new List<(string Record, string Why)>();
+        var records = new List<Dictionary<string, object?>>();
+        string? nameShape = t.From.Count > 0 ? t.From[0] : null;
+        bool refers = t.Params.Any(p => p.RefersByName);
+        var names = new HashSet<string>(StringComparer.Ordinal);
+
+        string? NameOf(object? v) =>
+            v is long id && id != 0 && nameShape is not null && _store.IsAlive(id) && _store.Has(id, nameShape)
+                ? Str(_store.Read(id, nameShape, t.Params[0].Name)) : null;
+
+        foreach (long id in _store.Query(t.Shapes, t.Marks))
+        {
+            var values = new Dictionary<string, object?>(StringComparer.Ordinal);
+            string label = NameOf(id) ?? "#" + id;
+            string? why = null;
+            for (int i = 0; i < t.Params.Count && why is null; i++)
+            {
+                var p = t.Params[i];
+                object? raw = _store.Read(id, t.From[i]!, p.Name);
+                if (p.Type == "Entity")
+                {
+                    if (raw is null || raw is 0L) values[p.Name] = "";
+                    else if (NameOf(raw) is { } n) values[p.Name] = n;
+                    else why = $"`{p.Name}` points at an identity with no `{t.Params[0].Name}` to write it by";
+                }
+                else if (p.IsList && p.Element == "Entity")
+                {
+                    var linked = new List<object?>();
+                    foreach (var element in raw is System.Collections.IEnumerable e and not string ? e.Cast<object?>() : Enumerable.Empty<object?>())
+                        if (NameOf(element) is { } n) linked.Add(n);
+                        else problems.Add((label, $"`{p.Name}`: a linked identity has no `{t.Params[0].Name}` to write it by, so it is left out"));
+                    values[p.Name] = linked;
+                }
+                else values[p.Name] = raw is System.Collections.IEnumerable e and not string ? e.Cast<object?>().ToList() : raw;
+            }
+            if (why is null && refers && !names.Add(label))
+                why = $"another record is named \"{label}\" already, so a link to it could not be told apart";
+            if (why is not null) { problems.Add((label, why)); continue; }
+            records.Add(values);
+        }
+
+        string text = Weave.WriteAll(records, t.Format, t.Params, t.Defaults, problems);
+        foreach (var (record, why) in problems)
+            Emit("Unwoven", new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["loom"] = t.Loom, ["record"] = record, ["why"] = $"toText<{t.Format.Name}>: \"{record}\": {why}",
+            });
+        return text;
+    }
+
     /// `match subject { when Name { … } else { … } }`. An arm matches by NAME, because that is what both
     /// kinds of pattern evaluate to: an enum case and a mark each yield their own bare name. So
     /// `match here() { when #Alpha { … } }` is a switch on which console this process is running as.
@@ -2195,6 +2255,7 @@ public sealed class Interp
                 return u.Op == IrUnOp.Not ? !Truthy(v) : v is long or int ? (object)unchecked(-AsLong(v)) : -AsDouble(v);
             }
             case IrRuntimeCall rc: return EvalRuntime(rc, self, locals);
+            case IrToText tt: return ToText(tt);
             case IrList li: return li.Items.Select(i => Eval(i, self, locals)).ToList();
             case IrIndex ix:
             {
@@ -2312,7 +2373,7 @@ public sealed class Interp
     /// Keep the two in step — a name added below and not here is silently rebindable by `use`.
     public static readonly IReadOnlySet<string> PrebuiltNames =
         new HashSet<string>(StringComparer.Ordinal)
-        { "spawn", "here", "pick", "len", "random", "join", "toJson", "fromJson",
+        { "spawn", "here", "pick", "len", "random", "join", "toJson", "fromJson", "toText",
           "split", "lines", "words", "chars", "trim", "code", "chr", "upper", "lower",
           "contains", "startsWith", "endsWith", "indexOf", "substring", "replace",
           "int", "float", "string", "bool", "isNumber", "args", "now", "remove", "sort",

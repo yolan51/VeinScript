@@ -1727,6 +1727,7 @@ public sealed class Parser
             case TokenKind.Ident:
             {
                 string name = Advance().Text;
+                if (name == "toText" && (Check(TokenKind.Lt) || Check(TokenKind.LParen))) return ParseToText(s);
                 // struct literal: `Ident {` but only when it clearly starts a struct (field: value)
                 if (!_noStructLit && Check(TokenKind.LBrace) && LooksLikeStructBody())
                     return new StructLitExpr(name, ParseStructBody(), s);
@@ -1736,6 +1737,31 @@ public sealed class Parser
                 _diag.Error("VS0104", $"Unexpected '{Cur.Text}' in expression.", s);
                 throw new ParseError();
         }
+    }
+
+    /// `toText<Format>(Loom)` / `toText(Loom)` (D23, the way out). Parsed here, by name, because its `<…>`
+    /// is a FORMAT and its argument a LOOM — neither is a value, so neither can go through the general call.
+    /// Anything but a loom reference as the argument is kept as `Loom = null` for Lower to report (VS0379).
+    private Expr ParseToText(SourceSpan s)
+    {
+        string? format = null;
+        IReadOnlyList<string> formatPath = Array.Empty<string>();
+        if (Match(TokenKind.Lt))
+        {
+            (format, formatPath) = ParseFormatRef();
+            Expect(TokenKind.Gt, "'>' after the format");
+        }
+        Expect(TokenKind.LParen, "'(' and the loom to write (`toText<Format>(Loom)`)");
+
+        string? loom = null;
+        IReadOnlyList<string> loomPath = Array.Empty<string>();
+        if ((Check(TokenKind.Ident) || Check(TokenKind.BuilderRef) || Check(TokenKind.Star)) &&
+            (Peek(1).Kind == TokenKind.RParen || Check(TokenKind.Star)))
+            (loom, loomPath) = ParseBuilderRef();
+        else if (!Check(TokenKind.RParen))
+            ParseExpr();                                        // not a loom: Lower says so
+        Expect(TokenKind.RParen, "')'");
+        return new ToTextExpr(loom, loomPath, format, formatPath, s);
     }
 
     /// `*Author.Bundle.Publicator.@Event` — a collision-safe cross-bundle reference. The leading dotted

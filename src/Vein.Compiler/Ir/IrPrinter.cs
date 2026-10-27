@@ -134,6 +134,7 @@ public static class IrPrinter
         IrUnary u => $"({(u.Op == IrUnOp.Neg ? "-" : "not")} {E(u.Operand)})",
         IrStructInit si => $"{si.TypeName} {{ {string.Join(", ", si.Fields.Select(f => $"{f.Field}: {E(f.Value)}"))} }}",
         IrList li => $"[{string.Join(", ", li.Items.Select(E))}]",
+        IrToText tt => $"toText<{tt.Format.Name}>({tt.Loom}: {string.Join(" ", tt.Shapes.Select(s => "$" + s).Concat(tt.Marks.Select(m => "#" + m)))})",
         _ => e.GetType().Name
     };
 

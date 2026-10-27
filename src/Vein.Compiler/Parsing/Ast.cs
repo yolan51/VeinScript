@@ -408,6 +408,12 @@ public sealed record MemberExpr(Expr Receiver, string Name, SourceSpan Span) : E
 
 /// `s.Guild.~members has p` (D24) — whether a collection holds a value. Contextual, like `carries`.
 public sealed record HasExpr(Expr Collection, Expr Value, SourceSpan Span) : Expr(Span);
+
+/// `toText<Format>(Loom)` — the way OUT of a loom (D23): every identity the loom would make, written as text in
+/// `Format`. No `<Format>` writes the loom's own, so `weave Loom(toText(Loom))` reads back what it wrote.
+/// `Loom` is null when the argument was not a loom name at all (VS0379, reported by Lower).
+public sealed record ToTextExpr(string? Loom, IReadOnlyList<string> LoomPath, string? Format,
+                                IReadOnlyList<string> FormatPath, SourceSpan Span) : Expr(Span);
 public sealed record IndexExpr(Expr Receiver, Expr Index, SourceSpan Span) : Expr(Span);
 /// A call. `ViaDo` is true for `do name(…)` — the spelling an SF call must use (D13); a bare call is an
 /// fn or a built-in.

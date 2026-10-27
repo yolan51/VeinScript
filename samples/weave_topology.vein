@@ -33,6 +33,9 @@
 //   4. WALKS ARE FLAT. `target s.Server.~peers as p` gives each peer, and `p.Server.name` reads its data
 //      directly; `target $Server.~peers as s, p` gives every (server, peer) in one loop. The program's
 //      own rules — a server listing itself, a link one way only — are a `has` each.
+//   5. THE WAY OUT IS THE SAME LOOM. `toText(Server)` writes every server back in the loom's own format, and
+//      `toText<KeyValue>(Server)` in another one. It writes the IDENTITIES, not the text they came from: S4
+//      once, no S7, and no empty host. Whatever it writes, `weave Server(…)` reads back as the same servers.
 //
 // The NPCs use the built-in KeyValue format: values in parameter order, or `name=value`, "…" around spaces.
 //
@@ -50,6 +53,13 @@
 //     rule: S1 -> S3 is one way
 //     rule: S1 -> S6 is one way
 //     rule: S6 -> S2 is one way
+//     as MeshList: S1=9811:S2+S4+S1+S3+S5+S6; S2=9812:S1+S3; S3=9813:S2+S4; S4=9814:S3+S1; S5=9815:S6+S1; S6=box.lan:9816:S5+S2
+//     as KeyValue: S1 port=9811 peers=S2+S4+S1+S3+S5+S6
+//     S2 port=9812 peers=S1+S3
+//     S3 port=9813 peers=S2+S4
+//     S4 port=9814 peers=S3+S1
+//     S5 port=9815 peers=S6+S1
+//     S6 host=box.lan port=9816 peers=S5+S2
 //     ! Npc: "Imp lots": `hp`: "lots" is not a whole number
 //     Goblin hp 30 at 4,2
 //     Orc hp 50 at 9,0
@@ -105,6 +115,10 @@ bundle WeaveTopology by you {
                 target $Server.~peers #Listed as s, p {                                 // every (server, peer) — one loop
                     if not (p.Server.~peers has s) { do print("rule: " + s.Server.name + " -> " + p.Server.name + " is one way") }
                 }
+
+                // The way out: the same loom, written back — in its own format, then in another.
+                do print("as MeshList: " + toText(Server))
+                do print("as KeyValue: " + trim(toText<KeyValue>(Server)))     // a line per record, and a last newline
 
                 // The NPCs, now that the mesh is done.
                 weave Npc("Goblin 30 4 2; Orc hp=50 x=9; \"Cave Troll\" 80; Imp lots")

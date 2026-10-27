@@ -438,7 +438,7 @@ continue
 upper(s) lower(s) contains(s, t) startsWith(s, t) endsWith(s, t) indexOf(s, t) substring(s, start, n)
 replace(s, a, b) int(x) float(x) string(x) bool(x) isNumber(s) padLeft(v, w[, c]) padRight(v, w[, c])` —
 all also compiled. **Interpreter-only** (a program using them runs on the interpreter):
-`here() pick(xs) toJson(shapeOnIdentity) fromJson(text) args() now() sort(xs) remove(xs, i)
+`here() pick(xs) toJson(shapeOnIdentity) fromJson(text) toText<Format>(Loom) args() now() sort(xs) remove(xs, i)
 slice(xs, start, n) env(name)`.
 
 ---
@@ -781,5 +781,5 @@ stepper, web preview, AI assistant that compiles suggestions before offering the
     the shard.
 12. Shape it to stay readable ([RULES-OF-THUMB.md](RULES-OF-THUMB.md)): give data its own shapes; more than two
     nested `target`s means a link is missing (`$Parent { of }` = where it sits, `$Owner { ownerId }` = what it belongs
-    to, both in Vein.Core: use them before inventing one); save with `toJson`, load with
-    `loom<Json>` + `weave` (built in — no `need`).
+    to, both in Vein.Core: use them before inventing one); save with `toText<Format>(Loom)`, load with
+    `weave Loom(text)` through the same loom (built in — no `need`).

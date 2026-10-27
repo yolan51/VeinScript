@@ -268,6 +268,8 @@ public sealed class Resolve
                 foreach (var a in rc.Args) Expr(a);
                 return Runtime(rc.Name);
 
+            case IrToText: return IrTypeRef.Of("string");
+
             default: return null;
         }
     }

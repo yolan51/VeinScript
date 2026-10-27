@@ -3026,6 +3026,70 @@ public sealed partial class Lower
             System.IO.Path.GetFileName(ws.Span.File), ws.Span.Line);
     }
 
+    /// `toText<Format>(Loom)` → one IrToText (D23, the way out). The LOOM says what is written — the identities
+    /// carrying its shapes and marks, each as its parameters in order — and the FORMAT how; with no `<Format>`,
+    /// the loom's own, so what is written is what `weave` reads. Problems a value can have (a separator inside
+    /// it) are found at run time, record by record; what the compiler can see is refused here:
+    /// VS0379 not a loom, VS0380 an unknown format.
+    private IrExpr LowerToText(ToTextExpr tt)
+    {
+        var empty = new IrLiteral("", IrLiteralKind.String);
+        string shown = tt.Format is null ? "toText" : $"toText<{tt.Format}>";
+        if (tt.Loom is null)
+        {
+            _diag.Error("VS0379", $"`{shown}(…)` takes a loom — the name of a `loom<Format> Name {{ … }}`, which says " +
+                "which identities to write and their fields. A value cannot say that.", tt.Span);
+            return empty;
+        }
+        if (ResolveBringTarget(tt.LoomPath, tt.Loom, tt.Span) is not { } target)
+        {
+            _diag.Error("VS0379", $"`{shown}({tt.Loom})`: there is no loom '{tt.Loom}'.", tt.Span);
+            return empty;
+        }
+        var b = target.Decl;
+        if (b.Loom is null)
+        {
+            _diag.Error("VS0379", $"`{shown}({tt.Loom})`: {tt.Loom} is a builder, not a loom. Declare it " +
+                $"`loom<Format> {tt.Loom} {{ … }}` — the same body — and it can be written as well as woven.", tt.Span);
+            return empty;
+        }
+
+        // The format: the one asked for, else the loom's own (resolved from where the loom was declared).
+        var fr = tt.Format is null
+            ? ResolveFormat(b.LoomPath, b.Loom, target.OwnerKey, tt.Span, report: false)
+            : ResolveFormat(tt.FormatPath, tt.Format, null, tt.Span);
+        string formatName = tt.Format ?? b.Loom;
+        if (fr is null)
+        {
+            _diag.Error("VS0380", $"`{shown}({tt.Loom})`: no format '{formatName}'. The built-ins are " +
+                $"{string.Join(", ", Weave.BuiltIns)}; a format of your own is a `format {formatName} {{ … }}`.", tt.Span);
+            return empty;
+        }
+        string? owner = tt.Format is null ? fr.Value.Key ?? target.OwnerKey : fr.Value.Key;
+        if (FlattenFormat(formatName, fr.Value.Decl, owner, tt.Span, out string? error, out string code) is not { } format)
+        {
+            _diag.Error(code, $"`{shown}({tt.Loom})`: format {formatName}: {error}.", tt.Span);
+            return empty;
+        }
+
+        // Every parameter came from a `$Shape` include — an identity template binds nothing else — so each can
+        // be read back off the identity it was written onto.
+        var prms = WovenParams(target);
+
+        static string Bare(string name) => name[(name.LastIndexOf('.') + 1)..];
+        var shapes = b.Members.OfType<ShapeInclude>().Select(si => si.Shape).Distinct(StringComparer.Ordinal).ToList();
+        var marks = b.Members.OfType<MarkMember>().SelectMany(m => m.Marks).Distinct(StringComparer.Ordinal).ToList();
+        var defaults = prms.Select(p => p.Default switch
+        {
+            LiteralExpr { Kind: not LiteralKind.Percent } lit => lit.Value,
+            ListLitExpr { Items.Count: 0 } => new List<object?>(),
+            _ => null,
+        }).ToList();
+
+        return new IrToText(tt.Loom, format, prms.Select(ToWeaveParam).ToList(),
+            prms.Select(p => (string?)Bare(p.From!)).ToList(), defaults, shapes, marks);
+    }
+
     /// LowerBring with the ordering context suspended, so the bring itself lowers to a plain bring rather
     /// than recursing back into LowerOrderedBring through any nested statement lowering it does.
     private IrStmt LowerBringDirect(BringStmt br)
@@ -3332,6 +3396,7 @@ public sealed partial class Lower
                     CheckElement(has.Value, hc.Kind == "map" ? hc.Key! : hc.Element, $"{((MemberExpr)cm.Receiver).Name}.~{cm.Name}");
                 return new IrRuntimeCall("CollHas", new[] { LowerExpr(has.Collection), LowerExpr(has.Value) });
             case IndexExpr ix: return new IrIndex(LowerExpr(ix.Receiver), LowerExpr(ix.Index));
+            case ToTextExpr tt: return LowerToText(tt);
             // `*Author.Bundle.Publicator.name(…)` — a cross-bundle call. The callee resolves to a shared
             // `fn`/`SF`, which is IMPORTED into this module under a mangled name so the runtime can find
             // it, exactly as a qualified `bring` pulls in a builder. Without this the call would lower to

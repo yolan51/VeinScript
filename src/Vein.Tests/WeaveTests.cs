@@ -341,6 +341,100 @@ public class WeaveTests : IDisposable
         Assert.Equal(new[] { "3 jacquard twill" }, lines);
     }
 
+    // ---- the way out: toText<Format>(Loom) ------------------------------------------------------------
+
+    private const string Mesh2 =
+        "    format MeshList { records \";\"  name \"=\"  values \":\"  lists \"+\" }\n" +
+        "    format Lines { values \"|\"  lists \",\" }\n" +
+        "    format Tabbed { values \"\\t\"  lists \" \"  quotes \"'\" }\n" +
+        "    shape $Server { name: string, host: string = \"\", port: int, peers: list<Entity> = [] }\n" +
+        "    mark #Listed\n";
+
+    private const string Input = "S1=9811:S2+S4; S2=box:9812:S1; S4=9814:S1+S2";
+
+    /// Everything a program prints, as one string — toText's output spans lines.
+    private static string RunWhole(string source, int ticks = 0)
+    {
+        var r = new VeinCompilerService().Compile(new CompileRequest("t.vein", source));
+        Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
+        var output = new StringWriter();
+        new Interp { Ticks = ticks }.Run(r.Modules[0], new StringReader(""), output);
+        return output.ToString().Replace("\r", "");
+    }
+
+    /// Weave `text` through a `loom<format> Server`, and print toText<writeAs>(Server) between ⟦ ⟧ and the
+    /// servers as the world holds them.
+    private static (string Text, string World) WeaveAndWrite(string format, string text, string writeAs)
+    {
+        string escaped = text.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\t", "\\t");
+        string source = "bundle T by you {\n" + Mesh2 + $"    loom<{format}> Server {{ $Server  mark #Listed }}\n" +
+            "    shard Setup {\n" +
+            $"        run once {{ weave Server(\"{escaped}\") }}\n" + Report +
+            "        hear @Woven as w {\n" +
+            $"            do *Vein.Console.Io.print(\"⟦\" + toText<{writeAs}>(Server) + \"⟧\")\n" +
+            "            target $Server #Listed as v {\n" +
+            "                var line = v.Server.name + \" \" + v.Server.host + \":\" + v.Server.port + \" ->\"\n" +
+            "                target v.Server.peers as p { target $Server on p as q { line = line + \" \" + q.Server.name } }\n" +
+            "                do *Vein.Console.Io.print(line)\n" +
+            "            }\n" +
+            "        }\n    }\n}";
+        string all = RunWhole(source);
+        int a = all.IndexOf('⟦'), b = all.IndexOf('⟧');
+        return (all[(a + 1)..b], all[..a] + all[(b + 1)..]);
+    }
+
+    [Fact]
+    public void ToText_writes_a_custom_format_the_way_its_records_are_read()
+    {
+        var (text, _) = WeaveAndWrite("MeshList", Input, "MeshList");
+        // The empty host is left out — reading places values by type — and peers are written by name.
+        Assert.Equal("S1=9811:S2+S4; S2=box:9812:S1; S4=9814:S1+S2", text);
+    }
+
+    [Theory]
+    [InlineData("MeshList")]
+    [InlineData("Lines")]
+    [InlineData("Tabbed")]
+    [InlineData("Json")]
+    [InlineData("Csv")]
+    [InlineData("Ini")]
+    [InlineData("KeyValue")]
+    public void What_toText_writes_weaves_back_into_the_same_identities(string format)
+    {
+        var (original, before) = WeaveAndWrite("MeshList", Input, format);
+        var (again, after) = WeaveAndWrite(format, original, format);
+        Assert.DoesNotContain("!", before);
+        Assert.Equal(before, after);           // the same servers, hosts, ports and links
+        Assert.Equal(original, again);         // and written the same way again
+    }
+
+    [Fact]
+    public void A_value_the_format_cannot_hold_is_said_and_the_rest_are_written()
+    {
+        // `a:b` holds MeshList's value separator, and MeshList has no `quotes`.
+        string source = "bundle T by you {\n" + Mesh2 + "    loom<MeshList> Server { $Server  mark #Listed }\n" +
+            "    shard Setup {\n" +
+            "        run once {\n" +
+            "            bring Server(\"S1\", \"a:b\", 1, [])\n" +
+            "            bring Server(\"S2\", \"\", 2, [])\n" +
+            "        }\n" + Report +
+            "        hear *Vein.Time.Clock.@Ticked as t { if t.frame == 1 { do *Vein.Console.Io.print(\"⟦\" + toText(Server) + \"⟧\") } }\n" +
+            "    }\n}";
+        string all = RunWhole(source, ticks: 3);
+        Assert.Contains("⟦S2=2⟧", all);
+        Assert.Contains("! toText<MeshList>: \"S1\":", all);
+    }
+
+    [Theory]
+    [InlineData("    builder Plain { $Server  mark #Listed }\n    fn f() return string { return toText(Plain) }", "VS0379")]
+    [InlineData("    loom<MeshList> Server { $Server  mark #Listed }\n    fn f(x: string) return string { return toText(x) }", "VS0379")]
+    [InlineData("    loom<MeshList> Server { $Server  mark #Listed }\n    fn f() return string { return toText(Nope) }", "VS0379")]
+    [InlineData("    loom<MeshList> Server { $Server  mark #Listed }\n    fn f() return string { return toText<Nope>(Server) }", "VS0380")]
+    public void ToText_refuses_what_is_not_a_loom_or_not_a_format(string members, string code)
+    {
+        Assert.Contains(Check(Mesh2 + members), d => d.Code == code);
+    }
+
     // ---- the samples -----------------------------------------------------------------------------------
 
     [Theory]

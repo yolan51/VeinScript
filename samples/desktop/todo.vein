@@ -6,9 +6,9 @@
 // DATA FIRST, THEN THE SCREEN. A group is an identity carrying $Group { name }; a task is one carrying
 // $Task { group, text, done, priority }. Everything else follows from those two shapes:
 //
-// 1. SAVING IS toJson, LOADING IS weave. groups.json and tasks.json beside the program are flat arrays, each
-//    record exactly one shape's toJson. Loading them back is the stdlib's JSON loom: `weave SavedTask(text)`
-//    brings one $Task identity per record (D23) — no parsing written here.
+// 1. ONE LOOM EACH WAY: weave IN, toText OUT. groups.json and tasks.json beside the program are written by
+//    `toText<Json>(SavedTask)` and read back by `weave SavedTask(text)`, one $Task identity per record (D23).
+//    The loom says what a record is; the format is named on both lines, so no parsing or joining is written here.
 //
 // 2. ONE PLACE BUILDS THE SCREEN. `View` gives every $Group and $Task that has no widgets yet its widgets, and
 //    marks it #Shown (`target $Task not #Shown`, D25). Loading, "Add group" and "Add" only bring DATA; the view
@@ -36,7 +36,7 @@ bundle Todo by you {
     builder Group { $Group   mark #Group }
     builder Task { $Task   mark #Task }
 
-    // The same two shapes, read back from JSON: one identity per record.
+    // The same two shapes as records of a file: written with toText<Json>, read back with weave.
     loom<Json> SavedGroup { $Group   mark #Group }
     loom<Json> SavedTask { $Task   mark #Task }
 
@@ -353,12 +353,8 @@ bundle Todo by you {
         // Written only after something the user did — so nothing is ever saved before it has been loaded.
         settled {
             if changed {
-                var groups = []
-                target $Group as g { groups += toJson(g.Group) }
-                var tasks = []
-                target $Task as t { tasks += toJson(t.Task) }
-                emit *Vein.Files.Io.@WriteFile { path: "groups.json", text: "[" + join(groups, ",\n ") + "]\n", tag: #GroupsFile }
-                emit *Vein.Files.Io.@WriteFile { path: "tasks.json", text: "[" + join(tasks, ",\n ") + "]\n", tag: #TasksFile }
+                emit *Vein.Files.Io.@WriteFile { path: "groups.json", text: toText<Json>(SavedGroup), tag: #GroupsFile }
+                emit *Vein.Files.Io.@WriteFile { path: "tasks.json", text: toText<Json>(SavedTask), tag: #TasksFile }
                 changed = false
             }
         }
