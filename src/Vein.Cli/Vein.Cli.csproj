@@ -23,4 +23,10 @@
   <ItemGroup>
     <None Include="..\..\stdlib\**\*.vein" Link="stdlib\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <!-- `veinc build` of a desktop program (one that needs Vein.Desktop) compiles THE Workbench's window drawer into
+       the exe — carried as source, not referenced, so veinc itself never loads Avalonia, and the Workbench's ▶
+       and a built program cannot draw differently: there is one DesktopRunner.cs. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\Vein.Workbench\DesktopRunner.cs" LogicalName="desktop/DesktopRunner.cs" />
+  </ItemGroup>
 </Project>

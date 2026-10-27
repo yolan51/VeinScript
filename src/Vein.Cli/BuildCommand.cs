@@ -34,6 +34,18 @@ internal static class BuildCommand
             Path.GetFileName(sourcePath), source, ProjectDir: sourceDir, SourcePath: sourcePath));
         if (compiled.Success) LockCommand.Record(sourceDir, compiled.OutsideUses);
 
+        // A DESKTOP PROGRAM (it needs Vein.Desktop) becomes a windowed app: the Workbench's DesktopRunner compiled
+        // in, no console. It must compile HERE — a windowed exe has no console to print its errors to, so a
+        // broken program would open nothing and say nothing.
+        bool desktop = Vein.Compiler.Project.DesktopProgram.Uses(compiled.Ast);
+        if (desktop && !compiled.Success)
+        {
+            foreach (var d in compiled.Diagnostics.Where(d => d.Severity == Vein.Compiler.Diagnostics.Severity.Error))
+                Console.Error.WriteLine(d);
+            Console.Error.WriteLine("build: fix the errors above first — a windowed program has no console to show them in.");
+            return 1;
+        }
+
         string name = Sanitize(Path.GetFileNameWithoutExtension(sourcePath));
         rid ??= RuntimeInformation.RuntimeIdentifier;
 
@@ -132,11 +144,22 @@ internal static class BuildCommand
                 }
             }
             else Console.Error.WriteLine("build warning: no stdlib folder found — the built program will not resolve *Vein.* references.");
-            File.WriteAllText(Path.Combine(temp, "app.csproj"), Csproj(name, compilerDll));
-            File.WriteAllText(Path.Combine(temp, "Program.cs"), HostProgram);
+            if (desktop)
+            {
+                // Its pictures travel with it — `Picture(w, "logo.png", …)` and a window icon name files beside the
+                // program, and a shared exe has no folder of the author's beside it.
+                foreach (string image in Directory.EnumerateFiles(sourceDir).Where(f => ImageExtensions.Contains(Path.GetExtension(f).ToLowerInvariant())))
+                    File.Copy(image, Path.Combine(project, Path.GetFileName(image)), overwrite: true);
+
+                using var runner = typeof(BuildCommand).Assembly.GetManifestResourceStream("desktop/DesktopRunner.cs")!;
+                using var into = File.Create(Path.Combine(temp, "DesktopRunner.cs"));
+                runner.CopyTo(into);
+            }
+            File.WriteAllText(Path.Combine(temp, "app.csproj"), desktop ? DesktopCsproj(name, compilerDll) : Csproj(name, compilerDll));
+            File.WriteAllText(Path.Combine(temp, "Program.cs"), desktop ? DesktopHostProgram : HostProgram);
 
             string outDir = Path.Combine(temp, "out");
-            Console.Error.WriteLine($"building {name}{exeExt} ({(selfContained ? "self-contained" : "framework-dependent")}, {rid}) — this can take a while…");
+            Console.Error.WriteLine($"building {name}{exeExt} ({(desktop ? "a desktop app with windows, " : "")}{(selfContained ? "self-contained" : "framework-dependent")}, {rid}) — this can take a while…");
 
             var psi = new ProcessStartInfo("dotnet")
             {
@@ -184,6 +207,117 @@ internal static class BuildCommand
         }
         return null;
     }
+
+    /// The pictures a desktop program may name beside itself (`Picture`, a window icon).
+    private static readonly HashSet<string> ImageExtensions = new(StringComparer.Ordinal) { ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico" };
+
+    // A desktop program's project: the console one's embedded files, plus its pictures, Avalonia, and THE
+    // Workbench's DesktopRunner.cs. WinExe — a windowed app opens no console box beside its window.
+    private static string DesktopCsproj(string name, string compilerDll) => $"""
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>WinExe</OutputType>
+            <TargetFramework>net8.0</TargetFramework>
+            <Nullable>enable</Nullable>
+            <ImplicitUsings>enable</ImplicitUsings>
+            <AssemblyName>{name}</AssemblyName>
+            <InvariantGlobalization>true</InvariantGlobalization>
+          </PropertyGroup>
+          <ItemGroup>
+            <PackageReference Include="Avalonia" Version="11.1.0" />
+            <PackageReference Include="Avalonia.Desktop" Version="11.1.0" />
+            <PackageReference Include="Avalonia.Themes.Fluent" Version="11.1.0" />
+            <PackageReference Include="Avalonia.Fonts.Inter" Version="11.1.0" />
+          </ItemGroup>
+          <ItemGroup>
+            <Reference Include="Vein.Compiler"><HintPath>{compilerDll}</HintPath></Reference>
+            <EmbeddedResource Include="main.txt" LogicalName="main.txt" />
+            <EmbeddedResource Include="build.txt" LogicalName="build.txt" />
+            <EmbeddedResource Include="project\**\*.vein" LogicalName="project/%(RecursiveDir)%(Filename)%(Extension)" />
+            <EmbeddedResource Include="project\*.png;project\*.jpg;project\*.jpeg;project\*.gif;project\*.bmp;project\*.ico" LogicalName="project/%(Filename)%(Extension)" />
+            <EmbeddedResource Include="project\.vein\libraries" LogicalName="project/.vein/libraries" />
+            <EmbeddedResource Include="project\vein.settings" LogicalName="project/vein.settings" Condition="Exists('project\vein.settings')" />
+            <EmbeddedResource Include="stdlib\**\*.vein" LogicalName="stdlib/%(RecursiveDir)%(Filename)%(Extension)" />
+          </ItemGroup>
+        </Project>
+        """;
+
+    // The generated desktop host: put the embedded program back on disk exactly as the console host does, compile
+    // and link it the same way, then hand it to DesktopRunner — the class the Workbench's ▶ uses.
+    private const string DesktopHostProgram = """
+        using Avalonia;
+        using Avalonia.Controls;
+        using Avalonia.Controls.ApplicationLifetimes;
+        using Avalonia.Styling;
+        using Avalonia.Themes.Fluent;
+        using Vein.Compiler.Diagnostics;
+        using Vein.Compiler.Ir;
+        using Vein.Compiler.Project;
+        using Vein.Workbench;
+
+        public static class Program
+        {
+            internal static IrModule? Module;
+            internal static string ProjectDir = "";
+
+            [STAThread]
+            public static int Main(string[] args)
+            {
+                var asm = System.Reflection.Assembly.GetExecutingAssembly();
+                string Text(string res) { using var s = asm.GetManifestResourceStream(res)!; return new StreamReader(s).ReadToEnd().Trim(); }
+
+                // As the console host: the stdlib and the program back on disk, in a folder named for THIS build.
+                string root = Path.Combine(Path.GetTempPath(), "vein-" + asm.GetName().Name + "-" + Text("build.txt"));
+                foreach (string res in asm.GetManifestResourceNames())
+                {
+                    if (!res.StartsWith("stdlib/", StringComparison.Ordinal) && !res.StartsWith("project/", StringComparison.Ordinal)) continue;
+                    string target = Path.Combine(root, res.Replace('\\', '/').Replace('/', Path.DirectorySeparatorChar));
+                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                    using var rs = asm.GetManifestResourceStream(res)!;
+                    using var fs = File.Create(target);
+                    rs.CopyTo(fs);
+                }
+                ProjectDir = Path.Combine(root, "project");
+                string main = Path.Combine(ProjectDir, Text("main.txt"));
+
+                var diag = new DiagnosticBag();
+                var unit = BundleLoader.Load(main, diag);
+                var linked = diag.HasErrors ? null : AppLinker.LinkNeeds(main, File.ReadAllText(main), diag);
+                Module = linked?.Module ?? (diag.HasErrors ? null : new Lower(diag, ProjectDir).LowerBundle(unit.Bundles[0]));
+                if (diag.HasErrors || Module is null)
+                {
+                    // No console to print to: the errors go in a file beside the exe, where a person will look.
+                    File.WriteAllLines(Path.Combine(AppContext.BaseDirectory, asm.GetName().Name + "-errors.txt"),
+                        diag.Items.Select(d => d.ToString()));
+                    return 1;
+                }
+
+                return AppBuilder.Configure<App>().UsePlatformDetect().WithInterFont().LogToTrace()
+                    .StartWithClassicDesktopLifetime(args, ShutdownMode.OnExplicitShutdown);
+            }
+        }
+
+        public sealed class App : Application
+        {
+            public override void Initialize()
+            {
+                Styles.Add(new FluentTheme());
+                RequestedThemeVariant = ThemeVariant.Dark;   // as the Workbench shows it
+            }
+
+            public override void OnFrameworkInitializationCompleted()
+            {
+                if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+                {
+                    // Files (`todo.json`) land beside the EXE, on whichever PC it was copied to; pictures are read
+                    // from the program's own embedded folder.
+                    new DesktopRunner(Program.Module!, AppContext.BaseDirectory, Program.ProjectDir,
+                        _ => { }, _ => desktop.Shutdown()).Start();
+                }
+                base.OnFrameworkInitializationCompleted();
+            }
+        }
+        """;
 
     private static string Sanitize(string n) =>
         new(n.Select(c => char.IsLetterOrDigit(c) || c == '_' ? c : '_').ToArray());

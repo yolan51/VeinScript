@@ -100,7 +100,7 @@ None of this was on the original map; all of it is on the interpreter.
 | HTTP server over the `@Request`/`@Response` pipeline | `veinc serve <f> --port N` |
 | App link + run — principal boots, capabilities join one runtime | `veinc run samples/app_capabilities/shop.app.vein` |
 | The network AS a capability — a non-principal bundle binds the socket | `veinc run samples/app_net/hub.app.vein` + `net_spoke.vein` |
-| Standalone executable | `veinc build <f>` |
+| Standalone executable — console, or a windowed app for a `Vein.Desktop` program | `veinc build <f>` |
 | Identities from text — `format` · `loom<Format>` · `weave Loom(text)`, @Woven/@Unwoven (D23, shipped 2026-10-24) | `samples/weave_topology.vein`, `veinc formats <f>`, the Formats tab |
 | `~` collections — `~<list>`/`~<set>`/`~<ring N>`, flat walks, `add`/`remove`/`has` (D24, shipped 2026-10-24; interpreter-only) | `samples/collections.vein` |
 

@@ -91,7 +91,18 @@ resource) and `dotnet publish`es it self-contained/single-file for the current R
 `-o <out.exe>`, `--rid <rid>`, `--framework-dependent` (small exe, needs .NET 8 installed).
 
 Requires the .NET SDK (for `dotnet publish`) and targets **console** programs — a web-style program
-(`@Response`) prints nothing through the exe (that's `veinc render`). Emitting real C#/SECS from the IR
+(`@Response`) prints nothing through the exe (that's `veinc render`).
+
+**A desktop program becomes a windowed app.** When the program needs `Vein.Desktop`, `build` compiles in the
+Workbench's own window drawer (`DesktopRunner.cs`, carried by veinc as source, so ▶ and the exe draw the same
+way) and the pictures beside the program, and publishes a WinExe — no console box, ~90 MB self-contained:
+
+```
+$ veinc build samples/desktop/todo.vein      # → samples/desktop/todo.exe: double-click it, its window opens
+```
+
+Its files land beside the EXE (`todo.json` on whichever PC it was copied to), as a console exe's do. It must
+compile first: a windowed app has no console for its errors, so `build` refuses one that does not. Emitting real C#/SECS from the IR
 (a true transpiler backend) is the larger follow-on; this ships a runnable app on today's interpreter.
 
 ### 2.3 Spawning + messaging between console apps
