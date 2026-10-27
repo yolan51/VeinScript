@@ -214,6 +214,8 @@ public partial class MainWindow : Window
         _terminal.AnyLine += (s, at, line) => _transcript.Add(s, at, line);
         _outline = this.FindControl<OutlinePanel>("Outline")!;
         _outline.Navigate = GoTo;
+        _outline.SetCollapsed(_settings.OutlineCollapsed);
+        _outline.CollapsedChanged = folded => { _settings.OutlineCollapsed = folded.ToList(); _settings.Save(); };
         _eventGraph = this.FindControl<EventGraphPanel>("EventGraph")!;
         _eventGraph.Navigate = GoTo;
         _inspector = this.FindControl<TabControl>("Inspector")!;

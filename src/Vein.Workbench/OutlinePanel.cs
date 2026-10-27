@@ -16,8 +16,21 @@ internal sealed class OutlinePanel : UserControl
 {
     private readonly StackPanel _body = new() { Spacing = 2, Margin = new Avalonia.Thickness(8, 6) };
 
+    /// The sections folded shut, by title. Clicking a section's title folds or opens it; the outline is
+    /// rebuilt on every edit, so the fold lives HERE rather than on a control that is about to be replaced.
+    private readonly HashSet<string> _collapsed = new(StringComparer.Ordinal);
+
     /// Jump to a declaration. Wired by the window to the shared GoTo.
     public Action<int, int>? Navigate { get; set; }
+
+    /// Told every time a section is folded or opened, so the window can remember it across launches.
+    public Action<IReadOnlyCollection<string>>? CollapsedChanged { get; set; }
+
+    public void SetCollapsed(IEnumerable<string> titles)
+    {
+        _collapsed.Clear();
+        _collapsed.UnionWith(titles);
+    }
 
     public OutlinePanel()
     {
@@ -48,33 +61,18 @@ internal sealed class OutlinePanel : UserControl
             var group = defs.Where(d => d.Kind == kind).OrderBy(d => d.Span.Line).ToList();
             if (group.Count == 0) continue;
 
-            _body.Children.Add(new TextBlock
-            {
-                Text = Plural(kind),
-                FontWeight = FontWeight.Bold,
-                FontSize = 12,
-                Foreground = Brushes.Gray,
-                Margin = new Avalonia.Thickness(0, 8, 0, 2)
-            });
-
-            foreach (var d in group) _body.Children.Add(Entry(d));
+            var rows = Section(Plural(kind), group.Count);
+            foreach (var d in group) rows.Children.Add(Entry(d));
         }
 
         // The groups `mute #M` acts on (D20): each mark a shard carries, then the shards carrying it. The
         // kinds above answer "what is declared"; this answers "what pauses together".
         var byMark = index.ShardsByMark();
         if (byMark.Count == 0) return;
-        _body.Children.Add(new TextBlock
-        {
-            Text = "Shards by mark",
-            FontWeight = FontWeight.Bold,
-            FontSize = 12,
-            Foreground = Brushes.Gray,
-            Margin = new Avalonia.Thickness(0, 8, 0, 2)
-        });
+        var marks = Section("Shards by mark", byMark.Count);
         foreach (var (mark, shards) in byMark)
         {
-            _body.Children.Add(new TextBlock
+            marks.Children.Add(new TextBlock
             {
                 Text = "#" + mark,
                 FontFamily = new FontFamily("Cascadia Code,Consolas,monospace"),
@@ -82,8 +80,48 @@ internal sealed class OutlinePanel : UserControl
                 Margin = new Avalonia.Thickness(6, 2, 0, 0)
             });
             foreach (var s in shards)
-                _body.Children.Add(Entry(s, withDetail: false, indent: 16));
+                marks.Children.Add(Entry(s, withDetail: false, indent: 16));
         }
+    }
+
+    /// A section's title — ▾ open, ▸ folded, and how many it holds, so a folded one still says what it hides —
+    /// and the panel its rows go in. Click the title to fold or open it.
+    private StackPanel Section(string title, int count)
+    {
+        bool folded = _collapsed.Contains(title);
+        var rows = new StackPanel { Spacing = 2, IsVisible = !folded };
+        var arrow = new TextBlock { Text = folded ? "▸" : "▾", Width = 12, Foreground = Brushes.Gray, FontSize = 12 };
+
+        var header = new Border
+        {
+            Background = Brushes.Transparent,   // a hit target across the whole row, not just the letters
+            Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+            Margin = new Avalonia.Thickness(0, 8, 0, 2),
+            Child = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 4,
+                Children =
+                {
+                    arrow,
+                    new TextBlock { Text = title, FontWeight = FontWeight.Bold, FontSize = 12, Foreground = Brushes.Gray },
+                    new TextBlock { Text = count.ToString(), FontSize = 11, Foreground = Brushes.DimGray, VerticalAlignment = VerticalAlignment.Center },
+                }
+            }
+        };
+        ToolTip.SetTip(header, "Click to fold or open");
+        header.PointerPressed += (_, _) =>
+        {
+            bool nowFolded = !_collapsed.Remove(title);
+            if (nowFolded) _collapsed.Add(title);
+            rows.IsVisible = !nowFolded;
+            arrow.Text = nowFolded ? "▸" : "▾";
+            CollapsedChanged?.Invoke(_collapsed);
+        };
+
+        _body.Children.Add(header);
+        _body.Children.Add(rows);
+        return rows;
     }
 
     private Control Entry(SymbolSite d, bool withDetail = true, double indent = 0)

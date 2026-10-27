@@ -45,6 +45,10 @@ internal sealed class WorkbenchSettings
     public string? LoungeWindow { get; set; }
     public string? AssistantWindow { get; set; }
 
+    /// The Outline's sections folded shut ("Marks", "Shards by mark", …), by title. Kept across launches: a
+    /// person who folds away forty marks to see the shards wants them folded tomorrow too.
+    public List<string> OutlineCollapsed { get; set; } = new();
+
     public const int MaxRecent = 8;
 
     private static string Path0 => Path.Combine(
