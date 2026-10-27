@@ -76,6 +76,57 @@ public class DesktopStdlibTests
         Assert.Contains("after: Title checks=0 widgets=3", Run(Tree, 5));
     }
 
+    [Fact]
+    public void Every_widget_builder_makes_a_widget_under_its_window_with_its_shape_and_marks()
+    {
+        const string source = """
+            bundle W by you {
+                need "Vein.Desktop"
+                need "Vein.UI"
+                shard Build {
+                    run once {
+                        bring Window("W", 300.0, 200.0) as w
+                        bring Slider(w, 0.0, 10.0, 4.0)
+                        bring Progress(w, 3.0, 5.0)
+                        bring Spacer(w, 8.0)
+                        bring Divider(w, 1.0)
+                        bring Scroll(w, 120.0) as list
+                        bring Label(list, "inside the scroll")
+                        bring Radios(w, ["a", "b"], 1)
+                        bring Switch(w, "on?", true)
+                        bring Badge(w, "3")
+                        bring IconButton(w, "x.png", 16.0, "Go")
+                        bring TextArea(w, "", "notes")
+                    }
+                    hear *Vein.Time.Clock.@Ticked as t {
+                        if t.frame == 2 {
+                            var widgets = 0
+                            target $Parent #Widget as x { widgets += 1 }
+                            var shapes = ""
+                            target $Slider as x { shapes = shapes + "slider=" + string(x.Slider.value) + " " }
+                            target $Progress as x { shapes = shapes + "progress=" + string(x.Progress.value) + "/" + string(x.Progress.max) + " " }
+                            target $Scroll as x { shapes = shapes + "scroll=" + string(x.Scroll.height) + " " }
+                            target $Choice #Radio as x { shapes = shapes + "radio=" + string(x.Choice.picked) + " " }
+                            target $Toggle #Switch as x { shapes = shapes + "switch=" + string(x.Toggle.checked) + " " }
+                            target $Text #Badge as x { shapes = shapes + "badge=" + x.Text.content + " " }
+                            target $Icon as x { shapes = shapes + "icon=" + x.Icon.source + " " }
+                            target $Field #Multiline as x { shapes = shapes + "area=" + x.Field.placeholder + " " }
+                            emit *Vein.Console.Io.@Print { text: "widgets=" + string(widgets) + " " + shapes }
+                        }
+                    }
+                }
+            }
+            """;
+
+        string output = Run(source, 3);
+        Assert.Contains("widgets=11 ", output);   // ten new widgets and the label inside the scroll
+        foreach (string expected in new[]
+                 {
+                     "slider=4", "progress=3/5", "scroll=120", "radio=1", "switch=true", "badge=3", "icon=x.png", "area=notes",
+                 })
+            Assert.Contains(expected, output);
+    }
+
     [Theory]
     [InlineData("bundle A by you { need \"Vein.Desktop\" }", true)]
     [InlineData("bundle A by you { need \"Vein.UI\" }", false)]

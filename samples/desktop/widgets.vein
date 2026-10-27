@@ -1,0 +1,117 @@
+// samples/desktop/widgets.vein — every Vein.Desktop widget in one window, each wired to something.
+//
+//   In the Workbench, press ▶ (F5): its window opens, drawn from its identities.
+//   veinc run samples/desktop/widgets.vein --ticks 2      (its rules alone, with no window drawn)
+//
+// The slider drives the progress bar and a label; the radio buttons and the switch say what they are set to;
+// the notes box shows what Ctrl+Enter sent; the icon button counts its clicks in a badge; the long list
+// scrolls. Every widget is an identity, and every reaction is a field written in VeinScript — the host only
+// draws them.
+
+bundle Widgets by you {
+    need "Vein.Desktop"
+    need "Vein.UI"
+    need "Vein.Graphics"
+
+    mark #Volume
+    mark #Level
+    mark #VolumeText
+    mark #Size
+    mark #Dark
+    mark #Said
+    mark #Notes
+    mark #Like
+    mark #Likes
+
+    shard Build {
+        run once {
+            bring Window("Widgets", 520.0, 760.0, "vslogo.png") as w
+            bring Heading(w, "Every widget", 22.0)
+
+            // A slider, and what follows it.
+            bring Row(w, 10.0) as volume
+            bring Label(volume, "Volume")
+            bring Slider(volume, 0.0, 100.0, 40.0) as slider
+            mark slider #Volume
+            attach $Tip to slider { text: "Drag me — the bar and the number follow" }
+            bring Label(volume, "40") as shown
+            mark shown #VolumeText
+            bring Progress(w, 40.0, 100.0) as level
+            mark level #Level
+
+            bring Divider(w, 1.0)
+
+            // One choice of several, all visible; and an on/off switch.
+            bring Radios(w, ["Small", "Medium", "Large"], 1) as size
+            mark size #Size
+            bring Switch(w, "Dark mode", true) as dark
+            mark dark #Dark
+            bring Label(w, "Medium, dark") as said
+            mark said #Said
+
+            bring Divider(w, 1.0)
+
+            // Several lines of text: Enter is a new line, Ctrl+Enter submits.
+            bring TextArea(w, "", "Notes… (Ctrl+Enter to send)") as notes
+            mark notes #Notes
+            bring Label(w, "") as sent
+            mark sent #Notes
+
+            bring Spacer(w, 6.0)
+
+            // A button with a picture, and a badge that counts.
+            bring Row(w, 8.0) as likes
+            bring IconButton(likes, "vslogo.png", 18.0, "Like") as like
+            mark like #Like
+            attach $Tip to like { text: "Each click adds one" }
+            bring Badge(likes, "0") as tally
+            mark tally #Likes
+
+            bring Divider(w, 1.0)
+
+            // A long list in a column that scrolls past 160 pixels.
+            bring Label(w, "Thirty rows, in a scrolling column:")
+            bring Scroll(w, 160.0, 4.0) as list
+            repeat 30 as i { bring Label(list, "Row " + string(i + 1)) }
+        }
+    }
+
+    shard React {
+        var likes = 0
+
+        hear @Slid as s {
+            target $Progress #Level as p { p.Progress.value = s.value }
+            target $Text #VolumeText as t { t.Text.content = string(int(s.value)) }
+        }
+
+        hear @Picked as p { do describe() }
+        hear @Toggled as t { do describe() }
+
+        hear @Submitted as s {
+            target $Field #Notes on s.target as n {
+                target $Text #Notes as t { t.Text.content = "Sent: " + s.value }
+            }
+        }
+
+        hear *Vein.UI.Interaction.@Clicked as c {
+            target $Button #Like on c.target as b {
+                likes += 1
+                target $Text #Likes as t { t.Text.content = string(likes) }
+            }
+        }
+    }
+
+    // What the radio buttons and the switch are set to, in words — read from their own fields.
+    SF describe() {
+        var words = ""
+        target $Choice #Size as c {
+            if c.Choice.picked == 0 { words = "Small" }
+            if c.Choice.picked == 1 { words = "Medium" }
+            if c.Choice.picked == 2 { words = "Large" }
+        }
+        target $Toggle #Dark as d {
+            if d.Toggle.checked { words = words + ", dark" } else { words = words + ", light" }
+        }
+        target $Text #Said as t { t.Text.content = words }
+    }
+}

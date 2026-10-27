@@ -47,6 +47,27 @@ bundle Desktop by Vein {
         shared("A dropdown: the options it offers, and which one is picked (0 is the first).")
         shape $Choice { ~<list> options: string, picked: int = 0 }
 
+        shared("A slider's range and where it sits. The host writes `value` as it moves.")
+        shape $Slider { min: float = 0.0, max: float = 100.0, value: float = 0.0 }
+
+        shared("A progress bar: how far along, out of `max`.")
+        shape $Progress { value: float = 0.0, max: float = 1.0 }
+
+        shared("Empty room between widgets, in pixels.")
+        shape $Space { size: float = 12.0 }
+
+        shared("A line across a column, `thickness` pixels high.")
+        shape $Rule { thickness: float = 1.0 }
+
+        shared("A column that scrolls once its content is taller than `height` pixels.")
+        shape $Scroll { height: float = 240.0 }
+
+        shared("A small picture on a button: an image file beside the program, `size` pixels.")
+        shape $Icon { source: string, size: float = 18.0 }
+
+        shared("Words shown when the pointer rests on a widget: attach it to any widget.")
+        shape $Tip { text: string }
+
         shared("Carried by every window.")
         mark #Window
 
@@ -60,6 +81,18 @@ bundle Desktop by Vein {
         // every host, so a widget wearing it — and everything inside it — is not shown until it is unmarked.
         shared("A button drawn in the accent colour: the selected tab, the main action.")
         mark #Accent
+
+        shared("A $Choice drawn as radio buttons — every option visible — instead of a dropdown.")
+        mark #Radio
+
+        shared("A $Toggle drawn as an on/off switch instead of a checkbox.")
+        mark #Switch
+
+        shared("A $Text drawn as a small rounded badge: a count, a status.")
+        mark #Badge
+
+        shared("A text box for several lines: Enter is a new line, Ctrl+Enter submits.")
+        mark #Multiline
 
         shared("A window: bring Window(\"Notes\", 480.0, 360.0, \"icon.png\") as w, then bring widgets into w.")
         builder Window { $Window   mark #Window }
@@ -88,6 +121,36 @@ bundle Desktop by Vein {
         shared("A dropdown inside parent: bring Dropdown(row, [\"Low\", \"High\"], 0) as pick. A pick arrives as @Picked.")
         builder Dropdown { *Vein.Core.Relations.$Parent  $Choice   mark #Widget }
 
+        shared("A slider: bring Slider(row, 0.0, 10.0, 5.0) as s. A move arrives as @Slid.")
+        builder Slider { *Vein.Core.Relations.$Parent  $Slider   mark #Widget }
+
+        shared("A progress bar: bring Progress(group, 3.0, 5.0) — 3 of 5.")
+        builder Progress { *Vein.Core.Relations.$Parent  $Progress   mark #Widget }
+
+        shared("Empty room: bring Spacer(w, 16.0).")
+        builder Spacer { *Vein.Core.Relations.$Parent  $Space   mark #Widget }
+
+        shared("A line across a column: bring Divider(w, 1.0).")
+        builder Divider { *Vein.Core.Relations.$Parent  $Rule   mark #Widget }
+
+        shared("A column that scrolls past height pixels: bring Scroll(w, 300.0) as list, then bring rows into list.")
+        builder Scroll { *Vein.Core.Relations.$Parent  $Scroll  $Panel   mark #Widget }
+
+        shared("Radio buttons: bring Radios(w, [\"Small\", \"Large\"], 0). A pick arrives as @Picked.")
+        builder Radios { *Vein.Core.Relations.$Parent  $Choice   mark #Widget #Radio }
+
+        shared("An on/off switch: bring Switch(w, \"Dark mode\", false). A flip arrives as @Toggled.")
+        builder Switch { *Vein.Core.Relations.$Parent  $Toggle   mark #Widget #Switch }
+
+        shared("A small rounded label: bring Badge(row, \"3\").")
+        builder Badge { *Vein.Core.Relations.$Parent  *Vein.UI.Widgets.$Text   mark #Widget #Badge }
+
+        shared("A button with a picture: bring IconButton(row, \"trash.png\", 16.0, \"\") — label may be empty.")
+        builder IconButton { *Vein.Core.Relations.$Parent  $Icon  *Vein.UI.Widgets.$Button   mark #Widget }
+
+        shared("A text box for several lines: bring TextArea(w, \"\", \"Notes…\"). Ctrl+Enter submits.")
+        builder TextArea { *Vein.Core.Relations.$Parent  *Vein.UI.Widgets.$Field   mark #Widget #Multiline }
+
         shared("An image file beside the program, drawn height pixels tall: bring Picture(w, \"logo.png\", 32.0).")
         builder Picture { *Vein.Core.Relations.$Parent  *Vein.UI.Widgets.$Image  $Picture   mark #Widget }
 
@@ -114,8 +177,11 @@ bundle Desktop by Vein {
         shared("From the host: a checkbox was ticked or unticked. $Toggle.checked already holds it.")
         event @Toggled { target: Entity, checked: bool }
 
-        shared("From the host: an option was picked in a dropdown. $Choice.picked already holds it.")
+        shared("From the host: an option was picked in a dropdown or radio group. $Choice.picked already holds it.")
         event @Picked { target: Entity, picked: int, option: string }
+
+        shared("From the host: a slider moved. $Slider.value already holds it.")
+        event @Slid { target: Entity, value: float }
 
         shared("From the host: the user closed a window. The host then removes it, and everything in it.")
         event @WindowClosed { target: Entity }

@@ -91,6 +91,12 @@ internal sealed class DesktopRunner
         _interp.FireHost("Picked", Payload(("target", id), ("picked", (long)picked), ("option", option)));
     });
 
+    public void Slide(long id, double value) => Input(() =>
+    {
+        _interp.World.Publish(id, "Slider", "value", value);
+        _interp.FireHost("Slid", Payload(("target", id), ("value", value)));
+    });
+
     public void CloseWindow(long id) => Input(() =>
     {
         _interp.FireHost("WindowClosed", Payload(("target", id)));
@@ -163,6 +169,7 @@ internal sealed class DesktopRunner
         foreach (long id in _controls.Keys.Where(id => !seen.Contains(id)).ToList())
         {
             Detach(_controls[id]);
+            _untinted.Remove(_controls[id]);
             _controls.Remove(id);
         }
         foreach (long id in _windows.Keys.Where(id => !seen.Contains(id)).ToList())
@@ -208,7 +215,10 @@ internal sealed class DesktopRunner
         {
             seen.Add(child.Id);
             var control = ControlFor(child);
-            if (control is Panel inner) Fill(inner, child, seen);
+            // Only a LAYOUT panel holds child widgets. A radio group is a StackPanel too, of its own buttons, and filling
+            // it from its (empty) child list emptied it every frame.
+            if (child.Kind == Kind.Panel && control is Panel inner) Fill(inner, child, seen);
+            else if (control is ScrollViewer { Content: Panel scrolled }) Fill(scrolled, child, seen);   // a Scroll column
             wanted.Add(control);
         }
         if (panel.Children.SequenceEqual(wanted)) return;
@@ -227,29 +237,44 @@ internal sealed class DesktopRunner
         var control = Build(n);
         if (control.IsVisible == n.Hidden) control.IsVisible = !n.Hidden;
         Paint(control, n.Tint);
+        // `$Tip` on any widget: words shown when the pointer rests on it.
+        if (ToolTip.GetTip(control) as string != (n.Tip.Length > 0 ? n.Tip : null))
+            ToolTip.SetTip(control, n.Tip.Length > 0 ? n.Tip : null);
         return control;
     }
 
+    /// What a control looked like before `$Tint` coloured it, so removing the tint gives exactly that back.
+    private readonly Dictionary<Control, object?> _untinted = new();
+
     /// `*Vein.Graphics.Looks.$Tint` is a widget's COLOUR, as it is a picture's: a button's or a panel's
     /// background, the colour of text. `a` is how strong it is, so one hue at four `a`s is four intensities.
-    /// Without one, the theme's own colour comes back.
-    private static void Paint(Control control, Color? tint)
+    /// Without one, the control keeps its OWN look — the theme's, or a badge's and a divider's own background —
+    /// because only a colour this method set is ever taken away.
+    private void Paint(Control control, Color? tint)
     {
         var property = control switch
         {
-            CheckBox => Avalonia.Controls.Primitives.TemplatedControl.ForegroundProperty,   // before Button: a CheckBox IS one
+            // A CheckBox and a ToggleSwitch ARE Buttons, so they come first: their tint is the colour of their words.
+            CheckBox or ToggleSwitch => Avalonia.Controls.Primitives.TemplatedControl.ForegroundProperty,
             Button or ComboBox => Avalonia.Controls.Primitives.TemplatedControl.BackgroundProperty,
+            ProgressBar or Slider => Avalonia.Controls.Primitives.TemplatedControl.ForegroundProperty,   // the filled part
             Panel => Panel.BackgroundProperty,
+            Border => Border.BackgroundProperty,       // a badge, a divider
             TextBlock => TextBlock.ForegroundProperty,
             _ => null,
         };
         if (property is null) return;
         if (tint is { } c)
         {
+            if (!_untinted.ContainsKey(control)) _untinted[control] = control.IsSet(property) ? control.GetValue(property) : null;
             if (control.GetValue(property) is not SolidColorBrush { Color: var now } || now != c)
                 control.SetValue(property, new SolidColorBrush(c));
         }
-        else if (control.IsSet(property)) control.ClearValue(property);
+        else if (_untinted.Remove(control, out var before))
+        {
+            if (before is null) control.ClearValue(property);
+            else control.SetValue(property, before);
+        }
     }
 
     private Control Build(Node n)
@@ -264,15 +289,117 @@ internal sealed class DesktopRunner
                 stack.Spacing = n.Gap;
                 return stack;
 
+            case Kind.Scroll:
+                // A column that scrolls: the StackPanel inside is what Fill puts the children in.
+                var scroll = existing as ScrollViewer ?? Replace(id, new ScrollViewer
+                {
+                    Content = new StackPanel(), VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+                });
+                scroll.MaxHeight = n.Height;
+                ((StackPanel)scroll.Content!).Spacing = n.Gap;
+                return scroll;
+
             case Kind.Button:
                 if (existing is not Button button)
                 {
                     button = Replace(id, new Button());
                     button.Click += (_, _) => Click(id);
                 }
-                if (!Equals(button.Content, n.Text)) button.Content = n.Text;
+                // `$Icon` puts a picture on the button, beside its label when it has one. Rebuilt only when what it
+                // shows changed — the key is kept in Tag.
+                string look = n.Icon.Length == 0 ? "text|" + n.Text : $"icon|{n.Icon}|{n.IconSize}|{n.Text}";
+                if (button.Tag as string != look)
+                {
+                    button.Tag = look;
+                    if (n.Icon.Length == 0) button.Content = n.Text;
+                    else
+                    {
+                        var face = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+                        face.Children.Add(new Avalonia.Controls.Image { Source = ImageAt(n.Icon), Height = n.IconSize, Width = n.IconSize, Stretch = Stretch.Uniform });
+                        if (n.Text.Length > 0) face.Children.Add(new TextBlock { Text = n.Text, VerticalAlignment = VerticalAlignment.Center });
+                        button.Content = face;
+                    }
+                }
                 button.Classes.Set("accent", n.Accent);   // Fluent's accent button, for `#Accent`
                 return button;
+
+            case Kind.Slider:
+                if (existing is not Slider slider)
+                {
+                    slider = Replace(id, new Slider { MinWidth = 180 });
+                    slider.ValueChanged += (_, e) => { if (!_syncing) Slide(id, e.NewValue); };
+                }
+                if (slider.Minimum != n.Min) slider.Minimum = n.Min;
+                if (slider.Maximum != n.Max) slider.Maximum = n.Max;
+                if (Math.Abs(slider.Value - n.Number) > 1e-9) slider.Value = n.Number;
+                return slider;
+
+            case Kind.Progress:
+                var bar = existing as ProgressBar ?? Replace(id, new ProgressBar { MinWidth = 180, Minimum = 0 });
+                bar.Maximum = n.Max > 0 ? n.Max : 1;
+                bar.Value = Math.Clamp(n.Number, 0, bar.Maximum);
+                return bar;
+
+            case Kind.Space:
+                var space = existing as Border ?? Replace(id, new Border { Background = Brushes.Transparent });
+                space.Width = n.Height;
+                space.Height = n.Height;
+                return space;
+
+            case Kind.Rule:
+                var rule = existing as Border ?? Replace(id, new Border
+                {
+                    Background = new SolidColorBrush(Color.Parse("#4A4F57")), HorizontalAlignment = HorizontalAlignment.Stretch,
+                    Margin = new Thickness(0, 4),
+                });
+                rule.Height = Math.Max(1, n.Height);
+                return rule;
+
+            case Kind.Badge:
+                if (existing is not Border badge || badge.Child is not TextBlock)
+                {
+                    badge = Replace(id, new Border
+                    {
+                        CornerRadius = new CornerRadius(9), Padding = new Thickness(7, 1),
+                        Background = new SolidColorBrush(Color.Parse("#2F5FA8")), VerticalAlignment = VerticalAlignment.Center,
+                        Child = new TextBlock { FontSize = 11 },
+                    });
+                }
+                ((TextBlock)badge.Child!).Text = n.Text;
+                return badge;
+
+            case Kind.Radio:
+                // Every option visible, one group per widget. Rebuilt only when the options changed.
+                var group = existing as StackPanel ?? Replace(id, new StackPanel { Spacing = 4 });
+                group.Orientation = n.Row ? Orientation.Horizontal : Orientation.Vertical;
+                if (group.Tag is not IReadOnlyList<string> had || !had.SequenceEqual(n.Options))
+                {
+                    group.Tag = n.Options;
+                    group.Children.Clear();
+                    for (int i = 0; i < n.Options.Count; i++)
+                    {
+                        int index = i;
+                        var radio = new RadioButton { Content = n.Options[i], GroupName = "vein-radio-" + id };
+                        radio.IsCheckedChanged += (_, _) =>
+                        {
+                            if (!_syncing && radio.IsChecked == true) Pick(id, index, n.Options[index]);
+                        };
+                        group.Children.Add(radio);
+                    }
+                }
+                for (int i = 0; i < group.Children.Count; i++)
+                    if (group.Children[i] is RadioButton r && r.IsChecked != (i == n.Picked)) r.IsChecked = i == n.Picked;
+                return group;
+
+            case Kind.Switch:
+                if (existing is not ToggleSwitch toggle)
+                {
+                    toggle = Replace(id, new ToggleSwitch());
+                    toggle.IsCheckedChanged += (_, _) => { if (!_syncing) Toggle(id, toggle.IsChecked == true); };
+                }
+                if (!Equals(toggle.Content, n.Text)) toggle.Content = n.Text;
+                if (toggle.IsChecked != n.Checked) toggle.IsChecked = n.Checked;
+                return toggle;
 
             case Kind.Choice:
                 if (existing is not ComboBox combo)
@@ -304,8 +431,19 @@ internal sealed class DesktopRunner
                 {
                     box = Replace(id, new TextBox { MinWidth = 220 });
                     box.TextChanged += (_, _) => { if (!_syncing) Edit(id, box.Text ?? ""); };
-                    box.KeyDown += (_, e) => { if (e.Key == Key.Enter) Submit(id, box.Text ?? ""); };
+                    // On the way IN: a box that AcceptsReturn (#Multiline) uses Enter for its newline, so there Enter is
+                    // left to it and Ctrl+Enter submits; a one-line box submits on Enter.
+                    box.AddHandler(InputElement.KeyDownEvent, (_, e) =>
+                    {
+                        if (e.Key != Key.Enter) return;
+                        if (box.AcceptsReturn && !e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
+                        e.Handled = box.AcceptsReturn;
+                        Submit(id, box.Text ?? "");
+                    }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
                 }
+                box.AcceptsReturn = n.Multiline;
+                box.TextWrapping = n.Multiline ? TextWrapping.Wrap : TextWrapping.NoWrap;
+                box.MinHeight = n.Multiline ? 90 : 0;
                 box.Watermark = n.Placeholder;
                 if ((box.Text ?? "") != n.Value)
                 {
@@ -375,7 +513,7 @@ internal sealed class DesktopRunner
 
     // ---- reading the world as a tree ------------------------------------------------------------------
 
-    internal enum Kind { Window, Panel, Button, Input, Check, Choice, Picture, Text }
+    internal enum Kind { Window, Panel, Scroll, Button, Input, Check, Switch, Choice, Radio, Slider, Progress, Space, Rule, Picture, Badge, Text }
 
     /// One window or widget, read from one identity. Only the fields its kind uses mean anything.
     internal sealed record Node(long Id, Kind Kind, IReadOnlyList<Node> Children)
@@ -397,6 +535,12 @@ internal sealed class DesktopRunner
         public Color? Tint { get; init; }
         public IReadOnlyList<string> Options { get; init; } = Array.Empty<string>();
         public int Picked { get; init; }
+        public double Min { get; init; }
+        public double Max { get; init; }
+        public double Number { get; init; }
+        public double IconSize { get; init; }
+        public bool Multiline { get; init; }
+        public string Tip { get; init; } = "";
 
         public IEnumerable<Node> Walk() => Children.SelectMany(c => c.Walk()).Prepend(this);
     }
@@ -430,20 +574,37 @@ internal sealed class DesktopRunner
                 Icon = Text(e, "Window", "icon"),
             },
             Kind.Panel => new Node(e.Entity, kind, kids) { Gap = Number(e, "Panel", "gap", 8), Row = e.Marks.Contains("Row") },
-            Kind.Button => new Node(e.Entity, kind, kids) { Text = Text(e, "Button", "label"), Accent = e.Marks.Contains("Accent") },
-            Kind.Input => new Node(e.Entity, kind, kids) { Value = Text(e, "Field", "value"), Placeholder = Text(e, "Field", "placeholder") },
-            Kind.Check => new Node(e.Entity, kind, kids) { Text = Text(e, "Toggle", "label"), Checked = Field(e, "Toggle", "checked") is true },
+            Kind.Scroll => new Node(e.Entity, kind, kids) { Gap = Number(e, "Panel", "gap", 8), Height = Number(e, "Scroll", "height", 240) },
+            Kind.Button => new Node(e.Entity, kind, kids)
+            {
+                Text = Text(e, "Button", "label"), Accent = e.Marks.Contains("Accent"),
+                Icon = Text(e, "Icon", "source"), IconSize = Number(e, "Icon", "size", 18),
+            },
+            Kind.Input => new Node(e.Entity, kind, kids)
+            {
+                Value = Text(e, "Field", "value"), Placeholder = Text(e, "Field", "placeholder"), Multiline = e.Marks.Contains("Multiline"),
+            },
+            Kind.Check or Kind.Switch => new Node(e.Entity, kind, kids) { Text = Text(e, "Toggle", "label"), Checked = Field(e, "Toggle", "checked") is true },
+            Kind.Slider => new Node(e.Entity, kind, kids)
+            {
+                Min = Number(e, "Slider", "min", 0), Max = Number(e, "Slider", "max", 100), Number = Number(e, "Slider", "value", 0),
+            },
+            Kind.Progress => new Node(e.Entity, kind, kids) { Number = Number(e, "Progress", "value", 0), Max = Number(e, "Progress", "max", 1) },
+            Kind.Space => new Node(e.Entity, kind, kids) { Height = Number(e, "Space", "size", 12) },
+            Kind.Rule => new Node(e.Entity, kind, kids) { Height = Number(e, "Rule", "thickness", 1) },
+            Kind.Badge => new Node(e.Entity, kind, kids) { Text = Text(e, "Text", "content") },
             Kind.Picture => new Node(e.Entity, kind, kids) { Source = Text(e, "Image", "source"), Height = Number(e, "Picture", "height", 32) },
-            Kind.Choice => new Node(e.Entity, kind, kids)
+            Kind.Choice or Kind.Radio => new Node(e.Entity, kind, kids)
             {
                 Options = Field(e, "Choice", "options") is System.Collections.IEnumerable items
                     ? items.Cast<object?>().Select(o => o?.ToString() ?? "").ToList()
                     : Array.Empty<string>(),
                 Picked = (int)Number(e, "Choice", "picked", 0),
+                Row = e.Marks.Contains("Row"),
             },
             _ => new Node(e.Entity, kind, kids) { Text = Text(e, "Text", "content"), FontSize = Number(e, "Font", "size", 0) },
         };
-        return node with { Hidden = e.Marks.Contains("Hidden"), Tint = TintOf(e) };
+        return node with { Hidden = e.Marks.Contains("Hidden"), Tint = TintOf(e), Tip = Text(e, "Tip", "text") };
     }
 
     private static Color? TintOf(EntityStore.EntitySnapshot e)
@@ -453,15 +614,21 @@ internal sealed class DesktopRunner
         return Color.FromArgb(Channel("a"), Channel("r"), Channel("g"), Channel("b"));
     }
 
+    /// The shape decides the widget; a mark picks how it is drawn (`#Radio`, `#Switch`, `#Badge`).
     private static Kind? KindOf(EntityStore.EntitySnapshot e) =>
         e.Components.ContainsKey("Window") ? Kind.Window
+        : e.Components.ContainsKey("Scroll") ? Kind.Scroll
         : e.Components.ContainsKey("Panel") ? Kind.Panel
         : e.Components.ContainsKey("Button") ? Kind.Button
         : e.Components.ContainsKey("Field") ? Kind.Input
-        : e.Components.ContainsKey("Toggle") ? Kind.Check
-        : e.Components.ContainsKey("Choice") ? Kind.Choice
+        : e.Components.ContainsKey("Toggle") ? (e.Marks.Contains("Switch") ? Kind.Switch : Kind.Check)
+        : e.Components.ContainsKey("Choice") ? (e.Marks.Contains("Radio") ? Kind.Radio : Kind.Choice)
+        : e.Components.ContainsKey("Slider") ? Kind.Slider
+        : e.Components.ContainsKey("Progress") ? Kind.Progress
+        : e.Components.ContainsKey("Space") ? Kind.Space
+        : e.Components.ContainsKey("Rule") ? Kind.Rule
         : e.Components.ContainsKey("Image") ? Kind.Picture
-        : e.Components.ContainsKey("Text") ? Kind.Text
+        : e.Components.ContainsKey("Text") ? (e.Marks.Contains("Badge") ? Kind.Badge : Kind.Text)
         : null;
 
     private static object? Field(EntityStore.EntitySnapshot e, string shape, string field) =>

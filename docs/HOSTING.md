@@ -258,7 +258,8 @@ the same contract:
 | types in a box | writes the box's `$Field.value`, **then** raises `@Edited { target, value }` |
 | presses Enter in a box | `@Submitted { target, value }` |
 | ticks a checkbox | writes `$Toggle.checked`, **then** raises `@Toggled { target, checked }` |
-| picks in a dropdown (`$Choice { ~<list> options, picked }`) | writes `$Choice.picked`, **then** raises `@Picked { target, picked, option }` |
+| picks in a dropdown or radio group (`$Choice { ~<list> options, picked }`) | writes `$Choice.picked`, **then** raises `@Picked { target, picked, option }` |
+| moves a slider (`$Slider { min, max, value }`) | writes `$Slider.value`, **then** raises `@Slid { target, value }` |
 | closes a window | `@WindowClosed { target }`, then destroys the window and everything parented under it; the last one closed ends the program |
 
 What the host draws, beyond the widgets' own fields:
@@ -270,6 +271,13 @@ What the host draws, beyond the widgets' own fields:
 | `*Vein.Graphics.Looks.#Hidden` on any widget | keeps it and draws it nowhere — and nothing inside it |
 | `#Accent` on a button | draws it in the accent colour (a selected tab, the main action) |
 | `*Vein.Graphics.Looks.$Tint { r, g, b, a }` on a widget | its colour, each channel 0..1: a button's or a panel's background, a text's or a checkbox's colour; `a` is the intensity |
+| `$Progress { value, max }` | a progress bar |
+| `$Space { size }` · `$Rule { thickness }` | empty room · a line across a column |
+| `$Scroll { height }` with `$Panel` | a column that scrolls past `height` pixels |
+| `$Icon { source, size }` on a button | a picture on the button, beside its label |
+| `$Tip { text }` on any widget | words shown when the pointer rests on it |
+| `#Radio` on a `$Choice` · `#Switch` on a `$Toggle` | radio buttons instead of a dropdown · an on/off switch instead of a checkbox |
+| `#Badge` on a `$Text` · `#Multiline` on a `$Field` | a small rounded label · a text box for several lines (Enter is a newline, Ctrl+Enter submits) |
 
 The host WRITES the two fields for the same reason it writes `$View`: they are the state of a control the
 host owns, and the program reads them like any field. Everything else — what a click means, what

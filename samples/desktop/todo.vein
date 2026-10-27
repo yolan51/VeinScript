@@ -75,6 +75,9 @@ bundle Todo by you {
     mark #Priority      // a task's priority dropdown — its $Choice.picked IS the priority (0 low … 3 very high)
     mark #NewPriority   // a group's dropdown beside its box: the priority a new task gets
     mark #Empty         // the hint shown while there is no group
+    mark #TabBadge      // a tab's count of tasks left — carries $Opens like its tab
+    mark #DoneBar       // a group's progress bar
+    mark #HideDone      // the switch that hides ticked tasks
 
     shard Build {
         run once {
@@ -87,6 +90,8 @@ bundle Todo by you {
             mark name #NewGroup
             bring Button(top, "Add group") as addGroup
             mark addGroup #AddGroup
+            bring Switch(w, "Hide done tasks", false) as hide
+            mark hide #HideDone
             bring Row(w, 6.0) as tabs
             mark tabs #Tabs
             bring Column(w, 16.0) as groups
@@ -128,7 +133,8 @@ bundle Todo by you {
             // Its tab goes with it; if it was the open one, another opens (next event, once it is gone).
             target $Parent #DropGroup on c.target as d {
                 target $Parent #Head on d.Parent.of as head {
-                    target $Opens #Tab as t {
+                    // Its tab and the tab's badge both carry $Opens for this group.
+                    target $Opens as t {
                         if t.Opens.group == head.Parent.of { do discard(t) }
                     }
                     do discard(head.Parent.of)
@@ -172,6 +178,10 @@ bundle Todo by you {
                     mark status #Status
                     bring Button(head, "Remove group") as dropGroup
                     mark dropGroup #DropGroup
+                    attach $Tip to dropGroup { text: "Remove this group and every task in it" }
+                    bring Progress(group, 0.0, 1.0) as bar
+                    mark bar #DoneBar
+                    bring Divider(group, 1.0)
                     bring Row(group, 8.0) as entry
                     mark entry #Entry
                     bring Input(entry, "", "Add a task to " + g.name) as box
@@ -180,12 +190,16 @@ bundle Todo by you {
                     mark pick #NewPriority
                     bring Button(entry, "Add") as add
                     mark add #Add
-                    bring Column(group, 4.0) as tasks
+                    // A long list scrolls instead of pushing the window off the screen.
+                    bring Scroll(group, 300.0, 4.0) as tasks
                     mark tasks #Tasks
                     target $Panel #Tabs as tabs {
                         bring Button(tabs, g.name) as tab
                         mark tab #Tab
                         attach $Opens to tab { group: group }
+                        bring Badge(tabs, "0") as badge
+                        mark badge #TabBadge
+                        attach $Opens to badge { group: group }
                     }
                     // A new group opens at once: the user named it to fill it.
                     emit @Show { group: group }
@@ -227,9 +241,11 @@ bundle Todo by you {
                         bring Dropdown(row, levels(), a.priority - 1) as chip
                         mark chip #Priority
                         attach $Tint to chip { }
+                        attach $Tip to chip { text: "Priority" }
                         bring Check(row, a.text, a.done)
-                        bring Button(row, "Remove") as del
+                        bring Button(row, "✕") as del
                         mark del #Delete
+                        attach $Tip to del { text: "Remove this task" }
                     }
                 }
                 // Empty THIS group's box, and only this one.
@@ -248,6 +264,10 @@ bundle Todo by you {
 
     shard Status {
         settled {
+            // The "Hide done tasks" switch, read once: a ticked task's row wears #Hidden while it is on.
+            var hideDone = false
+            target $Toggle #HideDone as h { hideDone = h.Toggle.checked }
+
             var groups = 0
             target $Panel #Group as group {
                 groups += 1
@@ -264,12 +284,26 @@ bundle Todo by you {
                                         target $Toggle on cell as t {
                                             all += 1
                                             if not t.Toggle.checked { left += 1 }
+                                            if hideDone and t.Toggle.checked { mark row #Hidden } else { unmark row #Hidden }
                                         }
                                     }
                                 }
                             }
                         }
                     }
+                }
+
+                // The same two numbers, drawn twice more: a bar that fills as tasks are done, and the tab's badge.
+                target $Parent #DoneBar as b {
+                    if b.Parent.of == group {
+                        target $Progress on b as p {
+                            p.Progress.value = float(all - left)
+                            if all == 0 { p.Progress.max = 1.0 } else { p.Progress.max = float(all) }
+                        }
+                    }
+                }
+                target $Opens #TabBadge as tb {
+                    if tb.Opens.group == group { target $Text on tb as t { t.Text.content = string(left) } }
                 }
 
                 // Write it into this group's #Status label: label → #Head row → this group.
