@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <!-- The stdlib copied beside veinc.dll is made read-only at run time (ProtectedSource); a rebuild must still refresh it. -->
+    <OverwriteReadOnlyFiles>true</OverwriteReadOnlyFiles>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

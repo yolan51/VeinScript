@@ -520,6 +520,13 @@ The starting value must be a literal (VS0356); only a shard/ShardView/bridge `va
 included, which is the only way to change a library's. A line naming no setting is VS0357; a value of the
 wrong type is VS0358, and the source's default is used. `veinc settings game.vein` lists them.
 
+**18d. The standard library is read, not edited — and only it is written `by Vein`.** The Workbench opens a
+stdlib file (and an installed library package's) read-only, with a bar saying so; every copy the tools make is
+read-only on disk; and the compiler warns when the stdlib it loads is not the one it shipped with (**VS0378**).
+Copying a stdlib file into a project is fine — it is then YOUR bundle: `bundle Desktop by Vein` anywhere but the
+stdlib is **VS0377**, so rename the author (`by you`) and `need "you.Desktop"`. Working on the language itself:
+View ▸ Allow Editing the Standard Library, then rebuild the compiler so VS0378 agrees.
+
 **19. A bundle can span files, and FRAGMENTS MERGE BEFORE THE MAIN FILE.** `publicators/*.vein` is API,
 `shards/*.vein` is behaviour, and a fragment carrying an API declaration is **VS0321**. Member order is
 the order shards run in, so a shard declared last in the main file still runs last — and a fragment

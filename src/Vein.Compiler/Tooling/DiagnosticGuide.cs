@@ -154,6 +154,12 @@ public static class DiagnosticGuide
 
         new("VS0358", "A `vein.settings` value must be a literal of the setting's type (an int is accepted for a float). One that is not would change the program's meaning or fail at run time, so the source's default is used and the line is reported.",
             "docs/SYNTAX-DECISIONS.md — D21"),
+
+        new("VS0377", "`by Vein` is how the standard library is written, so a bundle claiming it outside the stdlib folder would read as the stdlib to every program that needs it. A stdlib file may be copied and changed — as YOUR bundle: give it your own author (`by you`) and `need` it by that name.",
+            "docs/RULES.md — rule 18d"),
+
+        new("VS0378", "The compiler carries the standard library it was built from and compares the one it loads with it. A difference means every program on this machine runs against a stdlib nobody else has — restore it, or, when working on the language itself, rebuild the compiler from it.",
+            "docs/RULES.md — rule 18d"),
     };
 
     private static readonly Dictionary<string, DiagnosticNote> ByCode =

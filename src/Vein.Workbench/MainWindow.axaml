@@ -91,6 +91,7 @@
         <MenuItem Header="Focus _Terminal" Click="OnFocusTerminal" InputGesture="Ctrl+OemTilde" />
         <Separator />
         <MenuItem Header="Compile as You _Type" Click="OnToggleAutoBuild" />
+        <MenuItem Name="AllowStdlibEditItem" Header="Allow Editing the _Standard Library" Click="OnToggleStdlibEdit" ToggleType="CheckBox" />
         <Separator />
         <MenuItem Header="Zoom _In" Click="OnFontBigger" InputGesture="Ctrl+OemPlus" />
         <MenuItem Header="Zoom _Out" Click="OnFontSmaller" InputGesture="Ctrl+OemMinus" />
@@ -175,6 +176,10 @@
         <DockPanel Grid.Column="2">
           <Border DockPanel.Dock="Top" Background="{DynamicResource Header}" BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1">
             <local:EditorTabs Name="FileTabs" />
+          </Border>
+          <Border DockPanel.Dock="Top" Name="LockedBar" IsVisible="False" Background="#2B2A1E" Padding="10,4"
+                  BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1">
+            <TextBlock Name="LockedText" Foreground="#E5C07B" FontSize="12" TextWrapping="Wrap" />
           </Border>
           <ae:TextEditor Name="Editor"
                          ShowLineNumbers="True"

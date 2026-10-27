@@ -47,6 +47,10 @@ if (args[0] == "test")
     return results.All(r => r.Passed) ? 0 : 1;
 }
 
+// The stdlib copy beside veinc.dll is read, never edited: read-only on disk (ProtectedSource). Not the repo's own
+// stdlib/ — that one is the source, guarded by the tamper check (VS0378) instead.
+ProtectedSource.Lock(Path.Combine(AppContext.BaseDirectory, "stdlib"));
+
 string command = args[0];
 string path = args[1];
 

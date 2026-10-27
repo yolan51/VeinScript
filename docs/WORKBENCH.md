@@ -16,6 +16,10 @@ dotnet run --project src/Vein.Workbench
 
 Open a `.vein` file (`Ctrl+O`) or a folder (`Ctrl+K`), edit, Build (`Ctrl+B`), Run (`F5`).
 
+**The standard library is read-only.** A stdlib file — and an installed library package's — opens with 🔒 on its
+tab and a bar above the editor; typing and Save do nothing. View ▸ Allow Editing the Standard Library unlocks it,
+for working on the language itself (RULES 18d).
+
 **A desktop program** (one that `need`s `Vein.Desktop`) needs no run line: `F5` opens its windows, drawn
 from its identities (`DesktopRunner`), its `@Print` lines go to the Output tab, and closing its last window
 or pressing ■ ends it. See HOSTING.md, "Desktop programs".

@@ -273,10 +273,12 @@ internal static class BuildCommand
                     if (!res.StartsWith("stdlib/", StringComparison.Ordinal) && !res.StartsWith("project/", StringComparison.Ordinal)) continue;
                     string target = Path.Combine(root, res.Replace('\\', '/').Replace('/', Path.DirectorySeparatorChar));
                     Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                    ProtectedSource.Unlock(target);   // the extracted stdlib is read-only; this exe may refresh it
                     using var rs = asm.GetManifestResourceStream(res)!;
                     using var fs = File.Create(target);
                     rs.CopyTo(fs);
                 }
+                ProtectedSource.Lock(Path.Combine(root, "stdlib"));
                 ProjectDir = Path.Combine(root, "project");
                 string main = Path.Combine(ProjectDir, Text("main.txt"));
 
@@ -365,10 +367,12 @@ internal static class BuildCommand
             // `%(RecursiveDir)` keeps the BUILD machine's separator, so a resource name can hold either.
             string target = Path.Combine(root, res.Replace('\\', '/').Replace('/', Path.DirectorySeparatorChar));
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            ProtectedSource.Unlock(target);   // the extracted stdlib is read-only; this exe may refresh it
             using var rs = asm.GetManifestResourceStream(res)!;
             using var fs = File.Create(target);
             rs.CopyTo(fs);
         }
+        ProtectedSource.Lock(Path.Combine(root, "stdlib"));
         string projectDir = Path.Combine(root, "project");
         string main = Path.Combine(projectDir, Text("main.txt"));
 

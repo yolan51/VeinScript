@@ -58,11 +58,13 @@ public static class LibraryPackage
             string target = Path.Combine(root, path);
             if (File.Exists(target) && File.ReadAllBytes(target).AsSpan().SequenceEqual(bytes)) continue;
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            ProtectedSource.Unlock(target);   // the copy is read-only: only this unpack may refresh it
             File.WriteAllBytes(target, bytes);
         }
         string marker = Path.Combine(root, BundleIndex.LibraryMarker);
         if (!File.Exists(marker))
             File.WriteAllText(marker, $"{assemblyName} {assembly.Version} — unpacked from its package; a copy, rewritten when the package changes.\n");
+        ProtectedSource.Lock(root);   // a package's bundles are read, never edited in place (ProtectedSource)
         return new Unpacked(assemblyName, assembly.Version.ToString(), root, resources.Select(r => r.Path).ToList());
     }
 

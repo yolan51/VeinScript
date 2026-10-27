@@ -24,7 +24,8 @@ keep the behaviour.
   `src/Vein.Tests/HostingTests.cs`, and only then gets used from the engine.
 
 The standard library travels inside `Vein.Hosting.dll` and is unpacked once per version to
-`%LOCALAPPDATA%/VeinHosting/<version>/stdlib`, so a host needs no folder layout.
+`%LOCALAPPDATA%/VeinHosting/<version>/stdlib`, so a host needs no folder layout. That copy — like an unpacked
+library package — is read-only on disk: it is read, never edited (RULES 18d).
 
 ## Each frame
 

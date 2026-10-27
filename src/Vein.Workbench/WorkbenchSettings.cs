@@ -49,6 +49,10 @@ internal sealed class WorkbenchSettings
     /// person who folds away forty marks to see the shards wants them folded tomorrow too.
     public List<string> OutlineCollapsed { get; set; } = new();
 
+    /// Off for everyone: the standard library and library packages open read-only (ProtectedSource). On, for
+    /// working on the language itself — View ▸ Allow Editing the Standard Library.
+    public bool AllowStdlibEdit { get; set; }
+
     public const int MaxRecent = 8;
 
     private static string Path0 => Path.Combine(

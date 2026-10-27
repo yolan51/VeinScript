@@ -41,6 +41,9 @@ public static class BundleLoader
         string text = Text(mainFile, editing) ?? "";
         var unit = new Parser(new Lexer(text, Path.GetFileName(mainFile), diag).Tokenize(), diag).ParseUnit();
 
+        // `by Vein` belongs to the standard library alone (VS0377): a copied stdlib file is the copier's own.
+        ProtectedSource.CheckAuthor(unit, mainFile, diag);
+
         string? dir = Path.GetDirectoryName(Path.GetFullPath(mainFile));
         if (dir is null || unit.Bundles.Count == 0) return unit;
 

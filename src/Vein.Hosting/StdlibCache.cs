@@ -39,9 +39,15 @@ internal static class StdlibCache
             using var source = asm.GetManifestResourceStream(name)!;
             using var reader = new StreamReader(source);
             string text = reader.ReadToEnd();
-            if (!File.Exists(target) || File.ReadAllText(target) != text) File.WriteAllText(target, text);
+            if (!File.Exists(target) || File.ReadAllText(target) != text)
+            {
+                Vein.Compiler.Project.ProtectedSource.Unlock(target);   // the copy is read-only: this tool may refresh it
+                File.WriteAllText(target, text);
+            }
         }
 
+        // Read-only on disk: a copy of the standard library is read, never edited (ProtectedSource).
+        Vein.Compiler.Project.ProtectedSource.Lock(stdlib);
         return root;
     }
 }

@@ -260,7 +260,11 @@ public partial class MainWindow : Window
             else if (statusBeforeHover is not null) { _statusBar.Text = statusBeforeHover; statusBeforeHover = null; }
         };
         _tabs.ConfirmClose = ConfirmDiscardAsync;
+        _tabs.Locked = IsLocked;
         Closing += OnClosing;
+
+        // The stdlib copied beside the Workbench is read, never edited: read-only on disk (ProtectedSource).
+        ProtectedSource.Lock(Path.Combine(AppContext.BaseDirectory, "stdlib"));
 
         LoadHighlighting();
         // After the theme, which AvaloniaEdit inserts first — this paints over it.
@@ -374,6 +378,7 @@ public partial class MainWindow : Window
 
         _autoBuildOn = _settings.AutoBuild;
         if (_settings.FontSize is >= 8 and <= 32) _editor.FontSize = _settings.FontSize;
+        if (this.FindControl<MenuItem>("AllowStdlibEditItem") is { } allow) allow.IsChecked = _settings.AllowStdlibEdit;
 
         var opened = 0;
         foreach (string file in _settings.OpenFiles.Where(File.Exists))
@@ -431,6 +436,43 @@ public partial class MainWindow : Window
         SetStatus(_autoBuildOn ? "Compile as you type: on" : "Compile as you type: off — Ctrl+B to build");
     }
 
+    // ---- the standard library is read, not edited (ProtectedSource) --------------------------------------
+
+    /// What the file in a tab belongs to that makes it read-only here, or null. The View menu's "Allow Editing
+    /// the Standard Library" switch — for working on the language itself — unlocks everything.
+    private string? LockedAs(EditorTabs.Doc? doc) =>
+        doc?.Path is { } path && !_settings.AllowStdlibEdit ? ProtectedSource.Kind(path) : null;
+
+    private bool IsLocked(EditorTabs.Doc doc) => LockedAs(doc) is not null;
+
+    /// The editor and the bar above it follow the active tab: locked files are read-only, and say so.
+    private void ShowLock(EditorTabs.Doc? doc)
+    {
+        string? kind = LockedAs(doc);
+        _editor.IsReadOnly = doc is null || kind is not null;
+        if (this.FindControl<Border>("LockedBar") is { } bar && this.FindControl<TextBlock>("LockedText") is { } text)
+        {
+            bar.IsVisible = kind is not null;
+            text.Text = kind == ProtectedSource.StandardLibrary
+                ? "🔒 Standard library — read-only. To change something, copy it into your project and give it your own " +
+                  "author (`by you`). Language developers: View ▸ Allow Editing the Standard Library."
+                : "🔒 A library package — read-only. It is a copy unpacked from its package; change the package's source " +
+                  "instead, or copy this file into your project under your own author.";
+        }
+    }
+
+    private void OnToggleStdlibEdit(object? sender, RoutedEventArgs e)
+    {
+        _settings.AllowStdlibEdit = !_settings.AllowStdlibEdit;
+        _settings.Save();
+        if (sender is MenuItem item) item.IsChecked = _settings.AllowStdlibEdit;
+        ShowLock(_tabs.Active);
+        _tabs.Redraw();
+        SetStatus(_settings.AllowStdlibEdit
+            ? "The standard library is editable — for working on the language itself. The compiler will warn (VS0378) until it is rebuilt from it."
+            : "The standard library is read-only again.");
+    }
+
     private void OnTabActivated(EditorTabs.Doc? doc)
     {
         // NOTHING OPEN. The editor is emptied and locked rather than left showing the text of the file
@@ -444,7 +486,7 @@ public partial class MainWindow : Window
             try
             {
                 _editor.Document = new AvaloniaEdit.Document.TextDocument("");
-                _editor.IsReadOnly = true;
+                ShowLock(null);
             }
             finally { _switchingTabs = false; }
 
@@ -458,7 +500,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        _editor.IsReadOnly = false;
+        // A stdlib or library-package file opens read-only, with a bar saying why (ShowLock).
+        ShowLock(doc);
 
         // Remember where the caret was in the tab we are leaving, so coming back lands where you were
         // rather than at the top of the file.
@@ -1840,6 +1883,11 @@ public partial class MainWindow : Window
     private async Task SaveDocAsync(EditorTabs.Doc doc)
     {
         if (doc.Path is null) { await SaveAsAsync(doc); return; }
+        if (LockedAs(doc) is { } kind)
+        {
+            SetStatus($"Not saved: {doc.Name} is part of {kind}, which is read-only. Copy it into your project to change it.");
+            return;
+        }
 
         try
         {

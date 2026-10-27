@@ -443,6 +443,20 @@ public sealed partial class Lower
                 $"bundle '{name}' is declared in two places on the search path — "
                 + $"'{first}' and '{second}'. A `*` reference carries no version and cannot choose between them.",
                 bundle.Span);
+
+        // A `by Vein` bundle anywhere but the standard library — a stdlib file copied into `bundles/`, or a package
+        // claiming to be the stdlib — is VS0377 here too, naming the file, since it is not the file being compiled.
+        foreach (var (name, file) in Index.Owners)
+            if (name.StartsWith(ProtectedSource.StdlibAuthor + ".", StringComparison.Ordinal) && !ProtectedSource.IsStandardLibrary(file))
+                _diag.Error("VS0377", ProtectedSource.Reserved($"bundle {name[(ProtectedSource.StdlibAuthor.Length + 1)..]} by {ProtectedSource.StdlibAuthor}")
+                    + $" (in {file})", bundle.Span);
+
+        // The stdlib this compile loads, compared with the one this compiler shipped with (VS0378).
+        if (Index.Roots.FirstOrDefault(BundleIndex.IsStdlibRoot) is { } stdlib && StdlibIntegrity.Changed(stdlib) is { Count: > 0 } changed)
+            _diag.Warning("VS0378",
+                $"The standard library at {stdlib} is not the one this compiler shipped with: {string.Join(", ", changed.Take(5))}"
+                + (changed.Count > 5 ? $" and {changed.Count - 5} more" : "")
+                + ". Restore it (or rebuild the compiler from it, if you are working on the language itself).", bundle.Span);
     }
 
     /// A console address that no `@Console { name: … }` spawns routes to a pipe nobody listens on, and the

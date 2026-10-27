@@ -45,6 +45,12 @@ internal sealed class EditorTabs : UserControl
     /// A tab is about to close and has unsaved edits — return true to proceed with closing.
     public Func<Doc, Task<bool>>? ConfirmClose;
 
+    /// Whether a tab's file is read-only here (the standard library, a library package): its title wears 🔒.
+    public Func<Doc, bool>? Locked;
+
+    /// Redraw the strip — after the lock switch changes, every 🔒 has to follow.
+    public void Redraw() => Refresh();
+
     public Doc? Active { get; private set; }
     public IReadOnlyList<Doc> Docs => _docs;
     public IEnumerable<Doc> DirtyDocs => _docs.Where(d => d.Dirty);
@@ -166,7 +172,7 @@ internal sealed class EditorTabs : UserControl
             {
                 // The dot is the dirty marker: present or absent, in the same place, so a glance at the
                 // strip says what would be lost. A changed colour alone reads as decoration.
-                Text = (doc.Dirty ? "● " : "") + doc.Name,
+                Text = (doc.Dirty ? "● " : "") + (Locked?.Invoke(doc) == true ? "🔒 " : "") + doc.Name,
                 VerticalAlignment = VerticalAlignment.Center,
                 Foreground = active ? Brushes.White : Brushes.Gainsboro,
                 FontWeight = active ? FontWeight.SemiBold : FontWeight.Normal

@@ -6,4 +6,9 @@
     <LangVersion>latest</LangVersion>
     <RootNamespace>Vein.Compiler</RootNamespace>
   </PropertyGroup>
+  <!-- The standard library this compiler was built from, so a compile can tell whether the stdlib it loads was
+       changed (StdlibIntegrity, VS0378). Fingerprinted only; the files a compile reads are still the ones on disk. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\stdlib\**\*.vein" LogicalName="stdlib/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
 </Project>
