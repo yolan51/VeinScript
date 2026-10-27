@@ -238,7 +238,8 @@ internal sealed class AssistantPanel : UserControl
 
     private void Render(AssistantAnswer answer)
     {
-        Say("assistant", Prose(answer.Reply), "#4EC9B0");
+        // Copy takes the WHOLE reply, code blocks included — the prose shown here has them moved into cards.
+        Say("assistant", Prose(answer.Reply), "#4EC9B0", copy: answer.Reply);
 
         foreach (var block in answer.Blocks) _turns.Children.Add(CodeCard(block));
 
@@ -426,7 +427,7 @@ internal sealed class AssistantPanel : UserControl
         return view;
     }
 
-    private void Say(string who, string text, string colour)
+    private void Say(string who, string text, string colour, string? copy = null)
     {
         if (text.Length == 0) return;
 
@@ -437,20 +438,39 @@ internal sealed class AssistantPanel : UserControl
             ? MarkdownView.Render(text, foreground)
             : new SelectableTextBlock { Text = text, TextWrapping = TextWrapping.Wrap, Foreground = foreground };
 
+        var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        header.Children.Add(new TextBlock
+        {
+            Text = who,
+            FontSize = 11,
+            FontWeight = FontWeight.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = new SolidColorBrush(Color.Parse(colour))
+        });
+
+        // COPY THE WHOLE REPLY. A drawn reply is many selectable blocks — a paragraph, a list item, a table cell —
+        // and a selection cannot cross from one to the next, so dragging copied one line at most. The button
+        // copies all of it, as the Markdown it arrived in, which pastes cleanly into a file, a chat or a note.
+        if (who == "assistant")
+        {
+            string all = copy ?? text;
+            var button = new Button { Content = "Copy", FontSize = 10, Padding = new Avalonia.Thickness(6, 1), VerticalAlignment = VerticalAlignment.Center };
+            ToolTip.SetTip(button, "Copy the whole reply");
+            button.Click += async (_, _) =>
+            {
+                if (TopLevel.GetTopLevel(this)?.Clipboard is not { } clip) return;
+                await clip.SetTextAsync(all);
+                button.Content = "Copied ✓";
+                await Task.Delay(1500);
+                button.Content = "Copy";
+            };
+            header.Children.Add(button);
+        }
+
         _turns.Children.Add(new StackPanel
         {
             Spacing = 4,
-            Children =
-            {
-                new TextBlock
-                {
-                    Text = who,
-                    FontSize = 11,
-                    FontWeight = FontWeight.SemiBold,
-                    Foreground = new SolidColorBrush(Color.Parse(colour))
-                },
-                body
-            }
+            Children = { header, body }
         });
 
         Dispatcher.UIThread.Post(() => _scroll.ScrollToEnd(), DispatcherPriority.Background);
