@@ -1049,12 +1049,13 @@ public partial class MainWindow : Window
     {
         _desktop?.Stop();
         string name = Path.GetFileName(RunPath ?? "untitled.vein");
-        string folder = ProjectDir ?? Path.GetDirectoryName(RunPath) ?? Environment.CurrentDirectory;
 
         _runOutput.Text = "";
         ShowBottomTab(TabOutput);
-        string programFolder = Path.GetDirectoryName(RunPath) ?? folder;
-        var runner = new DesktopRunner(entry, folder, programFolder,
+        // The program's folder holds its pictures AND its files: `todo.json` lands beside `todo.vein`, as a
+        // built exe keeps it beside the exe — not in whichever folder the Workbench happens to have open.
+        string programFolder = Path.GetDirectoryName(RunPath) ?? ProjectDir ?? Environment.CurrentDirectory;
+        var runner = new DesktopRunner(entry, programFolder, programFolder,
             line => Dispatcher.UIThread.Post(() => _runOutput.Text += line + "\n"),
             reason => Dispatcher.UIThread.Post(() => SetStatus($"{name} ended: {reason}.")));
         _desktop = runner;

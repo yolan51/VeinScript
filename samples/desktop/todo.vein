@@ -32,6 +32,13 @@
 // 5. ONE GROUP AT A TIME IS A MARK. Every group but the open one wears *Vein.Graphics.Looks.#Hidden, which the
 //    host draws nowhere — the group and everything in it. @Show { group } moves the mark; a tab knows its
 //    group through $Opens, so nothing compares labels.
+//
+// 6. IT REMEMBERS, IN todo.json BESIDE THE PROGRAM. At start it reads the file and brings every group and
+//    task back through the same @AddGroup and @AddTask a click uses. After every change `settled` writes
+//    the list out again — only when the text changed. Built with `veinc build`, the file sits beside the
+//    .exe, on whichever PC it was copied to:
+//
+//        {"groups":[{"group":{"name":"Shopping"},"tasks":[{"label":"Buy milk","checked":true}]}]}
 
 bundle Todo by you {
     need "Vein.Desktop"
@@ -40,12 +47,17 @@ bundle Todo by you {
     need "Vein.Graphics"
 
     event @AddGroup { name: string }
-    event @AddTask { group: Entity, text: string }
+    event @AddTask { group: Entity, text: string, done: bool = false }
     event @Show { group: Entity }
     event @ShowSome { }
+    event @ShowFirst { }
+    event @RestoreTasks { }
+    event @Loaded { }
 
     shape $Opens { group: Entity }   // a tab's group
+    shape $Named { name: string }    // a group's name, as saved
 
+    mark #Saved         // the tag of todo.json's reads and writes (RULES 28c)
     mark #NewGroup      // the box that names a new group
     mark #AddGroup      // …and its button
     mark #Tabs          // the row of tabs, one per group
@@ -132,10 +144,20 @@ bundle Todo by you {
 
     shard Groups {
         hear @AddGroup as g {
-            if not (g.name == "") {
+            // A name already taken opens that group instead: two "Shopping"s could not be told apart, by
+            // the user or by todo.json.
+            var taken = false
+            target $Named #Group as other {
+                if other.Named.name == g.name {
+                    taken = true
+                    emit @Show { group: other }
+                }
+            }
+            if not (g.name == "") and not taken {
                 target $Panel #Groups as groups {
                     bring Column(groups, 6.0) as group
                     mark group #Group
+                    attach $Named to group { name: g.name }
                     bring Row(group, 12.0) as head
                     mark head #Head
                     bring Heading(head, g.name, 18.0)
@@ -177,12 +199,14 @@ bundle Todo by you {
         hear @ShowSome as x {
             var shown = 0
             target $Panel #Group not #Hidden as g { shown += 1 }
-            if shown == 0 {
-                var first = 0
-                target $Panel #Group as g {
-                    first += 1
-                    if first == 1 { emit @Show { group: g } }
-                }
+            if shown == 0 { emit @ShowFirst { } }
+        }
+
+        hear @ShowFirst as x {
+            var first = 0
+            target $Panel #Group as g {
+                first += 1
+                if first == 1 { emit @Show { group: g } }
             }
         }
 
@@ -191,7 +215,7 @@ bundle Todo by you {
                 target $Parent #Tasks as tasks {
                     if tasks.Parent.of == a.group {
                         bring Row(tasks, 8.0) as row
-                        bring Check(row, a.text, false)
+                        bring Check(row, a.text, a.done)
                         bring Button(row, "Remove") as del
                         mark del #Delete
                     }
@@ -254,6 +278,83 @@ bundle Todo by you {
 
             target $Text #Empty as e {
                 if groups == 0 { e.Text.content = "No group yet. Name one above, then press Enter." } else { e.Text.content = "" }
+            }
+        }
+    }
+
+    // ---- what it remembers: todo.json, beside the program -----------------------------------------
+    //
+    // THE SHAPES ARE THE RECORDS. `toJson(t.Toggle)` writes a checkbox as {"label":…,"checked":…} and
+    // `toJson(g.Named)` a group's name — escaped by the language, in declaration order (RULES 24b) — and
+    // `fromJson` reads the file back into records whose fields have the same names.
+
+    shard Storage {
+        var loaded = false   // nothing is written until what was saved has come back
+        var saved = ""       // the text last read or written: an unchanged list is not written again
+
+        run once {
+            emit *Vein.Files.Io.@ReadFile { path: "todo.json", tag: #Saved }
+        }
+
+        // The groups first, through the same @AddGroup a click uses. Their tasks need the groups to exist,
+        // which they do from the NEXT event (RULES 12b) — so @RestoreTasks is queued after them.
+        hear *Vein.Files.Io.@FileLoaded as f {
+            if f.tag == #Saved {
+                saved = f.text
+                target fromJson(f.text).groups as grp { emit @AddGroup { name: grp.group.name } }
+                emit @RestoreTasks { }
+            }
+        }
+
+        // The first run, or the file was deleted: start empty, and save from now on.
+        hear *Vein.Files.Io.@FileMissing as f {
+            if f.tag == #Saved { emit @Loaded { } }
+        }
+
+        hear @RestoreTasks as r {
+            target fromJson(saved).groups as grp {
+                target $Named #Group as g {
+                    if g.Named.name == grp.group.name {
+                        target grp.tasks as task { emit @AddTask { group: g, text: task.label, done: task.checked } }
+                    }
+                }
+            }
+            emit @ShowFirst { }
+            emit @Loaded { }
+        }
+
+        hear @Loaded as l { loaded = true }
+
+        // The whole list as JSON, every frame — and written only when it differs from what is on disk.
+        settled {
+            if loaded {
+                var groups = ""
+                target $Named #Group as g {
+                    var tasks = ""
+                    target $Parent #Tasks as list {
+                        if list.Parent.of == g {
+                            target $Parent as row {
+                                if row.Parent.of == list {
+                                    target $Parent as cell {
+                                        if cell.Parent.of == row {
+                                            target $Toggle on cell as t {
+                                                if not (tasks == "") { tasks = tasks + "," }
+                                                tasks = tasks + toJson(t.Toggle)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if not (groups == "") { groups = groups + ",\n " }
+                    groups = groups + "{\"group\":" + toJson(g.Named) + ",\"tasks\":[" + tasks + "]}"
+                }
+                let text = "{\"groups\":[\n " + groups + "\n]}\n"
+                if not (text == saved) {
+                    saved = text
+                    emit *Vein.Files.Io.@WriteFile { path: "todo.json", text: text, tag: #Saved }
+                }
             }
         }
     }
