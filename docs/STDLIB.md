@@ -108,7 +108,10 @@ Vein.Desktop  — windows and widgets as identities: $Window $Panel $Toggle $Pic
                 Badge IconButton TextArea
                 Label Heading Button Input Check Dropdown Picture, #Accent (and Vein.Graphics' #Hidden and $Tint), `do discard(e)`,
                 @Edited @Submitted @Toggled @Picked @Slid @WindowClosed
+                an application's frame: MenuBar Menu MenuItem ($Shortcut { keys }) Toolbar StatusBar Split($Split { first }),
+                #Flat buttons; file dialogs @PickOpenFile @PickSaveFile → @FilePicked / @PickCancelled
                 (stdlib/Desktop.vein; the Workbench's ▶ draws them — HOSTING.md "Desktop programs")
+Vein.Files    — @ReadFile @WriteFile → @FileLoaded @FileWritten @FileMissing; @ListFolder → @FolderListed { entries }
 ```
 
 A single conceptual identity (e.g. `Vein.Input.@MouseDown`) is defined **once**; each backend translates

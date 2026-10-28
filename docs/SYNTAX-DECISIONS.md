@@ -957,7 +957,8 @@ ShardView TaskRow on $Task as t { Row(8.0) { … } }          // reusable: it do
 - **A socket follows its collection.** When an identity leaves the collection (a card moved to another lane:
   adding it to an `owns` list moves it), its view leaves that socket and is built again, a frame later, in
   whichever socket's collection holds it now. Moving a card is one line of data:
-  `next.Lane.~cards.add(card)`. Sample: `samples/desktop/kanban.vein`, six views.
+  `next.Lane.~cards.add(card)`. Samples: `samples/desktop/kanban.vein` (six views), and at size
+  `samples/desktop/planner/planner.vein` (eleven, a card shown two ways: a board tile and a list line).
 - A ShardView declared inside another's body is not allowed: composition is through sockets only.
 
 *Web, eventually.* Today a page is a stream of `@Html` fragments, so order is everything and a brick cannot

@@ -185,6 +185,10 @@ answers queued). A relative path is anchored at `VeinGame.FilesRoot` — the pro
 sets one; an engine sets its per-user data folder (VeinGodot: `user://`) so an exported game never writes
 beside its executable. Setting it applies to the running program and every reload.
 
+`@ListFolder { path, tag }` answers `@FolderListed { path, full, entries, tag }`: the folder's sub-folders
+first, each ending with `/`, then its files, each group by name (ordinal, so the same on every machine); a
+folder that cannot be read answers `@FileMissing`. The interpreter carries it on every host.
+
 ## Replicas: several machines that must agree
 
 A host that runs the same rules on several machines — a ledger's validators, a job run twice to check it —
@@ -279,6 +283,22 @@ What the host draws, beyond the widgets' own fields:
 | `$Tip { text }` on any widget | words shown when the pointer rests on it |
 | `#Radio` on a `$Choice` · `#Switch` on a `$Toggle` | radio buttons instead of a dropdown · an on/off switch instead of a checkbox |
 | `#Badge` on a `$Text` · `#Multiline` on a `$Field` | a small rounded label · a text box for several lines (Enter is a newline, Ctrl+Enter submits) |
+| `#MenuBar` › `#Menu` › `#MenuItem` (each a `$Button`) | a menu bar along the window's top edge; an item labelled `-` is a separator; a click is `@Clicked` |
+| `$Shortcut { keys }` on a menu item or a button | the key that fires it (`Ctrl+S`), shown beside the item |
+| `#Toolbar` · `#StatusBar` on a `#Row` | a band along the window's top (under the menus) · along its bottom |
+| `$Split { first }` | two panes: its first child `first` pixels wide on the left, its second filling the rest, a draggable divider between |
+| `#Flat` on a button | an item of a list: full width, words on the left, no face until it is `#Accent` |
+
+**A window lays out its frame by kind**, whatever order it was brought in: menu bars and toolbars along the top,
+status bars along the bottom, a Split filling the rest; everything else is the column above the Split (or the
+whole window when there is none).
+
+**File dialogs.** A program asks with `@PickOpenFile { title, extension, tag }` or
+`@PickSaveFile { title, extension, suggested, tag }`; the host shows the system's own dialog and answers
+`@FilePicked { path, tag }` or `@PickCancelled { tag, reason }`. The interpreter reaches its host through
+`Interp.HostRequest`; with no host to ask (`veinc run`, a test) the answer is `@PickCancelled` at once, so a
+program never waits forever. A host must answer AFTER the event that asked has finished — the Workbench posts
+its answer to the next turn of its dispatcher.
 
 The host WRITES the two fields for the same reason it writes `$View`: they are the state of a control the
 host owns, and the program reads them like any field. Everything else — what a click means, what
