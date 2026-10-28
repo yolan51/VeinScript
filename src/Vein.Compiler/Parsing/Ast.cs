@@ -383,7 +383,7 @@ public sealed record WeaveStmt(string Loom, IReadOnlyList<Expr> Args, string? Bi
 /// two shards adding in one tick both land. `Values` is empty for Clear.
 public sealed record CollectionStmt(CollectionOp Op, IReadOnlyList<Expr> Values, Expr Target, SourceSpan Span) : Stmt(Span);
 
-public enum CollectionOp { Add, Remove, Clear, Put }
+public enum CollectionOp { Add, Remove, Clear, Put, Move }
 
 public sealed record BringStmt(Expr? Count, string Builder, IReadOnlyList<Expr> Args, bool FillRest, SourceSpan Span) : Stmt(Span)
 {

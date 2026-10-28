@@ -954,6 +954,9 @@ ShardView TaskRow on $Task as t { Row(8.0) { … } }          // reusable: it do
 - **Marks go back to one job:** naming roles for handlers (`#Done`, `#Delete`).
 - Any depth works. Several views can sit on one shape (a tab and a column, both `on $Group`). Data may arrive
   in any order: a socket fills as its identities appear. `discard` cascades through ownership and the tree.
+- **A socket keeps its collection's ORDER.** Each view root in a collection socket carries `*Vein.Core.Relations.$Place
+  { index }`, its element's place in the collection, and a host draws siblings by it — so `.move(x, 0)` on the data
+  moves the row on screen (the planner's tabs are dragged this way).
 - **A socket follows its collection.** When an identity leaves the collection (a card moved to another lane:
   adding it to an `owns` list moves it), its view leaves that socket and is built again, a frame later, in
   whichever socket's collection holds it now. Moving a card is one line of data:

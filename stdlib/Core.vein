@@ -56,6 +56,14 @@ bundle Core by Vein {
         shared("Ownership link: the Entity that owns this identity.")
         shape $Owner { ownerId: Entity }
 
+        shared("Where it sits among its parent's children: lower first; equal ones in the order they were made.")
+        shape $Place { index: int = 0 }
+
+        shared("Put e at place `index` among its siblings: do placeAt(row, 2). A view's socket does this for you (D26).")
+        SF placeAt(e: Entity, index: int) {
+            attach $Place to e { index: index }
+        }
+
         // Written bare: a shared SF runs INLINE in the caller, and `$Owner` resolves by its bare name there.
         shared("Make owner the owner of e: do ownedBy(tab, group). `do discard(group)` then takes e with it.")
         SF ownedBy(e: Entity, owner: Entity) {

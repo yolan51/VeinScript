@@ -70,6 +70,27 @@ public class CollectionOwnsAndMapTests
     }
 
     [Fact]
+    public void Move_puts_what_is_in_the_list_at_a_place_and_an_owned_item_moved_stays_alive()
+    {
+        // `.move(x, i)`: taken out where it is and put back at place i, clamped; nothing leaves, so nothing ends.
+        var lines = Run(
+            "            bring Item(\"a\") as a\n            bring Item(\"b\") as b\n            bring Item(\"c\") as c\n" +
+            "            bring Bag(\"bag\", [a, b, c])\n            bring Chat([\"x\", \"y\"])",
+            go: "            target $Bag as bag { target bag.Bag.~items as i { if i.Item.name == \"c\" { bag.Bag.~items.move(i, 0) } } }\n" +
+                "            target $Chat as c { c.Chat.~lines.move(\"x\", 9) }",
+            show: "            target $Bag as bag {\n                var line = \"\"\n                target bag.Bag.~items as i { line = line + i.Item.name }\n" +
+                  $"                {P}(line)\n            }}\n            target $Chat as c {{ {P}(join(c.Chat.~lines, \",\")) }}\n" + CountItems);
+        Assert.Equal(new[] { "cab", "y,x", "items 3" }, lines);
+    }
+
+    [Fact]
+    public void Move_is_refused_on_a_map_which_has_no_order()
+    {
+        Assert.Contains(Check("    shard S { run once { bring Board(\"b\", []) as b\n b.Board.~scores.move(\"ann\", 0) } }"),
+            d => d.Code == "VS0375");
+    }
+
+    [Fact]
     public void Remove_takes_several_values_and_clear_empties()
     {
         var lines = Run("            bring Chat([\"a\", \"b\", \"c\"]) as c",

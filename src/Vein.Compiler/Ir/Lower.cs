@@ -2809,6 +2809,12 @@ public sealed partial class Lower
         switch (cs.Op)
         {
             case CollectionOp.Clear: return Call("CollClear");
+            // `.move(x, i)` — x, already in the list, to place i (0 is first). An ORDER: a map has none (VS0375).
+            case CollectionOp.Move:
+                if (map) { _diag.Error("VS0375", $"`.move(x, index)` reorders a list — {where} is a `~<map>`, which has no order.", cs.Span); break; }
+                if (cs.Values.Count != 2) return new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
+                CheckElement(cs.Values[0], c.Element, where);
+                return Call("CollMove", LowerExpr(cs.Values[0]), LowerExpr(cs.Values[1]));
             case CollectionOp.Put:
                 if (cs.Values.Count != 2) return new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
                 CheckElement(cs.Values[0], map ? c.Key! : c.Element, $"{where}'s keys");

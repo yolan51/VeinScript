@@ -288,6 +288,8 @@ What the host draws, beyond the widgets' own fields:
 | `#Toolbar` · `#StatusBar` on a `#Row` | a band along the window's top (under the menus) · along its bottom |
 | `$Split { first }` | two panes: its first child `first` pixels wide on the left, its second filling the rest, a draggable divider between |
 | `#Flat` on a button | an item of a list: full width, words on the left, no face until it is `#Accent` |
+| `#Draggable` on a widget | it can be dragged; let go over another `#Draggable` widget and the host raises `@Dropped { target, onto }` (the program decides what that means) |
+| `*Vein.Core.Relations.$Place { index }` | where a widget sits among its siblings: lower first, then the order they were made |
 
 **A window lays out its frame by kind**, whatever order it was brought in: menu bars and toolbars along the top,
 status bars along the bottom, a Split filling the rest; everything else is the column above the Split (or the

@@ -869,12 +869,14 @@ public sealed class Interp
 
         try
         {
-            string text = File.ReadAllText(ResolvePath(path));
+            string full = Path.GetFullPath(ResolvePath(path));
+            string text = File.ReadAllText(full);
             Emit("FileLoaded", new Dictionary<string, object?>(StringComparer.Ordinal)
             {
                 ["path"] = path,
                 ["text"] = text,
                 ["bytes"] = (long)text.Length,
+                ["full"] = full,
                 ["tag"] = tag
             });
         }
@@ -965,6 +967,7 @@ public sealed class Interp
             {
                 ["path"] = path,
                 ["bytes"] = (long)text.Length,
+                ["full"] = Path.GetFullPath(full),
                 ["tag"] = tag
             });
         }
@@ -2774,13 +2777,14 @@ public sealed class Interp
             case "CollRemove":
             case "CollClear":
             case "CollPut":
+            case "CollMove":
             {
                 long e = AsLong(Eval(rc.Args[0], self, locals));
                 string shape = Str(Eval(rc.Args[1], self, locals));
                 string field = Str(Eval(rc.Args[2], self, locals));
                 object? value = rc.Args.Count > 3 ? Eval(rc.Args[3], self, locals) : null;
                 object? put = rc.Args.Count > 4 ? Eval(rc.Args[4], self, locals) : null;
-                string op = rc.Name switch { "CollAdd" => "add", "CollRemove" => "remove", "CollClear" => "clear", _ => "put" };
+                string op = rc.Name switch { "CollAdd" => "add", "CollRemove" => "remove", "CollClear" => "clear", "CollMove" => "move", _ => "put" };
                 var spec = _store.FieldsOf(shape)?.FirstOrDefault(f => f.Name == field)?.Collection;
                 if (spec is not null && op != "clear")
                 {
@@ -2790,7 +2794,7 @@ public sealed class Interp
                         value = CollectionElement(value, spec.Key, where, op == "put" ? "key of" : "remove from");
                         if (op == "put") put = CollectionElement(put, spec.Element, where, "value of");
                     }
-                    else value = CollectionElement(value, spec.Element, where, op == "add" ? "add to" : "remove from");
+                    else value = CollectionElement(value, spec.Element, where, op == "add" ? "add to" : op == "move" ? "move in" : "remove from");
                 }
                 // A `$Shape` element is checked AT the commit, after the commands queued before it — so an
                 // identity brought earlier in this event counts — and refused with this unit's place.

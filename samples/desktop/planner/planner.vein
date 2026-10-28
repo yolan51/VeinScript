@@ -1,31 +1,35 @@
-// samples/desktop/planner/planner.vein — a project planner: projects in a sidebar, each one's tasks as a BOARD
-// (lanes, cards that move) or as a LIST (priorities, progress, hide done), saved to .plan files you pick.
+// samples/desktop/planner/planner.vein — a project planner: projects in a sidebar and as TABS you can drag, each
+// one's tasks as a BOARD (lanes, cards that move) or as a LIST (priorities, progress, hide done), saved to .plan
+// files you pick.
 //
 //   In the Workbench, press ▶ (F5): its window opens, built by its views, on example.plan beside it.
 //   veinc run samples/desktop/planner/planner.vein --ticks 8      (its rules alone, with no window drawn)
 //
 // A BIG PROGRAM IN ONE FILE, KEPT READABLE BY FOUR IDEAS:
 //
-// 1. THE DATA IS A TREE OF `owns` LISTS (D24). The planner owns projects, a project owns lanes, a lane owns cards.
-//    Removing a project ends its lanes and their cards; moving a card is adding it to another lane's list.
+// 1. THE DATA IS A TREE OF `owns` LISTS (D24). The planner owns the open plan; a plan owns its projects, a project
+//    its lanes, a lane its cards. Closing a plan ends all of it; moving a card is adding it to another lane's list.
+//    A plan also keeps a second list, `~tabs`, that does NOT own: closing a tab leaves the project where it is.
 //
-// 2. EVERY PIECE OF THE SCREEN IS A VIEW ON ONE KIND OF IDENTITY (D26), placed by its parent's socket. Eleven views,
-//    and a card has two of them — a tile on the board, a line in the list — because it is shown two ways:
+// 2. EVERY PIECE OF THE SCREEN IS A VIEW ON ONE KIND OF IDENTITY (D26), placed by its parent's socket — in the
+//    socket's collection's ORDER, so `.move(x, i)` on the data moves it on the screen. Fourteen views; a project has
+//    four (a sidebar entry, a tab, a board, a list) and a card two (a tile, a line):
 //
 //      PlannerWindow on $Planner   menu bar · toolbar · Split( sidebar | pages ) · status bar
 //      StatusLine    on $Planner   the status bar's words
-//      ProjectItem   on $Project   a sidebar entry           RecentItem  on $Recent   a recently used file
-//      ProjectBoard  on $Project   the board page            FolderEntry on $Entry    a .plan beside the open one
-//      LaneColumn    on $Lane      a board column            CardTile    on $Card     a card on the board
-//      ProjectList   on $Project   the list page
-//      LaneSection   on $Lane      a list section            CardLine    on $Card     a task in the list
+//      PlanSidebar   on $Plan      its projects (drag to reorder)    RecentItem  on $Recent   a recently used file
+//      PlanPages     on $Plan      its tab strip and pages           FolderEntry on $Entry    a .plan beside the open one
+//      ProjectItem   on $Project   a sidebar entry                   ProjectTab  on $Project  a tab (drag it; × closes)
+//      ProjectBoard  on $Project   the board page                    ProjectList on $Project  the list page
+//      LaneColumn    on $Lane      a board column                    LaneSection on $Lane     a list section
+//      CardTile      on $Card      a card on the board               CardLine    on $Card     a task in the list
 //
-// 3. FILES GO THROUGH LOOMS, BOTH WAYS. A .plan file is {"cards": […], "lanes": […], "projects": […]}: each list is
-//    one loom's toText<Json>, read back by the same loom with `weave` — cards first, so a lane finds its cards by
-//    id, then lanes, then projects. No parsing is written here.
+// 3. FILES GO THROUGH LOOMS, BOTH WAYS. A .plan file is {"cards": […], "lanes": […], "projects": […], "plan": […]}:
+//    each list is one loom's toText<Json>, read back by the same loom with `weave` — cards first, so a lane finds
+//    its cards by id, then lanes, projects, and the plan (its projects' and tabs' order, and the open one).
 //
-// 4. HANDLERS CHANGE DATA; `settled` DERIVES WHAT IS SHOWN. Which page is visible, the accents, the counts, the
-//    colours, "hide done", the window's title and its unsaved dot are all recomputed from the data every frame.
+// 4. HANDLERS CHANGE DATA; `settled` DERIVES WHAT IS SHOWN. Which page is visible, the accents, a tab's unsaved dot,
+//    the counts, the colours, "hide done", the window's title are all recomputed from the data every frame.
 
 bundle Planner by you {
     need "Vein.Desktop"
@@ -38,27 +42,33 @@ bundle Planner by you {
     shape $Card { id: string, title: string, done: bool = false, priority: int = 1 }
     shape $Lane { id: string, name: string, ~<list> cards: owns $Card }
     shape $Project { id: string, name: string, ~<list> lanes: owns $Lane }
+
+    // What a .plan file holds besides its projects: their order, the open tabs in theirs, and the tab showing.
+    shape $Plan { id: string, open: string = "", ~<list> projects: owns $Project, ~<list> tabs: $Project }
+
     shape $Recent { path: string }
     shape $Entry { name: string, path: string }
 
-    // The planner itself: the open file, whether it changed, which project and which page are showing.
+    // The planner itself: the open file, whether it changed, the page kind, and what the sidebar lists.
     shape $Planner {
         title: string, file: string = "", dirty: bool = false, warned: bool = false,
-        mode: string = "board", open: string = "", hideDone: bool = false,
-        ~<list> projects: owns $Project, ~<list> recents: owns $Recent, ~<list> entries: owns $Entry
+        mode: string = "board", hideDone: bool = false,
+        ~<list> plans: owns $Plan, ~<list> recents: owns $Recent, ~<list> entries: owns $Entry
     }
 
     builder Card { $Card   mark #Card }
     builder Lane { $Lane   mark #Lane }
     builder Project { $Project   mark #Project }
+    builder Plan { $Plan   mark #Plan }
     builder Recent { $Recent   mark #Recent }
     builder Entry { $Entry   mark #Entry }
     builder Planner { $Planner   mark #Planner }
 
-    // The file's three lists, and the recent files beside the program.
+    // The file's four lists, and the recent files beside the program.
     loom<Json> SavedCard { $Card   mark #Card }
     loom<Json> SavedLane { $Lane   mark #Lane }
     loom<Json> SavedProject { $Project   mark #Project }
+    loom<Json> SavedPlan { $Plan   mark #Plan }
     loom<Json> SavedRecent { $Recent   mark #Recent }
 
     event @Changed { }          // the user changed the plan: it is unsaved now
@@ -69,9 +79,11 @@ bundle Planner by you {
     mark #Card
     mark #Lane
     mark #Project
+    mark #Plan
     mark #Recent
     mark #Entry
     mark #Planner
+    mark #Edited            // a project changed since the plan was last saved: its tab shows a dot
     // what the user can do — a menu item and a toolbar button for the same thing wear the same mark
     mark #New
     mark #Open
@@ -85,6 +97,9 @@ bundle Planner by you {
     mark #ProjectName
     mark #DropOpenProject
     mark #OpenProject
+    mark #TabItem
+    mark #TabLabel
+    mark #CloseTab
     mark #DropProject
     mark #LaneName
     mark #AddLane
@@ -102,6 +117,7 @@ bundle Planner by you {
     // what is shown
     mark #BoardPage
     mark #ListPage
+    mark #NoTabs
     mark #Tile
     mark #Line
     mark #LaneCount
@@ -158,12 +174,7 @@ bundle Planner by you {
             }
             Split(250.0) {
                 Scroll(4000.0, 6.0) {
-                    Heading("Projects", 14.0)
-                    Column(2.0) socket !ProjectItem(a.Planner.~projects)
-                    Row(4.0) {
-                        Input("", "New project") mark #ProjectName
-                        Button("+") mark #AddProject
-                    }
+                    Column(6.0) socket !PlanSidebar(a.Planner.~plans)
                     Divider(1.0)
                     Heading("Recent", 14.0)
                     Column(2.0) socket !RecentItem(a.Planner.~recents)
@@ -171,8 +182,7 @@ bundle Planner by you {
                     Column(2.0) socket !FolderEntry(a.Planner.~entries)
                 }
                 Scroll(4000.0, 8.0) {
-                    Column(8.0) socket !ProjectBoard(a.Planner.~projects)
-                    Column(8.0) socket !ProjectList(a.Planner.~projects)
+                    Column(8.0) socket !PlanPages(a.Planner.~plans)
                 }
             }
             StatusBar(20.0) socket !StatusLine
@@ -185,8 +195,22 @@ bundle Planner by you {
         Label("") mark #SaveLabel
     }
 
+    // ---- the sidebar: the plan's projects (drag one onto another to move it), recent files, the folder --------
+
+    ShardView PlanSidebar on $Plan as plan {
+        Column(2.0) {
+            Heading("Projects", 14.0)
+            Column(2.0) socket !ProjectItem(plan.Plan.~projects)
+            Row(4.0) {
+                Input("", "New project") mark #ProjectName
+                Button("+") mark #AddProject
+            }
+        }
+    }
+
     ShardView ProjectItem on $Project as p {
-        Button(p.Project.name) mark #Flat #OpenProject
+        Button(p.Project.name) mark #Flat #OpenProject #Draggable as item
+        attach $Tip to item { text: "Drag onto another project to move it" }
     }
 
     ShardView RecentItem on $Recent as r {
@@ -196,6 +220,28 @@ bundle Planner by you {
 
     ShardView FolderEntry on $Entry as e {
         Button(e.Entry.name) mark #Flat #OpenEntry
+    }
+
+    // ---- the pages: a strip of tabs, and the open project's board or list -----------------------------
+
+    ShardView PlanPages on $Plan as plan {
+        Column(8.0) {
+            Row(2.0) socket !ProjectTab(plan.Plan.~tabs)
+            Divider(1.0)
+            Label("No project open — pick one in the sidebar.") mark #NoTabs
+            Column(8.0) socket !ProjectBoard(plan.Plan.~projects)
+            Column(8.0) socket !ProjectList(plan.Plan.~projects)
+        }
+    }
+
+    // A tab, as the Workbench draws one: its name (with a dot while unsaved) and a ×. Drag it onto another tab to
+    // move it there.
+    ShardView ProjectTab on $Project as t {
+        Row(0.0) mark #TabItem #Draggable {
+            Button(t.Project.name) mark #Flat #TabLabel
+            Button("×") mark #Flat #CloseTab as close
+            attach $Tip to close { text: "Close this tab — the project stays in the sidebar" }
+        }
     }
 
     // ---- the board: columns of cards that move -----------------------------------------------------------
@@ -279,7 +325,7 @@ bundle Planner by you {
     // ---- what the user does: data changes ------------------------------------------------------------
 
     shard Start {
-        run once { bring Planner("Planner", "", false, false, "board", "", false, [], [], []) }
+        run once { bring Planner("Planner", "", false, false, "board", false, [], [], []) }
     }
 
     shard Actions {
@@ -292,15 +338,17 @@ bundle Planner by you {
             target $Button #ShowBoard on k.target as b { target $Planner as a { a.Planner.mode = "board" } }
             target $Button #ShowList on k.target as b { target $Planner as a { a.Planner.mode = "list" } }
             target $Button #ToggleDone on k.target as b { target $Planner as a { a.Planner.hideDone = not a.Planner.hideDone } }
-            target $Button #DropOpenProject on k.target as b { target $Planner as a { do dropProjectById(a.Planner.open) } }
+            target $Button #DropOpenProject on k.target as b { target $Plan as plan { do dropProjectById(plan.Plan.open) } }
 
             // the sidebar
             target $Button #AddProject on k.target as b { do addProject() }
-            target $Owner #OpenProject on k.target as b {
-                target $Project on b.Owner.ownerId as p { target $Planner as a { a.Planner.open = p.Project.id } }
-            }
+            target $Owner #OpenProject on k.target as b { do openTab(b.Owner.ownerId) }
             target $Owner #OpenRecent on k.target as b { target $Recent on b.Owner.ownerId as r { do leaveThen("open", r.Recent.path) } }
             target $Owner #OpenEntry on k.target as b { target $Entry on b.Owner.ownerId as e { do leaveThen("open", e.Entry.path) } }
+
+            // the tabs
+            target $Owner #TabLabel on k.target as b { do openTab(b.Owner.ownerId) }
+            target $Owner #CloseTab on k.target as b { do closeTab(b.Owner.ownerId) }
 
             // the pages: each button is owned by what it acts on
             target $Owner #DropProject on k.target as b { do dropProject(b.Owner.ownerId) }
@@ -312,6 +360,16 @@ bundle Planner by you {
             target $Owner #DeleteCard on k.target as b { do deleteCard(b.Owner.ownerId) }
         }
 
+        // Dragging: a tab onto a tab moves it in the tab strip; a sidebar project onto another moves it in the plan.
+        hear *Vein.Desktop.Events.@Dropped as d {
+            target $Owner #TabItem on d.target as dragged {
+                target $Owner #TabItem on d.onto as under { do moveTab(dragged.Owner.ownerId, under.Owner.ownerId) }
+            }
+            target $Owner #OpenProject on d.target as dragged {
+                target $Owner #OpenProject on d.onto as under { do moveProject(dragged.Owner.ownerId, under.Owner.ownerId) }
+            }
+        }
+
         hear @Submitted as s {
             target $Field #ProjectName on s.target as f { do addProject() }
             target $Owner #LaneName on s.target as f { do addLane(f.Owner.ownerId) }
@@ -321,7 +379,7 @@ bundle Planner by you {
         hear @Toggled as e {
             target $Owner #Done on e.target as box {
                 target $Card on box.Owner.ownerId as c { c.Card.done = e.checked }
-                emit @Changed { }
+                do touched(projectOfCard(box.Owner.ownerId))
             }
             target $Toggle #HideDone on e.target as t { target $Planner as a { a.Planner.hideDone = e.checked } }
         }
@@ -329,7 +387,7 @@ bundle Planner by you {
         hear @Picked as e {
             target $Owner #Priority on e.target as pick {
                 target $Card on pick.Owner.ownerId as c { c.Card.priority = e.picked + 1 }
-                emit @Changed { }
+                do touched(projectOfCard(pick.Owner.ownerId))
             }
         }
 
@@ -356,8 +414,48 @@ bundle Planner by you {
         }
     }
 
-    // A project with the three usual lanes, named by the sidebar's box. A bring is not seen by a query until its
-    // event commits, so the new ids are numbered once, here.
+    // A project changed: the plan is unsaved, and the project's tab says so.
+    SF touched(project: Entity) {
+        target $Project on project as p { mark p #Edited }
+        emit @Changed { }
+    }
+
+    // Shown in its tab — opened one if it was not.
+    SF openTab(project: Entity) {
+        target $Plan as plan {
+            target $Project on project as p {
+                if not (plan.Plan.~tabs has project) { plan.Plan.~tabs.add(project) }
+                plan.Plan.open = p.Project.id
+            }
+        }
+    }
+
+    // Only the tab goes: the project stays in the plan, and in the sidebar.
+    SF closeTab(project: Entity) {
+        target $Plan as plan { plan.Plan.~tabs.remove(project) }
+    }
+
+    // Dropped on another tab, a tab takes that tab's place; the one it lands on shifts over.
+    SF moveTab(project: Entity, under: Entity) {
+        target $Plan as plan {
+            var at = -1
+            target plan.Plan.~tabs as x { if x == under { at = Index } }
+            if at >= 0 { plan.Plan.~tabs.move(project, at) }
+        }
+        emit @Changed { }
+    }
+
+    SF moveProject(project: Entity, under: Entity) {
+        target $Plan as plan {
+            var at = -1
+            target plan.Plan.~projects as x { if x == under { at = Index } }
+            if at >= 0 { plan.Plan.~projects.move(project, at) }
+        }
+        emit @Changed { }
+    }
+
+    // A project with the three usual lanes, named by the sidebar's box, opened in a tab. A bring is not seen by a
+    // query until its event commits, so the new ids are numbered once, here.
     SF addProject() {
         target $Field #ProjectName as f {
             if not (trim(f.Field.value) == "") {
@@ -366,9 +464,10 @@ bundle Planner by you {
                 bring Lane("l" + (n + 1), "Doing", []) as doing
                 bring Lane("l" + (n + 2), "Done", []) as done
                 bring Project("p" + (n + 3), trim(f.Field.value), [todo, doing, done]) as p
-                target $Planner as a {
-                    a.Planner.~projects.add(p)
-                    a.Planner.open = "p" + (n + 3)
+                target $Plan as plan {
+                    plan.Plan.~projects.add(p)
+                    plan.Plan.~tabs.add(p)
+                    plan.Plan.open = "p" + (n + 3)
                 }
                 f.Field.value = ""
                 emit @Changed { }
@@ -376,8 +475,12 @@ bundle Planner by you {
         }
     }
 
+    // Out of the tabs, then out of the plan — and an `owns` list ends what leaves it: the project, its lanes, cards.
     SF dropProject(project: Entity) {
-        target $Planner as a { if a.Planner.~projects has project { a.Planner.~projects.remove(project) } }
+        target $Plan as plan {
+            plan.Plan.~tabs.remove(project)
+            if plan.Plan.~projects has project { plan.Plan.~projects.remove(project) }
+        }
         emit @Changed { }
     }
 
@@ -391,15 +494,15 @@ bundle Planner by you {
                 bring Lane("l" + nextNumber(), trim(f.Field.value), []) as lane
                 target $Project on project as p { p.Project.~lanes.add(lane) }
                 f.Field.value = ""
-                emit @Changed { }
+                do touched(project)
             }
         }
     }
 
-    // Out of its project — and an `owns` list ends what leaves it: the lane, its cards, and their views.
     SF dropLane(lane: Entity) {
+        let project = projectOfLane(lane)
         target $Project as p { if p.Project.~lanes has lane { p.Project.~lanes.remove(lane) } }
-        emit @Changed { }
+        do touched(project)
     }
 
     // The lane has a box on the board and one in the list; the one that holds words is the one meant.
@@ -411,7 +514,7 @@ bundle Planner by you {
                 bring Card("c" + nextNumber(), trim(f.Field.value), false, priority) as card
                 target $Lane on lane as l { l.Lane.~cards.add(card) }
                 f.Field.value = ""
-                emit @Changed { }
+                do touched(projectOfLane(lane))
             }
         }
     }
@@ -419,19 +522,21 @@ bundle Planner by you {
     // To the lane `step` places along in the same project. Adding to an `owns` list moves the card out of its old
     // one, and its view follows it to the new lane's socket.
     SF moveCard(card: Entity, step: int) {
-        target $Project as p {
+        let project = projectOfCard(card)
+        target $Project on project as p {
             var at = -1
             target p.Project.~lanes as l { if l.Lane.~cards has card { at = Index } }
             if at >= 0 {
                 target p.Project.~lanes as l { if Index == at + step { l.Lane.~cards.add(card) } }
             }
         }
-        emit @Changed { }
+        do touched(project)
     }
 
     SF deleteCard(card: Entity) {
+        let project = projectOfCard(card)
         target $Lane as l { if l.Lane.~cards has card { l.Lane.~cards.remove(card) } }
-        emit @Changed { }
+        do touched(project)
     }
 
     // ---- what it remembers: .plan files, and the recent ones -------------------------------------------
@@ -451,7 +556,7 @@ bundle Planner by you {
             if f.tag == #PlanFile {
                 do closePlan()
                 pending = f.text
-                pendingPath = f.path
+                pendingPath = f.full
                 emit @LoadPlan { }
             }
         }
@@ -466,7 +571,8 @@ bundle Planner by you {
         hear @Woven as w {
             if w.loom == "SavedCard" { weave SavedLane(toJson(fromJson(pending).lanes)) }
             if w.loom == "SavedLane" { weave SavedProject(toJson(fromJson(pending).projects)) }
-            if w.loom == "SavedProject" { do opened(pendingPath) }
+            if w.loom == "SavedProject" { weave SavedPlan(toJson(fromJson(pending).plan)) }
+            if w.loom == "SavedPlan" { do opened(pendingPath) }
             if w.loom == "SavedRecent" {
                 target $Planner as a {
                     target $Recent as r { if not (a.Planner.~recents has r) { a.Planner.~recents.add(r) } }
@@ -474,7 +580,8 @@ bundle Planner by you {
             }
         }
 
-        hear @Unwoven as u { emit *Vein.Console.Io.@Print { text: "! " + u.why } }
+        // A file from before plans had a record of their own has no "plan" list: that is not a problem.
+        hear @Unwoven as u { if not (u.loom == "SavedPlan") { emit *Vein.Console.Io.@Print { text: "! " + u.why } } }
 
         hear @Fresh as x {
             let n = nextNumber()
@@ -482,9 +589,9 @@ bundle Planner by you {
             bring Lane("l" + (n + 1), "Doing", []) as doing
             bring Lane("l" + (n + 2), "Done", []) as done
             bring Project("p" + (n + 3), "My project", [todo, doing, done]) as p
+            bring Plan("plan", "p" + (n + 3), [p], [p]) as plan
             target $Planner as a {
-                a.Planner.~projects.add(p)
-                a.Planner.open = "p" + (n + 3)
+                a.Planner.~plans.add(plan)
                 a.Planner.file = ""
                 a.Planner.dirty = false
                 a.Planner.warned = false
@@ -499,10 +606,13 @@ bundle Planner by you {
         hear *Vein.Files.Io.@FileWritten as w {
             if w.tag == #PlanFile {
                 target $Planner as a {
+                    a.Planner.file = w.full
                     a.Planner.dirty = false
                     a.Planner.warned = false
                 }
-                emit *Vein.Files.Io.@ListFolder { path: folderOf(w.path), tag: #PlanFolder }
+                target $Project #Edited as p { unmark p #Edited }
+                do remember(w.full)
+                emit *Vein.Files.Io.@ListFolder { path: folderOf(w.full), tag: #PlanFolder }
             }
         }
 
@@ -531,19 +641,31 @@ bundle Planner by you {
         }
     }
 
-    // Every project goes, and with them — `owns` — every lane and card.
+    // The plan goes, and with it — `owns` — every project, lane and card.
     SF closePlan() {
-        target $Planner as a { a.Planner.~projects.clear() }
+        target $Planner as a { a.Planner.~plans.clear() }
     }
 
-    // The woven projects join the planner, in the file's order; the file becomes the open one.
+    // The woven plan becomes the open one. A file from before plans had a record of their own gets one: its projects
+    // in the file's order, each open in a tab.
     SF opened(path: string) {
+        var plans = 0
+        target $Plan as plan { plans += 1 }
+        if plans == 0 {
+            var all = []
+            var first = ""
+            target $Project as p {
+                all += p
+                if first == "" { first = p.Project.id }
+            }
+            bring Plan("plan", first, all, all) as made
+            target $Planner as a { a.Planner.~plans.add(made) }
+        }
         target $Planner as a {
-            target $Project as p { if not (a.Planner.~projects has p) { a.Planner.~projects.add(p) } }
+            target $Plan as plan { if not (a.Planner.~plans has plan) { a.Planner.~plans.add(plan) } }
             a.Planner.file = path
             a.Planner.dirty = false
             a.Planner.warned = false
-            a.Planner.open = ""
         }
         do remember(path)
         emit *Vein.Files.Io.@ListFolder { path: folderOf(path), tag: #PlanFolder }
@@ -559,18 +681,17 @@ bundle Planner by you {
         }
     }
 
-    // The three lists, each written by the loom that reads it back.
+    // The four lists, each written by the loom that reads it back.
     SF writePlan(path: string) {
         emit *Vein.Files.Io.@WriteFile { path: path, text: "{\"cards\": " + toText<Json>(SavedCard) + ", \"lanes\": " +
-            toText<Json>(SavedLane) + ", \"projects\": " + toText<Json>(SavedProject) + "}\n", tag: #PlanFile }
-        target $Planner as a { a.Planner.file = path }
-        do remember(path)
+            toText<Json>(SavedLane) + ", \"projects\": " + toText<Json>(SavedProject) + ", \"plan\": " +
+            toText<Json>(SavedPlan) + "}\n", tag: #PlanFile }
     }
 
-    // Recent files, newest last, six at most, each once.
+    // Recent files, newest last, six at most, each once — by its full path, whichever way it was reached.
     SF remember(path: string) {
         var known = false
-        target $Recent as r { if r.Recent.path == path { known = true } }
+        target $Recent as r { if lower(r.Recent.path) == lower(path) { known = true } }
         if not known {
             bring Recent(path) as recent
             target $Planner as a {
@@ -589,14 +710,12 @@ bundle Planner by you {
 
     shard Looks {
         settled {
-            var open = ""
             var mode = "board"
             var hide = false
             var file = ""
             var dirty = false
             var warned = false
             target $Planner as a {
-                open = a.Planner.open
                 mode = a.Planner.mode
                 hide = a.Planner.hideDone
                 file = a.Planner.file
@@ -604,14 +723,24 @@ bundle Planner by you {
                 warned = a.Planner.warned
             }
 
-            // The open project, or the first one when it is gone.
-            var found = false
-            var first = ""
-            target $Project as p {
-                if p.Project.id == open { found = true }
-                if first == "" { first = p.Project.id }
+            // The open tab, or the first tab when it was closed; none while no tab is open.
+            var open = ""
+            var tabs = 0
+            target $Plan as plan {
+                var found = false
+                var first = ""
+                target plan.Plan.~tabs as x {
+                    tabs += 1
+                    target $Project on x as p {
+                        if p.Project.id == plan.Plan.open { found = true }
+                        if first == "" { first = p.Project.id }
+                    }
+                }
+                if not found { plan.Plan.open = first }
+                open = plan.Plan.open
+                if not found { open = first }
             }
-            if not found and not (first == "") { target $Planner as a { a.Planner.open = first } }
+            target $Text #NoTabs as t { if tabs == 0 { unmark t #Hidden } else { mark t #Hidden } }
 
             // One page at a time: the open project's board, or its list.
             target $Owner #BoardPage as page {
@@ -620,12 +749,20 @@ bundle Planner by you {
             target $Owner #ListPage as page {
                 target $Project on page.Owner.ownerId as p { if mode == "list" and p.Project.id == open { unmark page #Hidden } else { mark page #Hidden } }
             }
+
+            // The tab strip: the open tab accented, an unsaved project's name with a dot.
+            target $Owner $Button #TabLabel as label {
+                target $Project on label.Owner.ownerId as p {
+                    if p.Project.id == open { mark label #Accent } else { unmark label #Accent }
+                    if p carries #Edited { label.Button.label = p.Project.name + "  •" } else { label.Button.label = p.Project.name }
+                }
+            }
             target $Owner #OpenProject as item {
                 target $Project on item.Owner.ownerId as p { if p.Project.id == open { mark item #Accent } else { unmark item #Accent } }
             }
+            // A folder listing and a file dialog spell the same path with different slashes. The entries are the
+            // open file's own folder, so its name is what to compare.
             target $Owner #OpenEntry as item {
-                // A folder listing and a file dialog spell the same path with different slashes. The entries are the
-                // open file's own folder, so its name is what to compare.
                 target $Entry on item.Owner.ownerId as e { if baseName(e.Entry.path) == baseName(file) { mark item #Accent } else { unmark item #Accent } }
             }
             target $Button #ShowBoard as b { if mode == "board" { mark b #Accent } else { unmark b #Accent } }
@@ -691,6 +828,18 @@ bundle Planner by you {
         if level == 3 { return 0.7 }
         if level == 2 { return 0.42 }
         return 0.18
+    }
+
+    fn projectOfLane(lane: Entity) return Entity {
+        var found = 0
+        target $Project as p { if p.Project.~lanes has lane { found = p } }
+        return found
+    }
+
+    fn projectOfCard(card: Entity) return Entity {
+        var found = 0
+        target $Lane as l { if l.Lane.~cards has card { found = projectOfLane(l) } }
+        return found
     }
 
     fn cardsIn(lane: Entity) return int {

@@ -67,6 +67,8 @@ public static class ViewDesugar
                     foreach (var ex in v.Excluded)
                         guard = And(guard, Not(new CarriesExpr(new NameExpr(v.Bind, v.Span), false, ex, v.Span), v.Span), v.Span);
                     var each = new TargetStmt(collection, v.Bind, Blk(v.Span,
+                        new LocalVarStmt(new VarDecl(false, "__i", null, new LoopIndexExpr(v.Span), v.Span), v.Span),
+                        Place(v, s),
                         new IfStmt(guard, Blk(v.Span, Build(v, s).ToArray()), null, v.Span)), v.Span);
                     fill = new QueryStmt(parent.Shapes, parent.Marks, parent.Bind, Blk(v.Span, Leave(v, s, collection), each), v.Span)
                     { On = Member(s, "Owner", "ownerId") };
@@ -113,6 +115,17 @@ public static class ViewDesugar
                 if (w.Socket is { } s) stmts.Add(new MarkStmt(false, self, $"__vsock_{v.Name}_{s.View}", w.Span));
                 foreach (var child in w.Children) Emit(child, self, top: false);
             }
+        }
+
+        // A SOCKET KEEPS ITS COLLECTION'S ORDER. The root this element's view put in this socket sits at the element's
+        // place in the collection (`$Place`), so `.move(x, 0)` on the data moves its row on the screen.
+        Stmt Place(ViewOnDecl v, Expr socket)
+        {
+            var r = new NameExpr("__r", v.Span);
+            var cond = And(new BinaryExpr(BinOp.Eq, Member(r, "Owner", "ownerId"), new NameExpr(v.Bind, v.Span), v.Span),
+                           new BinaryExpr(BinOp.Eq, Member(r, "Parent", "of"), socket, v.Span), v.Span);
+            return new QueryStmt(new[] { "Owner", "Parent" }, new[] { RootMark(v) }, "__r", Blk(v.Span,
+                new IfStmt(cond, Blk(v.Span, Do(Relations, "placeAt", v.Span, r, new NameExpr("__i", v.Span))), null, v.Span)), v.Span);
         }
 
         // THE DATA DECIDES WHAT FILLS A SOCKET, also when it changes. A root in this socket whose identity has left

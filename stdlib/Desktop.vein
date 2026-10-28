@@ -115,6 +115,9 @@ bundle Desktop by Vein {
         shared("A row along a window's bottom edge: where things stand.")
         mark #StatusBar
 
+        shared("A widget the user can drag onto another #Draggable one; the host then raises @Dropped { target, onto }.")
+        mark #Draggable
+
         shared("A button drawn flat, as an item of a list: a sidebar's projects, a folder's files.")
         mark #Flat
 
@@ -233,6 +236,10 @@ bundle Desktop by Vein {
 
         shared("From the host: a slider moved. $Slider.value already holds it.")
         event @Slid { target: Entity, value: float }
+
+        // What a drop MEANS — a tab moved, a card filed — is the program's: the host only says which onto which.
+        shared("From the host: the user dragged #Draggable widget `target` and let go over #Draggable widget `onto`.")
+        event @Dropped { target: Entity, onto: Entity }
 
         shared("From the host: the user closed a window. The host then removes it, and everything in it.")
         event @WindowClosed { target: Entity }

@@ -50,11 +50,12 @@ bundle Files by Vein {
             tag: string = ""
         }
 
-        shared("A file was read. `text` is all of it; `bytes` is its length; `tag` is whatever the request carried.")
+        shared("A file was read. `text` is all of it; `bytes` is its length; `full` is its absolute path; `tag` is whatever the request carried.")
         event @FileLoaded {
             path: string
             text: string
             bytes: int
+            full: string = ""
             tag: string = ""
         }
 
@@ -81,10 +82,11 @@ bundle Files by Vein {
             tag: string = ""
         }
 
-        shared("A file was written.")
+        shared("A file was written; `full` is its absolute path.")
         event @FileWritten {
             path: string
             bytes: int
+            full: string = ""
             tag: string = ""
         }
 

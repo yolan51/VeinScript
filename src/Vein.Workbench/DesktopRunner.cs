@@ -294,6 +294,52 @@ internal sealed class DesktopRunner
         }
     }
 
+    // ---- `#Draggable` → @Dropped { target, onto } ----------------------------------------------------------------
+    //
+    // A press starts nothing; a move of a few pixels with the button down starts a drag (the widget dims); letting
+    // go over another #Draggable widget raises @Dropped. Handlers see events even when a Button inside handled them
+    // — a tab is a row whose button takes the press — and the Button's own click still happens, as it would.
+
+    /// Each draggable control, and the identity it draws.
+    private readonly Dictionary<Control, long> _dragIds = new();
+    private (long Id, Point Start, Control Control, bool Moving)? _drag;
+
+    private void MakeDraggable(Control control, long id)
+    {
+        bool hooked = _dragIds.ContainsKey(control);
+        _dragIds[control] = id;
+        if (hooked) return;
+
+        control.AddHandler(InputElement.PointerPressedEvent, (_, e) =>
+        {
+            if (!e.GetCurrentPoint(control).Properties.IsLeftButtonPressed || TopLevel.GetTopLevel(control) is not { } top) return;
+            _drag = (_dragIds[control], e.GetPosition(top), control, false);
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
+
+        control.AddHandler(InputElement.PointerMovedEvent, (_, e) =>
+        {
+            if (_drag is not { } d || d.Control != control || d.Moving || TopLevel.GetTopLevel(control) is not { } top) return;
+            var p = e.GetPosition(top);
+            if (Math.Abs(p.X - d.Start.X) + Math.Abs(p.Y - d.Start.Y) < 8) return;
+            _drag = d with { Moving = true };
+            control.Opacity = 0.5;
+        }, Avalonia.Interactivity.RoutingStrategies.Bubble, handledEventsToo: true);
+
+        control.AddHandler(InputElement.PointerReleasedEvent, (_, e) =>
+        {
+            if (_drag is not { } d || d.Control != control) return;
+            _drag = null;
+            control.Opacity = 1;
+            if (!d.Moving || TopLevel.GetTopLevel(control) is not { } top) return;
+            // What is under the pointer, climbed to the nearest OTHER draggable widget.
+            for (var v = top.InputHitTest(e.GetPosition(top)) as Visual; v is not null; v = Avalonia.VisualTree.VisualExtensions.GetVisualParent(v))
+                if (v is Control c && _dragIds.TryGetValue(c, out long onto) && onto != d.Id) { Drop(d.Id, onto); return; }
+        }, Avalonia.Interactivity.RoutingStrategies.Bubble, handledEventsToo: true);
+    }
+
+    /// The user let `id` go over `onto`. Public, like Click, so a test can drop without a pointer.
+    public void Drop(long id, long onto) => Input(() => _interp.FireHost("Dropped", Payload(("target", id), ("onto", onto))));
+
     /// The widgets INSIDE a container, by the container's kind. Only a LAYOUT kind holds child widgets: a radio group
     /// is a StackPanel too, of its own buttons, and filling it from its (empty) child list emptied it every frame.
     private void FillInside(Control control, Node node, HashSet<long> seen)
@@ -394,6 +440,8 @@ internal sealed class DesktopRunner
         var control = Build(n);
         if (control.IsVisible == n.Hidden) control.IsVisible = !n.Hidden;
         Paint(control, n.Tint);
+        if (n.Draggable) MakeDraggable(control, n.Id);
+        else _dragIds.Remove(control);
         // `$Tip` on any widget: words shown when the pointer rests on it.
         if (ToolTip.GetTip(control) as string != (n.Tip.Length > 0 ? n.Tip : null))
             ToolTip.SetTip(control, n.Tip.Length > 0 ? n.Tip : null);
@@ -784,6 +832,7 @@ internal sealed class DesktopRunner
         public double First { get; init; }
         public bool Flat { get; init; }
         public bool Bottom { get; init; }
+        public bool Draggable { get; init; }
 
         public IEnumerable<Node> Walk() => Children.SelectMany(c => c.Walk()).Prepend(this);
     }
@@ -805,7 +854,7 @@ internal sealed class DesktopRunner
     {
         // The builders cannot make a $Parent cycle, but a program can attach anything: stop, don't recurse forever.
         var kids = depth < 64 && children.TryGetValue(e.Entity, out var list)
-            ? list.Select(c => NodeOf(c, children, depth + 1)).ToList()
+            ? list.OrderBy(PlaceOf).Select(c => NodeOf(c, children, depth + 1)).ToList()   // by `$Place`, then made-order (a stable sort)
             : new List<Node>();
 
         var kind = KindOf(e)!.Value;
@@ -851,8 +900,12 @@ internal sealed class DesktopRunner
             },
             _ => new Node(e.Entity, kind, kids) { Text = Text(e, "Text", "content"), FontSize = Number(e, "Font", "size", 0) },
         };
-        return node with { Hidden = e.Marks.Contains("Hidden"), Tint = TintOf(e), Tip = Text(e, "Tip", "text") };
+        return node with { Hidden = e.Marks.Contains("Hidden"), Tint = TintOf(e), Tip = Text(e, "Tip", "text"), Draggable = e.Marks.Contains("Draggable") };
     }
+
+    /// `*Vein.Core.Relations.$Place { index }` — where a widget sits among its siblings; one without it sits at 0.
+    private static long PlaceOf(EntityStore.EntitySnapshot e) =>
+        Field(e, "Place", "index") switch { long l => l, int n => n, double d => (long)d, _ => 0 };
 
     private static Color? TintOf(EntityStore.EntitySnapshot e)
     {

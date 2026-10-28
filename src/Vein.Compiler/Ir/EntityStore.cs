@@ -452,6 +452,16 @@ public sealed class EntityStore
                     leaving.AddRange(items);
                     items.Clear();
                     break;
+                // `.move(x, i)`: x, where it is, taken out and put back at place i (clamped to the list). Nothing leaves,
+                // so nothing owned ends; something not in the list is not added — moving is not adding.
+                case "move":
+                    int from = items.FindIndex(i => Same(i, value));
+                    if (from < 0) break;
+                    var moving = items[from];
+                    items.RemoveAt(from);
+                    int to = put switch { long whole => (int)whole, int n => n, double d => (int)d, _ => from };
+                    items.Insert(Math.Clamp(to, 0, items.Count), moving);
+                    break;
             }
             var kept = Normalize(items, spec);
             if (spec?.Kind == "ring") leaving.AddRange(items.Take(items.Count - kept.Count));

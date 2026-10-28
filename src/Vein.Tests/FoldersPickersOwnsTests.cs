@@ -47,6 +47,26 @@ public class FoldersPickersOwnsTests : IDisposable
     }
 
     [Fact]
+    public void A_read_and_a_write_say_the_files_full_path_however_it_was_asked_for()
+    {
+        File.WriteAllText(Path.Combine(_dir, "a.txt"), "hi");
+        string output = Run("""
+            bundle T by you {
+                shard S {
+                    run once {
+                        emit *Vein.Files.Io.@ReadFile { path: "a.txt" }
+                        emit *Vein.Files.Io.@WriteFile { path: "./sub/../b.txt", text: "x", append: false }
+                    }
+                    hear *Vein.Files.Io.@FileLoaded as f { emit *Vein.Console.Io.@Print { text: "read " + f.full } }
+                    hear *Vein.Files.Io.@FileWritten as w { emit *Vein.Console.Io.@Print { text: "wrote " + w.full } }
+                }
+            }
+            """);
+        Assert.Contains("read " + Path.Combine(_dir, "a.txt"), output);
+        Assert.Contains("wrote " + Path.Combine(_dir, "b.txt"), output);    // `./sub/..` folded away: one spelling per file
+    }
+
+    [Fact]
     public void A_file_dialog_with_no_window_to_show_it_in_is_cancelled_at_once()
     {
         string output = Run("""

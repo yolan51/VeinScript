@@ -454,6 +454,7 @@ shape $Bag   { ~<list> items: owns $Item }
 shape $Board { ~<map> scores: string | int }
 target $Guild.~members as g, m { … m.Person.name … }     // one loop per (guild, member)
 g.Guild.~members.add(cy)    g.Guild.~members.remove(bob)    g.Guild.~members.clear()    g.Guild.~members.has(cy)
+g.Guild.~members.move(cy, 0)                                       // a list's order: cy first (a map has none)
 b.Board.~scores.put("ann", 3)    b.Board.~scores["ann"]    target $Board.~scores as b, e { e.key … e.value }
 ```
 

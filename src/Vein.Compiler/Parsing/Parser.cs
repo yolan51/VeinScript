@@ -1575,18 +1575,19 @@ public sealed class Parser
         return new ExprStmt(call with { ViaDo = true }, s);
     }
 
-    /// `s.Chat.~lines.add("a", "b")` / `.remove(x)` / `.clear()` / `.put(k, v)` (D24) — the method forms of a
+    /// `s.Chat.~lines.add("a", "b")` / `.remove(x)` / `.clear()` / `.put(k, v)` / `.move(x, i)` (D24) — the method forms of a
     /// collection change, as the statement they are. Null when `e` is not one.
     private Stmt? CollectionCall(Expr e, SourceSpan s)
     {
         if (e is not CallExpr { Callee: MemberExpr { Receiver: MemberExpr { Collection: true } coll, Name: var m } } call)
             return null;
-        if (m is not ("add" or "remove" or "clear" or "put")) return null;   // misspellings are reported where read
+        if (m is not ("add" or "remove" or "clear" or "put" or "move")) return null;   // misspellings are reported where read
         var (op, ok) = m switch
         {
             "add" => (CollectionOp.Add, call.Args.Count > 0),
             "remove" => (CollectionOp.Remove, call.Args.Count > 0),
             "clear" => (CollectionOp.Clear, call.Args.Count == 0),
+            "move" => (CollectionOp.Move, call.Args.Count == 2),
             _ => (CollectionOp.Put, call.Args.Count == 2),
         };
         if (!ok)
@@ -1594,6 +1595,7 @@ public sealed class Parser
             {
                 "clear" => "`.clear()` empties the collection — it takes nothing.",
                 "put" => "`.put(key, value)` takes a key and a value.",
+                "move" => "`.move(x, index)` takes what is already in the list, and the place to put it (0 is first).",
                 _ => $"`.{m}(…)` takes one or more values: `.{m}(x)`, `.{m}(x, y)`.",
             }, s);
         return new CollectionStmt(op, call.Args, coll, s);
@@ -1740,12 +1742,12 @@ public sealed class Parser
                 if (e is MemberExpr { Collection: true } && !collection)
                 {
                     // `.~members.add(…)` — a collection has these and nothing else.
-                    if (n.Text is not ("add" or "remove" or "clear" or "put" or "has") || !Check(TokenKind.LParen))
+                    if (n.Text is not ("add" or "remove" or "clear" or "put" or "has" or "move") || !Check(TokenKind.LParen))
                     {
                         string lower = n.Text.ToLowerInvariant();
-                        _diag.Error("VS0375", lower is "add" or "remove" or "clear" or "put" or "has" && lower != n.Text
+                        _diag.Error("VS0375", lower is "add" or "remove" or "clear" or "put" or "has" or "move" && lower != n.Text
                             ? $"Write `.{lower}(…)` — a collection's words are lowercase, like every built-in."
-                            : $"A collection has `.add(…)`, `.remove(…)`, `.clear()`, `.has(x)` — and a `~<map>` `.put(key, value)` — not `.{n.Text}`.", n.Span);
+                            : $"A collection has `.add(…)`, `.remove(…)`, `.clear()`, `.has(x)`, `.move(x, index)` — and a `~<map>` `.put(key, value)` — not `.{n.Text}`.", n.Span);
                     }
                     else if (n.Text == "has")
                     {

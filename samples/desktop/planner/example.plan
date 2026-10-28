@@ -12,4 +12,5 @@
  {"id":"l5","name":"Done","cards":["c6"]}]
 , "projects": [{"id":"p1","name":"Website","lanes":["l1","l2","l3"]},
  {"id":"p2","name":"Home","lanes":["l4","l5"]}]
+, "plan": [{"id":"plan","open":"p1","projects":["p1","p2"],"tabs":["p1","p2"]}]
 }

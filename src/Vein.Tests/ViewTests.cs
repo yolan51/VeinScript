@@ -110,6 +110,39 @@ public class ViewTests
         Assert.Contains("after: windows=1 | Water plants in Work", Run(Lego, 10));
     }
 
+    [Fact]
+    public void A_socket_keeps_its_collections_order_so_moving_the_data_moves_the_rows()
+    {
+        // Three tasks; the last is moved to the front of the list. Each row's $Place follows its task's place.
+        string source = Lego[..Lego.IndexOf("shard Start {", StringComparison.Ordinal)] + """
+                shard Start {
+                    run once {
+                        bring Board("B")
+                        bring Task("one") as one
+                        bring Task("two") as two
+                        bring Task("three") as three
+                        bring Group("G", [one, two, three])
+                    }
+                }
+                shard Probe {
+                    hear *Vein.Time.Clock.@Ticked as k {
+                        if k.frame == 6 {
+                            target $Group as g { target g.Group.~tasks as t { if t.Task.text == "three" { g.Group.~tasks.move(t, 0) } } }
+                        }
+                        if k.frame == 5 or k.frame == 9 {
+                            var line = "frame " + k.frame + ":"
+                            target $Toggle $Parent as c { target $Place on c.Parent.of as row { line = line + " " + c.Toggle.label + "@" + row.Place.index } }
+                            emit *Vein.Console.Io.@Print { text: line }
+                        }
+                    }
+                }
+            }
+            """;
+        string output = Run(source, 11);
+        Assert.Contains("frame 5: one@0 two@1 three@2", output);
+        Assert.Contains("frame 9: one@1 two@2 three@0", output);
+    }
+
     [Theory]
     [InlineData("ShardView A on $Board as b { Column(1.0) socket !Nope }", "VS0383")]
     [InlineData("ShardView A on $Group as g { Column(1.0) socket !B(g.Group.~tasks) }\n    ShardView B on $Task as g { Row(1.0) }", "VS0384")]
