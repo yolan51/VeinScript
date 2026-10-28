@@ -267,6 +267,9 @@ public sealed partial class Lower
         _loweredName = bundle.Name;
         _ownerKey = (bundle.Author ?? "local") + "." + bundle.Name;
 
+        // D26: every `ShardView … on $Shape` becomes a shard of today's statements before anything else looks.
+        bundle = ViewDesugar.Apply(bundle, _diag);
+
         // Before Collect, which keeps ONE declaration per name — so a duplicate is reported rather than
         // silently replaced.
         BundleLoader.CheckDuplicates(bundle, _diag);

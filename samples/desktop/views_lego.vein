@@ -1,4 +1,7 @@
-// docs/design/views-lego.vein — DESIGN SKETCH for D26 (PROPOSED, docs/SYNTAX-DECISIONS.md). NOT COMPILED YET.
+// samples/desktop/views_lego.vein — ShardViews bricked together like Lego (D26, docs/SYNTAX-DECISIONS.md).
+//
+//   In the Workbench, press ▶ (F5): its window opens, built by its views.
+//   veinc run samples/desktop/views_lego.vein --ticks 5      (its rules alone, with no window drawn)
 //
 // Three ShardViews brick a desktop app together like Lego. A PARENT view says which view goes where, with a
 // SOCKET named after that view (`socket !TaskRow(…)`, the shard sigil of D19). A child view says nothing about
@@ -8,16 +11,16 @@
 //   GroupCard   on $Group   placed by BoardWindow; offers                        socket !TaskRow(g.Group.~tasks)
 //   TaskRow     on $Task    placed by its group's card
 //
-// What it would MEAN, in today's VeinScript (the rule that keeps it VeinScript):
+// What a view MEANS, in today's VeinScript (the compiler rewrites it into exactly this — ViewDesugar):
 //   • a view's body runs ONCE per identity carrying its shape — `settled { target $S not #<generated> as x { … } }`
 //   • a builder call needs no `bring` and no parent: a nested call gets its enclosing widget, the top call gets
 //     the socket it is placed in
-//   • every widget the body brings is owned by x (`do ownedBy(w, x)`): `discard(x)` takes them all, and a handler
-//     goes from a clicked widget to its data in one step
+//   • every widget the body brings is owned by x (`do ownedBy(w, x)`), so a handler
+//     goes from a clicked widget to its data in one step — and the view ends with x, discarded or destroyed
 //   • `socket !View(collection)` shows that view for each identity in the collection, in its order; with no
 //     argument, for every identity the view is on
 //
-// Everything outside the three views is today's language.
+// Below the views, everything is ordinary VeinScript.
 
 bundle Lego by you {
     need "Vein.Desktop"
@@ -42,7 +45,7 @@ bundle Lego by you {
 
     // ---- brick 1: the window — top-level, with a socket for every group's card ------------------------
 
-    ShardView BoardWindow on $Board as b {                       // [D26]
+    ShardView BoardWindow on $Board as b {
         Window(b.Board.title, 480.0, 600.0) {
             Heading(b.Board.title, 24.0)
             Column(12.0) socket !GroupCard
@@ -51,7 +54,7 @@ bundle Lego by you {
 
     // ---- brick 2: a group's card — with a socket for THIS group's tasks -----------------------------------
 
-    ShardView GroupCard on $Group as g {                         // [D26]
+    ShardView GroupCard on $Group as g {
         Column(6.0) {
             Heading(g.Group.name, 18.0)
             Column(4.0) socket !TaskRow(g.Group.~tasks)
@@ -60,7 +63,7 @@ bundle Lego by you {
 
     // ---- brick 3: a task's row — it does not know where it goes -----------------------------------------
 
-    ShardView TaskRow on $Task as t {                            // [D26]
+    ShardView TaskRow on $Task as t {
         Row(8.0) {
             Check(t.Task.text, t.Task.done) mark #Done
             Button("✕") mark #Delete

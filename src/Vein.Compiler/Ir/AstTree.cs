@@ -52,10 +52,23 @@ public sealed class AstTree
         ShardDecl sh => WithAttrs(Node("Shard", sh.Name, sh.Span, sh.Members.Select(Member)), Carries(sh.CarriedShapes, sh.CarriedMarks)),
         ViewDecl vw => WithAttrs(Node("ShardView", vw.Name, vw.Span, vw.Members.Select(Member)), Carries(vw.CarriedShapes, vw.CarriedMarks)),
         BridgeDecl br => WithAttrs(Node("Bridge", br.Name, br.Span, br.Members.Select(Member)), Carries(br.CarriedShapes, br.CarriedMarks)),
+        ViewOnDecl vo => Node("ShardView", vo.Name + " on " + string.Join(" ", vo.Shapes.Select(x => "$" + x).Concat(vo.Marks.Select(x => "#" + x))
+                                 .Concat(vo.Excluded.Select(x => "not #" + x))) + " as " + vo.Bind, vo.Span, vo.Body.Select(ViewLine)),
         BuilderDecl { Loom: { } loom } lm => WithAttrs(Node("Loom", lm.Name, lm.Span, lm.Members.Select(SigMember)), ("format", loom)),
         BuilderDecl bl => WithAttrs(Node("Builder", bl.Name, bl.Span, bl.Members.Select(SigMember)), BuilderKind(bl)),
         FormatDecl fm => Format(fm),
         _ => Leaf(d.GetType().Name, "", d.Span)
+    };
+
+    // A view's line (D26): a widget with its decorations and children, or a statement as any block shows it.
+    private IrNode ViewLine(ViewItem item) => item switch
+    {
+        WidgetItem w => Node("Widget", w.Builder +
+                (w.Marks.Count > 0 ? " " + string.Join(" ", w.Marks.Select(m => "#" + m)) : "") +
+                (w.Bind is null ? "" : " as " + w.Bind) +
+                (w.Socket is null ? "" : " socket !" + w.Socket.View), w.Span, w.Children.Select(ViewLine)),
+        StmtItem s => Stmt(s.Stmt),
+        _ => Leaf(item.GetType().Name, "", item.Span)
     };
 
     private IrNode LoadNode(AppLoad l)

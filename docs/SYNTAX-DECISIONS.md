@@ -877,9 +877,13 @@ tested in the body.
 
 Sample: `samples/target_not.vein` (in `check-backend.sh`).
 
-## D26 — `ShardView Name on $Shape as x { … }`: a view per identity *(PROPOSED, not built)* {#views}
+## D26 — `ShardView Name on $Shape as x { … }` + `socket !View(collection)`: a view per identity {#views}
 
-**PROPOSED (2026-10-27).** Nothing here is in the compiler. Worked example: `docs/design/views-lego.vein`.
+> **Reported as** `VS0382` (a view with no shape), `VS0383` (`socket !X` names no view) and `VS0384` (a view and the
+> view whose socket places it bind the same name).
+
+**DECIDED and built (2026-10-27).** `ViewDesugar` rewrites every view into a shard of today's statements before
+anything lowers it. Sample: `samples/desktop/views_lego.vein`; tests: `ViewTests`.
 
 **The problem.** `samples/desktop/todo.vein` builds its screen by hand, in 73 lines:
 - a `View` shard (34 lines) of `settled { target $Group not #Shown as g { …; mark g #Shown } }`;
@@ -963,11 +967,15 @@ only the drawer differs.
 - From the pasted proposal: `in` (D3), `!=` (D12), `none`/`$X?`, and `find`/`first`/`the`/`count(… where)`
   phrase queries.
 
-*Open questions:*
-1. **Spelling:** `ShardView … on`, or a new `view`.
-2. **Teardown:** `discard(t)` ends a view, but a plain `destroy t` leaves its owned widgets. Either `destroy`
-   follows `$Owner`, or "views end with `discard`".
-3. **Web:** `ShardView … on` for the web, which needs the element tree first.
+*Settled since it was proposed:*
+1. **Spelling:** `ShardView … on`, with `socket` the only new word. It is contextual: a word only after a
+   widget's `)`.
+2. **Teardown:** a view ends with its identity, whether it was `discard`ed or `destroy`ed. Each view's
+   `settled` block discards a root widget (marked `#__vroot_<View>`) whose identity no longer carries the
+   view's shapes.
+3. **Web:** still open. It needs web widgets to be a `$Parent` tree first.
+4. **Windows from a view:** a view builds its window in `settled`, not in `run once`, so the Workbench's runner
+   gives a program a few frames to open its first window.
 
 ## Reserved-word disposition
 
@@ -1022,7 +1030,7 @@ Still pending: tokens `LBracket`/`RBracket` if D9(a). **Never keywords:** `class
 
 - **D9** — brackets & list syntax: (a) vs (b). *(specs assume (a).)*
 - **D10** — user-defined generics timing. *(deferred.)*
-- **D26** — `ShardView Name on $Shape as x` + `socket !View(collection)`: views per identity, composed through sockets. *(proposed; spelling, teardown and web open.)*
+- **D26** — views: built. Open part: the web (needs web widgets as a `$Parent` tree).
 - **Reserved block** — `transform`: assign a meaning or cut before v1.0. (`on` got one: D22.)
   *(The rest of what this list once held — `by`, `start`, `audience`, `bridge`, `bring`, `builder`,
   `mute`, `unmute` —

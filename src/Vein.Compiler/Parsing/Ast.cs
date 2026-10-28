@@ -204,6 +204,29 @@ public sealed record ViewDecl(string Name, IReadOnlyList<Node> Members, SourceSp
     public IReadOnlyList<string> CarriedMarks { get; init; } = Array.Empty<string>();
 }
 
+/// `ShardView Name on $Shape #Mark not #M as x { … }` — a view PER IDENTITY (D26). Its body is widgets
+/// (`Row(8.0) { … }`, no `bring`, no parent) and ordinary statements. It never reaches Lower as itself:
+/// <see cref="Vein.Compiler.Parsing.ViewDesugar"/> rewrites it into a shard of today's statements first.
+public sealed record ViewOnDecl(
+    string Name, IReadOnlyList<string> Shapes, IReadOnlyList<string> Marks, IReadOnlyList<string> Excluded,
+    string Bind, IReadOnlyList<ViewItem> Body, SourceSpan Span) : Decl(Span);
+
+/// One line of a view's body: a widget, or a statement passed through.
+public abstract record ViewItem(SourceSpan Span) : Node(Span);
+
+/// `Check(t.Task.text, t.Task.done) mark #Done as box socket !TaskRow(g.Group.~tasks) { children }` — a builder
+/// brought as a widget of the view. Its parent is prepended by the desugar: the enclosing widget, or the socket.
+public sealed record WidgetItem(
+    string Builder, IReadOnlyList<Expr> Args, IReadOnlyList<string> Marks, string? Bind,
+    SocketSpec? Socket, IReadOnlyList<ViewItem> Children, SourceSpan Span) : ViewItem(Span);
+
+/// `socket !View(collection)` on a widget: that view is shown in it for each identity of the collection, in its
+/// order — or, with no collection, for every identity the view is on.
+public sealed record SocketSpec(string View, Expr? Collection, SourceSpan Span) : Node(Span);
+
+/// An ordinary statement inside a view's body (`attach $Tip to box { … }`, an `if`, …).
+public sealed record StmtItem(Stmt Stmt, SourceSpan Span) : ViewItem(Span);
+
 /// Bridge — a First-Class object that hears events and emits new ones (e.g. forwarding/interop).
 /// Same member shape as a shard; a distinct kind so provenance shows Bridge.X, not Shard.X.
 public sealed record BridgeDecl(string Name, IReadOnlyList<Node> Members, SourceSpan Span) : Decl(Span)

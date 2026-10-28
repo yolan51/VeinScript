@@ -395,6 +395,29 @@ error (**VS0206**): it would consume an argument and put it nowhere. A template 
 and **no** `mark` keeps the old meaning — it emits `@<BuilderName>` — so this changed no existing
 program.
 
+**Views — `ShardView Name on $Shape as x { … }`, `socket !View(collection)`.** A view per identity (D26). Its body
+is widgets: no `bring`, and no parent, because a nested call gets its enclosing widget. Every widget is owned by
+`x` and ends with it. A parent view places a child view with a socket named after it:
+
+```
+ShardView GroupCard on $Group as g {
+    Column(6.0) {
+        Heading(g.Group.name, 18.0)
+        Column(4.0) socket !TaskRow(g.Group.~tasks)     // one TaskRow per task of this group, in its order
+    }
+}
+ShardView TaskRow on $Task as t { Row(8.0) { Check(t.Task.text, t.Task.done) mark #Done } }
+```
+
+Grammar:
+
+```
+viewon   := "ShardView" Name "on" { ShapeRef | MarkRef | "not" MarkRef } "as" Name "{" { widget | stmt } "}"
+widget   := Name "(" args ")" { "mark" MarkRef {MarkRef} | "as" Name | "socket" ShardRef ["(" expr ")"] } ["{" { widget | stmt } "}"]
+```
+
+It is rewritten into a shard of ordinary statements before lowering, so it runs and compiles like any shard.
+
 **Weaving — `format`, `loom<Format>`, `weave Loom(text)`, `toText<Format>(Loom)`.** A format says how a record of text is written; a
 loom — a builder's body — says what a record becomes; `weave` brings one identity per record, each the
 `bring` a person would write; `toText` writes them back out, in the loom's format or another (D23, RULES 7e):

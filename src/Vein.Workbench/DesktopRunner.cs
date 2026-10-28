@@ -34,6 +34,10 @@ internal sealed class DesktopRunner
     private readonly Dictionary<string, Avalonia.Media.Imaging.Bitmap?> _images = new(StringComparer.OrdinalIgnoreCase);
     private readonly Action<string> _ended;
     private readonly Dictionary<long, Window> _windows = new();
+
+    /// A window has been shown. Until then no window is "the last one closed": a ShardView's window (D26) arrives a
+    /// frame after boot, and the timer — which Avalonia starts as it is built — was already running.
+    private bool _opened;
     private readonly Dictionary<long, Control> _controls = new();
     private readonly DispatcherTimer _timer;
     private DateTime _last = DateTime.Now;
@@ -58,8 +62,11 @@ internal sealed class DesktopRunner
     {
         if (!Guard(() => _interp.Boot(_module))) return;
         Render();
+        // A window a ShardView builds (D26) arrives in `settled`, a frame or two after boot — so a program with
+        // no window yet gets a few frames before it is called windowless.
+        for (int i = 0; i < 5 && _windows.Count == 0 && !_done; i++) Frame();
         if (_done) return;
-        if (_windows.Count == 0) { Quit("it opened no window — bring a Window(…) in `run once`"); return; }
+        if (_windows.Count == 0) { Quit("it opened no window — bring a Window(…) in `run once`, or show one from a ShardView"); return; }
         _timer.Start();
     }
 
@@ -178,7 +185,7 @@ internal sealed class DesktopRunner
             _windows.Remove(id);   // first, so its Closing handler knows the program closed it
             window.Close();
         }
-        if (_windows.Count == 0 && _timer.IsEnabled) Quit("its last window closed");
+        if (_windows.Count == 0 && _opened) Quit("its last window closed");
     }
 
     private Window WindowFor(Node w)
@@ -204,6 +211,7 @@ internal sealed class DesktopRunner
             if (_windows.Remove(id)) CloseWindow(id);   // the user closed it; the program hears it first
         };
         _windows[id] = window;
+        _opened = true;
         window.Show();
         return window;
     }

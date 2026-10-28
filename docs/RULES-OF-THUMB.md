@@ -90,6 +90,10 @@ Loading, "Add" and "Add group" should all just `bring` data. One `View` shard gi
 has no widgets yet its widgets, and marks it: `target $Task not #Shown as t { …widgets…; mark t #Shown }`. The
 construction code then exists once, and loading can never build a screen that differs from adding.
 
+The language now does this for you (D26): `ShardView TaskRow on $Task as t { Row(8.0) { … } }` builds each
+task's widgets once, owns them, and ends them with the task. A parent view places it with
+`socket !TaskRow(g.Group.~tasks)`. See `samples/desktop/views_lego.vein`.
+
 ## 9. Write each action once
 
 When several inputs mean the same thing (Enter in a box, a click on Add), each emits one event (`@AddTask`) and

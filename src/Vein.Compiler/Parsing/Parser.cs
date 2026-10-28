@@ -803,10 +803,11 @@ public sealed class Parser
         return new WeaveStmt(name, args, bind, s) { LoomPath = path };
     }
 
-    private ViewDecl ParseView()
+    private Decl ParseView()
     {
         var s = Here; Advance();
         string name = Expect(TokenKind.Ident, "ShardView name").Text;
+        if (Check(TokenKind.KwOn)) return ParseViewOn(s, name);
         var (carriedShapes, carriedMarks) = ParseCarried();
         Expect(TokenKind.LBrace, "'{'");
         var members = new List<Node>();
@@ -823,6 +824,87 @@ public sealed class Parser
         }
         Expect(TokenKind.RBrace, "'}'");
         return new ViewDecl(name, members, s) { CarriedShapes = carriedShapes, CarriedMarks = carriedMarks };
+    }
+
+    /// `ShardView TaskRow on $Task #M not #N as t { … }` (D26): a view per identity. The head is a query's —
+    /// shapes, marks, `not` marks (D25) — and `as` names the identity the body is about.
+    private ViewOnDecl ParseViewOn(SourceSpan s, string name)
+    {
+        Advance();                                                  // `on`
+        var shapes = new List<string>();
+        var marks = new List<string>();
+        var excluded = new List<string>();
+        while (true)
+        {
+            if (Check(TokenKind.ShapeRef)) shapes.Add(Advance().Text);
+            else if (Check(TokenKind.MarkRef)) marks.Add(Advance().Text);
+            else if (Check(TokenKind.KwNot) && Peek().Kind == TokenKind.MarkRef) { Advance(); excluded.Add(Advance().Text); }
+            else break;
+        }
+        if (shapes.Count == 0)
+            _diag.Error("VS0382", $"`ShardView {name} on …` needs a shape: the identities it is a view of (`on $Task as t`).", s);
+        Expect(TokenKind.KwAs, $"`as` and a name for the identity (`ShardView {name} on $Shape as x`)");
+        string bind = ExpectName("a name for the identity").Text;
+        return new ViewOnDecl(name, shapes, marks, excluded, bind, ParseViewBody(), s);
+    }
+
+    /// A view's body: a line that starts `Name(` is a WIDGET; anything else is an ordinary statement.
+    private List<ViewItem> ParseViewBody()
+    {
+        Expect(TokenKind.LBrace, "'{'");
+        var items = new List<ViewItem>();
+        SkipTerms();
+        while (!Check(TokenKind.RBrace) && !AtEnd)
+        {
+            int before = _i;
+            try
+            {
+                if (Check(TokenKind.Ident) && Peek().Kind == TokenKind.LParen) items.Add(ParseWidget());
+                else { var st = ParseStmt(); items.Add(new StmtItem(st, st.Span)); }
+            }
+            catch (ParseError) { SynchronizeInBlock(); }
+            if (_i == before && !AtEnd) Advance();
+            SkipTerms();
+        }
+        Expect(TokenKind.RBrace, "'}'");
+        return items;
+    }
+
+    /// `Row(8.0) mark #A as row socket !TaskRow(g.Group.~tasks) { … }` — the decorations in any order, then the
+    /// children. `socket` is contextual: a word only here, after a widget's `)`.
+    private WidgetItem ParseWidget()
+    {
+        var s = Here;
+        string builder = Advance().Text;
+        Expect(TokenKind.LParen, "'('");
+        var args = new List<Expr>();
+        if (!Check(TokenKind.RParen))
+            do args.Add(ParseExpr()); while (Match(TokenKind.Comma));
+        Expect(TokenKind.RParen, "')'");
+
+        var marks = new List<string>();
+        string? bind = null;
+        SocketSpec? socket = null;
+        while (true)
+        {
+            if (Match(TokenKind.KwMark))
+            {
+                marks.Add(Expect(TokenKind.MarkRef, "#Mark").Text);
+                while (Check(TokenKind.MarkRef)) marks.Add(Advance().Text);
+            }
+            else if (Match(TokenKind.KwAs)) bind = ExpectName("a name for the widget").Text;
+            else if (Check(TokenKind.Ident) && Cur.Text == "socket")
+            {
+                var ss = Here; Advance();
+                string view = Expect(TokenKind.ShardRef, "the view it holds, `!ViewName`").Text;
+                Expr? collection = null;
+                if (Match(TokenKind.LParen)) { collection = ParseExpr(); Expect(TokenKind.RParen, "')'"); }
+                socket = new SocketSpec(view, collection, ss);
+            }
+            else break;
+        }
+        var children = Check(TokenKind.LBrace) ? ParseViewBody() : new List<ViewItem>();
+        return new WidgetItem(builder, args, marks, bind, socket, children, s);
     }
 
     private BridgeDecl ParseBridge()
