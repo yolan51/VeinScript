@@ -879,8 +879,8 @@ Sample: `samples/target_not.vein` (in `check-backend.sh`).
 
 ## D26 — `ShardView Name on $Shape as x { … }` + `socket !View(collection)`: a view per identity {#views}
 
-> **Reported as** `VS0382` (a view with no shape), `VS0383` (`socket !X` names no view) and `VS0384` (a view and the
-> view whose socket places it bind the same name).
+> **Reported as** `VS0382` (a view with no shape), `VS0383` (`socket !X` names no view), `VS0384` (a view and the
+> view whose socket places it bind the same name) and `VS0385` (a socket's list holds what its view is not on).
 
 **DECIDED and built (2026-10-27).** `ViewDesugar` rewrites every view into a shard of today's statements before
 anything lowers it. Sample: `samples/desktop/views_lego.vein`; tests: `ViewTests`.
@@ -945,7 +945,8 @@ ShardView TaskRow on $Task as t { Row(8.0) { … } }          // reusable: it do
   view is on, in spawn order.
 - **Checked:**
   - an unknown view is an error;
-  - so is a collection whose elements do not carry the view's shape;
+  - so is a list whose elements do not carry the view's shape, or that holds plain values (VS0385, when the list is
+    `x.Shape.~field` of a shape this bundle declares);
   - a view placed by no socket is a top-level one (a window).
 
   Mistakes are said, not an empty screen.

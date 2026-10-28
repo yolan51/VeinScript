@@ -147,6 +147,8 @@ public class ViewTests
     [InlineData("ShardView A on $Board as b { Column(1.0) socket !Nope }", "VS0383")]
     [InlineData("ShardView A on $Group as g { Column(1.0) socket !B(g.Group.~tasks) }\n    ShardView B on $Task as g { Row(1.0) }", "VS0384")]
     [InlineData("ShardView A on #Board as b { Column(1.0) }", "VS0382")]
+    [InlineData("ShardView A on $Group as g { Column(1.0) socket !B(g.Group.~tasks) }\n    ShardView B on $Board as b { Row(1.0) }", "VS0385")]
+    [InlineData("shape $Tags { ~<list> words: string }\n    ShardView A on $Tags as g { Column(1.0) socket !B(g.Tags.~words) }\n    ShardView B on $Task as t { Row(1.0) }", "VS0385")]
     public void A_wiring_mistake_is_said_not_an_empty_screen(string views, string code)
     {
         string source = Lego[..Lego.IndexOf("ShardView BoardWindow", StringComparison.Ordinal)] + views + "\n}";

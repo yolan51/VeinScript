@@ -38,7 +38,11 @@ public static class ViewDesugar
                     if (views.All(o => o.Name != s.View))
                         diag.Error("VS0383", $"`socket !{s.View}`: there is no `ShardView {s.View} on $Shape as x` in this bundle. " +
                             $"The views are {string.Join(", ", views.Select(o => o.Name))}.", s.Span);
-                    else sockets.Add((v, s));
+                    else
+                    {
+                        CheckElements(views.First(o => o.Name == s.View), s);
+                        sockets.Add((v, s));
+                    }
                 }
 
         var members = new List<Decl>();
@@ -86,6 +90,24 @@ public static class ViewDesugar
         }
         foreach (var mk in marks.Distinct(StringComparer.Ordinal)) members.Add(new MarkDecl(mk, bundle.Span));
         return bundle with { Members = members };
+
+        // A SOCKET'S LIST MUST HOLD WHAT ITS VIEW IS ON. `socket !PlanSidebar(a.Planner.~recents)` built nothing and
+        // said nothing: every element was skipped for not carrying $Plan. When the collection is `x.Shape.~field` and
+        // the shape is declared in this bundle, its element type is known here, so the mismatch is an error.
+        void CheckElements(ViewOnDecl view, SocketSpec socket)
+        {
+            if (socket.Collection is not MemberExpr { Collection: true, Name: var field, Receiver: MemberExpr { Name: var shape } }) return;
+            var decl = Shapes(bundle.Members).FirstOrDefault(sd => sd.Name == shape);
+            if (decl?.Members.OfType<FieldDecl>().FirstOrDefault(f => f.Name == field)?.Collection is not { } spec) return;
+            string list = $"{shape}.~{field}";
+            if (spec.Element != "Entity")
+                diag.Error("VS0385", $"`socket !{view.Name}({list})`: {list} holds {spec.Element} values, and a view is drawn for " +
+                    $"identities — give the socket a list of identities that carry ${string.Join(" $", view.Shapes)}.", socket.Span);
+            else if (spec.Carries is { } carries && !view.Shapes.Contains(carries))
+                diag.Error("VS0385", $"`socket !{view.Name}({list})`: {list} holds ${carries}, and {view.Name} is a view on " +
+                    $"${string.Join(" $", view.Shapes)} — nothing in that list could ever show. Use a view on ${carries}, or a list of " +
+                    $"${string.Join(" $", view.Shapes)}.", socket.Span);
+        }
 
         // `target $S #M not #E not #__view_V as x { body; mark x #__view_V }`, the socket (or none) as the parent.
         Stmt Instances(ViewOnDecl v, Expr? parent) =>
@@ -155,6 +177,15 @@ public static class ViewDesugar
                 new IfStmt(Not(alive, v.Span), Blk(v.Span, Do(Widgets, "discard", v.Span, w)), null, v.Span)), v.Span);
         }
     }
+
+    /// Every shape the bundle declares, publicators included.
+    private static IEnumerable<ShapeDecl> Shapes(IEnumerable<Decl> members) =>
+        members.SelectMany(m => m switch
+        {
+            ShapeDecl s => new[] { s },
+            PublicatorDecl p => Shapes(p.Members),
+            _ => Enumerable.Empty<ShapeDecl>(),
+        });
 
     private static string ViewMark(ViewOnDecl v) => "__view_" + v.Name;
     private static string RootMark(ViewOnDecl v) => "__vroot_" + v.Name;
