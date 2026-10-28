@@ -1,23 +1,23 @@
 // docs/design/views-lego.vein — DESIGN SKETCH for D26 (PROPOSED, docs/SYNTAX-DECISIONS.md). NOT COMPILED YET.
 //
-// Three ShardViews brick a desktop app together like Lego. Each one is a view ON one kind of identity, and
-// knows only the SOCKET its top piece plugs into: a widget another view built and marked. No view mentions
-// another view.
+// Three ShardViews brick a desktop app together like Lego. A PARENT view says which view goes where, with a
+// SOCKET named after that view (`socket !TaskRow(…)`, the shard sigil of D19). A child view says nothing about
+// its place, so it can be reused in another socket unchanged.
 //
-//   BoardWindow on $Board   the base plate        offers socket #Groups
-//   GroupCard   on $Group   plugs into #Groups    offers socket #Tasks
-//   TaskRow     on $Task    plugs into ITS group's #Tasks
+//   BoardWindow on $Board   top-level (placed by no socket): the window, with   socket !GroupCard
+//   GroupCard   on $Group   placed by BoardWindow; offers                        socket !TaskRow(g.Group.~tasks)
+//   TaskRow     on $Task    placed by its group's card
 //
-// What a ShardView `on $Shape as x { … }` would MEAN, in today's VeinScript (the rule that keeps it VeinScript):
-//   • the body runs ONCE per identity carrying $Shape that has no view of this name yet — it is
-//     `settled { target $Shape not #<generated> as x { …; mark x #<generated> } }`
-//   • a builder call needs no `bring`; a NESTED call gets its enclosing widget as its parent (RULES 9), so only
-//     the top call names where it plugs in
-//   • every widget the body brings is owned by x (`do ownedBy(w, x)`), so `discard(x)` takes them all and a
-//     handler goes from a clicked widget to its data in one step
-//   • `mark #M` after a call marks that widget
+// What it would MEAN, in today's VeinScript (the rule that keeps it VeinScript):
+//   • a view's body runs ONCE per identity carrying its shape — `settled { target $S not #<generated> as x { … } }`
+//   • a builder call needs no `bring` and no parent: a nested call gets its enclosing widget, the top call gets
+//     the socket it is placed in
+//   • every widget the body brings is owned by x (`do ownedBy(w, x)`): `discard(x)` takes them all, and a handler
+//     goes from a clicked widget to its data in one step
+//   • `socket !View(collection)` shows that view for each identity in the collection, in its order; with no
+//     argument, for every identity the view is on
 //
-// Everything below the views is today's language.
+// Everything outside the three views is today's language.
 
 bundle Lego by you {
     need "Vein.Desktop"
@@ -27,8 +27,8 @@ bundle Lego by you {
     // ---- the data: nothing here knows about the screen ------------------------------------------------
 
     shape $Board { title: string }
-    shape $Group { name: string }
-    shape $Task { group: string, text: string, done: bool = false }
+    shape $Task { text: string, done: bool = false }
+    shape $Group { name: string, ~<list> tasks: owns $Task }     // D24: a group OWNS its tasks, in order
 
     builder Board { $Board   mark #Board }
     builder Group { $Group   mark #Group }
@@ -37,47 +37,46 @@ bundle Lego by you {
     mark #Board
     mark #Group
     mark #Task
-    mark #Groups        // socket: where group cards plug in
-    mark #Tasks         // socket: where a group's task rows plug in
     mark #Done
     mark #Delete
 
-    // ---- brick 1: the base plate — one window per $Board, offering the #Groups socket -------------------
+    // ---- brick 1: the window — top-level, with a socket for every group's card ------------------------
 
     ShardView BoardWindow on $Board as b {                       // [D26]
         Window(b.Board.title, 480.0, 600.0) {
             Heading(b.Board.title, 24.0)
-            Column(12.0) mark #Groups
+            Column(12.0) socket !GroupCard
         }
     }
 
-    // ---- brick 2: a group — plugs into #Groups, offers its own #Tasks socket -----------------------------
+    // ---- brick 2: a group's card — with a socket for THIS group's tasks -----------------------------------
 
     ShardView GroupCard on $Group as g {                         // [D26]
-        Column(groupsSocket(), 6.0) {
+        Column(6.0) {
             Heading(g.Group.name, 18.0)
-            Column(4.0) mark #Tasks
+            Column(4.0) socket !TaskRow(g.Group.~tasks)
         }
     }
 
-    // ---- brick 3: a task — plugs into its own group's #Tasks ---------------------------------------------
+    // ---- brick 3: a task's row — it does not know where it goes -----------------------------------------
 
     ShardView TaskRow on $Task as t {                            // [D26]
-        Row(tasksOf(t.Task.group), 8.0) {
+        Row(8.0) {
             Check(t.Task.text, t.Task.done) mark #Done
             Button("✕") mark #Delete
         }
     }
 
-    // ---- the data arrives in ANY order; each brick waits until its socket exists -----------------------
+    // ---- the data arrives in ANY order; a socket fills as its identities appear ------------------------
 
     shard Start {
         run once {
-            bring Task("Work", "Ship it")           // before its group and the board: waits a frame or two
+            bring Task("Ship it") as ship                // before its group and the board exist
             bring Board("My board")
-            bring Group("Work")
-            bring Group("Home")
-            bring Task("Home", "Water plants")
+            bring Group("Work", [ship]) as work
+            bring Group("Home", []) as home
+            bring Task("Water plants") as water
+            home.Group.~tasks.add(water)
         }
     }
 
@@ -94,33 +93,22 @@ bundle Lego by you {
             }
         }
     }
-
-    // ---- the sockets: small questions, today's language ------------------------------------------------
-
-    // The one column every group card plugs into — 0 until the board's window exists.
-    fn groupsSocket() return Entity {
-        var at = 0
-        target $Panel #Groups as s { at = s }
-        return at
-    }
-
-    // A group's task column, found through the card that owns it — 0 until that card exists.
-    fn tasksOf(group: string) return Entity {
-        var at = 0
-        target $Group as g {
-            if g.Group.name == group {
-                target $Owner $Panel #Tasks as s { if s.Owner.ownerId == g { at = s } }
-            }
-        }
-        return at
-    }
 }
 
+// ---- ten views later -------------------------------------------------------------------------------------
+//
+// The structure lives in the parents' sockets, so it can be read — and drawn by the Outline — as a tree:
+//
+//   BoardWindow ▸ !GroupCard ▸ !TaskRow
+//              ▸ !Sidebar ▸ !FilterChip
+//              ▸ !StatusBar
+//
+// A misspelt `socket !TaskRwo` is an error, not an empty screen; a view placed by nothing is a window.
+//
 // ---- web, eventually: the same bricks, a different drawer -------------------------------------------------
 //
 // Today a web page is a STREAM of text fragments (@Html), so order is everything and a brick cannot plug in
-// later — which is why the web todo and the desktop todo look nothing alike. The unifying step: on the web too,
-// a widget is an identity with a $Parent (a tree, as on the desktop), and @Render WALKS that tree and writes the
-// HTML, the way the Workbench walks it and draws native controls. Then these three ShardViews serve a page
-// unchanged: Column → <div>, Heading → <h2>, Check → <input type=checkbox>, Button → <button>. The bricks, the
-// sockets and the rules stay; only the drawer differs — Avalonia on the desktop, an HTML writer on the web.
+// later. The unifying step: on the web too, a widget is an identity with a $Parent (a tree, as on the desktop),
+// and @Render WALKS that tree and writes the HTML, the way the Workbench walks it and draws native controls.
+// Then these three ShardViews serve a page unchanged: Column → <div>, Heading → <h2>, Check → <input
+// type=checkbox>, Button → <button>. The bricks and the sockets stay; only the drawer differs.

@@ -893,7 +893,7 @@ The pattern is right (one place builds the screen, RULES-OF-THUMB 8); the bookke
 **The proposal: the language does the pattern, and it stays the pattern.**
 ```
 ShardView TaskRow on $Task as t {
-    Row(listFor(t.Task.group), 8.0) {                  // the top call names where it plugs in
+    Row(8.0) {                                         // where it goes is the parent's `socket !TaskRow(…)`
         Dropdown(levels(), t.Task.priority - 1) mark #Priority
         Check(t.Task.text, t.Task.done)         mark #Done
         Button("✕")                             mark #Delete
@@ -910,22 +910,47 @@ model (D5):
 1. **When it runs.** The body runs ONCE per identity carrying the head's shapes and marks (`not #M` per D25)
    that has no view of this name yet:
    `settled { target $Task not #<generated> as t { …; mark t #<generated> } }`.
-2. **Nesting.** Inside a view, a builder call needs no `bring`. A NESTED call gets its enclosing widget as its
-   first argument (the parent, RULES 9), so only the top call names a parent. The data identity can still
-   BE the widget (`Row(t, …)`).
+2. **Nesting.** Inside a view, a builder call needs no `bring`, and no parent argument: a nested call gets its
+   enclosing widget as its parent (RULES 9), and the top call gets the socket it is placed in. A view placed by
+   no socket (a window) is top-level.
 3. **Ownership.** Every widget the body brings is owned by `t` (`do ownedBy(w, t)`). So `discard(t)` takes
    them all, and a handler goes from a click to the data in one step:
    `target $Owner #Delete on c.target as d { do discard(d.Owner.ownerId) }`. No `in view of`.
 4. **Decorations.** `mark #M` after a call marks that widget. `as name` binds it for the rest of the body, as
    `bring … as` does, so `attach $Tip to name { … }` works. A body may hold ordinary statements too.
 
-*Composition: Lego through sockets.* A view never names another view. Its top piece plugs into a SOCKET, a
-widget another view built and marked (`Column(4.0) mark #Tasks`), found by a small `fn` (`tasksOf(group)`).
-- Any depth: `BoardWindow` → `GroupCard` → `TaskRow`.
-- Several views on one shape (a tab and a column, both `on $Group`), each with its own generated mark.
-- A brick whose socket does not exist yet waits a frame (its fn answers 0), so data may arrive in any order.
-- `discard` cascades through ownership and the tree.
-- A ShardView inside another's body is not allowed: composition goes through sockets only.
+*Composition: Lego through sockets — `socket !View(collection)`, the one new word.* A PARENT view says which
+view goes where, by the view's name with the shard sigil (D19). The child view says nothing about its place:
+```
+ShardView BoardWindow on $Board as b {
+    Window(b.Board.title, 480.0, 600.0) {
+        Column(12.0) socket !GroupCard                       // a GroupCard for every $Group
+    }
+}
+ShardView GroupCard on $Group as g {
+    Column(6.0) {
+        Heading(g.Group.name, 18.0)
+        Column(4.0) socket !TaskRow(g.Group.~tasks)          // one TaskRow per task of THIS group
+    }
+}
+ShardView TaskRow on $Task as t { Row(8.0) { … } }          // reusable: it does not know where it goes
+```
+- **The data decides what fills a socket.** `socket !TaskRow(g.Group.~tasks)` shows a TaskRow for each
+  identity in that collection, in its order: the D24 `owns` link (`$Group { ~<list> tasks: owns $Task }`),
+  so no name matching and no hand-written socket `fn`. With no argument, the socket takes every identity the
+  view is on, in spawn order.
+- **Checked:**
+  - an unknown view is an error;
+  - so is a collection whose elements do not carry the view's shape;
+  - a view placed by no socket is a top-level one (a window).
+
+  Mistakes are said, not an empty screen.
+- **Readable at ten views.** The structure is written in the parents (`BoardWindow ▸ !GroupCard ▸
+  !TaskRow`), so the Outline can draw the screen as a tree straight from the declarations.
+- **Marks go back to one job:** naming roles for handlers (`#Done`, `#Delete`).
+- Any depth works. Several views can sit on one shape (a tab and a column, both `on $Group`). Data may arrive
+  in any order: a socket fills as its identities appear. `discard` cascades through ownership and the tree.
+- A ShardView declared inside another's body is not allowed: composition is through sockets only.
 
 *Web, eventually.* Today a page is a stream of `@Html` fragments, so order is everything and a brick cannot
 plug in later. The unifying step: on the web, too, a widget is an identity with a `$Parent`, and `@Render`
@@ -934,7 +959,7 @@ only the drawer differs.
 
 *Not in D26:*
 - Reactivity (`bind:`, `live`, `hide when`): a later decision. Derived values stay in `settled`.
-- `slot`: placement is the top call's parent.
+- A separate `slot`/`into`: the socket names its view, so the child needs neither.
 - From the pasted proposal: `in` (D3), `!=` (D12), `none`/`$X?`, and `find`/`first`/`the`/`count(… where)`
   phrase queries.
 
@@ -997,7 +1022,7 @@ Still pending: tokens `LBracket`/`RBracket` if D9(a). **Never keywords:** `class
 
 - **D9** — brackets & list syntax: (a) vs (b). *(specs assume (a).)*
 - **D10** — user-defined generics timing. *(deferred.)*
-- **D26** — `ShardView Name on $Shape as x`: a view per identity, composed through sockets. *(proposed; spelling, teardown and web open.)*
+- **D26** — `ShardView Name on $Shape as x` + `socket !View(collection)`: views per identity, composed through sockets. *(proposed; spelling, teardown and web open.)*
 - **Reserved block** — `transform`: assign a meaning or cut before v1.0. (`on` got one: D22.)
   *(The rest of what this list once held — `by`, `start`, `audience`, `bridge`, `bring`, `builder`,
   `mute`, `unmute` —
