@@ -549,4 +549,467 @@ bundle Desktop by Vein {
             }
         }
     }
+
+    // ---- tabs, as TEMPLATES (D27) ------------------------------------------------------------------------------
+    //
+    // Attach $Tab { label } to anything that should have a tab (a project, a file, a map), keep a $TabStrip whose
+    // `~tabs` lists them in order, and take the view and the shard:
+    //
+    //   ShardView MyTab from *Vein.Desktop.Tabs.!TabItem              then: Row(2.0) socket !MyTab(x.TabStrip.~tabs)
+    //   shard Tabs from *Vein.Desktop.Tabs.!TabActions
+    //
+    // A click shows a tab, × closes it (the thing stays — only the tab goes), a drag onto another tab moves it there,
+    // and a thing marked #TabUnsaved shows a dot. `open` is the open tab's PLACE in `~tabs`, so it saves as a number;
+    // openTabOf(strip) is the thing itself. A sidebar opens one with `do openTab(strip, thing)`.
+    publicator Tabs {
+        shared("What a tab says. Attach it to anything that should have a tab.")
+        shape $Tab { label: string }
+
+        shared("Tabs in order, and the place of the open one (-1 while none is open).")
+        shape $TabStrip { open: int = 0, ~<list> tabs: $Tab }
+
+        shared("A tab strip: bring TabStrip(0, [a, b]), or include $TabStrip in a builder of your own.")
+        builder TabStrip { $TabStrip   mark #TabStrip }
+
+        shared("Carried by a tab strip.")
+        mark #TabStrip
+        shared("A tab: its label and its ×, dragged as one.")
+        mark #TabItem
+        shared("A tab's label: a click shows it.")
+        mark #TabLabel
+        shared("A tab's ×: a click closes it.")
+        mark #TabClose
+        shared("On a thing with a tab: it changed since it was saved, and its tab shows a dot.")
+        mark #TabUnsaved
+
+        shared("A tab, as the Workbench draws one: a label and a ×; drag it onto another tab to move it there.")
+        ShardView TabItem on $Tab as t {
+            Row(0.0) mark #TabItem #Draggable {
+                Button(t.Tab.label) mark #Flat #TabLabel
+                Button("×") mark #Flat #TabClose as close
+                attach $Tip to close { text: "Close this tab" }
+            }
+        }
+
+        shared("Tabs that work: click to show, × to close, drag to move, a dot while unsaved, the open one accented.")
+        shard TabActions {
+            hear *Vein.UI.Interaction.@Clicked as k {
+                target $Owner #TabLabel on k.target as b { target $TabStrip as s { if s.TabStrip.~tabs has b.Owner.ownerId { do openTab(s, b.Owner.ownerId) } } }
+                target $Owner #TabClose on k.target as b { target $TabStrip as s { if s.TabStrip.~tabs has b.Owner.ownerId { do closeTab(s, b.Owner.ownerId) } } }
+            }
+
+            hear *Vein.Desktop.Events.@Dropped as d {
+                target $Owner #TabItem on d.target as dragged {
+                    target $Owner #TabItem on d.onto as under {
+                        target $TabStrip as s {
+                            if s.TabStrip.~tabs has dragged.Owner.ownerId { do moveTab(s, dragged.Owner.ownerId, under.Owner.ownerId) }
+                        }
+                    }
+                }
+            }
+
+            settled {
+                target $TabStrip as s {
+                    target s.TabStrip.~tabs as thing {
+                        let place = Index
+                        target $Owner $Button #TabLabel as label {
+                            if label.Owner.ownerId == thing {
+                                if place == s.TabStrip.open { mark label #Accent } else { unmark label #Accent }
+                                if thing carries #TabUnsaved { label.Button.label = thing.Tab.label + "  •" } else { label.Button.label = thing.Tab.label }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        shared("Show `thing` in its tab — opened at the end when it had none.")
+        SF openTab(strip: Entity, thing: Entity) {
+            target $TabStrip on strip as s {
+                var at = -1
+                var total = 0
+                target s.TabStrip.~tabs as x {
+                    if x == thing { at = Index }
+                    total += 1
+                }
+                if at < 0 {
+                    s.TabStrip.~tabs.add(thing)
+                    at = total
+                }
+                s.TabStrip.open = at
+            }
+        }
+
+        shared("Close `thing`'s tab; the thing stays. The tab beside it opens when it was the open one.")
+        SF closeTab(strip: Entity, thing: Entity) {
+            target $TabStrip on strip as s {
+                var at = -1
+                var total = 0
+                target s.TabStrip.~tabs as x {
+                    if x == thing { at = Index }
+                    total += 1
+                }
+                if at >= 0 {
+                    s.TabStrip.~tabs.remove(thing)
+                    if s.TabStrip.open > at { s.TabStrip.open = s.TabStrip.open - 1 }
+                    if s.TabStrip.open >= total - 1 { s.TabStrip.open = total - 2 }
+                }
+            }
+        }
+
+        shared("Move `thing`'s tab to where `under`'s is; the open tab stays the open one.")
+        SF moveTab(strip: Entity, thing: Entity, under: Entity) {
+            target $TabStrip on strip as s {
+                var src = -1
+                var dst = -1
+                target s.TabStrip.~tabs as x {
+                    if x == thing { src = Index }
+                    if x == under { dst = Index }
+                }
+                if src >= 0 and dst >= 0 {
+                    s.TabStrip.~tabs.move(thing, dst)
+                    let open = s.TabStrip.open
+                    if open == src { s.TabStrip.open = dst }
+                    if src < open and open <= dst { s.TabStrip.open = open - 1 }
+                    if dst <= open and open < src { s.TabStrip.open = open + 1 }
+                }
+            }
+        }
+
+        shared("The thing whose tab is open, or 0 when none is.")
+        fn openTabOf(strip: Entity) return Entity {
+            var found = 0
+            target $TabStrip on strip as s { target s.TabStrip.~tabs as x { if Index == s.TabStrip.open { found = x } } }
+            return found
+        }
+    }
+
+    // ---- boards: lanes of cards, as a board or as a list (TEMPLATES, D27) --------------------------------------
+    //
+    //   ShardView MyBoard from *Vein.Desktop.Board.!BoardPage { Tools { …the app's buttons… } }
+    //   ShardView MyList from *Vein.Desktop.Board.!BoardList
+    //   shard Boards from *Vein.Desktop.Board.!BoardActions
+    //   SF boardChanged(board: Entity) { … }          the hook: the user changed this board
+    //
+    // Inside a board everything is done: add and remove lanes and cards, move a card a lane left or right, tick it,
+    // give it a priority (its colour), counts and progress, and hiding done cards when a $TaskBoardLooks says so.
+    publicator Board {
+        shared("A card: what it says, whether it is done, its priority (1 Low … 4 Very high).")
+        shape $TaskCard { id: string, title: string, done: bool = false, priority: int = 1 }
+        shared("A lane of cards, in order.")
+        shape $TaskLane { id: string, name: string, ~<list> cards: owns $TaskCard }
+        shared("A board of lanes, in order.")
+        shape $TaskBoard { id: string, name: string, ~<list> lanes: owns $TaskLane }
+        shared("How boards are shown: attach one anywhere; `hideDone` hides done cards.")
+        shape $TaskBoardLooks { hideDone: bool = false }
+
+        shared("A card: bring TaskCard(\"c1\", \"Write the copy\", false, 3).")
+        builder TaskCard { $TaskCard   mark #TaskCard }
+        shared("A lane: bring TaskLane(\"l1\", \"To do\", [cards…]).")
+        builder TaskLane { $TaskLane   mark #TaskLane }
+        shared("A board: bring TaskBoard(\"b1\", \"Website\", [lanes…]).")
+        builder TaskBoard { $TaskBoard   mark #TaskBoard }
+        shared("Cards as JSON records — the cards of every board.")
+        loom<Json> SavedTaskCard { $TaskCard   mark #TaskCard }
+        shared("Lanes as JSON records, their cards by id.")
+        loom<Json> SavedTaskLane { $TaskLane   mark #TaskLane }
+
+        shared("Carried by a card.")
+        mark #TaskCard
+        shared("Carried by a lane.")
+        mark #TaskLane
+        shared("Carried by a board.")
+        mark #TaskBoard
+        shared("A board page's root.")
+        mark #BoardPage
+        shared("A list page's root.")
+        mark #ListPage
+        shared("A card on the board.")
+        mark #Tile
+        shared("A card in the list.")
+        mark #Line
+        shared("A board's new-lane box.")
+        mark #LaneName
+        shared("A board's Add lane.")
+        mark #AddLane
+        shared("A lane's ✕.")
+        mark #DropLane
+        shared("A lane's new-card box.")
+        mark #CardName
+        shared("A list section's priority for a new card.")
+        mark #NewPriority
+        shared("A lane's add-card button.")
+        mark #AddCard
+        shared("A card's ←.")
+        mark #MoveLeft
+        shared("A card's →.")
+        mark #MoveRight
+        shared("A card's ✕.")
+        mark #DeleteCard
+        shared("A card's checkbox.")
+        mark #Done
+        shared("A card's priority.")
+        mark #Priority
+        shared("A lane's count.")
+        mark #LaneCount
+        shared("A list section's \"2 of 3 left\".")
+        mark #LaneStatus
+        shared("A list section's progress.")
+        mark #LaneBar
+        shared("A list page's \"4 of 7 tasks done\".")
+        mark #BoardProgress
+
+        shared("A board: its name, the app's Tools, a new-lane box, and its lanes as columns of cards.")
+        ShardView BoardPage on $TaskBoard as p {
+            Column(12.0) mark #BoardPage {
+                Row(8.0) slot Tools {
+                    Heading(p.TaskBoard.name, 22.0)
+                    Input("", "New lane") mark #LaneName
+                    Button("Add lane") mark #AddLane
+                }
+                Row(16.0) socket !LaneColumn(p.TaskBoard.~lanes)
+            }
+        }
+
+        shared("A lane on a board: its name and count, its cards, a new-card box.")
+        ShardView LaneColumn on $TaskLane as l {
+            Column(6.0) {
+                Row(6.0) {
+                    Heading(l.TaskLane.name, 16.0)
+                    Badge("0") mark #LaneCount
+                    Button("✕") mark #DropLane as drop
+                    attach $Tip to drop { text: "Remove this lane and its cards" }
+                }
+                Column(6.0) socket !CardTile(l.TaskLane.~cards)
+                Row(4.0) {
+                    Input("", "New card") mark #CardName
+                    Button("+") mark #AddCard
+                }
+            }
+        }
+
+        shared("A card on a board: its priority, ← → to move it, ✕, and its checkbox.")
+        ShardView CardTile on $TaskCard as c {
+            Column(2.0) mark #Tile {
+                Row(4.0) {
+                    Dropdown(levels(), c.TaskCard.priority - 1) mark #Priority as chip
+                    attach $Tint to chip { r: 0.92, g: 0.26, b: 0.21, a: intensity(c.TaskCard.priority) }
+                    Button("←") mark #MoveLeft
+                    Button("→") mark #MoveRight
+                    Button("✕") mark #DeleteCard
+                }
+                Check(c.TaskCard.title, c.TaskCard.done) mark #Done
+            }
+        }
+
+        shared("A board as a list: its name, the app's Tools, how much is done, and a section per lane.")
+        ShardView BoardList on $TaskBoard as p {
+            Column(12.0) mark #ListPage {
+                Row(8.0) slot Tools { Heading(p.TaskBoard.name, 22.0) }
+                Label("") mark #BoardProgress
+                Column(16.0) socket !LaneSection(p.TaskBoard.~lanes)
+            }
+        }
+
+        shared("A lane as a list section: name, what is left, progress, its cards, and a box to add one.")
+        ShardView LaneSection on $TaskLane as l {
+            Column(6.0) {
+                Row(8.0) {
+                    Heading(l.TaskLane.name, 16.0)
+                    Label("") mark #LaneStatus
+                }
+                Progress(0.0, 1.0) mark #LaneBar
+                Column(2.0) socket !CardLine(l.TaskLane.~cards)
+                Row(6.0) {
+                    Input("", "Add a task to " + l.TaskLane.name) mark #CardName
+                    Dropdown(levels(), 0) mark #NewPriority
+                    Button("Add") mark #AddCard
+                }
+            }
+        }
+
+        shared("A card in a list: its priority, its checkbox, ✕.")
+        ShardView CardLine on $TaskCard as c {
+            Row(8.0) mark #Line {
+                Dropdown(levels(), c.TaskCard.priority - 1) mark #Priority as chip
+                attach $Tint to chip { r: 0.92, g: 0.26, b: 0.21, a: intensity(c.TaskCard.priority) }
+                Check(c.TaskCard.title, c.TaskCard.done) mark #Done
+                Button("✕") mark #DeleteCard
+            }
+        }
+
+        // Every change it makes, it reports through the hook `boardChanged(board)` — the program's.
+        shared("Boards that work: lanes and cards added, removed, moved, ticked, prioritised; counts; hide done.")
+        shard BoardActions {
+            hear *Vein.UI.Interaction.@Clicked as k {
+                target $Owner #AddLane on k.target as b { do addLane(b.Owner.ownerId) }
+                target $Owner #DropLane on k.target as b { do dropLane(b.Owner.ownerId) }
+                target $Owner #AddCard on k.target as b { do addCard(b.Owner.ownerId) }
+                target $Owner #MoveLeft on k.target as b { do moveCard(b.Owner.ownerId, -1) }
+                target $Owner #MoveRight on k.target as b { do moveCard(b.Owner.ownerId, 1) }
+                target $Owner #DeleteCard on k.target as b { do deleteCard(b.Owner.ownerId) }
+            }
+
+            hear @Submitted as s {
+                target $Owner #LaneName on s.target as f { do addLane(f.Owner.ownerId) }
+                target $Owner #CardName on s.target as f { do addCard(f.Owner.ownerId) }
+            }
+
+            hear @Toggled as e {
+                target $Owner #Done on e.target as box {
+                    target $TaskCard on box.Owner.ownerId as c { c.TaskCard.done = e.checked }
+                    do boardChanged(boardOfCard(box.Owner.ownerId))
+                }
+            }
+
+            hear @Picked as e {
+                target $Owner #Priority on e.target as pick {
+                    target $TaskCard on pick.Owner.ownerId as c { c.TaskCard.priority = e.picked + 1 }
+                    do boardChanged(boardOfCard(pick.Owner.ownerId))
+                }
+            }
+
+            settled {
+                var hide = false
+                target $TaskBoardLooks as looks { hide = looks.TaskBoardLooks.hideDone }
+                target $Owner #Tile as w { target $TaskCard on w.Owner.ownerId as c { if hide and c.TaskCard.done { mark w #Hidden } else { unmark w #Hidden } } }
+                target $Owner #Line as w { target $TaskCard on w.Owner.ownerId as c { if hide and c.TaskCard.done { mark w #Hidden } else { unmark w #Hidden } } }
+                target $Owner $Choice $Tint #Priority as chip { chip.Tint.a = intensity(chip.Choice.picked + 1) }
+                target $Owner $Text #LaneCount as label { target $TaskLane on label.Owner.ownerId as l { label.Text.content = string(cardsIn(l)) } }
+                target $Owner $Text #LaneStatus as label {
+                    target $TaskLane on label.Owner.ownerId as l { label.Text.content = string(cardsIn(l) - doneIn(l)) + " of " + string(cardsIn(l)) + " left" }
+                }
+                target $Owner $Progress #LaneBar as bar {
+                    target $TaskLane on bar.Owner.ownerId as l {
+                        bar.Progress.value = float(doneIn(l))
+                        bar.Progress.max = float(larger(1, cardsIn(l)))
+                    }
+                }
+                target $Owner $Text #BoardProgress as label {
+                    target $TaskBoard on label.Owner.ownerId as p {
+                        var all = 0
+                        var done = 0
+                        target p.TaskBoard.~lanes as l {
+                            all += cardsIn(l)
+                            done += doneIn(l)
+                        }
+                        label.Text.content = string(done) + " of " + string(all) + " tasks done"
+                    }
+                }
+            }
+
+            SF addLane(board: Entity) {
+                target $Owner $Field #LaneName as f {
+                    if f.Owner.ownerId == board and not (trim(f.Field.value) == "") {
+                        bring TaskLane("l" + nextNumber(), trim(f.Field.value), []) as lane
+                        target $TaskBoard on board as p { p.TaskBoard.~lanes.add(lane) }
+                        f.Field.value = ""
+                        do boardChanged(board)
+                    }
+                }
+            }
+
+            // Out of its board — and an `owns` list ends what leaves it: the lane, its cards, their views.
+            SF dropLane(lane: Entity) {
+                let board = boardOfLane(lane)
+                target $TaskBoard as p { if p.TaskBoard.~lanes has lane { p.TaskBoard.~lanes.remove(lane) } }
+                do boardChanged(board)
+            }
+
+            // A lane has a box on the board and one in the list; the one holding words is the one meant.
+            SF addCard(lane: Entity) {
+                var priority = 1
+                target $Owner $Choice #NewPriority as pick { if pick.Owner.ownerId == lane { priority = pick.Choice.picked + 1 } }
+                target $Owner $Field #CardName as f {
+                    if f.Owner.ownerId == lane and not (trim(f.Field.value) == "") {
+                        bring TaskCard("c" + nextNumber(), trim(f.Field.value), false, priority) as card
+                        target $TaskLane on lane as l { l.TaskLane.~cards.add(card) }
+                        f.Field.value = ""
+                        do boardChanged(boardOfLane(lane))
+                    }
+                }
+            }
+
+            // To the lane `step` places along. Adding to an `owns` list moves the card, and its view follows.
+            SF moveCard(card: Entity, step: int) {
+                let board = boardOfCard(card)
+                target $TaskBoard on board as p {
+                    var at = -1
+                    target p.TaskBoard.~lanes as l { if l.TaskLane.~cards has card { at = Index } }
+                    if at >= 0 {
+                        target p.TaskBoard.~lanes as l { if Index == at + step { l.TaskLane.~cards.add(card) } }
+                    }
+                }
+                do boardChanged(board)
+            }
+
+            SF deleteCard(card: Entity) {
+                let board = boardOfCard(card)
+                target $TaskLane as l { if l.TaskLane.~cards has card { l.TaskLane.~cards.remove(card) } }
+                do boardChanged(board)
+            }
+        }
+
+        shared("The priorities a card can have.")
+        fn levels() return list<string> { return ["Low", "Medium", "High", "Very high"] }
+
+        shared("How strong a priority's colour is: 0.18 for Low … 1.0 for Very high.")
+        fn intensity(level: int) return float {
+            if level >= 4 { return 1.0 }
+            if level == 3 { return 0.7 }
+            if level == 2 { return 0.42 }
+            return 0.18
+        }
+
+        shared("How many cards a lane holds.")
+        fn cardsIn(lane: Entity) return int {
+            var n = 0
+            target $TaskLane on lane as l { target l.TaskLane.~cards as c { n += 1 } }
+            return n
+        }
+
+        shared("How many of a lane's cards are done.")
+        fn doneIn(lane: Entity) return int {
+            var n = 0
+            target $TaskLane on lane as l { target l.TaskLane.~cards as c { if c.TaskCard.done { n += 1 } } }
+            return n
+        }
+
+        shared("The board a lane is in, or 0.")
+        fn boardOfLane(lane: Entity) return Entity {
+            var found = 0
+            target $TaskBoard as p { if p.TaskBoard.~lanes has lane { found = p } }
+            return found
+        }
+
+        shared("The board a card is in, or 0.")
+        fn boardOfCard(card: Entity) return Entity {
+            var found = 0
+            target $TaskLane as l { if l.TaskLane.~cards has card { found = boardOfLane(l) } }
+            return found
+        }
+
+        shared("The larger of two numbers.")
+        fn larger(a: int, b: int) return int {
+            if a > b { return a }
+            return b
+        }
+
+        // Ids are a letter and a number (`c12`, `l3`, `b2`): the number is what must not repeat.
+        shared("A number no card, lane or board uses yet, for a new id: \"c\" + nextNumber().")
+        fn nextNumber() return int {
+            var top = 0
+            target $TaskCard as c { top = larger(top, idNumber(c.TaskCard.id)) }
+            target $TaskLane as l { top = larger(top, idNumber(l.TaskLane.id)) }
+            target $TaskBoard as p { top = larger(top, idNumber(p.TaskBoard.id)) }
+            return top + 1
+        }
+
+        shared("The number in an id after its first letter: idNumber(\"c12\") is 12; 0 when there is none.")
+        fn idNumber(id: string) return int {
+            let digits = substring(id, 1, len(id) - 1)
+            if isNumber(digits) { return int(digits) }
+            return 0
+        }
+    }
 }

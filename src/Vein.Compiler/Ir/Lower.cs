@@ -616,9 +616,15 @@ public sealed partial class Lower
     {
         if (_shapeFields.ContainsKey(name) || _importedShapes.ContainsKey(name)) return;
 
+        // A `~` field keeps what it is (D24) — its kind, element, and whether it OWNS. Without it a needed bundle's
+        // `$Board { ~<list> lanes: owns $Lane }` was a plain list here: ending a board left its lanes alive.
+        // Checked where it is declared; copied as declared here.
         _importedShapes[name] = new IrType(
             name, IrTypeKind.Component,
-            fields.Select(f => new IrField(f.Name, Ty(f.Type), ParseFold(f.Fold, f.Span), LowerDefault(f.Default))).ToList(),
+            fields.Select(f => new IrField(f.Name, Ty(f.Type), ParseFold(f.Fold, f.Span), LowerDefault(f.Default))
+            {
+                Collection = f.Collection is { } c ? new IrCollection(c.Kind, c.Size, c.Element, c.Carries, c.Owns) { Key = c.Key, KeyCarries = c.KeyCarries } : null,
+            }).ToList(),
             Array.Empty<IrEnumCase>(), null, new[] { IrAttr.Of("component") });
     }
 
@@ -2859,8 +2865,12 @@ public sealed partial class Lower
 
     private WeaveParam ToWeaveParam((string Name, TypeRef? Type, Expr? Default, string? From) p)
     {
-        var collection = p.From is not null && _shapeFields.TryGetValue(p.From, out var fs)
-            ? fs.FirstOrDefault(f => f.Name == p.Name)?.Collection : null;
+        // The shape the parameter came from: this bundle's, else a needed one's (`loom<Json> SavedLane { $Lane }` over the
+        // stdlib's $Lane) — without it a `~<list> cards: owns $Card` lost its element shape and was written empty.
+        var fields = p.From is null ? null
+            : _shapeFields.TryGetValue(p.From, out var fs) ? fs
+            : Index.Shapes.FirstOrDefault(kv => kv.Key == p.From || kv.Key.EndsWith("." + p.From, StringComparison.Ordinal)).Value?.Members.OfType<FieldDecl>().ToList();
+        var collection = fields?.FirstOrDefault(f => f.Name == p.Name)?.Collection;
         return new(p.Name, p.Type?.Name ?? "string", p.Default is not null, p.Type?.Args.FirstOrDefault()?.Name,
             // A `~` collection's kind (D24), so a weave reports a duplicate in a `~<set>` rather than folding it away;
             // and the shape its elements carry, so `toText` names a linked card by the CARD's first field.
@@ -3111,7 +3121,26 @@ public sealed partial class Lower
         }).ToList();
 
         return new IrToText(tt.Loom, format, prms.Select(ToWeaveParam).ToList(),
-            prms.Select(p => (string?)Bare(p.From!)).ToList(), defaults, shapes, marks);
+            prms.Select(p => (string?)Bare(p.From!)).ToList(), defaults, shapes, marks, LoomNames(tt.Span));
+    }
+
+    /// Every loom this bundle can weave — its own, then its needed bundles' — as (the shape of its first parameter,
+    /// that parameter): how each kind of record is NAMED. `toText` writes a link by the name the linked identity's own
+    /// loom gives it — a plan's tab (an identity carrying $Board and $Tab) by the board's `id`, not by `$Tab.label`,
+    /// which no loom names anything by.
+    private List<(string Shape, string Field)> LoomNames(SourceSpan at)
+    {
+        var names = new List<(string, string)>();
+        var looms = _builders.Values.Where(b => b.Loom is not null).Select(b => (Path: (IReadOnlyList<string>)Array.Empty<string>(), b.Name))
+            .Concat(Index.Builders.Where(kv => kv.Value.Loom is not null && kv.Value.Shared && _needed.Contains(string.Join(".", kv.Key.Split('.').Take(2))))
+                .Select(kv => (Path: (IReadOnlyList<string>)kv.Key.Split('.')[..^1], kv.Value.Name)));
+        foreach (var (path, name) in looms)
+            if (ResolveBringTarget(path, name, at) is { } target && WovenParams(target).FirstOrDefault() is { From: { } from } first)
+            {
+                string shape = from[(from.LastIndexOf('.') + 1)..];
+                if (!names.Any(n => n.Item1 == shape)) names.Add((shape, first.Name));
+            }
+        return names;
     }
 
     /// LowerBring with the ordering context suspended, so the bring itself lowers to a plain bring rather

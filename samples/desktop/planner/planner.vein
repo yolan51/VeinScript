@@ -5,31 +5,16 @@
 //   In the Workbench, press ▶ (F5): its window opens on example.plan beside it.
 //   veinc run samples/desktop/planner/planner.vein --ticks 8      (its rules alone, with no window drawn)
 //
-// WHAT THIS FILE DOES NOT WRITE: the File menu, New / Open… / Save / Save as…, the dialogs, "unsaved — do it again to
-// discard", recent files, the .plan files beside the open one, the window's title and its dot, the status bar. That
-// is the stdlib's document shell — *Vein.Desktop.Document, taken as TEMPLATES (D27): the window with `from`, its
-// slots filled with the planner's own menus, tools, sidebar and pages; the files shard with `from`, answered by
-// three hooks at the end of the file (documentNew, documentLoaded, documentText).
+// MOST OF THE APP IS THE STDLIB'S, TAKEN AS TEMPLATES (D27) — each a line here:
 //
-// WHAT IT DOES WRITE, BY FOUR IDEAS:
+//   *Vein.Desktop.Document   the window, File menu and toolbar, dialogs, unsaved warning, recents, the folder, the title
+//   *Vein.Desktop.Tabs       a tab per project: click, ×, drag to move, a dot while unsaved
+//   *Vein.Desktop.Board      a project's lanes and cards, as a board or as a list: add, move, tick, prioritise, count
 //
-// 1. THE DATA IS A TREE OF `owns` LISTS (D24). A plan owns its projects, a project its lanes, a lane its cards.
-//    A plan also keeps `~tabs`, a list that does NOT own: closing a tab leaves the project where it is.
-//
-// 2. EVERY PIECE OF THE SCREEN IS A VIEW ON ONE KIND OF IDENTITY (D26), placed by its parent's socket in the
-//    collection's ORDER — so `.move(x, i)` on the data moves it on the screen:
-//
-//      PlanSidebar  on $Plan     its projects (drag to reorder)     PlanPages   on $Plan     the tab strip and pages
-//      ProjectItem  on $Project  a sidebar entry                    ProjectTab  on $Project  a tab (drag it; × closes)
-//      ProjectBoard on $Project  the board page                     ProjectList on $Project  the list page
-//      LaneColumn   on $Lane     a board column                     LaneSection on $Lane     a list section
-//      CardTile     on $Card     a card on the board                CardLine    on $Card     a task in the list
-//
-// 3. FILES GO THROUGH LOOMS, BOTH WAYS. A .plan file is {"cards": […], "lanes": […], "projects": […], "plan": […]},
-//    each list one loom's toText<Json>, read back by the same loom — cards first, so a lane finds its cards by id.
-//
-// 4. HANDLERS CHANGE DATA; `settled` DERIVES WHAT IS SHOWN: the visible page, the accents, a tab's unsaved dot, the
-//    counts, the colours, "hide done".
+// WHAT THIS FILE WRITES is what only a planner has: a PLAN of projects (a project is a board with a tab), the sidebar
+// of projects you can drag, the board/list switch, and the hooks the templates call — documentNew, documentLoaded,
+// documentText for the file, boardChanged for an edit. A .plan file is {"cards", "lanes", "projects", "plan"}, each
+// list one loom's toText<Json>, read back by the same loom: cards first, so a lane finds its cards by id.
 
 bundle Planner by you {
     need "Vein.Desktop"
@@ -37,37 +22,25 @@ bundle Planner by you {
     need "Vein.Core"
     need "Vein.Graphics"
 
-    // ---- the data ---------------------------------------------------------------------------------------
+    // ---- the data: the planner's own; boards, lanes, cards and tabs are the stdlib's ------------------------
 
-    shape $Card { id: string, title: string, done: bool = false, priority: int = 1 }
-    shape $Lane { id: string, name: string, ~<list> cards: owns $Card }
-    shape $Project { id: string, name: string, ~<list> lanes: owns $Lane }
+    // A plan: its projects (boards) in order, and — from the stdlib's $TabStrip — its open tabs and the one showing.
+    shape $Plan { id: string, ~<list> projects: owns $TaskBoard }
 
-    // What a .plan file holds besides its projects: their order, the open tabs in theirs, and the tab showing.
-    shape $Plan { id: string, open: string = "", ~<list> projects: owns $Project, ~<list> tabs: $Project }
+    // The planner's own state, on the same identity as the shell's $Document.
+    shape $Planner { mode: string = "board", ~<list> plans: owns $Plan }
 
-    // The planner's own state, on the same identity as the shell's $Document: the page kind, and the open plan.
-    shape $Planner { mode: string = "board", hideDone: bool = false, ~<list> plans: owns $Plan }
+    builder Project { *Vein.Desktop.Board.$TaskBoard  *Vein.Desktop.Tabs.$Tab   mark #Project }
+    builder Plan { $Plan  *Vein.Desktop.Tabs.$TabStrip   mark #Plan }
 
-    builder Card { $Card   mark #Card }
-    builder Lane { $Lane   mark #Lane }
-    builder Project { $Project   mark #Project }
-    builder Plan { $Plan   mark #Plan }
-
-    loom<Json> SavedCard { $Card   mark #Card }
-    loom<Json> SavedLane { $Lane   mark #Lane }
-    loom<Json> SavedProject { $Project   mark #Project }
-    loom<Json> SavedPlan { $Plan   mark #Plan }
+    loom<Json> SavedProject { *Vein.Desktop.Board.$TaskBoard   mark #Project }
+    loom<Json> SavedPlan { $Plan  *Vein.Desktop.Tabs.$TabStrip   mark #Plan }
 
     event @LoadPlan { text: string }    // the old plan is gone; weave this one
     event @Fresh { }                     // the old plan is gone; start an empty one
 
-    mark #Card
-    mark #Lane
     mark #Project
     mark #Plan
-    mark #Edited            // a project changed since the plan was last saved: its tab shows a dot
-    // what the user can do
     mark #ShowBoard
     mark #ShowList
     mark #ToggleDone
@@ -76,31 +49,8 @@ bundle Planner by you {
     mark #ProjectName
     mark #DropOpenProject
     mark #OpenProject
-    mark #TabItem
-    mark #TabLabel
-    mark #CloseTab
     mark #DropProject
-    mark #LaneName
-    mark #AddLane
-    mark #DropLane
-    mark #CardName
-    mark #NewPriority
-    mark #AddCard
-    mark #MoveLeft
-    mark #MoveRight
-    mark #DeleteCard
-    mark #Done
-    mark #Priority
-    // what is shown
-    mark #BoardPage
-    mark #ListPage
     mark #NoTabs
-    mark #Tile
-    mark #Line
-    mark #LaneCount
-    mark #LaneStatus
-    mark #LaneBar
-    mark #ProjectProgress
     mark #CountLabel
 
     // ---- the window: the shell's, with the planner's parts in its slots ------------------------------------
@@ -132,6 +82,8 @@ bundle Planner by you {
     }
 
     shard Files from *Vein.Desktop.Document.!DocumentFiles
+    shard Tabs from *Vein.Desktop.Tabs.!TabActions
+    shard Boards from *Vein.Desktop.Board.!BoardActions
 
     // ---- the sidebar: the plan's projects (drag one onto another to move it) ---------------------------------
 
@@ -146,16 +98,16 @@ bundle Planner by you {
         }
     }
 
-    ShardView ProjectItem on $Project as p {
-        Button(p.Project.name) mark #Flat #OpenProject #Draggable as item
+    ShardView ProjectItem on $TaskBoard as p {
+        Button(p.TaskBoard.name) mark #Flat #OpenProject #Draggable as item
         attach $Tip to item { text: "Drag onto another project to move it" }
     }
 
-    // ---- the pages: a strip of tabs, and the open project's board or list -----------------------------
+    // ---- the pages: the stdlib's tabs, and the open project as the stdlib's board or list ------------------
 
     ShardView PlanPages on $Plan as plan {
         Column(8.0) {
-            Row(2.0) socket !ProjectTab(plan.Plan.~tabs)
+            Row(2.0) socket !ProjectTab(plan.TabStrip.~tabs)
             Divider(1.0)
             Label("No project open — pick one in the sidebar.") mark #NoTabs
             Column(8.0) socket !ProjectBoard(plan.Plan.~projects)
@@ -163,99 +115,19 @@ bundle Planner by you {
         }
     }
 
-    // A tab, as the Workbench draws one: its name (with a dot while unsaved) and a ×. Drag it onto another tab.
-    ShardView ProjectTab on $Project as t {
-        Row(0.0) mark #TabItem #Draggable {
-            Button(t.Project.name) mark #Flat #TabLabel
-            Button("×") mark #Flat #CloseTab as close
-            attach $Tip to close { text: "Close this tab — the project stays in the sidebar" }
-        }
+    ShardView ProjectTab from *Vein.Desktop.Tabs.!TabItem
+    ShardView ProjectBoard from *Vein.Desktop.Board.!BoardPage {
+        Tools { Button("Remove project") mark #DropProject }
     }
+    ShardView ProjectList from *Vein.Desktop.Board.!BoardList
 
-    // ---- the board: columns of cards that move -----------------------------------------------------------
-
-    ShardView ProjectBoard on $Project as p {
-        Column(12.0) mark #BoardPage #Hidden {
-            Row(8.0) {
-                Heading(p.Project.name, 22.0)
-                Input("", "New lane") mark #LaneName
-                Button("Add lane") mark #AddLane
-                Button("Remove project") mark #DropProject
-            }
-            Row(16.0) socket !LaneColumn(p.Project.~lanes)
-        }
-    }
-
-    ShardView LaneColumn on $Lane as l {
-        Column(6.0) {
-            Row(6.0) {
-                Heading(l.Lane.name, 16.0)
-                Badge("0") mark #LaneCount
-                Button("✕") mark #DropLane as drop
-                attach $Tip to drop { text: "Remove this lane and its cards" }
-            }
-            Column(6.0) socket !CardTile(l.Lane.~cards)
-            Row(4.0) {
-                Input("", "New card") mark #CardName
-                Button("+") mark #AddCard
-            }
-        }
-    }
-
-    ShardView CardTile on $Card as c {
-        Column(2.0) mark #Tile {
-            Row(4.0) {
-                Dropdown(levels(), c.Card.priority - 1) mark #Priority as chip
-                attach $Tint to chip { r: 0.92, g: 0.26, b: 0.21, a: intensity(c.Card.priority) }
-                Button("←") mark #MoveLeft
-                Button("→") mark #MoveRight
-                Button("✕") mark #DeleteCard
-            }
-            Check(c.Card.title, c.Card.done) mark #Done
-        }
-    }
-
-    // ---- the list: the same lanes and cards, as sections of tasks ---------------------------------------
-
-    ShardView ProjectList on $Project as p {
-        Column(12.0) mark #ListPage #Hidden {
-            Heading(p.Project.name, 22.0)
-            Label("") mark #ProjectProgress
-            Column(16.0) socket !LaneSection(p.Project.~lanes)
-        }
-    }
-
-    ShardView LaneSection on $Lane as l {
-        Column(6.0) {
-            Row(8.0) {
-                Heading(l.Lane.name, 16.0)
-                Label("") mark #LaneStatus
-            }
-            Progress(0.0, 1.0) mark #LaneBar
-            Column(2.0) socket !CardLine(l.Lane.~cards)
-            Row(6.0) {
-                Input("", "Add a task to " + l.Lane.name) mark #CardName
-                Dropdown(levels(), 0) mark #NewPriority
-                Button("Add") mark #AddCard
-            }
-        }
-    }
-
-    ShardView CardLine on $Card as c {
-        Row(8.0) mark #Line {
-            Dropdown(levels(), c.Card.priority - 1) mark #Priority as chip
-            attach $Tint to chip { r: 0.92, g: 0.26, b: 0.21, a: intensity(c.Card.priority) }
-            Check(c.Card.title, c.Card.done) mark #Done
-            Button("✕") mark #DeleteCard
-        }
-    }
-
-    // ---- what the user does: data changes ------------------------------------------------------------
+    // ---- what the user does --------------------------------------------------------------------------------
 
     shard Start {
         run once {
             bring Document("Planner", "example.plan", "plan", false, false, [], []) as doc
             attach $Planner to doc { mode: "board" }
+            attach $TaskBoardLooks to doc { hideDone: false }
         }
     }
 
@@ -263,82 +135,33 @@ bundle Planner by you {
         hear *Vein.UI.Interaction.@Clicked as k {
             target $Button #ShowBoard on k.target as b { target $Planner as a { a.Planner.mode = "board" } }
             target $Button #ShowList on k.target as b { target $Planner as a { a.Planner.mode = "list" } }
-            target $Button #ToggleDone on k.target as b { target $Planner as a { a.Planner.hideDone = not a.Planner.hideDone } }
-            target $Button #DropOpenProject on k.target as b { target $Plan as plan { do dropProjectById(plan.Plan.open) } }
+            target $Button #ToggleDone on k.target as b { target $TaskBoardLooks as looks { looks.TaskBoardLooks.hideDone = not looks.TaskBoardLooks.hideDone } }
+            target $Button #DropOpenProject on k.target as b { target $Plan as plan { do dropProject(openTabOf(plan)) } }
             target $Button #AddProject on k.target as b { do addProject() }
-            target $Owner #OpenProject on k.target as b { do openTab(b.Owner.ownerId) }
-            target $Owner #TabLabel on k.target as b { do openTab(b.Owner.ownerId) }
-            target $Owner #CloseTab on k.target as b { do closeTab(b.Owner.ownerId) }
-
-            // the pages: each button is owned by what it acts on
+            target $Owner #OpenProject on k.target as b { target $Plan as plan { do openTab(plan, b.Owner.ownerId) } }
             target $Owner #DropProject on k.target as b { do dropProject(b.Owner.ownerId) }
-            target $Owner #AddLane on k.target as b { do addLane(b.Owner.ownerId) }
-            target $Owner #DropLane on k.target as b { do dropLane(b.Owner.ownerId) }
-            target $Owner #AddCard on k.target as b { do addCard(b.Owner.ownerId) }
-            target $Owner #MoveLeft on k.target as b { do moveCard(b.Owner.ownerId, -1) }
-            target $Owner #MoveRight on k.target as b { do moveCard(b.Owner.ownerId, 1) }
-            target $Owner #DeleteCard on k.target as b { do deleteCard(b.Owner.ownerId) }
         }
 
-        // Dragging: a tab onto a tab moves it in the tab strip; a sidebar project onto another moves it in the plan.
+        // A sidebar project dragged onto another takes its place in the plan.
         hear *Vein.Desktop.Events.@Dropped as d {
-            target $Owner #TabItem on d.target as dragged {
-                target $Owner #TabItem on d.onto as under { do moveTab(dragged.Owner.ownerId, under.Owner.ownerId) }
-            }
             target $Owner #OpenProject on d.target as dragged {
                 target $Owner #OpenProject on d.onto as under { do moveProject(dragged.Owner.ownerId, under.Owner.ownerId) }
             }
+            emit *Vein.Desktop.Document.@DocumentChanged { }
         }
 
         hear @Submitted as s {
             target $Field #ProjectName on s.target as f { do addProject() }
-            target $Owner #LaneName on s.target as f { do addLane(f.Owner.ownerId) }
-            target $Owner #CardName on s.target as f { do addCard(f.Owner.ownerId) }
         }
 
         hear @Toggled as e {
-            target $Owner #Done on e.target as box {
-                target $Card on box.Owner.ownerId as c { c.Card.done = e.checked }
-                do touched(projectOfCard(box.Owner.ownerId))
-            }
-            target $Toggle #HideDone on e.target as t { target $Planner as a { a.Planner.hideDone = e.checked } }
-        }
-
-        hear @Picked as e {
-            target $Owner #Priority on e.target as pick {
-                target $Card on pick.Owner.ownerId as c { c.Card.priority = e.picked + 1 }
-                do touched(projectOfCard(pick.Owner.ownerId))
-            }
+            target $Toggle #HideDone on e.target as t { target $TaskBoardLooks as looks { looks.TaskBoardLooks.hideDone = e.checked } }
         }
     }
 
-    // A project changed: the document is unsaved, and the project's tab says so.
-    SF touched(project: Entity) {
-        target $Project on project as p { mark p #Edited }
-        emit *Vein.Desktop.Document.@DocumentChanged { }
-    }
-
-    SF openTab(project: Entity) {
-        target $Plan as plan {
-            target $Project on project as p {
-                if not (plan.Plan.~tabs has project) { plan.Plan.~tabs.add(project) }
-                plan.Plan.open = p.Project.id
-            }
-        }
-    }
-
-    // Only the tab goes: the project stays in the plan, and in the sidebar.
-    SF closeTab(project: Entity) {
-        target $Plan as plan { plan.Plan.~tabs.remove(project) }
-    }
-
-    // Dropped on another tab, a tab takes that tab's place; the one it lands on shifts over.
-    SF moveTab(project: Entity, under: Entity) {
-        target $Plan as plan {
-            var at = -1
-            target plan.Plan.~tabs as x { if x == under { at = Index } }
-            if at >= 0 { plan.Plan.~tabs.move(project, at) }
-        }
+    // The board template's hook: the user changed this board. The document is unsaved; its tab shows a dot.
+    SF boardChanged(board: Entity) {
+        target $TaskBoard on board as p { mark p #TabUnsaved }
         emit *Vein.Desktop.Document.@DocumentChanged { }
     }
 
@@ -348,7 +171,6 @@ bundle Planner by you {
             target plan.Plan.~projects as x { if x == under { at = Index } }
             if at >= 0 { plan.Plan.~projects.move(project, at) }
         }
-        emit *Vein.Desktop.Document.@DocumentChanged { }
     }
 
     // A project with the three usual lanes, named by the sidebar's box, opened in a tab. A bring is not seen by a
@@ -357,14 +179,14 @@ bundle Planner by you {
         target $Field #ProjectName as f {
             if not (trim(f.Field.value) == "") {
                 let n = nextNumber()
-                bring Lane("l" + n, "To do", []) as todo
-                bring Lane("l" + (n + 1), "Doing", []) as doing
-                bring Lane("l" + (n + 2), "Done", []) as done
-                bring Project("p" + (n + 3), trim(f.Field.value), [todo, doing, done]) as p
+                let name = trim(f.Field.value)
+                bring TaskLane("l" + n, "To do", []) as todo
+                bring TaskLane("l" + (n + 1), "Doing", []) as doing
+                bring TaskLane("l" + (n + 2), "Done", []) as done
+                bring Project("p" + (n + 3), name, [todo, doing, done], name) as p
                 target $Plan as plan {
                     plan.Plan.~projects.add(p)
-                    plan.Plan.~tabs.add(p)
-                    plan.Plan.open = "p" + (n + 3)
+                    do openTab(plan, p)
                 }
                 f.Field.value = ""
                 emit *Vein.Desktop.Document.@DocumentChanged { }
@@ -372,68 +194,13 @@ bundle Planner by you {
         }
     }
 
-    // Out of the tabs, then out of the plan — and an `owns` list ends what leaves it: the project, its lanes, cards.
+    // Its tab closes; out of the plan — and an `owns` list ends what leaves it: the project, its lanes, cards.
     SF dropProject(project: Entity) {
         target $Plan as plan {
-            plan.Plan.~tabs.remove(project)
+            do closeTab(plan, project)
             if plan.Plan.~projects has project { plan.Plan.~projects.remove(project) }
         }
         emit *Vein.Desktop.Document.@DocumentChanged { }
-    }
-
-    SF dropProjectById(id: string) {
-        target $Project as p { if p.Project.id == id { do dropProject(p) } }
-    }
-
-    SF addLane(project: Entity) {
-        target $Owner $Field #LaneName as f {
-            if f.Owner.ownerId == project and not (trim(f.Field.value) == "") {
-                bring Lane("l" + nextNumber(), trim(f.Field.value), []) as lane
-                target $Project on project as p { p.Project.~lanes.add(lane) }
-                f.Field.value = ""
-                do touched(project)
-            }
-        }
-    }
-
-    SF dropLane(lane: Entity) {
-        let project = projectOfLane(lane)
-        target $Project as p { if p.Project.~lanes has lane { p.Project.~lanes.remove(lane) } }
-        do touched(project)
-    }
-
-    // The lane has a box on the board and one in the list; the one that holds words is the one meant.
-    SF addCard(lane: Entity) {
-        var priority = 1
-        target $Owner $Choice #NewPriority as pick { if pick.Owner.ownerId == lane { priority = pick.Choice.picked + 1 } }
-        target $Owner $Field #CardName as f {
-            if f.Owner.ownerId == lane and not (trim(f.Field.value) == "") {
-                bring Card("c" + nextNumber(), trim(f.Field.value), false, priority) as card
-                target $Lane on lane as l { l.Lane.~cards.add(card) }
-                f.Field.value = ""
-                do touched(projectOfLane(lane))
-            }
-        }
-    }
-
-    // To the lane `step` places along in the same project. Adding to an `owns` list moves the card out of its old
-    // one, and its view follows it to the new lane's socket.
-    SF moveCard(card: Entity, step: int) {
-        let project = projectOfCard(card)
-        target $Project on project as p {
-            var at = -1
-            target p.Project.~lanes as l { if l.Lane.~cards has card { at = Index } }
-            if at >= 0 {
-                target p.Project.~lanes as l { if Index == at + step { l.Lane.~cards.add(card) } }
-            }
-        }
-        do touched(project)
-    }
-
-    SF deleteCard(card: Entity) {
-        let project = projectOfCard(card)
-        target $Lane as l { if l.Lane.~cards has card { l.Lane.~cards.remove(card) } }
-        do touched(project)
     }
 
     // ---- the shell's hooks: how a plan becomes text and back ----------------------------------------------
@@ -450,7 +217,7 @@ bundle Planner by you {
 
     // The four lists, each written by the loom that reads it back.
     fn documentText() return string {
-        return "{\"cards\": " + toText<Json>(SavedCard) + ", \"lanes\": " + toText<Json>(SavedLane) + ", \"projects\": " +
+        return "{\"cards\": " + toText<Json>(SavedTaskCard) + ", \"lanes\": " + toText<Json>(SavedTaskLane) + ", \"projects\": " +
             toText<Json>(SavedProject) + ", \"plan\": " + toText<Json>(SavedPlan) + "}\n"
     }
 
@@ -465,43 +232,40 @@ bundle Planner by you {
         // The old plan's identities are gone by now (they ended at the last commit), so its ids are free again.
         hear @LoadPlan as l {
             pending = l.text
-            weave SavedCard(toJson(fromJson(pending).cards))
+            weave SavedTaskCard(toJson(fromJson(pending).cards))
         }
 
         hear @Woven as w {
-            if w.loom == "SavedCard" { weave SavedLane(toJson(fromJson(pending).lanes)) }
-            if w.loom == "SavedLane" { weave SavedProject(toJson(fromJson(pending).projects)) }
+            if w.loom == "SavedTaskCard" { weave SavedTaskLane(toJson(fromJson(pending).lanes)) }
+            if w.loom == "SavedTaskLane" { weave SavedProject(toJson(fromJson(pending).projects)) }
             if w.loom == "SavedProject" { weave SavedPlan(toJson(fromJson(pending).plan)) }
             if w.loom == "SavedPlan" { do adoptPlan() }
         }
 
-        // A file from before plans had a record of their own has no "plan" list: that is not a problem.
+        // A file from before plans had a record of their own has no usable "plan" list: that is not a problem.
         hear @Unwoven as u { if not (u.loom == "SavedPlan") { emit *Vein.Console.Io.@Print { text: "! " + u.why } } }
 
         hear @Fresh as x {
             let n = nextNumber()
-            bring Lane("l" + n, "To do", []) as todo
-            bring Lane("l" + (n + 1), "Doing", []) as doing
-            bring Lane("l" + (n + 2), "Done", []) as done
-            bring Project("p" + (n + 3), "My project", [todo, doing, done]) as p
-            bring Plan("plan", "p" + (n + 3), [p], [p]) as plan
+            bring TaskLane("l" + n, "To do", []) as todo
+            bring TaskLane("l" + (n + 1), "Doing", []) as doing
+            bring TaskLane("l" + (n + 2), "Done", []) as done
+            bring Project("p" + (n + 3), "My project", [todo, doing, done], "My project") as p
+            bring Plan("plan", [p], 0, [p]) as plan
             target $Planner as a { a.Planner.~plans.add(plan) }
         }
     }
 
-    // The woven plan becomes the planner's. A file from before plans had a record of their own gets one: its
-    // projects in the file's order, each open in a tab.
+    // The woven plan becomes the planner's, each project given its tab's label. A file without a plan record gets
+    // one: its projects in the file's order, each open in a tab.
     SF adoptPlan() {
+        target $TaskBoard as b { attach $Tab to b { label: b.TaskBoard.name } }
         var plans = 0
         target $Plan as plan { plans += 1 }
         if plans == 0 {
             var all = []
-            var first = ""
-            target $Project as p {
-                all += p
-                if first == "" { first = p.Project.id }
-            }
-            bring Plan("plan", first, all, all) as made
+            target $TaskBoard as b { all += b }
+            bring Plan("plan", all, 0, all) as made
             target $Planner as a { a.Planner.~plans.add(made) }
         }
         target $Planner as a {
@@ -514,148 +278,34 @@ bundle Planner by you {
     shard Looks {
         settled {
             var mode = "board"
-            var hide = false
-            target $Planner as a {
-                mode = a.Planner.mode
-                hide = a.Planner.hideDone
-            }
+            target $Planner as a { mode = a.Planner.mode }
 
-            // The open tab, or the first tab when it was closed; none while no tab is open.
-            var open = ""
+            // The open project is the open tab's; one page shows it — its board or its list.
+            var open = 0
             var tabs = 0
             target $Plan as plan {
-                var found = false
-                var first = ""
-                target plan.Plan.~tabs as x {
-                    tabs += 1
-                    target $Project on x as p {
-                        if p.Project.id == plan.Plan.open { found = true }
-                        if first == "" { first = p.Project.id }
-                    }
-                }
-                if not found { plan.Plan.open = first }
-                open = plan.Plan.open
-                if not found { open = first }
+                open = openTabOf(plan)
+                target plan.TabStrip.~tabs as x { tabs += 1 }
             }
             target $Text #NoTabs as t { if tabs == 0 { unmark t #Hidden } else { mark t #Hidden } }
+            target $Owner #BoardPage as page { if mode == "board" and page.Owner.ownerId == open { unmark page #Hidden } else { mark page #Hidden } }
+            target $Owner #ListPage as page { if mode == "list" and page.Owner.ownerId == open { unmark page #Hidden } else { mark page #Hidden } }
 
-            // One page at a time: the open project's board, or its list.
-            target $Owner #BoardPage as page {
-                target $Project on page.Owner.ownerId as p { if mode == "board" and p.Project.id == open { unmark page #Hidden } else { mark page #Hidden } }
-            }
-            target $Owner #ListPage as page {
-                target $Project on page.Owner.ownerId as p { if mode == "list" and p.Project.id == open { unmark page #Hidden } else { mark page #Hidden } }
-            }
+            // Saved: no tab has a dot.
+            target $Document as d { if not d.Document.dirty { target $TaskBoard #TabUnsaved as p { unmark p #TabUnsaved } } }
 
-            // Saved: no tab has a dot. The tab strip: the open tab accented, an unsaved project's name with a dot.
-            target $Document as d { if not d.Document.dirty { target $Project #Edited as p { unmark p #Edited } } }
-            target $Owner $Button #TabLabel as label {
-                target $Project on label.Owner.ownerId as p {
-                    if p.Project.id == open { mark label #Accent } else { unmark label #Accent }
-                    if p carries #Edited { label.Button.label = p.Project.name + "  •" } else { label.Button.label = p.Project.name }
-                }
-            }
-            target $Owner #OpenProject as item {
-                target $Project on item.Owner.ownerId as p { if p.Project.id == open { mark item #Accent } else { unmark item #Accent } }
-            }
+            target $Owner #OpenProject as item { if item.Owner.ownerId == open { mark item #Accent } else { unmark item #Accent } }
             target $Button #ShowBoard as b { if mode == "board" { mark b #Accent } else { unmark b #Accent } }
             target $Button #ShowList as b { if mode == "list" { mark b #Accent } else { unmark b #Accent } }
-            target $Toggle #HideDone as t { t.Toggle.checked = hide }
+            target $TaskBoardLooks as looks { target $Toggle #HideDone as t { t.Toggle.checked = looks.TaskBoardLooks.hideDone } }
 
-            // Done tasks hidden on both pages, when asked; the priority colour follows each dropdown.
-            target $Owner #Tile as w { target $Card on w.Owner.ownerId as c { if hide and c.Card.done { mark w #Hidden } else { unmark w #Hidden } } }
-            target $Owner #Line as w { target $Card on w.Owner.ownerId as c { if hide and c.Card.done { mark w #Hidden } else { unmark w #Hidden } } }
-            target $Owner $Choice $Tint #Priority as chip { chip.Tint.a = intensity(chip.Choice.picked + 1) }
-
-            // Counts, per lane, per project, and in the status bar.
-            target $Owner $Text #LaneCount as label { target $Lane on label.Owner.ownerId as l { label.Text.content = string(cardsIn(l)) } }
-            target $Owner $Text #LaneStatus as label {
-                target $Lane on label.Owner.ownerId as l { label.Text.content = string(cardsIn(l) - doneIn(l)) + " of " + string(cardsIn(l)) + " left" }
-            }
-            target $Owner $Progress #LaneBar as bar {
-                target $Lane on bar.Owner.ownerId as l {
-                    bar.Progress.value = float(doneIn(l))
-                    bar.Progress.max = float(max1(cardsIn(l)))
-                }
-            }
-            target $Owner $Text #ProjectProgress as label {
-                target $Project on label.Owner.ownerId as p {
-                    var all = 0
-                    var done = 0
-                    target p.Project.~lanes as l {
-                        all += cardsIn(l)
-                        done += doneIn(l)
-                    }
-                    label.Text.content = string(done) + " of " + string(all) + " tasks done"
-                }
-            }
             var cards = 0
             var finished = 0
-            target $Card as c {
+            target $TaskCard as c {
                 cards += 1
-                if c.Card.done { finished += 1 }
+                if c.TaskCard.done { finished += 1 }
             }
             target $Text #CountLabel as t { t.Text.content = string(cards) + " cards, " + string(finished) + " done" }
         }
-    }
-
-    // ---- small answers -------------------------------------------------------------------------------
-
-    fn levels() return list<string> { return ["Low", "Medium", "High", "Very high"] }
-
-    fn intensity(level: int) return float {
-        if level >= 4 { return 1.0 }
-        if level == 3 { return 0.7 }
-        if level == 2 { return 0.42 }
-        return 0.18
-    }
-
-    fn projectOfLane(lane: Entity) return Entity {
-        var found = 0
-        target $Project as p { if p.Project.~lanes has lane { found = p } }
-        return found
-    }
-
-    fn projectOfCard(card: Entity) return Entity {
-        var found = 0
-        target $Lane as l { if l.Lane.~cards has card { found = projectOfLane(l) } }
-        return found
-    }
-
-    fn cardsIn(lane: Entity) return int {
-        var n = 0
-        target $Lane on lane as l { target l.Lane.~cards as c { n += 1 } }
-        return n
-    }
-
-    fn doneIn(lane: Entity) return int {
-        var n = 0
-        target $Lane on lane as l { target l.Lane.~cards as c { if c.Card.done { n += 1 } } }
-        return n
-    }
-
-    fn max1(n: int) return int {
-        if n < 1 { return 1 }
-        return n
-    }
-
-    // A number no card, lane or project uses yet: one more than the largest after their first letter.
-    fn nextNumber() return int {
-        var top = 0
-        target $Card as c { top = larger(top, numberIn(c.Card.id)) }
-        target $Lane as l { top = larger(top, numberIn(l.Lane.id)) }
-        target $Project as p { top = larger(top, numberIn(p.Project.id)) }
-        return top + 1
-    }
-
-    fn numberIn(id: string) return int {
-        let digits = substring(id, 1, len(id) - 1)
-        if isNumber(digits) { return int(digits) }
-        return 0
-    }
-
-    fn larger(a: int, b: int) return int {
-        if a > b { return a }
-        return b
     }
 }

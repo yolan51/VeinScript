@@ -198,4 +198,5 @@ public sealed record IrList(IReadOnlyList<IrExpr> Items) : IrExpr;
 /// may leave out a value that equals it.
 public sealed record IrToText(
     string Loom, WeaveFormat Format, IReadOnlyList<WeaveParam> Params, IReadOnlyList<string?> From,
-    IReadOnlyList<object?> Defaults, IReadOnlyList<string> Shapes, IReadOnlyList<string> Marks) : IrExpr;
+    IReadOnlyList<object?> Defaults, IReadOnlyList<string> Shapes, IReadOnlyList<string> Marks,
+    IReadOnlyList<(string Shape, string Field)>? Names = null) : IrExpr;   // each loom's record name: a link is written by it

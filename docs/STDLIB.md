@@ -112,6 +112,10 @@ Vein.Desktop  — windows and widgets as identities: $Window $Panel $Toggle $Pic
                 #Flat buttons, #Draggable → @Dropped { target, onto }; file dialogs @PickOpenFile @PickSaveFile → @FilePicked / @PickCancelled
                 a document app's shell, as TEMPLATES (D27): *Vein.Desktop.Document — $Document, ShardView DocumentWindow (slots
                 Menus Tools Sidebar Content Status), shard DocumentFiles (hooks documentNew, documentLoaded(text), documentText())
+                *Vein.Desktop.Tabs — $TabStrip { open, ~tabs } over $Tab { label }, ShardView TabItem (drag to reorder),
+                shard TabActions; openTab moveTab closeTab openTabOf
+                *Vein.Desktop.Board — $TaskBoard ~lanes owns $TaskLane ~cards owns $TaskCard, looms SavedTaskCard SavedTaskLane,
+                ShardViews BoardPage BoardList (slot Tools), shard BoardActions (hook boardChanged(board)), $TaskBoardLooks { hideDone }
                 (stdlib/Desktop.vein; the Workbench's ▶ draws them — HOSTING.md "Desktop programs")
 Vein.Files    — @ReadFile @WriteFile → @FileLoaded @FileWritten @FileMissing; @ListFolder → @FolderListed { entries }; fileName(path), folderOf(path)
 ```

@@ -2062,6 +2062,10 @@ public sealed class Interp
         // owns $Card` → the card's `id`), or, for a plain `Entity`, this loom's own first parameter.
         string? NameOf(object? v, string? shape = null)
         {
+            // The name its own loom gives it: the first field of a loomed shape it carries — the element's shape first.
+            if (v is long linked && linked != 0 && _store.IsAlive(linked) && t.Names is { } names)
+                foreach (var (s0, field0) in names.OrderBy(n => n.Shape == shape ? 0 : 1))
+                    if (_store.Has(linked, s0)) return Str(_store.Read(linked, s0, field0));
             string? s = shape ?? nameShape;
             string? field = shape is null ? t.Params[0].Name : _store.FieldsOf(shape)?.FirstOrDefault()?.Name;
             return v is long id && id != 0 && s is not null && field is not null && _store.IsAlive(id) && _store.Has(id, s)

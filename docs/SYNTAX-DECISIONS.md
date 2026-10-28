@@ -1038,6 +1038,14 @@ fn documentText() return string { … }                      // a HOOK the templ
   program's `box.Field.value = …` raised `@Edited`, which marked a fresh document unsaved.
 - **A template that starts something does it on its first `settled` frame.** In `run once` it cannot see the
   identity the program brings in its own `run once`, because that bring commits after both have run.
+- **A needed bundle's `owns` survives the import.** Without it, ending a board left its lanes, and reopening a
+  file refused every record ("already woven").
+- **`toText` writes a link by the name its own loom gives it.** A tab carrying `$TaskBoard` and `$Tab` is written
+  as the board's id, not its label.
+
+**A library's shapes need distinctive names.** Shapes unify by bare name across a program (RULES 15b), so a library
+`$Card` clashed (VS0220) with every program that has its own, as `samples/desktop/kanban.vein` does. The board library
+says `$TaskCard`, `$TaskLane`, `$TaskBoard`; the publicator keeps the short name (`*Vein.Desktop.Board`).
 
 ## Reserved-word disposition
 
@@ -1093,7 +1101,7 @@ Still pending: tokens `LBracket`/`RBracket` if D9(a). **Never keywords:** `class
 - **D9** — brackets & list syntax: (a) vs (b). *(specs assume (a).)*
 - **D10** — user-defined generics timing. *(deferred.)*
 - **D26** — views: built. Open part: the web (needs web widgets as a `$Parent` tree).
-- **D27** — templates (`from`, `slot`): built. Next: the tabs and the board as templates too.
+- **D27** — templates (`from`, `slot`): built, with three libraries on it — *Vein.Desktop.Document, .Tabs, .Board (the planner: 892 → 311 lines).
 - **Reserved block** — `transform`: assign a meaning or cut before v1.0. (`on` got one: D22.)
   *(The rest of what this list once held — `by`, `start`, `audience`, `bridge`, `bring`, `builder`,
   `mute`, `unmute` —

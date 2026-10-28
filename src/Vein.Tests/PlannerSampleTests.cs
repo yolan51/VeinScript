@@ -19,17 +19,17 @@ public class PlannerSampleTests : IDisposable
                     if k.frame == 6 {
                         target $Planner as a {
                             target a.Planner.~plans as plan {
-                                var line = "open=" + plan.Plan.open + " ::"
+                                var line = "open=" + plan.TabStrip.open + " ::"
                                 target plan.Plan.~projects as p {
-                                    line = line + " " + p.Project.name + ":"
-                                    target p.Project.~lanes as l {
-                                        line = line + " [" + l.Lane.name
-                                        target l.Lane.~cards as c { line = line + " " + c.Card.id }
+                                    line = line + " " + p.TaskBoard.name + ":"
+                                    target p.TaskBoard.~lanes as l {
+                                        line = line + " [" + l.TaskLane.name
+                                        target l.TaskLane.~cards as c { line = line + " " + c.TaskCard.id }
                                         line = line + "]"
                                     }
                                 }
                                 line = line + " tabs:"
-                                target plan.Plan.~tabs as t { line = line + " " + t.Project.name }
+                                target plan.TabStrip.~tabs as t { line = line + " " + t.Tab.label }
                                 target $Document as doc { target doc.Document.~entries as e { line = line + " entry=" + e.FolderFile.name } }
                                 emit *Vein.Console.Io.@Print { text: line }
                             }
@@ -67,7 +67,7 @@ public class PlannerSampleTests : IDisposable
         new Interp { Ticks = 8, BaseDirectory = _dir }.Run(r.Modules[0], new StringReader(""), output);
         string text = output.ToString();
 
-        Assert.Contains("open=p1 :: Website: [To do c1 c2] [Doing c3] [Done c4] Home: [To do c5 c7] [Done c6] tabs: Website Home entry=example.plan", text);
+        Assert.Contains("open=0 :: Website: [To do c1 c2] [Doing c3] [Done c4] Home: [To do c5 c7] [Done c6] tabs: Website Home entry=example.plan", text);
         Assert.Contains("tab widgets=2", text);
         Assert.Contains("windows=1 tiles=7 lines=7", text);       // every card twice: a tile on the board, a line in the list
         Assert.DoesNotContain("! ", text);                         // nothing unwoven
