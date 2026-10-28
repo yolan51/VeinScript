@@ -1,0 +1,277 @@
+// samples/desktop/kanban.vein — a kanban board built from six ShardViews (D26): projects as tabs, lanes as
+// columns, cards that move from lane to lane.
+//
+//   In the Workbench, press ▶ (F5): its window opens, built by its views.
+//   veinc run samples/desktop/kanban.vein --ticks 6      (its rules alone, with no window drawn)
+//
+// THE DATA IS A TREE OF `owns` LISTS (D24), AND THE SCREEN FOLLOWS IT. An app owns projects, a project owns lanes,
+// a lane owns cards. Each view is about ONE kind of identity, and a parent view places its children with a socket
+// named after them, filled from the parent's own list:
+//
+//   MainWindow   on $App       the window          socket !ProjectTab(a.App.~projects)
+//                                                   socket !ProjectBoard(a.App.~projects)
+//                                                   socket !StatusBar
+//   StatusBar    on $App       a second view of the same app, in the window's bottom row
+//   ProjectTab   on $Project   a button in the tab row
+//   ProjectBoard on $Project   a second view of the same project:  socket !LaneColumn(p.Project.~lanes)
+//   LaneColumn   on $Lane      a column:                           socket !CardRow(l.Lane.~cards)
+//   CardRow      on $Card      a priority, a checkbox, → and ✕
+//
+// WHAT IS NOT WRITTEN HERE: where a card's row goes, when a column appears, how a removed card's row leaves, or
+// how a moved card's row follows it. Moving a card is one line of DATA — `next.Lane.~cards.add(card)` takes it
+// out of its lane, because an `owns` list holds an identity once — and its row leaves the old lane's socket and
+// is built again in the new one. Removing it from its lane ends it, and its row with it.
+//
+// Handlers stay rules: every widget a view builds is OWNED by the identity it is a view of, so a click on a
+// card's → is `target $Owner #Move on c.target as m` and `m.Owner.ownerId` is the card.
+
+bundle Kanban by you {
+    need "Vein.Desktop"
+    need "Vein.UI"
+    need "Vein.Core"
+    need "Vein.Graphics"
+
+    // ---- the data ---------------------------------------------------------------------------------------
+
+    shape $Card { title: string, done: bool = false, priority: int = 1 }
+    shape $Lane { name: string, ~<list> cards: owns $Card }
+    shape $Project { name: string, ~<list> lanes: owns $Lane }
+    shape $App { title: string, open: string = "", ~<list> projects: owns $Project }
+
+    builder Card { $Card   mark #Card }
+    builder Lane { $Lane   mark #Lane }
+    builder Project { $Project   mark #Project }
+    builder App { $App   mark #App }
+
+    mark #Card
+    mark #Lane
+    mark #Project
+    mark #App
+    mark #Tab           // a project's tab
+    mark #Board         // a project's board: shown when its project is open
+    mark #LaneName      // a board's "new lane" box
+    mark #AddLane       // …and its button
+    mark #LaneCount     // a column's "3 cards"
+    mark #CardName      // a column's "new card" box
+    mark #AddCard       // …and its button
+    mark #Priority      // a card's priority
+    mark #Done          // a card's checkbox
+    mark #Move          // a card's →
+    mark #Delete        // a card's ✕
+    mark #Status        // the status bar's text
+
+    // ---- the views: one per kind of identity, placed by its parent's socket ----------------------------
+
+    ShardView MainWindow on $App as a {
+        Window(a.App.title, 1000.0, 600.0) {
+            Heading(a.App.title, 24.0)
+            Row(6.0) socket !ProjectTab(a.App.~projects)
+            Divider(1.0)
+            Column(8.0) socket !ProjectBoard(a.App.~projects)
+            Divider(1.0)
+            Row(8.0) socket !StatusBar
+        }
+    }
+
+    ShardView StatusBar on $App as s {
+        Label("") mark #Status
+    }
+
+    ShardView ProjectTab on $Project as p {
+        Button(p.Project.name) mark #Tab
+    }
+
+    ShardView ProjectBoard on $Project as p {
+        Column(10.0) mark #Board #Hidden {
+            Row(8.0) {
+                Heading(p.Project.name, 18.0)
+                Input("", "New lane") mark #LaneName
+                Button("Add lane") mark #AddLane
+            }
+            Row(14.0) socket !LaneColumn(p.Project.~lanes)
+        }
+    }
+
+    ShardView LaneColumn on $Lane as l {
+        Column(6.0) {
+            Heading(l.Lane.name, 16.0)
+            Label("") mark #LaneCount
+            Column(4.0) socket !CardRow(l.Lane.~cards)
+            Row(4.0) {
+                Input("", "New card") mark #CardName
+                Button("+") mark #AddCard
+            }
+        }
+    }
+
+    ShardView CardRow on $Card as c {
+        Row(6.0) {
+            Dropdown(levels(), c.Card.priority - 1) mark #Priority as chip
+            attach $Tint to chip { r: 0.92, g: 0.26, b: 0.21, a: intensity(c.Card.priority) }
+            attach $Tip to chip { text: "Priority" }
+            Check(c.Card.title, c.Card.done) mark #Done
+            Button("→") mark #Move as move
+            attach $Tip to move { text: "Move to the next lane" }
+            Button("✕") mark #Delete
+        }
+    }
+
+    // ---- the starting board: data only — the views do the rest -------------------------------------------
+
+    shard Seed {
+        run once {
+            bring App("Kanban", "Website", []) as board
+
+            bring Project("Website", []) as web
+            bring Lane("To do", []) as webTodo
+            bring Lane("Doing", []) as webDoing
+            bring Lane("Done", []) as webDone
+            bring Card("Write the copy", false, 3) as copy
+            bring Card("Pick a typeface", false, 1) as font
+            bring Card("Build the menu", false, 4) as menu
+            bring Card("Buy the domain", true, 2) as domain
+            webTodo.Lane.~cards.add(copy)
+            webTodo.Lane.~cards.add(font)
+            webDoing.Lane.~cards.add(menu)
+            webDone.Lane.~cards.add(domain)
+            web.Project.~lanes.add(webTodo)
+            web.Project.~lanes.add(webDoing)
+            web.Project.~lanes.add(webDone)
+
+            bring Project("Home", []) as home
+            bring Lane("To do", []) as homeTodo
+            bring Lane("Done", []) as homeDone
+            bring Card("Fix the tap", false, 4) as tap
+            bring Card("Water the plants", false, 1) as plants
+            homeTodo.Lane.~cards.add(tap)
+            homeTodo.Lane.~cards.add(plants)
+            home.Project.~lanes.add(homeTodo)
+            home.Project.~lanes.add(homeDone)
+
+            board.App.~projects.add(web)
+            board.App.~projects.add(home)
+        }
+    }
+
+    // ---- what the user does: data changes, one or two lines each ---------------------------------------
+
+    shard Actions {
+        hear *Vein.UI.Interaction.@Clicked as k {
+            target $Owner #Tab on k.target as t {
+                target $Project on t.Owner.ownerId as p { target $App as a { a.App.open = p.Project.name } }
+            }
+            target $Owner #AddLane on k.target as b { do addLane(b.Owner.ownerId) }
+            target $Owner #AddCard on k.target as b { do addCard(b.Owner.ownerId) }
+            target $Owner #Move on k.target as m { do moveRight(m.Owner.ownerId) }
+            target $Owner #Delete on k.target as d { do removeCard(d.Owner.ownerId) }
+        }
+
+        hear @Submitted as s {
+            target $Owner #LaneName on s.target as f { do addLane(f.Owner.ownerId) }
+            target $Owner #CardName on s.target as f { do addCard(f.Owner.ownerId) }
+        }
+
+        hear @Toggled as e {
+            target $Owner #Done on e.target as box { target $Card on box.Owner.ownerId as c { c.Card.done = e.checked } }
+        }
+
+        hear @Picked as e {
+            target $Owner #Priority on e.target as pick { target $Card on pick.Owner.ownerId as c { c.Card.priority = e.picked + 1 } }
+        }
+    }
+
+    // A new lane at the end of the project, named by its board's box.
+    SF addLane(project: Entity) {
+        target $Owner $Field #LaneName as f {
+            if f.Owner.ownerId == project and not (trim(f.Field.value) == "") {
+                bring Lane(trim(f.Field.value), []) as lane
+                target $Project on project as p { p.Project.~lanes.add(lane) }
+                f.Field.value = ""
+            }
+        }
+    }
+
+    // A new card at the bottom of the lane, named by its column's box.
+    SF addCard(lane: Entity) {
+        target $Owner $Field #CardName as f {
+            if f.Owner.ownerId == lane and not (trim(f.Field.value) == "") {
+                bring Card(trim(f.Field.value), false, 1) as card
+                target $Lane on lane as l { l.Lane.~cards.add(card) }
+                f.Field.value = ""
+            }
+        }
+    }
+
+    // To the next lane of the same project. An `owns` list holds a card once, so adding it moves it.
+    SF moveRight(card: Entity) {
+        var lane = 0
+        target $Lane as l { if l.Lane.~cards has card { lane = l } }
+        var next = 0
+        target $Project as p {
+            var passed = false
+            target p.Project.~lanes as l {
+                if passed and next == 0 { next = l }
+                if l == lane { passed = true }
+            }
+        }
+        if not (next == 0) { target $Lane on next as n { n.Lane.~cards.add(card) } }
+    }
+
+    // Out of its lane — and an `owns` list ends what leaves it: the card, and so its row.
+    SF removeCard(card: Entity) {
+        target $Lane as l { if l.Lane.~cards has card { l.Lane.~cards.remove(card) } }
+    }
+
+    // ---- what is shown, derived -------------------------------------------------------------------------
+
+    shard Looks {
+        settled {
+            var open = ""
+            target $App as a { open = a.App.open }
+
+            // One board at a time, and its tab accented.
+            target $Owner #Board as b {
+                target $Project on b.Owner.ownerId as p { if p.Project.name == open { unmark b #Hidden } else { mark b #Hidden } }
+            }
+            target $Owner #Tab as t {
+                target $Project on t.Owner.ownerId as p { if p.Project.name == open { mark t #Accent } else { unmark t #Accent } }
+            }
+
+            target $Owner $Text #LaneCount as label {
+                target $Lane on label.Owner.ownerId as l { label.Text.content = plural(cards(l), "card") }
+            }
+
+            target $Owner $Choice $Tint #Priority as chip { chip.Tint.a = intensity(chip.Choice.picked + 1) }
+
+            var all = 0
+            var done = 0
+            target $Card as c {
+                all += 1
+                if c.Card.done { done += 1 }
+            }
+            target $Text #Status as s { s.Text.content = plural(all, "card") + ", " + string(done) + " done" }
+        }
+    }
+
+    // ---- small answers -------------------------------------------------------------------------------
+
+    fn levels() return list<string> { return ["Low", "Medium", "High", "Very high"] }
+
+    fn intensity(level: int) return float {
+        if level >= 4 { return 1.0 }
+        if level == 3 { return 0.7 }
+        if level == 2 { return 0.42 }
+        return 0.18
+    }
+
+    fn cards(lane: Entity) return int {
+        var n = 0
+        target $Lane on lane as l { target l.Lane.~cards as c { n += 1 } }
+        return n
+    }
+
+    fn plural(n: int, word: string) return string {
+        if n == 1 { return "1 " + word }
+        return string(n) + " " + word + "s"
+    }
+}

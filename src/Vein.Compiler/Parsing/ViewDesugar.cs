@@ -68,7 +68,7 @@ public static class ViewDesugar
                         guard = And(guard, Not(new CarriesExpr(new NameExpr(v.Bind, v.Span), false, ex, v.Span), v.Span), v.Span);
                     var each = new TargetStmt(collection, v.Bind, Blk(v.Span,
                         new IfStmt(guard, Blk(v.Span, Build(v, s).ToArray()), null, v.Span)), v.Span);
-                    fill = new QueryStmt(parent.Shapes, parent.Marks, parent.Bind, Blk(v.Span, each), v.Span)
+                    fill = new QueryStmt(parent.Shapes, parent.Marks, parent.Bind, Blk(v.Span, Leave(v, s, collection), each), v.Span)
                     { On = Member(s, "Owner", "ownerId") };
                 }
                 else fill = Instances(v, s);
@@ -113,6 +113,20 @@ public static class ViewDesugar
                 if (w.Socket is { } s) stmts.Add(new MarkStmt(false, self, $"__vsock_{v.Name}_{s.View}", w.Span));
                 foreach (var child in w.Children) Emit(child, self, top: false);
             }
+        }
+
+        // THE DATA DECIDES WHAT FILLS A SOCKET, also when it changes. A root in this socket whose identity has left
+        // the collection (a card moved to another lane: an `owns` add moves it) is discarded and its identity
+        // unmarked — so the next frame builds it again in whichever socket's collection now holds it.
+        Stmt Leave(ViewOnDecl v, Expr socket, Expr collection)
+        {
+            var r = new NameExpr("__r", v.Span);
+            var owner = Member(r, "Owner", "ownerId");
+            return new QueryStmt(new[] { "Owner", "Parent" }, new[] { RootMark(v) }, "__r", Blk(v.Span,
+                new IfStmt(new BinaryExpr(BinOp.Eq, Member(r, "Parent", "of"), socket, v.Span), Blk(v.Span,
+                    new IfStmt(Not(new HasExpr(collection, owner, v.Span), v.Span), Blk(v.Span,
+                        new MarkStmt(true, owner, ViewMark(v), v.Span),
+                        Do(Widgets, "discard", v.Span, r)), null, v.Span)), null, v.Span)), v.Span);
         }
 
         // A view ends with its identity: every root whose identity no longer carries the view's shapes goes.

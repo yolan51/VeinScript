@@ -63,6 +63,7 @@ public class ViewTests
                     if k.frame == 6 {
                         target $Task as t { if t.Task.text == "Fix tap" { destroy t } }
                         target $Owner #Delete as d { target $Task on d.Owner.ownerId as t { if t.Task.text == "Ship it" { do discard(t) } } }
+                        target $Group as g { if g.Group.name == "Work" { target $Task as t { if t.Task.text == "Water plants" { g.Group.~tasks.add(t) } } } }
                     }
                     if k.frame == 9 { do report("after") }
                 }
@@ -102,10 +103,11 @@ public class ViewTests
     }
 
     [Fact]
-    public void A_view_ends_with_its_identity_whether_it_was_discarded_or_destroyed()
+    public void A_view_ends_with_its_identity_and_follows_it_when_it_moves_to_another_collection()
     {
-        // `discard(ship)` takes its row through ownership; a plain `destroy` of Fix tap is swept by the view.
-        Assert.Contains("after: windows=1 | Water plants in Home", Run(Lego, 10));
+        // `discard(ship)` takes its row through ownership; a plain `destroy` of Fix tap is swept by the view; and
+        // Water plants, moved from Home's list to Work's, leaves Home's socket and is built again in Work's.
+        Assert.Contains("after: windows=1 | Water plants in Work", Run(Lego, 10));
     }
 
     [Theory]

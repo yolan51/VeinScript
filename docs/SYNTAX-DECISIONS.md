@@ -954,6 +954,10 @@ ShardView TaskRow on $Task as t { Row(8.0) { … } }          // reusable: it do
 - **Marks go back to one job:** naming roles for handlers (`#Done`, `#Delete`).
 - Any depth works. Several views can sit on one shape (a tab and a column, both `on $Group`). Data may arrive
   in any order: a socket fills as its identities appear. `discard` cascades through ownership and the tree.
+- **A socket follows its collection.** When an identity leaves the collection (a card moved to another lane:
+  adding it to an `owns` list moves it), its view leaves that socket and is built again, a frame later, in
+  whichever socket's collection holds it now. Moving a card is one line of data:
+  `next.Lane.~cards.add(card)`. Sample: `samples/desktop/kanban.vein`, six views.
 - A ShardView declared inside another's body is not allowed: composition is through sockets only.
 
 *Web, eventually.* Today a page is a stream of `@Html` fragments, so order is everything and a brick cannot
