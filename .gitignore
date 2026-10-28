@@ -12,3 +12,9 @@ chatserver
 # Local tool settings — per-machine permissions, not part of the project. Untracked but not ignored
 # meant a `git add .` would have swept it into a public repository.
 .claude/
+
+# What the desktop samples remember when you run them — your own data, not the sample.
+samples/desktop/groups.json
+samples/desktop/tasks.json
+samples/desktop/todo.json
+samples/desktop/planner/planner.recent.json

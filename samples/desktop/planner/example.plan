@@ -1,0 +1,15 @@
+{"cards": [{"id":"c1","title":"Write the copy","done":false,"priority":3},
+ {"id":"c2","title":"Pick a typeface","done":false,"priority":1},
+ {"id":"c3","title":"Build the menu","done":false,"priority":4},
+ {"id":"c4","title":"Buy the domain","done":true,"priority":2},
+ {"id":"c5","title":"Fix the tap","done":false,"priority":4},
+ {"id":"c6","title":"Water the plants","done":true,"priority":1},
+ {"id":"c7","title":"Call the plumber","done":false,"priority":2}]
+, "lanes": [{"id":"l1","name":"To do","cards":["c1","c2"]},
+ {"id":"l2","name":"Doing","cards":["c3"]},
+ {"id":"l3","name":"Done","cards":["c4"]},
+ {"id":"l4","name":"To do","cards":["c5","c7"]},
+ {"id":"l5","name":"Done","cards":["c6"]}]
+, "projects": [{"id":"p1","name":"Website","lanes":["l1","l2","l3"]},
+ {"id":"p2","name":"Home","lanes":["l4","l5"]}]
+}
