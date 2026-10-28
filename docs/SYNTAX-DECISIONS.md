@@ -877,6 +877,73 @@ tested in the body.
 
 Sample: `samples/target_not.vein` (in `check-backend.sh`).
 
+## D26 — `ShardView Name on $Shape as x { … }`: a view per identity *(PROPOSED, not built)* {#views}
+
+**PROPOSED (2026-10-27).** Nothing here is in the compiler. Worked example: `docs/design/views-lego.vein`.
+
+**The problem.** `samples/desktop/todo.vein` builds its screen by hand, in 73 lines:
+- a `View` shard (34 lines) of `settled { target $Group not #Shown as g { …; mark g #Shown } }`;
+- `SF groupWidgets` (28) and `SF taskWidgets` (11);
+- every widget brought with its parent written out, plus 10 `ownedBy` lines so a handler can find the data
+  behind a click;
+- 15 uses of `#Shown`/`#Fresh`.
+
+The pattern is right (one place builds the screen, RULES-OF-THUMB 8); the bookkeeping is the program's.
+
+**The proposal: the language does the pattern, and it stays the pattern.**
+```
+ShardView TaskRow on $Task as t {
+    Row(listFor(t.Task.group), 8.0) {                  // the top call names where it plugs in
+        Dropdown(levels(), t.Task.priority - 1) mark #Priority
+        Check(t.Task.text, t.Task.done)         mark #Done
+        Button("✕")                             mark #Delete
+    }
+}
+```
+
+*Spelling: no new word.* `ShardView` is already a keyword, a shard whose job is what is shown (the web's
+`ShardView Page`), and `on $S as x` is D22's "one identity". Together they read "a view, on each `$Task`". (A
+new word `view` is the alternative.)
+
+*Meaning: a desugar into today's statements*, which is what keeps it VeinScript, and keeps it one execution
+model (D5):
+1. **When it runs.** The body runs ONCE per identity carrying the head's shapes and marks (`not #M` per D25)
+   that has no view of this name yet:
+   `settled { target $Task not #<generated> as t { …; mark t #<generated> } }`.
+2. **Nesting.** Inside a view, a builder call needs no `bring`. A NESTED call gets its enclosing widget as its
+   first argument (the parent, RULES 9), so only the top call names a parent. The data identity can still
+   BE the widget (`Row(t, …)`).
+3. **Ownership.** Every widget the body brings is owned by `t` (`do ownedBy(w, t)`). So `discard(t)` takes
+   them all, and a handler goes from a click to the data in one step:
+   `target $Owner #Delete on c.target as d { do discard(d.Owner.ownerId) }`. No `in view of`.
+4. **Decorations.** `mark #M` after a call marks that widget. `as name` binds it for the rest of the body, as
+   `bring … as` does, so `attach $Tip to name { … }` works. A body may hold ordinary statements too.
+
+*Composition: Lego through sockets.* A view never names another view. Its top piece plugs into a SOCKET, a
+widget another view built and marked (`Column(4.0) mark #Tasks`), found by a small `fn` (`tasksOf(group)`).
+- Any depth: `BoardWindow` → `GroupCard` → `TaskRow`.
+- Several views on one shape (a tab and a column, both `on $Group`), each with its own generated mark.
+- A brick whose socket does not exist yet waits a frame (its fn answers 0), so data may arrive in any order.
+- `discard` cascades through ownership and the tree.
+- A ShardView inside another's body is not allowed: composition goes through sockets only.
+
+*Web, eventually.* Today a page is a stream of `@Html` fragments, so order is everything and a brick cannot
+plug in later. The unifying step: on the web, too, a widget is an identity with a `$Parent`, and `@Render`
+walks the tree to HTML, as the Workbench walks it to native controls. The same ShardViews then serve a page;
+only the drawer differs.
+
+*Not in D26:*
+- Reactivity (`bind:`, `live`, `hide when`): a later decision. Derived values stay in `settled`.
+- `slot`: placement is the top call's parent.
+- From the pasted proposal: `in` (D3), `!=` (D12), `none`/`$X?`, and `find`/`first`/`the`/`count(… where)`
+  phrase queries.
+
+*Open questions:*
+1. **Spelling:** `ShardView … on`, or a new `view`.
+2. **Teardown:** `discard(t)` ends a view, but a plain `destroy t` leaves its owned widgets. Either `destroy`
+   follows `$Owner`, or "views end with `discard`".
+3. **Web:** `ShardView … on` for the web, which needs the element tree first.
+
 ## Reserved-word disposition
 
 Every keyword currently in [Lexer.cs](../src/Vein.Compiler/Lexing/Lexer.cs) `Keywords`, classified.
@@ -930,6 +997,7 @@ Still pending: tokens `LBracket`/`RBracket` if D9(a). **Never keywords:** `class
 
 - **D9** — brackets & list syntax: (a) vs (b). *(specs assume (a).)*
 - **D10** — user-defined generics timing. *(deferred.)*
+- **D26** — `ShardView Name on $Shape as x`: a view per identity, composed through sockets. *(proposed; spelling, teardown and web open.)*
 - **Reserved block** — `transform`: assign a meaning or cut before v1.0. (`on` got one: D22.)
   *(The rest of what this list once held — `by`, `start`, `audience`, `bridge`, `bring`, `builder`,
   `mute`, `unmute` —
