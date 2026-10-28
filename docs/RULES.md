@@ -533,6 +533,13 @@ The starting value must be a literal (VS0356); only a shard/ShardView/bridge `va
 included, which is the only way to change a library's. A line naming no setting is VS0357; a value of the
 wrong type is VS0358, and the source's default is used. `veinc settings game.vein` lists them.
 
+**18e. A setting is set where a template is copied, and reached in code as `!Shard.name` — which lands at the
+commit** (D28). `shard Files from *Vein.Desktop.Document.!DocumentFiles { tune maxRecents = 10 }` starts the
+copy's setting at 10; `vein.settings` (`Files.maxRecents = 12`) still wins. In code, `!Boards.hideDone = true`
+sets a setting of a shard of THIS bundle, as `mute` reaches (VS0350); only a `tune` var can be named (VS0387),
+with a value of its type (VS0388). The write is queued to the commit, so the same block still reads the old
+value: `!S.rate = 5` then `!S.rate` gives the previous rate until the next frame. `!x` alone is still VS0006.
+
 **18d. The standard library is read, not edited — and only it is written `by Vein`.** The Workbench opens a
 stdlib file (and an installed library package's) read-only, with a bar saying so; every copy the tools make is
 read-only on disk; and the compiler warns when the stdlib it loads is not the one it shipped with (**VS0378**).

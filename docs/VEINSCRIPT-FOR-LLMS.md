@@ -303,6 +303,15 @@ Fly.speed = 12.0
 Move.speed = 6.5
 ```
 
+A template copy's settings start where it is copied, and code reaches a setting by the shard's name (D28) —
+this bundle's shards only, `tune` vars only, written at the commit (the same frame still reads the old value):
+
+```vein
+shard Files from *Vein.Desktop.Document.!DocumentFiles { tune maxRecents = 10 }
+shard Boards from *Vein.Desktop.Board.!BoardActions
+hear @Toggled as t { !Boards.hideDone = t.checked }
+```
+
 **Schedules** (per frame, in this order):
 
 | Schedule | Runs |
@@ -759,6 +768,7 @@ stepper, web preview, AI assistant that compiles suggestions before offering the
 | VS0350–VS0354 | `mute`/`audience` naming problems |
 | VS0355 / VS0356 | `tune` not on a shard var / a setting without a literal starting value |
 | VS0357 / VS0358 | a `vein.settings` line naming no setting / a value of the wrong type |
+| VS0387 / VS0388 | `!S.x` where `x` is not a setting of `S` / a value of the wrong type for it |
 
 ---
 

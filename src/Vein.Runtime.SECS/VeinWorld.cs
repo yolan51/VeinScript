@@ -339,6 +339,16 @@ public sealed class VeinWorld
             Defer(() => { if (add) system.Marks.Add(mark); else system.Marks.Remove(mark); });
     }
 
+    /// `!S.name` (D28): a setting of a system, read as it stands.
+    public T ShardSetting<T>(string key, string name) =>
+        _byKey.TryGetValue(key, out var system) && system.GetSetting(name) is T value ? value : default!;
+
+    /// `!S.name = v` (D28), deferred like `Mute`.
+    public void SetShardSetting(string key, string name, object? value)
+    {
+        if (_byKey.TryGetValue(key, out var system)) Defer(() => system.SetSetting(name, value));
+    }
+
     /// Interp.IsMuted, line for line: muted by name, or carrying a muted mark.
     private bool IsMuted(VeinSystem s) => s.Muted || (_mutedMarks.Count > 0 && s.Marks.Overlaps(_mutedMarks));
 
@@ -767,4 +777,8 @@ public abstract class VeinSystem
     public virtual void Once() { }
     public virtual void Tick() { }
     public virtual void Settled() { }
+
+    /// `!Boards.hideDone` (D28): this system's settings by name. The emitter overrides both for a shard with any.
+    public virtual object? GetSetting(string name) => null;
+    public virtual void SetSetting(string name, object? value) { }
 }

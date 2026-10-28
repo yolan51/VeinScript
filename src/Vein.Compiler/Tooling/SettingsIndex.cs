@@ -57,18 +57,26 @@ public static class SettingsIndex
             if (unit is null) continue;
             var sources = BundleLoader.SourceFiles(path);
             bool library = index.Roots.Any(r => BundleIndex.IsLibraryRoot(r) && IsUnder(path, r));
-            foreach (var bundle in unit.Bundles)
+            foreach (var written in unit.Bundles)
             {
-                string section = (bundle.Author is null ? "" : bundle.Author + ".") + bundle.Name;
-                foreach (var need in bundle.Members.OfType<NeedDecl>())
+                string section = (written.Author is null ? "" : written.Author + ".") + written.Name;
+                foreach (var need in written.Members.OfType<NeedDecl>())
                     if (index.Owners.TryGetValue(need.Key, out var owner)) queue.Enqueue(Path.GetFullPath(owner));
-                foreach (var (shard, members) in Shards(bundle))
+                // A template's copy (`shard Files from *…!DocumentFiles { tune maxRecents = 10 }`, D28) has the
+                // template's settings under its own name, starting where the use site says — as Lower sees it.
+                var bundle = TemplateExpand.Apply(written, new DiagnosticBag(), key =>
+                    index.Owners.TryGetValue(key, out var source)
+                        ? SafeLoad(source, new DiagnosticBag())?.Bundles.FirstOrDefault(b => (b.Author ?? "local") + "." + b.Name == key)
+                        : null);
+                foreach (var (shard, at, members) in Shards(bundle))
                     foreach (var v in members.OfType<VarDecl>().Where(v => v.Tune && v.Init is not null))
                     {
                         string type = v.Type?.Name ?? Lower.SettingKind(v)?.ToString().ToLowerInvariant() ?? "";
                         string? value = file.Find(section, shard + "." + v.Name)?.Value;
+                        // Declared in a library's template: shown where the program copies it.
+                        var where = BundleLoader.PathOf(v.Span, sources) is { } own ? (own, v.Span.Line) : (BundleLoader.PathOf(at, sources) ?? path, at.Line);
                         settings.Add(new Setting(section, shard, v.Name, type, Spell(v.Init!), value, v.Doc ?? "",
-                            BundleLoader.PathOf(v.Span, sources) ?? path, v.Span.Line, library));
+                            where.Item1, where.Item2, library));
                     }
             }
         }
@@ -101,14 +109,14 @@ public static class SettingsIndex
         "bool" => LiteralKind.Bool, "percent" => LiteralKind.Percent, _ => null,
     };
 
-    private static IEnumerable<(string Name, IReadOnlyList<Node> Members)> Shards(BundleDecl bundle)
+    private static IEnumerable<(string Name, SourceSpan Span, IReadOnlyList<Node> Members)> Shards(BundleDecl bundle)
     {
         foreach (var d in bundle.Members)
             switch (d)
             {
-                case ShardDecl s: yield return (s.Name, s.Members); break;
-                case ViewDecl v: yield return (v.Name, v.Members); break;
-                case BridgeDecl b: yield return (b.Name, b.Members); break;
+                case ShardDecl s: yield return (s.Name, s.Span, s.Members); break;
+                case ViewDecl v: yield return (v.Name, v.Span, v.Members); break;
+                case BridgeDecl b: yield return (b.Name, b.Span, b.Members); break;
             }
     }
 

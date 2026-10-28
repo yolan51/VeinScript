@@ -396,6 +396,8 @@ bundle Desktop by Vein {
         // copy made with `from` resolves in the program, where they are written.
         shared("A document app's files: New, Open…, Save, Save as…, unsaved warnings, recents, the folder, the title.")
         shard DocumentFiles {
+            tune("How many recent files the sidebar keeps.")
+            var maxRecents = 6
             var recentsChanged = false
             var started = false
 
@@ -541,7 +543,7 @@ bundle Desktop by Vein {
                         d.Document.~recents.add(recent)
                         var held = 0
                         target d.Document.~recents as r { held += 1 }
-                        if held > 6 { target d.Document.~recents as r { if Index == 0 { d.Document.~recents.remove(r) } } }
+                        if held > maxRecents { target d.Document.~recents as r { if Index == 0 { d.Document.~recents.remove(r) } } }
                     }
                     emit @DocumentRecentsChanged { }
                 }
@@ -692,7 +694,7 @@ bundle Desktop by Vein {
     //   SF boardChanged(board: Entity) { … }          the hook: the user changed this board
     //
     // Inside a board everything is done: add and remove lanes and cards, move a card a lane left or right, tick it,
-    // give it a priority (its colour), counts and progress, and hiding done cards when a $TaskBoardLooks says so.
+    // give it a priority (its colour), counts and progress, and hiding done cards (its setting `hideDone`).
     publicator Board {
         shared("A card: what it says, whether it is done, its priority (1 Low … 4 Very high).")
         shape $TaskCard { id: string, title: string, done: bool = false, priority: int = 1 }
@@ -700,8 +702,6 @@ bundle Desktop by Vein {
         shape $TaskLane { id: string, name: string, ~<list> cards: owns $TaskCard }
         shared("A board of lanes, in order.")
         shape $TaskBoard { id: string, name: string, ~<list> lanes: owns $TaskLane }
-        shared("How boards are shown: attach one anywhere; `hideDone` hides done cards.")
-        shape $TaskBoardLooks { hideDone: bool = false }
 
         shared("A card: bring TaskCard(\"c1\", \"Write the copy\", false, 3).")
         builder TaskCard { $TaskCard   mark #TaskCard }
@@ -841,6 +841,9 @@ bundle Desktop by Vein {
         // Every change it makes, it reports through the hook `boardChanged(board)` — the program's.
         shared("Boards that work: lanes and cards added, removed, moved, ticked, prioritised; counts; hide done.")
         shard BoardActions {
+            tune("Done cards are hidden.")
+            var hideDone = false
+
             hear *Vein.UI.Interaction.@Clicked as k {
                 target $Owner #AddLane on k.target as b { do addLane(b.Owner.ownerId) }
                 target $Owner #DropLane on k.target as b { do dropLane(b.Owner.ownerId) }
@@ -870,10 +873,8 @@ bundle Desktop by Vein {
             }
 
             settled {
-                var hide = false
-                target $TaskBoardLooks as looks { hide = looks.TaskBoardLooks.hideDone }
-                target $Owner #Tile as w { target $TaskCard on w.Owner.ownerId as c { if hide and c.TaskCard.done { mark w #Hidden } else { unmark w #Hidden } } }
-                target $Owner #Line as w { target $TaskCard on w.Owner.ownerId as c { if hide and c.TaskCard.done { mark w #Hidden } else { unmark w #Hidden } } }
+                target $Owner #Tile as w { target $TaskCard on w.Owner.ownerId as c { if hideDone and c.TaskCard.done { mark w #Hidden } else { unmark w #Hidden } } }
+                target $Owner #Line as w { target $TaskCard on w.Owner.ownerId as c { if hideDone and c.TaskCard.done { mark w #Hidden } else { unmark w #Hidden } } }
                 target $Owner $Choice $Tint #Priority as chip { chip.Tint.a = intensity(chip.Choice.picked + 1) }
                 target $Owner $Text #LaneCount as label { target $TaskLane on label.Owner.ownerId as l { label.Text.content = string(cardsIn(l)) } }
                 target $Owner $Text #LaneStatus as label {

@@ -719,6 +719,23 @@ public sealed class CSharpBackend : IVeinBackend
                 : $"    public {StateCs(f)} {Ident(f.Name)};");
         if (shard.State.Count > 0) sb.AppendLine();
 
+        // `!ThisShard.setting` from elsewhere (D28): its settings by name.
+        var settings = shard.State.Where(f => f.Tune is not null).ToList();
+        if (settings.Count > 0)
+        {
+            sb.AppendLine("    public override object? GetSetting(string name) => name switch");
+            sb.AppendLine("    {");
+            foreach (var f in settings) sb.AppendLine($"        \"{Escape(f.Name)}\" => {Ident(f.Name)},");
+            sb.AppendLine("        _ => null,");
+            sb.AppendLine("    };");
+            sb.AppendLine("    public override void SetSetting(string name, object? value)");
+            sb.AppendLine("    {");
+            foreach (var f in settings)
+                sb.AppendLine($"        if (name == \"{Escape(f.Name)}\") {Ident(f.Name)} = ({StateCs(f)})System.Convert.ChangeType(value, typeof({StateCs(f)}), System.Globalization.CultureInfo.InvariantCulture)!;");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+        }
+
         // `hear` blocks, collected first so Subscribe can wire them — and only for events this module
         // DECLARES. A `hear *Vein.Console.Io.@Input` has no payload class here, and emitting the cast
         // anyway produced `(Events.Input)p` against a type that does not exist (CS0426). Guarding the
@@ -1650,6 +1667,11 @@ public sealed class CSharpBackend : IVeinBackend
                 return $"World.MuteMark({Expr(c.Args[0])}, {(c.Name == "MuteMark" ? "true" : "false")})";
             case "MarkShard" or "UnmarkShard":
                 return $"World.MarkShard({Expr(c.Args[0])}, {Expr(c.Args[1])}, {(c.Name == "MarkShard" ? "true" : "false")})";
+            // `!Boards.hideDone` (D28): the setting's type rides as the last argument, for the read's cast.
+            case "ShardSetting":
+                return $"World.ShardSetting<{SettingCs(c.Args[2])}>({Expr(c.Args[0])}, {Expr(c.Args[1])})";
+            case "SetShardSetting":
+                return $"World.SetShardSetting({Expr(c.Args[0])}, {Expr(c.Args[1])}, {Expr(c.Args[2])})";
 
             case "Emit":
                 // @Print is the one bridged event: a program that cannot speak cannot be diffed against
@@ -1995,6 +2017,9 @@ public sealed class CSharpBackend : IVeinBackend
     /// compares an arm against the subject's text, and the interpreter stores exactly that. Emitting
     /// `public State state;` named a C# type nothing declares and the whole file stopped compiling.
     private string Cs(IrTypeRef t) => _enumNames.Contains(t.Name) ? "string" : CsBase(t);
+
+    /// A setting read's C# type, from the type name Lower passes (D28); `infer` is the boxed value.
+    private string SettingCs(IrExpr type) => type is IrLiteral { Value: string name } && name != "infer" ? Cs(IrTypeRef.Of(name)) : "object";
 
     private static string CsBase(IrTypeRef t) => t.Name switch
     {

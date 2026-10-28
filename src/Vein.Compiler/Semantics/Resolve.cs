@@ -266,6 +266,9 @@ public sealed class Resolve
 
             case IrRuntimeCall rc:
                 foreach (var a in rc.Args) Expr(a);
+                // `!Boards.hideDone` (D28) carries the setting's type as its last argument.
+                if (rc.Name == "ShardSetting" && rc.Args[^1] is IrLiteral { Value: string settingType })
+                    return IrTypeRef.Of(settingType);
                 return Runtime(rc.Name);
 
             case IrToText: return IrTypeRef.Of("string");
@@ -345,7 +348,7 @@ public sealed class Resolve
     private static IrTypeRef? Runtime(string name) => name switch
     {
         "Emit" or "AddTag" or "RemoveTag" or "AddComponent" or "RemoveComponent" or "DestroyEntity"
-            or "Mute" or "Unmute" or "MuteMark" or "UnmuteMark" or "MarkShard" or "UnmarkShard"
+            or "Mute" or "Unmute" or "MuteMark" or "UnmuteMark" or "MarkShard" or "UnmarkShard" or "SetShardSetting"
             => IrTypeRef.Of("void"),
         "random" => IrTypeRef.Of("float"),
         "Carries" => IrTypeRef.Of("bool"),

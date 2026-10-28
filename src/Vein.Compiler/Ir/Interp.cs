@@ -2838,6 +2838,20 @@ public sealed class Interp
                     _commands.Add(() => target.Muted = mute);
                 return null;
             }
+            // `!Boards.hideDone` (D28): a shard's setting — read as it stands, written at the commit like `mute`.
+            case "ShardSetting":
+                return _byKey.TryGetValue(Str(Eval(rc.Args[0], self, locals)), out var owner)
+                    ? owner.State.GetValueOrDefault(Str(Eval(rc.Args[1], self, locals)))
+                    : null;
+            case "SetShardSetting":
+            {
+                string name = Str(Eval(rc.Args[1], self, locals));
+                var value = Eval(rc.Args[2], self, locals);
+                if (rc.Args[3] is IrLiteral { Value: "float" } && value is long whole) value = (double)whole;
+                if (_byKey.TryGetValue(Str(Eval(rc.Args[0], self, locals)), out var target))
+                    _commands.Add(() => target.State[name] = value);
+                return null;
+            }
             // `x carries #M` / `x carries $S` (D20). The subject says where to look: a sender's `from`
             // carries what its shard carried when it emitted; a console's `from` is its address, which
             // it carries as a mark (the audience rule); an entity id asks the store, which answers for

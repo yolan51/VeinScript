@@ -130,6 +130,16 @@ public sealed partial class Lower
         kinds.Add(kind);
     }
 
+    /// Each shard's vars (D28): `!Boards.hideDone` may name a SETTING (Tune) and nothing else; ordinary state is
+    /// kept only so the error can say so. Collected up front, like `_shardKinds`.
+    private readonly Dictionary<string, Dictionary<string, VarDecl>> _shardVars = new(StringComparer.Ordinal);
+
+    private void NoteSettings(string shard, IEnumerable<Node> members)
+    {
+        if (!_shardVars.TryGetValue(shard, out var vars)) _shardVars[shard] = vars = new(StringComparer.Ordinal);
+        foreach (var v in members.OfType<VarDecl>()) vars[v.Name] = v;
+    }
+
     /// The routing key a shard is muted by: `Author.Bundle.Name`. Its `Name` is no good for this — the
     /// app linker renames a duplicated one to `Bundle.Name` — so every shard carries this as `@key` and
     /// `mute` lowers to it, the way an event is keyed by `EventKey` rather than its bare name.
@@ -235,16 +245,19 @@ public sealed partial class Lower
                 case ShardDecl sh:
                     foreach (var hb in sh.Members.OfType<HearBlock>()) HeardWithAudience(hb);
                     ShardKind(sh.Name, "shard");
+                    NoteSettings(sh.Name, sh.Members);
                     _shardMarks.UnionWith(sh.CarriedMarks);
                     break;
                 case ViewDecl vw:
                     foreach (var hb in vw.Members.OfType<HearBlock>()) HeardWithAudience(hb);
                     ShardKind(vw.Name, "ShardView");
+                    NoteSettings(vw.Name, vw.Members);
                     _shardMarks.UnionWith(vw.CarriedMarks);
                     break;
                 case BridgeDecl br:
                     foreach (var hb in br.Members.OfType<HearBlock>()) _shardMarks.UnionWith(hb.AudienceMarks.Concat(hb.ExcludedMarks));
                     ShardKind(br.Name, "bridge");
+                    NoteSettings(br.Name, br.Members);
                     _shardMarks.UnionWith(br.CarriedMarks);
                     break;
             }
@@ -3320,8 +3333,75 @@ public sealed partial class Lower
         _ => new IrLiteral("", IrLiteralKind.String)   // string, shapes, … → placeholder
     };
 
+    // ---- shard settings in code (D28) ------------------------------------------------------------------
+
+    /// `!Boards.hideDone`: the key of a shard of this bundle (the same reach and check as `mute`, VS0350), and the
+    /// setting's type. Null when it names no setting of that shard (VS0387).
+    private (string Key, string Type)? ShardSettingOf(ShardSettingExpr s)
+    {
+        // Inside another bundle's SF the name is that bundle's shard, whose vars this compilation cannot see.
+        if (_importOwner is { } owner) return (owner + "." + s.Shard, "infer");
+        if (LocalShardKey(s.Shard, s.Span, "VS0350", "`!…` before a setting takes", $"!{s.Shard}.{s.Name}") is not { } key) return null;
+        var vars = _shardVars.GetValueOrDefault(s.Shard);
+        if (vars is not null && vars.TryGetValue(s.Name, out var v) && v.Tune) return (key, SettingType(v));
+        var settings = vars?.Where(x => x.Value.Tune).Select(x => x.Key).ToList() ?? new List<string>();
+        string listed = settings.Count == 0
+            ? $" {s.Shard} has no settings — mark a var with `tune(\"…\")` to make it one."
+            : $" Its settings are {string.Join(", ", settings)}.";
+        _diag.Error("VS0387", vars is not null && vars.ContainsKey(s.Name)
+            ? $"`{s.Name}` is {s.Shard}'s own state, not a setting: only a `tune(\"…\")` var can be reached by `!{s.Shard}.{s.Name}`.{listed}"
+            : $"{s.Shard} has no setting '{s.Name}'.{listed}", s.Span);
+        return null;
+    }
+
+    /// A setting's type name — declared, else its literal's — as both runtimes name it; a percent is a float.
+    private static string SettingType(VarDecl v) => SettingKind(v) is { } kind ? KindName(kind) : v.Type?.Name ?? "infer";
+
+    private static string KindName(LiteralKind? kind) => kind switch
+    {
+        LiteralKind.Int => "int",
+        LiteralKind.Float or LiteralKind.Percent => "float",
+        LiteralKind.String => "string",
+        LiteralKind.Bool => "bool",
+        _ => "infer",
+    };
+
+    /// What a value written to a setting is, when that is plain from the source; null when it is not.
+    private string? PlainType(Expr e) => e switch
+    {
+        LiteralExpr l => KindName(l.Kind),
+        UnaryExpr { Op: UnOp.Neg, Operand: LiteralExpr l } => KindName(l.Kind),
+        UnaryExpr { Op: UnOp.Not } => "bool",
+        BinaryExpr { Op: BinOp.And or BinOp.Or or BinOp.Eq or BinOp.Ne or BinOp.Lt or BinOp.Gt or BinOp.Le or BinOp.Ge } => "bool",
+        ShardSettingExpr s when _shardVars.GetValueOrDefault(s.Shard)?.GetValueOrDefault(s.Name) is { Tune: true } v => SettingType(v),
+        _ => null,
+    };
+
+    private IrStmt LowerSetShardSetting(ShardSettingExpr s, AssignStmt a)
+    {
+        var value = LowerExpr(a.Value);
+        if (ShardSettingOf(s) is not { } setting) return new IrExprStmt(new IrLiteral(null, IrLiteralKind.Int));
+        if (PlainType(a.Value) is { } given && setting.Type != "infer" && given != setting.Type
+            && !(given == "int" && setting.Type == "float"))
+            _diag.Error("VS0388", $"!{s.Shard}.{s.Name} is a {setting.Type} setting; this value is a {given}.", a.Value.Span);
+        IrExpr Read() => new IrRuntimeCall("ShardSetting", new IrExpr[] { Str(setting.Key), Str(s.Name), Str(setting.Type) });
+        IrBinOp? compound = a.Op switch
+        {
+            AssignOp.PlusEq => IrBinOp.Add,
+            AssignOp.MinusEq => IrBinOp.Sub,
+            AssignOp.StarEq => IrBinOp.Mul,
+            AssignOp.SlashEq => IrBinOp.Div,
+            _ => null
+        };
+        if (compound is { } op) value = new IrBinary(op, Read(), value);
+        return new IrExprStmt(new IrRuntimeCall("SetShardSetting", new[] { Str(setting.Key), Str(s.Name), value, Str(setting.Type) }));
+
+        static IrExpr Str(string text) => new IrLiteral(text, IrLiteralKind.String);
+    }
+
     private IrStmt LowerAssign(AssignStmt a)
     {
+        if (a.Target is ShardSettingExpr setting) return LowerSetShardSetting(setting, a);
         var target = LowerExpr(a.Target);
         var value = LowerExpr(a.Value);
         IrBinOp? compound = a.Op switch
@@ -3405,6 +3485,12 @@ public sealed partial class Lower
             case NameExpr n: return new IrLocalRef(n.Name);
             case EntityExpr: return new IrEntityRef();
             case LoopIndexExpr: return new IrLoopIndexRef();
+            case ShardSettingExpr ss:
+                return ShardSettingOf(ss) is { } setting
+                    ? new IrRuntimeCall("ShardSetting", new IrExpr[] {
+                        new IrLiteral(setting.Key, IrLiteralKind.String), new IrLiteral(ss.Name, IrLiteralKind.String),
+                        new IrLiteral(setting.Type, IrLiteralKind.String) })
+                    : new IrLiteral(null, IrLiteralKind.Int);
             // `*` qualified cross-bundle ref. Not linked/resolved at runtime yet (surface + tooling
             // pass): lower to a scope ref carrying the dotted path + sigil'd member so the IR is
             // representable; project tooling does the real resolution/collision checks.

@@ -672,11 +672,38 @@ public sealed class Parser
         if (Match(TokenKind.KwFrom))
         {
             var (path, template) = ParseTemplateRef();
-            var extra = Check(TokenKind.LBrace) ? ParseFirstClassBody() : new List<Node>();
+            var extra = Check(TokenKind.LBrace) ? ParseTemplateBody() : new List<Node>();
             return new TemplateUseDecl(false, name, path, template, Array.Empty<SlotFill>(), extra, s);
         }
         var (shapes, marks) = ParseCarried();
         return new ShardDecl(name, ParseFirstClassBody(), s) { CarriedShapes = shapes, CarriedMarks = marks };
+    }
+
+    /// A template copy's `{ }`: more members, and `tune name = literal` setting where one of its settings starts (D28).
+    private List<Node> ParseTemplateBody()
+    {
+        Expect(TokenKind.LBrace, "'{'");
+        var members = new List<Node>();
+        SkipTerms();
+        while (!Check(TokenKind.RBrace) && !AtEnd)
+        {
+            if (Check(TokenKind.KwTune) && Peek().Kind == TokenKind.Ident)
+            {
+                var at = Here; Advance();
+                string name = Advance().Text;
+                Expect(TokenKind.Assign, "'=' and the setting's starting value");
+                var value = ParseExpr();
+                if (!IsTunableLiteral(value))
+                    _diag.Error("VS0356",
+                        $"Setting '{name}' needs a literal starting value — a number, a percent, a string or true/false. " +
+                        "It replaces the template's default, and `vein.settings` can still replace it.", value.Span);
+                members.Add(new TuneSet(name, value, at));
+            }
+            else members.Add(ParseShardMember());
+            SkipTerms();
+        }
+        Expect(TokenKind.RBrace, "'}'");
+        return members;
     }
 
     /// `*Author.Bundle.Publicator.!Template` — a shared shard or view, by its shard sigil (D19, D27).
@@ -1765,9 +1792,15 @@ public sealed class Parser
         if (Check(TokenKind.ShardRef))
         {
             var t = Advance();
+            // `!Boards.hideDone` (D28): a shard's setting — the one place `!` stands in an expression.
+            if (Check(TokenKind.Dot) && Peek().Kind == TokenKind.Ident)
+            {
+                Advance();
+                return new ShardSettingExpr(t.Text, Advance().Text, t.Span);
+            }
             _diag.Error("VS0006",
                 $"VeinScript has no `!` — write `not {t.Text}`. Logic is spelled in words here; `!{t.Text}` " +
-                "names a shard, which only an `audience` list takes.", t.Span);
+                $"names a shard, and `!{t.Text}.setting` one of its settings.", t.Span);
             return new UnaryExpr(UnOp.Not, new NameExpr(t.Text, t.Span), t.Span);
         }
         if (Check(TokenKind.Minus)) { var s = Here; Advance(); return new UnaryExpr(UnOp.Neg, ParseUnary(), s); }

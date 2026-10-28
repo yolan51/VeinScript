@@ -472,8 +472,8 @@ bundle's shard.
 > bundle in the app declares).
 
 **DECIDED.** `!` directly followed by a name is a reference to a shard, the fifth sigil next to `$` `#`
-`@` `&`. Only an `audience` list takes one today. In that list, `not` in front of any entry turns it from
-"must" into "must not":
+`@` `&`. (It since also names a view, D26; a template, D27; and a setting, `!S.name`, D28.) In an
+`audience` list, `not` in front of any entry turns it from "must" into "must not":
 
 ```
 hear @Test as t audience not !Ledger not !Billing { … }   // anyone except those two shards
@@ -1047,6 +1047,41 @@ fn documentText() return string { … }                      // a HOOK the templ
 `$Card` clashed (VS0220) with every program that has its own, as `samples/desktop/kanban.vein` does. The board library
 says `$TaskCard`, `$TaskLane`, `$TaskBoard`; the publicator keeps the short name (`*Vein.Desktop.Board`).
 
+## D28 — Settings at the use site, `tune name = v`, and in code, `!Shard.name` {#shardsettings}
+
+> **Reported as `VS0386`** (a use-site `tune` naming no setting of the template), **`VS0356`** (a use-site
+> value that is not a literal), **`VS0350`** (`!S.x` with no shard `S` in this bundle), **`VS0387`** (`x` is
+> not a setting of `S`: ordinary state, or no such var) and **`VS0388`** (a value of the wrong type).
+
+**DECIDED.** Templates (D27) give a program its structure, slots take its parts and hooks its logic. The values
+were the missing piece: a library's settings (D21) could only be changed in `vein.settings`, and a program could
+not change one while it runs. Two forms, both on the shard's name:
+
+```
+shard Files  from *Vein.Desktop.Document.!DocumentFiles { tune maxRecents = 10 }   // where it starts
+shard Boards from *Vein.Desktop.Board.!BoardActions
+
+hear @Toggled as t { !Boards.hideDone = t.checked }                                 // set, at the commit
+target $Toggle #HideDone as s { s.Toggle.checked = !Boards.hideDone }               // read
+```
+
+- **`tune name = literal`** in a template copy's braces replaces that setting's starting value. Which wins:
+  `vein.settings`, then the use site, then the template's default. The use site's value is the default the
+  Settings panel shows (`veinc settings` lists a copy's settings under the copy's name: `Files.maxRecents`).
+- **`!S.name`** reads or sets a SETTING of a shard, ShardView or bridge of this bundle; a template copy is one.
+  The reach is `mute`'s (D18): one bundle never reaches another's shards by name, and a shard's ordinary state
+  stays its own. Only what its author marked `tune` is reachable.
+- **A write lands at the commit,** like `mute` and `mark !S` (D18, D20), so the outcome never depends on shard
+  order. A read sees the value as it stands. `+=` reads, then writes at the commit.
+- **Both runtimes:** the interpreter keeps settings in the shard's state; the C# backend generates
+  `GetSetting`/`SetSetting` per shard with settings, and `VeinWorld` defers the write.
+
+*Why `!`.* D19 made `!Name` the shard's sigil; a shard's settings are the one thing about a shard another part of
+the program may change, so `!Name.setting` is the sigil doing its job. D12 is untouched: `!` alone is never "not".
+
+*Used:* `samples/shard_settings.vein`; the planner (`!Boards.hideDone` replaces the `$TaskBoardLooks` shape a
+program had to attach, and `tune maxRecents = 10`).
+
 ## Reserved-word disposition
 
 Every keyword currently in [Lexer.cs](../src/Vein.Compiler/Lexing/Lexer.cs) `Keywords`, classified.
@@ -1102,6 +1137,7 @@ Still pending: tokens `LBracket`/`RBracket` if D9(a). **Never keywords:** `class
 - **D10** — user-defined generics timing. *(deferred.)*
 - **D26** — views: built. Open part: the web (needs web widgets as a `$Parent` tree).
 - **D27** — templates (`from`, `slot`): built, with three libraries on it — *Vein.Desktop.Document, .Tabs, .Board (the planner: 892 → 311 lines).
+- **D28** — settings at the use site and `!Shard.setting`: built. Open: a setting's range (`tune("…", 0, 20)`).
 - **Reserved block** — `transform`: assign a meaning or cut before v1.0. (`on` got one: D22.)
   *(The rest of what this list once held — `by`, `start`, `audience`, `bridge`, `bring`, `builder`,
   `mute`, `unmute` —

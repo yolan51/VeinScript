@@ -81,7 +81,7 @@ bundle Planner by you {
         Status { Label("") mark #CountLabel }
     }
 
-    shard Files from *Vein.Desktop.Document.!DocumentFiles
+    shard Files from *Vein.Desktop.Document.!DocumentFiles { tune maxRecents = 10 }
     shard Tabs from *Vein.Desktop.Tabs.!TabActions
     shard Boards from *Vein.Desktop.Board.!BoardActions
 
@@ -127,7 +127,6 @@ bundle Planner by you {
         run once {
             bring Document("Planner", "example.plan", "plan", false, false, [], []) as doc
             attach $Planner to doc { mode: "board" }
-            attach $TaskBoardLooks to doc { hideDone: false }
         }
     }
 
@@ -135,7 +134,7 @@ bundle Planner by you {
         hear *Vein.UI.Interaction.@Clicked as k {
             target $Button #ShowBoard on k.target as b { target $Planner as a { a.Planner.mode = "board" } }
             target $Button #ShowList on k.target as b { target $Planner as a { a.Planner.mode = "list" } }
-            target $Button #ToggleDone on k.target as b { target $TaskBoardLooks as looks { looks.TaskBoardLooks.hideDone = not looks.TaskBoardLooks.hideDone } }
+            target $Button #ToggleDone on k.target as b { !Boards.hideDone = not !Boards.hideDone }
             target $Button #DropOpenProject on k.target as b { target $Plan as plan { do dropProject(openTabOf(plan)) } }
             target $Button #AddProject on k.target as b { do addProject() }
             target $Owner #OpenProject on k.target as b { target $Plan as plan { do openTab(plan, b.Owner.ownerId) } }
@@ -155,7 +154,7 @@ bundle Planner by you {
         }
 
         hear @Toggled as e {
-            target $Toggle #HideDone on e.target as t { target $TaskBoardLooks as looks { looks.TaskBoardLooks.hideDone = e.checked } }
+            target $Toggle #HideDone on e.target as t { !Boards.hideDone = e.checked }
         }
     }
 
@@ -297,7 +296,7 @@ bundle Planner by you {
             target $Owner #OpenProject as item { if item.Owner.ownerId == open { mark item #Accent } else { unmark item #Accent } }
             target $Button #ShowBoard as b { if mode == "board" { mark b #Accent } else { unmark b #Accent } }
             target $Button #ShowList as b { if mode == "list" { mark b #Accent } else { unmark b #Accent } }
-            target $TaskBoardLooks as looks { target $Toggle #HideDone as t { t.Toggle.checked = looks.TaskBoardLooks.hideDone } }
+            target $Toggle #HideDone as t { t.Toggle.checked = !Boards.hideDone }
 
             var cards = 0
             var finished = 0

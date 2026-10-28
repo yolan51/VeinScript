@@ -1,0 +1,23 @@
+// D28: `!Shard.setting` reads a shard's setting, and sets it at the next commit.
+bundle D28 by me {
+    shard Spawner {
+        tune("Crates made each frame.")
+        var rate: int = 2
+        tune("Spawning at all.")
+        var running = true
+        var made = 0
+        each tick { if running { made += rate } }
+    }
+    shard Director {
+        each tick as t {
+            // A write lands at the commit: this frame still reads the value it had.
+            if t.frame == 2 {
+                !Spawner.rate = 5
+                emit *Vein.Console.Io.@Print { text: "set rate, still " + !Spawner.rate }
+            }
+            if t.frame == 3 { !Spawner.rate += 1 }
+            if t.frame == 4 { !Spawner.running = not !Spawner.running }
+            emit *Vein.Console.Io.@Print { text: "frame " + t.frame + ": rate " + !Spawner.rate + ", running " + !Spawner.running }
+        }
+    }
+}

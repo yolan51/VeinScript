@@ -210,6 +210,7 @@ public static class AstPrinter
         MarkRefExpr mr => $"#{mr.Name}",
         MemberExpr m => $"{Ex(m.Receiver)}.{(m.Collection ? "~" : "")}{m.Name}",
         HasExpr h => $"({Ex(h.Collection)} has {Ex(h.Value)})",
+        ShardSettingExpr s => $"!{s.Shard}.{s.Name}",
         ToTextExpr tt => $"toText{(tt.Format is null ? "" : "<" + tt.Format + ">")}({tt.Loom})",
         IndexExpr ix => $"{Ex(ix.Receiver)}[{Ex(ix.Index)}]",
         CallExpr c => $"{Ex(c.Callee)}({string.Join(", ", c.Args.Select(Ex))})",

@@ -233,6 +233,9 @@ public sealed record TemplateUseDecl(
     bool IsView, string Name, IReadOnlyList<string> Path, string Template,
     IReadOnlyList<SlotFill> Fills, IReadOnlyList<Node> Extra, SourceSpan Span) : Decl(Span);
 
+/// `tune maxRecents = 10` inside `shard X from … { }` (D28): the template's setting starts from this literal.
+public sealed record TuneSet(string Name, Expr Value, SourceSpan Span) : Node(Span);
+
 /// `Content { … }` inside a `ShardView … from …` — the widgets and statements for the template's slot `Content`.
 public sealed record SlotFill(string Slot, IReadOnlyList<ViewItem> Items, SourceSpan Span) : Node(Span);
 
@@ -444,6 +447,9 @@ public sealed record MemberExpr(Expr Receiver, string Name, SourceSpan Span) : E
     /// only a `~` field may be.
     public bool Collection { get; init; }
 }
+
+/// `!Boards.hideDone` (D28) — a SETTING of a shard of this bundle, read, or set at the next commit.
+public sealed record ShardSettingExpr(string Shard, string Name, SourceSpan Span) : Expr(Span);
 
 /// `s.Guild.~members has p` (D24) — whether a collection holds a value. Contextual, like `carries`.
 public sealed record HasExpr(Expr Collection, Expr Value, SourceSpan Span) : Expr(Span);

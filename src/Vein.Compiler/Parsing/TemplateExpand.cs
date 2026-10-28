@@ -69,7 +69,8 @@ public static class TemplateExpand
                         $"name there.{Offer(source, publicator, viewsOnly: false)}", use.Span);
                     continue;
                 }
-                result.Add(shard with { Name = use.Name, Members = shard.Members.Concat(use.Extra).ToList(), Span = use.Span, Shared = false, Exported = false, Doc = null });
+                result.Add(shard with { Name = use.Name, Members = Tuned(shard, use, diag).Concat(use.Extra.Where(x => x is not TuneSet)).ToList(),
+                    Span = use.Span, Shared = false, Exported = false, Doc = null });
             }
         }
 
@@ -91,6 +92,19 @@ public static class TemplateExpand
                         }
         }
         return bundle with { Members = result };
+    }
+
+    /// The template's members with each `tune name = literal` of the use site as its setting's starting value (D28).
+    private static IEnumerable<Node> Tuned(ShardDecl shard, TemplateUseDecl use, DiagnosticBag diag)
+    {
+        var sets = use.Extra.OfType<TuneSet>().ToList();
+        if (sets.Count == 0) return shard.Members;
+        var settings = shard.Members.OfType<VarDecl>().Where(v => v.Tune).Select(v => v.Name).ToList();
+        foreach (var set in sets.Where(t => !settings.Contains(t.Name)))
+            diag.Error("VS0386", $"`tune {set.Name}`: {use.Template} has no setting of that name" +
+                (settings.Count == 0 ? " — it has none." : $" — its settings are {string.Join(", ", settings)}."), set.Span);
+        return shard.Members.Select(m => m is VarDecl { Tune: true } v && sets.LastOrDefault(t => t.Name == v.Name) is { } set
+            ? v with { Init = set.Value } : m);
     }
 
     private static string Key(BundleDecl b) => (b.Author ?? "local") + "." + b.Name;
