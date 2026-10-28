@@ -84,7 +84,7 @@ public class StdlibTests
         // Raised 80 → 120 for the planner's host events (file dialogs, folder listing): each is one event a host
         // answers, which is the shape a desktop library grows in.
         Assert.InRange(byKind[SymbolKind.Event], 5, 120);
-        Assert.InRange(byKind[SymbolKind.Builder], 5, 60);
+        Assert.InRange(byKind[SymbolKind.Builder], 5, 90);     // 60 → 90 with the frame builders (MenuBar, Menu, …)
         Assert.False(byKind.ContainsKey(SymbolKind.Shard));   // shards are never in the shared API
     }
 
