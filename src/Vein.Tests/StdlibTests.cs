@@ -80,7 +80,7 @@ public class StdlibTests
         // expressed AS builders — a palette or a component is one `css =` field — and Vein.Web's elements
         // are each a shape PLUS a builder, so the two counts now grow together with every element the
         // library learns.
-        Assert.InRange(byKind[SymbolKind.Shape], 10, 60);
+        Assert.InRange(byKind[SymbolKind.Shape], 10, 90);      // 60 → 90 with Vein.Desktop's frame ($Split, $Shortcut)
         // Raised 80 → 120 for the planner's host events (file dialogs, folder listing): each is one event a host
         // answers, which is the shape a desktop library grows in.
         Assert.InRange(byKind[SymbolKind.Event], 5, 120);

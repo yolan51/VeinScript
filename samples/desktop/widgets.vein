@@ -22,11 +22,21 @@ bundle Widgets by you {
     mark #Notes
     mark #Like
     mark #Likes
+    mark #Reset
 
     shard Build {
         run once {
             bring Window("Widgets", 520.0, 760.0, "vslogo.png") as w
             bring Heading(w, "Every widget", 22.0)
+
+            // A menu bar and a status bar: the window puts them on its edges, wherever they are brought.
+            bring MenuBar(w) as bar
+            bring Menu(bar, "Likes") as likesMenu
+            bring MenuItem(likesMenu, "Reset") as reset
+            mark reset #Reset
+            attach $Shortcut to reset { keys: "Ctrl+R" }
+            bring StatusBar(w, 8.0) as status
+            bring Label(status, "Likes ▸ Reset (Ctrl+R) sets the likes back to 0")
 
             // A slider, and what follows it.
             bring Row(w, 10.0) as volume
@@ -94,6 +104,10 @@ bundle Widgets by you {
         }
 
         hear *Vein.UI.Interaction.@Clicked as c {
+            target $Button #Reset on c.target as r {
+                likes = 0
+                target $Text #Likes as t { t.Text.content = "0" }
+            }
             target $Button #Like on c.target as b {
                 likes += 1
                 target $Text #Likes as t { t.Text.content = string(likes) }

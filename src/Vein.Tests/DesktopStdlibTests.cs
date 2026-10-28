@@ -155,6 +155,56 @@ public class DesktopStdlibTests
     }
 
     [Fact]
+    public void The_frame_builders_make_a_menu_tree_bars_and_a_split_each_with_its_own_mark()
+    {
+        // An application's frame: menu bar → menu → items (a "-" one is a separator), a toolbar and a status bar
+        // (rows, told apart by mark), and a split with its starting width. A shortcut is attachable to an item.
+        const string source = """
+            bundle F by you {
+                need "Vein.Desktop"
+                need "Vein.UI"
+                shard Build {
+                    run once {
+                        bring Window("F", 300.0, 200.0) as w
+                        bring MenuBar(w) as bar
+                        bring Menu(bar, "File") as file
+                        bring MenuItem(file, "Save") as save
+                        attach $Shortcut to save { keys: "Ctrl+S" }
+                        bring MenuItem(file, "-")
+                        bring Toolbar(w, 6.0) as tools
+                        bring Button(tools, "Open") as open
+                        mark open #Flat
+                        bring StatusBar(w, 12.0)
+                        bring Split(w, 180.0) as split
+                        bring Column(split, 4.0)
+                        bring Column(split, 4.0)
+                    }
+                    hear *Vein.Time.Clock.@Ticked as t {
+                        if t.frame == 2 {
+                            var seen = ""
+                            target $Panel #MenuBar as x { seen = seen + "menubar " }
+                            target $Button #Menu as x { seen = seen + "menu=" + x.Button.label + " " }
+                            target $Button #MenuItem as x { seen = seen + "item=" + x.Button.label + " " }
+                            target $Shortcut as x { seen = seen + "keys=" + x.Shortcut.keys + " " }
+                            target $Panel #Row #Toolbar as x { seen = seen + "toolbar " }
+                            target $Panel #Row #StatusBar as x { seen = seen + "statusbar " }
+                            target $Button #Flat as x { seen = seen + "flat=" + x.Button.label + " " }
+                            target $Split as x { seen = seen + "split=" + string(x.Split.first) + " " }
+                            emit *Vein.Console.Io.@Print { text: seen }
+                        }
+                    }
+                }
+            }
+            """;
+        string output = Run(source, 3);
+        foreach (string expected in new[]
+                 {
+                     "menubar", "menu=File", "item=Save", "item=-", "keys=Ctrl+S", "toolbar", "statusbar", "flat=Open", "split=180",
+                 })
+            Assert.Contains(expected, output);
+    }
+
+    [Fact]
     public void Every_widget_builder_makes_a_widget_under_its_window_with_its_shape_and_marks()
     {
         const string source = """

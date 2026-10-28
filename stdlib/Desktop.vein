@@ -68,6 +68,12 @@ bundle Desktop by Vein {
         shared("Words shown when the pointer rests on a widget: attach it to any widget.")
         shape $Tip { text: string }
 
+        shared("Two panes side by side, the first `first` pixels wide, with a divider the user can drag.")
+        shape $Split { first: float = 220.0 }
+
+        shared("A key that fires a menu item or a button, shown beside it in a menu: attach $Shortcut to save { keys: \"Ctrl+S\" }.")
+        shape $Shortcut { keys: string }
+
         shared("Carried by every window.")
         mark #Window
 
@@ -93,6 +99,24 @@ bundle Desktop by Vein {
 
         shared("A text box for several lines: Enter is a new line, Ctrl+Enter submits.")
         mark #Multiline
+
+        shared("The menu bar along a window's top edge; it holds Menus.")
+        mark #MenuBar
+
+        shared("A menu in a menu bar (or a submenu in a menu); it holds MenuItems.")
+        mark #Menu
+
+        shared("An item in a menu. A click is @Clicked, as a button's is; an item labelled \"-\" is a separator.")
+        mark #MenuItem
+
+        shared("A row of buttons along a window's top edge, under its menu bar.")
+        mark #Toolbar
+
+        shared("A row along a window's bottom edge: where things stand.")
+        mark #StatusBar
+
+        shared("A button drawn flat, as an item of a list: a sidebar's projects, a folder's files.")
+        mark #Flat
 
         shared("A window: bring Window(\"Notes\", 480.0, 360.0, \"icon.png\") as w, then bring widgets into w.")
         builder Window { $Window   mark #Window }
@@ -153,6 +177,28 @@ bundle Desktop by Vein {
 
         shared("An image file beside the program, drawn height pixels tall: bring Picture(w, \"logo.png\", 32.0).")
         builder Picture { *Vein.Core.Relations.$Parent  *Vein.UI.Widgets.$Image  $Picture   mark #Widget }
+
+        // ---- an application's frame: a menu bar, a toolbar, a status bar, and a split ----------------------
+        // A window lays these out by kind, whatever order they are brought in: menu bars and toolbars along the top,
+        // status bars along the bottom, a Split filling the rest. A window without them is a column, as before.
+
+        shared("The menu bar of window: bring MenuBar(w) as bar, then Menu(bar, \"File\").")
+        builder MenuBar { *Vein.Core.Relations.$Parent  $Panel   mark #Widget #MenuBar }
+
+        shared("A menu in a menu bar, or a submenu in a menu: bring Menu(bar, \"File\") as file.")
+        builder Menu { *Vein.Core.Relations.$Parent  *Vein.UI.Widgets.$Button   mark #Widget #Menu }
+
+        shared("An item of a menu; a click is @Clicked. \"-\" draws a separator: bring MenuItem(file, \"Save\") as save.")
+        builder MenuItem { *Vein.Core.Relations.$Parent  *Vein.UI.Widgets.$Button   mark #Widget #MenuItem }
+
+        shared("A toolbar along the window's top, under its menu bar: bring Toolbar(w, 6.0) as tools.")
+        builder Toolbar { *Vein.Core.Relations.$Parent  $Panel   mark #Widget #Row #Toolbar }
+
+        shared("A status bar along the window's bottom: bring StatusBar(w, 12.0) as status.")
+        builder StatusBar { *Vein.Core.Relations.$Parent  $Panel   mark #Widget #Row #StatusBar }
+
+        shared("Two panes side by side: its first child on the left, `first` pixels wide; its second fills the rest.")
+        builder Split { *Vein.Core.Relations.$Parent  $Split   mark #Widget }
 
         // REMOVAL WALKS DOWN. The runtime raises no @Destroyed (stdlib/Core.vein leaves teardown to the
         // program), so taking a row away would leave its checkbox behind, parented to nothing. This takes the

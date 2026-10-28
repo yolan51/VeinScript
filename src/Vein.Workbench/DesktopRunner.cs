@@ -225,7 +225,7 @@ internal sealed class DesktopRunner
             foreach (var w in Tree)
             {
                 seen.Add(w.Id);
-                Fill((Panel)((ScrollViewer)WindowFor(w).Content!).Content!, w, seen);
+                FillWindow((DockPanel)WindowFor(w).Content!, w, seen);
             }
         }
         finally { _syncing = false; }
@@ -257,7 +257,7 @@ internal sealed class DesktopRunner
         window = new Window
         {
             Title = w.Title, Width = w.Width, Height = w.Height,
-            Content = new ScrollViewer { Content = new StackPanel { Margin = new Thickness(16), Spacing = 8 } },
+            Content = new DockPanel(),
         };
         if (w.Icon.Length > 0 && Resolve(w.Icon) is { } iconPath && File.Exists(iconPath))
         {
@@ -267,6 +267,7 @@ internal sealed class DesktopRunner
         {
             if (_windows.Remove(id)) CloseWindow(id);   // the user closed it; the program hears it first
         };
+        _mainAreas[id] = new ScrollViewer { Content = new StackPanel { Margin = new Thickness(16), Spacing = 8 } };
         _windows[id] = window;
         _opened = true;
         window.Show();
@@ -280,10 +281,7 @@ internal sealed class DesktopRunner
         {
             seen.Add(child.Id);
             var control = ControlFor(child);
-            // Only a LAYOUT panel holds child widgets. A radio group is a StackPanel too, of its own buttons, and filling
-            // it from its (empty) child list emptied it every frame.
-            if (child.Kind == Kind.Panel && control is Panel inner) Fill(inner, child, seen);
-            else if (control is ScrollViewer { Content: Panel scrolled }) Fill(scrolled, child, seen);   // a Scroll column
+            FillInside(control, child, seen);
             wanted.Add(control);
         }
         if (panel.Children.SequenceEqual(wanted)) return;
@@ -295,6 +293,100 @@ internal sealed class DesktopRunner
             panel.Children.Add(control);
         }
     }
+
+    /// The widgets INSIDE a container, by the container's kind. Only a LAYOUT kind holds child widgets: a radio group
+    /// is a StackPanel too, of its own buttons, and filling it from its (empty) child list emptied it every frame.
+    private void FillInside(Control control, Node node, HashSet<long> seen)
+    {
+        switch (node.Kind)
+        {
+            case Kind.Panel when control is Panel inner: Fill(inner, node, seen); break;
+            case Kind.Scroll when control is ScrollViewer { Content: Panel scrolled }: Fill(scrolled, node, seen); break;
+            case Kind.Bar when control is Border { Child: Panel row }: Fill(row, node, seen); break;
+            case Kind.Split when control is Grid grid: FillSplit(grid, node, seen); break;
+            case Kind.MenuBar or Kind.Menu when control is ItemsControl items: FillMenu(items, node, seen); break;
+        }
+    }
+
+    /// A Split's first child on the left, its second on the right of the divider. A third has nowhere to go and is
+    /// not drawn.
+    private void FillSplit(Grid grid, Node node, HashSet<long> seen)
+    {
+        var panes = new List<Control>();
+        for (int i = 0; i < node.Children.Count && i < 2; i++)
+        {
+            var child = node.Children[i];
+            seen.Add(child.Id);
+            var control = ControlFor(child);
+            FillInside(control, child, seen);
+            Grid.SetColumn(control, i == 0 ? 0 : 2);
+            panes.Add(control);
+        }
+        var current = grid.Children.Where(c => c is not GridSplitter).ToList();
+        if (current.SequenceEqual(panes)) return;
+        foreach (var c in current) grid.Children.Remove(c);
+        foreach (var c in panes) { Detach(c); grid.Children.Add(c); }
+    }
+
+    /// A menu bar's menus, a menu's items — rebuilt only when what they hold changed, so an open menu stays open.
+    private void FillMenu(ItemsControl menu, Node node, HashSet<long> seen)
+    {
+        var wanted = new List<Control>();
+        foreach (var child in node.Children)
+        {
+            seen.Add(child.Id);
+            var control = ControlFor(child);
+            FillInside(control, child, seen);
+            wanted.Add(control);
+        }
+        if (menu.Items.Cast<object?>().SequenceEqual(wanted)) return;
+        menu.Items.Clear();
+        foreach (var c in wanted) { Detach(c); menu.Items.Add(c); }
+    }
+
+    /// A window lays out its FRAME by kind, whatever order it was brought in: menu bars and toolbars along the top,
+    /// status bars along the bottom, a Split filling what is left. Everything else is the column it always was —
+    /// above the Split when there is one, filling the window when there is not.
+    private void FillWindow(DockPanel root, Node window, HashSet<long> seen)
+    {
+        var main = _mainAreas[window.Id];
+        var edges = new List<Control>();
+        Control? split = null;
+        var plain = new List<Node>();
+        foreach (var child in window.Children)
+        {
+            bool edge = child.Kind is Kind.MenuBar or Kind.Bar;
+            if (!edge && !(child.Kind == Kind.Split && split is null)) { plain.Add(child); continue; }
+            seen.Add(child.Id);
+            var control = ControlFor(child);
+            FillInside(control, child, seen);
+            if (edge)
+            {
+                DockPanel.SetDock(control, child.Bottom ? Dock.Bottom : Dock.Top);
+                edges.Add(control);
+            }
+            else split = control;
+        }
+        Fill((Panel)main.Content!, window with { Children = plain }, seen);
+
+        var wanted = new List<Control>(edges);
+        if (split is null)
+        {
+            main.ClearValue(DockPanel.DockProperty);
+            wanted.Add(main);
+        }
+        else
+        {
+            if (plain.Count > 0) { DockPanel.SetDock(main, Dock.Top); wanted.Add(main); }
+            wanted.Add(split);
+        }
+        if (root.Children.SequenceEqual(wanted)) return;
+        root.Children.Clear();
+        foreach (var c in wanted) { Detach(c); root.Children.Add(c); }
+    }
+
+    /// Each window's column — the widgets that are not its frame.
+    private readonly Dictionary<long, ScrollViewer> _mainAreas = new();
 
     /// `#Hidden` (Vein.Graphics) keeps the control and draws it nowhere — and a hidden panel hides what is in it.
     private Control ControlFor(Node n)
@@ -386,7 +478,70 @@ internal sealed class DesktopRunner
                     }
                 }
                 button.Classes.Set("accent", n.Accent);   // Fluent's accent button, for `#Accent`
+                // `#Flat`: an item of a list — the full width, its words on the left, no button face until accented.
+                if (n.Flat)
+                {
+                    button.HorizontalAlignment = HorizontalAlignment.Stretch;
+                    button.HorizontalContentAlignment = HorizontalAlignment.Left;
+                    if (n.Accent || n.Tint is not null) button.ClearValue(Button.BackgroundProperty);
+                    else button.Background = Brushes.Transparent;
+                    button.BorderThickness = new Thickness(0);
+                }
+                SetHotKey(button, n.Shortcut);
                 return button;
+
+            case Kind.MenuBar:
+                return existing as Menu ?? Replace(id, new Menu());
+
+            case Kind.Menu:
+                var menu = existing as MenuItem ?? Replace(id, new MenuItem());
+                if (!Equals(menu.Header, n.Text)) menu.Header = n.Text;
+                return menu;
+
+            case Kind.MenuItem when n.Text == "-":
+                return existing as Separator ?? Replace(id, new Separator());
+
+            case Kind.MenuItem:
+                if (existing is not MenuItem item)
+                {
+                    item = Replace(id, new MenuItem());
+                    item.Click += (_, _) => Click(id);
+                }
+                if (!Equals(item.Header, n.Text)) item.Header = n.Text;
+                if ((item.InputGesture?.ToString() ?? "") != n.Shortcut)
+                {
+                    item.InputGesture = Gesture(n.Shortcut);
+                    SetHotKey(item, n.Shortcut);
+                }
+                return item;
+
+            case Kind.Bar:
+                // A toolbar or a status bar: a row on a band of its own, a little apart from what it frames.
+                var band = existing as Border ?? Replace(id, new Border
+                {
+                    Padding = new Thickness(10, 5), Background = new SolidColorBrush(Color.Parse("#1A808080")),
+                    Child = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center },
+                });
+                ((StackPanel)band.Child!).Spacing = n.Gap;
+                return band;
+
+            case Kind.Split:
+                if (existing is not Grid split)
+                {
+                    split = Replace(id, new Grid { Margin = new Thickness(8) });
+                    split.ColumnDefinitions = new ColumnDefinitions("220,6,*");
+                    var divider = new GridSplitter { ResizeDirection = GridResizeDirection.Columns, Background = new SolidColorBrush(Color.Parse("#33808080")) };
+                    Grid.SetColumn(divider, 1);
+                    split.Children.Add(divider);
+                    split.Tag = 220.0;
+                }
+                // The program's width is where it STARTS; after the user drags the divider, theirs stands.
+                if (split.Tag is double was && Math.Abs(was - n.First) > 0.5)
+                {
+                    split.ColumnDefinitions[0].Width = new GridLength(n.First);
+                    split.Tag = n.First;
+                }
+                return split;
 
             case Kind.Slider:
                 if (existing is not Slider slider)
@@ -550,6 +705,20 @@ internal sealed class DesktopRunner
         return _images[path] = bitmap;
     }
 
+    /// `$Shortcut { keys: "Ctrl+S" }` — parsed as Avalonia reads a gesture; one it cannot read is no shortcut, not a crash.
+    private static KeyGesture? Gesture(string keys)
+    {
+        if (keys.Length == 0) return null;
+        try { return KeyGesture.Parse(keys); } catch (Exception) { return null; }
+    }
+
+    private static void SetHotKey(Control control, string keys)
+    {
+        var gesture = Gesture(keys);
+        if (control is Button b && !Equals(b.HotKey, gesture)) b.HotKey = gesture;
+        if (control is MenuItem m && !Equals(m.HotKey, gesture)) m.HotKey = gesture;
+    }
+
     /// An identity whose kind changed gets a new control; the old one leaves the window.
     private T Replace<T>(long id, T control) where T : Control
     {
@@ -560,7 +729,11 @@ internal sealed class DesktopRunner
 
     private static void Detach(Control control)
     {
-        if (control.Parent is Panel parent) parent.Children.Remove(control);
+        switch (control.Parent)
+        {
+            case Panel parent: parent.Children.Remove(control); break;
+            case ItemsControl items: items.Items.Remove(control); break;     // a menu's item
+        }
     }
 
     private void Quit(string reason)
@@ -578,7 +751,8 @@ internal sealed class DesktopRunner
 
     // ---- reading the world as a tree ------------------------------------------------------------------
 
-    internal enum Kind { Window, Panel, Scroll, Button, Input, Check, Switch, Choice, Radio, Slider, Progress, Space, Rule, Picture, Badge, Text }
+    internal enum Kind { Window, Panel, Scroll, Button, Input, Check, Switch, Choice, Radio, Slider, Progress, Space, Rule, Picture, Badge, Text,
+                         MenuBar, Menu, MenuItem, Bar, Split }
 
     /// One window or widget, read from one identity. Only the fields its kind uses mean anything.
     internal sealed record Node(long Id, Kind Kind, IReadOnlyList<Node> Children)
@@ -606,6 +780,10 @@ internal sealed class DesktopRunner
         public double IconSize { get; init; }
         public bool Multiline { get; init; }
         public string Tip { get; init; } = "";
+        public string Shortcut { get; init; } = "";
+        public double First { get; init; }
+        public bool Flat { get; init; }
+        public bool Bottom { get; init; }
 
         public IEnumerable<Node> Walk() => Children.SelectMany(c => c.Walk()).Prepend(this);
     }
@@ -644,7 +822,11 @@ internal sealed class DesktopRunner
             {
                 Text = Text(e, "Button", "label"), Accent = e.Marks.Contains("Accent"),
                 Icon = Text(e, "Icon", "source"), IconSize = Number(e, "Icon", "size", 18),
+                Flat = e.Marks.Contains("Flat"), Shortcut = Text(e, "Shortcut", "keys"),
             },
+            Kind.Menu or Kind.MenuItem => new Node(e.Entity, kind, kids) { Text = Text(e, "Button", "label"), Shortcut = Text(e, "Shortcut", "keys") },
+            Kind.Bar => new Node(e.Entity, kind, kids) { Gap = Number(e, "Panel", "gap", 8), Row = true, Bottom = e.Marks.Contains("StatusBar") },
+            Kind.Split => new Node(e.Entity, kind, kids) { First = Number(e, "Split", "first", 220) },
             Kind.Input => new Node(e.Entity, kind, kids)
             {
                 Value = Text(e, "Field", "value"), Placeholder = Text(e, "Field", "placeholder"), Multiline = e.Marks.Contains("Multiline"),
@@ -682,6 +864,11 @@ internal sealed class DesktopRunner
     /// The shape decides the widget; a mark picks how it is drawn (`#Radio`, `#Switch`, `#Badge`).
     private static Kind? KindOf(EntityStore.EntitySnapshot e) =>
         e.Components.ContainsKey("Window") ? Kind.Window
+        : e.Marks.Contains("MenuBar") ? Kind.MenuBar
+        : e.Marks.Contains("MenuItem") ? Kind.MenuItem
+        : e.Marks.Contains("Menu") ? Kind.Menu
+        : e.Marks.Contains("Toolbar") || e.Marks.Contains("StatusBar") ? Kind.Bar
+        : e.Components.ContainsKey("Split") ? Kind.Split
         : e.Components.ContainsKey("Scroll") ? Kind.Scroll
         : e.Components.ContainsKey("Panel") ? Kind.Panel
         : e.Components.ContainsKey("Button") ? Kind.Button
