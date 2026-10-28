@@ -894,6 +894,53 @@ public sealed class Interp
         }
     }
 
+    /// `@ListFolder` → `@FolderListed { entries }`: folders first, each with a trailing `/`, then files — each group
+    /// by name, ordinally, so the order is the same on every machine. A folder that cannot be read answers
+    /// @FileMissing, routed by the same tag, as a file read is.
+    private void DoListFolder(Dictionary<string, object?> payload)
+    {
+        string path = Str(payload.GetValueOrDefault("path"));
+        string tag = Str(payload.GetValueOrDefault("tag"));
+        try
+        {
+            string full = Path.GetFullPath(ResolvePath(path.Length == 0 ? "." : path));
+            var folders = Directory.GetDirectories(full).Select(d => Path.GetFileName(d) + "/").OrderBy(n => n, StringComparer.Ordinal);
+            var files = Directory.GetFiles(full).Select(Path.GetFileName).OrderBy(n => n, StringComparer.Ordinal);
+            Emit("FolderListed", new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = path,
+                ["full"] = full,
+                ["entries"] = folders.Concat(files).Cast<object?>().ToList(),
+                ["tag"] = tag
+            });
+        }
+        catch (Exception ex)
+        {
+            Emit("FileMissing", new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = path,
+                ["reason"] = ex.Message,
+                ["tag"] = tag
+            });
+        }
+    }
+
+    /// Asks the host for something only a host can do — today, a file dialog. True when the host took it and will
+    /// answer later (with @FilePicked or @PickCancelled, through <see cref="FireHost"/>).
+    public Func<string, IReadOnlyDictionary<string, object?>, bool>? HostRequest { get; set; }
+
+    /// `@PickOpenFile` / `@PickSaveFile`. With no host to show a dialog (`veinc run`, a test), the answer is
+    /// @PickCancelled at once — a program waiting on a picker must never wait forever.
+    private void DoPick(string name, Dictionary<string, object?> payload)
+    {
+        if (HostRequest is { } host && host(name, payload)) return;
+        Emit("PickCancelled", new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["tag"] = Str(payload.GetValueOrDefault("tag")),
+            ["reason"] = "no window to show a file dialog in",
+        });
+    }
+
     private void DoWriteFile(Dictionary<string, object?> payload)
     {
         string path = Str(payload.GetValueOrDefault("path"));
@@ -1605,6 +1652,8 @@ public sealed class Interp
             if (name == "Fetch") { DoFetch(payload); continue; }
             if (name == "ReadFile") { DoReadFile(payload); continue; }
             if (name == "WriteFile") { DoWriteFile(payload); continue; }
+            if (name == "ListFolder") { DoListFolder(payload); continue; }
+            if (name is "PickOpenFile" or "PickSaveFile") { DoPick(name, payload); continue; }
 
             // A DIAGNOSTIC IS NEVER DROPPED. Every other unheard event vanishing is the design — an
             // emit is not addressed to anyone. This one is different: a diagnostics library that loses
@@ -1860,6 +1909,14 @@ public sealed class Interp
     {
         string text = Str(Eval(w.Source, self, locals));
         var problems = new List<(string Record, string Why)>();
+
+        // A NAME LIVES AS LONG AS ITS IDENTITY. Opening a second file after discarding the first wove the same
+        // names again, and every record was refused as "already woven" — by identities that no longer existed.
+        foreach (var (gone, _) in _wovenNames.Where(kv => kv.Value is long id && !_store.IsAlive(id)).ToList())
+        {
+            _wovenNames.Remove(gone);
+            _ambiguousNames.Remove(gone);
+        }
         void Problem(string record, string what) => problems.Add((record, $"\"{record}\": {what}"));
 
         // ---- pass 1: read, name, spawn ----
@@ -1998,9 +2055,15 @@ public sealed class Interp
         bool refers = t.Params.Any(p => p.RefersByName);
         var names = new HashSet<string>(StringComparer.Ordinal);
 
-        string? NameOf(object? v) =>
-            v is long id && id != 0 && nameShape is not null && _store.IsAlive(id) && _store.Has(id, nameShape)
-                ? Str(_store.Read(id, nameShape, t.Params[0].Name)) : null;
+        // A link is written as its target's NAME: the first field of the shape its elements carry (`~<list> cards:
+        // owns $Card` → the card's `id`), or, for a plain `Entity`, this loom's own first parameter.
+        string? NameOf(object? v, string? shape = null)
+        {
+            string? s = shape ?? nameShape;
+            string? field = shape is null ? t.Params[0].Name : _store.FieldsOf(shape)?.FirstOrDefault()?.Name;
+            return v is long id && id != 0 && s is not null && field is not null && _store.IsAlive(id) && _store.Has(id, s)
+                ? Str(_store.Read(id, s, field)) : null;
+        }
 
         foreach (long id in _store.Query(t.Shapes, t.Marks))
         {
@@ -2021,7 +2084,7 @@ public sealed class Interp
                 {
                     var linked = new List<object?>();
                     foreach (var element in raw is System.Collections.IEnumerable e and not string ? e.Cast<object?>() : Enumerable.Empty<object?>())
-                        if (NameOf(element) is { } n) linked.Add(n);
+                        if (NameOf(element, p.Carries) is { } n) linked.Add(n);
                         else problems.Add((label, $"`{p.Name}`: a linked identity has no `{t.Params[0].Name}` to write it by, so it is left out"));
                     values[p.Name] = linked;
                 }
@@ -2331,7 +2394,8 @@ public sealed class Interp
     /// compiled into a no-op.
     public static readonly IReadOnlySet<string> HostEvents =
         new HashSet<string>(StringComparer.Ordinal)
-        { "Response", "Print", "Console", "Send", "Listen", "Link", "Fetch", "ReadFile", "WriteFile", "PlaySound", "Quit", "PrintError", "PrintInline" };
+        { "Response", "Print", "Console", "Send", "Listen", "Link", "Fetch", "ReadFile", "WriteFile", "ListFolder",
+          "PickOpenFile", "PickSaveFile", "PlaySound", "Quit", "PrintError", "PrintInline" };
 
     /// <summary>The readable half of an event key: `me.T.Go` → `Go`.</summary>
     /// <remarks>
@@ -2361,7 +2425,8 @@ public sealed class Interp
         new HashSet<string>(StringComparer.Ordinal)
         {
             "Request", "Response", "DiagnosticRaised", "Failed", "Fetched",
-            "FileLoaded", "FileMissing", "FileWritten", "Input", "Message", "Undelivered",
+            "FileLoaded", "FileMissing", "FileWritten", "FolderListed", "FilePicked", "PickCancelled",
+            "Input", "Message", "Undelivered",
             "KeyDown", "KeyUp", "TextInput", "MouseDown", "MouseUp", "MouseMove", "MouseWorld",
             "ActionPressed", "ActionReleased", "ButtonDown", "ButtonUp", "AxisMoved",
             "Ticked", "SoundEnded", "AnimationEnded", "Collided", "Separated", "Clicked", "InputEnded",

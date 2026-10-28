@@ -2841,10 +2841,15 @@ public sealed partial class Lower
     private List<(string Name, TypeRef? Type, Expr? Default, string? From)> WovenParams(BringTarget t) =>
         BringParams(t).Params.Where(p => t.Fixed is null || !t.Fixed.ContainsKey(p.Name)).ToList();
 
-    private WeaveParam ToWeaveParam((string Name, TypeRef? Type, Expr? Default, string? From) p) =>
-        new(p.Name, p.Type?.Name ?? "string", p.Default is not null, p.Type?.Args.FirstOrDefault()?.Name,
-            // A `~` collection's kind (D24), so a weave reports a duplicate in a `~<set>` rather than folding it away.
-            p.From is not null && _shapeFields.TryGetValue(p.From, out var fs) ? fs.FirstOrDefault(f => f.Name == p.Name)?.Collection?.Kind : null);
+    private WeaveParam ToWeaveParam((string Name, TypeRef? Type, Expr? Default, string? From) p)
+    {
+        var collection = p.From is not null && _shapeFields.TryGetValue(p.From, out var fs)
+            ? fs.FirstOrDefault(f => f.Name == p.Name)?.Collection : null;
+        return new(p.Name, p.Type?.Name ?? "string", p.Default is not null, p.Type?.Args.FirstOrDefault()?.Name,
+            // A `~` collection's kind (D24), so a weave reports a duplicate in a `~<set>` rather than folding it away;
+            // and the shape its elements carry, so `toText` names a linked card by the CARD's first field.
+            collection?.Kind, collection?.Carries);
+    }
 
     /// A format by name, seen from the bundle `ownerKey` belongs to (null: this one) — local, then built-in,
     /// then `need`; a qualified `*A.B.Name` by its path. BuiltIn is true for Json/Csv/Ini/KeyValue.

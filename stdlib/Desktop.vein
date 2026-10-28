@@ -190,5 +190,19 @@ bundle Desktop by Vein {
 
         shared("From the host: the user closed a window. The host then removes it, and everything in it.")
         event @WindowClosed { target: Entity }
+
+        // ---- file dialogs: the program asks, the host shows the operating system's own dialog ----
+
+        shared("Ask the user for a file to OPEN, with the system dialog. `extension` filters it (\"plan\"); the answer is @FilePicked or @PickCancelled.")
+        event @PickOpenFile { title: string = "Open", extension: string = "", tag: string = "" }
+
+        shared("Ask the user where to SAVE, with the system dialog, starting from `suggested`. The answer is @FilePicked or @PickCancelled.")
+        event @PickSaveFile { title: string = "Save as", extension: string = "", suggested: string = "", tag: string = "" }
+
+        shared("From the host: the file the user chose — a full path. `tag` is the request's.")
+        event @FilePicked { path: string, tag: string = "" }
+
+        shared("From the host: the dialog was closed without a choice — or there is no window to show one in (`veinc run`).")
+        event @PickCancelled { tag: string = "", reason: string = "" }
     }
 }

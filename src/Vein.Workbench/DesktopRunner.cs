@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Vein.Compiler.Ir;
 
@@ -56,6 +57,8 @@ internal sealed class DesktopRunner
         var lines = new LineSink(print);
         _interp = new Interp { BaseDirectory = baseDirectory, Output = lines, ErrorOutput = lines };
         _timer = new DispatcherTimer(TimeSpan.FromMilliseconds(33), DispatcherPriority.Input, (_, _) => Frame());
+        ShowPicker = SystemPicker;
+        _interp.HostRequest = OnHostRequest;
     }
 
     public void Start()
@@ -103,6 +106,60 @@ internal sealed class DesktopRunner
         _interp.World.Publish(id, "Slider", "value", value);
         _interp.FireHost("Slid", Payload(("target", id), ("value", value)));
     });
+
+    // ---- file dialogs: @PickOpenFile / @PickSaveFile, answered with @FilePicked or @PickCancelled ----------
+
+    /// The dialog itself: (save?, title, extension, suggested) → the chosen full path, or null. The system dialog
+    /// by default; replaceable, so a test can answer without one.
+    public Func<bool, string, string, string, Task<string?>> ShowPicker { get; set; }
+
+    private bool OnHostRequest(string name, IReadOnlyDictionary<string, object?> request)
+    {
+        if (name is not ("PickOpenFile" or "PickSaveFile")) return false;
+        string S(string field) => request.TryGetValue(field, out var v) ? v?.ToString() ?? "" : "";
+        bool save = name == "PickSaveFile";
+        string tag = S("tag");
+        // POSTED, never answered inline: the request arrives mid-Drain, and an answer fired from inside it would
+        // re-enter the interpreter while it is still handling the event that asked.
+        Dispatcher.UIThread.Post(async () =>
+        {
+            string? path = null;
+            try { path = await ShowPicker(save, S("title"), S("extension"), S("suggested")); }
+            catch (Exception) { /* a dialog that failed to open is a dialog nobody answered */ }
+            if (_done) return;
+            if (Guard(() =>
+                {
+                    if (path is null) _interp.FireHost("PickCancelled", Payload(("tag", tag), ("reason", "cancelled")));
+                    else _interp.FireHost("FilePicked", Payload(("path", path), ("tag", tag)));
+                }))
+                Render();
+        });
+        return true;
+    }
+
+    private async Task<string?> SystemPicker(bool save, string title, string extension, string suggested)
+    {
+        if (_windows.Values.FirstOrDefault() is not { } top) return null;
+        var types = extension.Length == 0 ? null : new List<Avalonia.Platform.Storage.FilePickerFileType>
+        {
+            new(extension.ToUpperInvariant() + " files") { Patterns = new[] { "*." + extension } },
+            Avalonia.Platform.Storage.FilePickerFileTypes.All,
+        };
+        if (save)
+        {
+            var file = await top.StorageProvider.SaveFilePickerAsync(new Avalonia.Platform.Storage.FilePickerSaveOptions
+            {
+                Title = title, SuggestedFileName = Path.GetFileName(suggested),
+                DefaultExtension = extension.Length == 0 ? null : extension, FileTypeChoices = types,
+            });
+            return file?.TryGetLocalPath();
+        }
+        var files = await top.StorageProvider.OpenFilePickerAsync(new Avalonia.Platform.Storage.FilePickerOpenOptions
+        {
+            Title = title, AllowMultiple = false, FileTypeFilter = types,
+        });
+        return files.Count > 0 ? files[0].TryGetLocalPath() : null;
+    }
 
     public void CloseWindow(long id) => Input(() =>
     {

@@ -93,6 +93,25 @@ bundle Files by Vein {
 
         shared("Add to the end of a file, creating it if it is not there.")
         SF append(path: string, text: string) { emit @WriteFile { path: path, text: text, append: true } }
+
+        // ---- folders ------------------------------------------------------------------------------
+
+        shared("Ask what a folder holds. The answer arrives as @FolderListed, or @FileMissing.")
+        event @ListFolder {
+            path: string
+            tag: string = ""
+        }
+
+        shared("A folder's entries by name: folders first, each ending with `/`, then files; `full` is the folder's absolute path.")
+        event @FolderListed {
+            path: string
+            full: string
+            entries: list<string>
+            tag: string = ""
+        }
+
+        shared("List a folder under a tag.")
+        SF listAs(path: string, tag: string) { emit @ListFolder { path: path, tag: tag } }
     }
 
     // WHY A `tag`, AND WHY IT IS THE ANSWER TO "I HAVE 19 FILES".

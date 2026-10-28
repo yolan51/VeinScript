@@ -5,7 +5,7 @@ namespace Vein.Compiler.Ir;
 
 /// <summary>A parameter a woven record fills: its name, its type, whether it may be missing, and — for a
 /// <c>list&lt;T&gt;</c> — the element type.</summary>
-public sealed record WeaveParam(string Name, string Type, bool HasDefault, string? Element = null, string? Kind = null)
+public sealed record WeaveParam(string Name, string Type, bool HasDefault, string? Element = null, string? Kind = null, string? Carries = null)
 {
     public bool IsList => Type == "list";
 
