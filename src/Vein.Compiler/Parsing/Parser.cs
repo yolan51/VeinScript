@@ -155,8 +155,10 @@ public sealed class Parser
                     // A `shard` is bundle BEHAVIOUR — it comes with the bundle and runs when the bundle is
                     // loaded; it is never part of a publicator's cross-bundle API (which holds shared
                     // shapes/events/builders). So a shard belongs at the bundle level, not in a publicator.
-                    if (d is ShardDecl && exported)
-                        _diag.Error("VS0108", "a `shard` is bundle behaviour — declare it at the bundle level, not inside a `publicator`.", d.Span);
+                    // …unless it is SHARED: then it is a TEMPLATE (D27), inert until a bundle writes `shard X from *…!Name`.
+                    if (d is ShardDecl && exported && doc is null)
+                        _diag.Error("VS0108", "a `shard` is bundle behaviour — declare it at the bundle level, not inside a `publicator`. " +
+                            "To offer it to other bundles as a template, give it a `shared(\"…\")`: it then runs only where one writes `shard X from *…!Name`.", d.Span);
                     members.Add(d with { Doc = doc ?? d.Doc, Exported = exported || d.Exported, Shared = (doc is not null && exported) || d.Shared });
                 }
             }
@@ -662,12 +664,32 @@ public sealed class Parser
         return members;
     }
 
-    private ShardDecl ParseShard()
+    private Decl ParseShard()
     {
         var s = Here; Advance();
         string name = Expect(TokenKind.Ident, "shard name").Text;
+        // `shard Files from *Vein.Desktop.Document.!DocumentFiles [{ more members }]` (D27): a template's copy.
+        if (Match(TokenKind.KwFrom))
+        {
+            var (path, template) = ParseTemplateRef();
+            var extra = Check(TokenKind.LBrace) ? ParseFirstClassBody() : new List<Node>();
+            return new TemplateUseDecl(false, name, path, template, Array.Empty<SlotFill>(), extra, s);
+        }
         var (shapes, marks) = ParseCarried();
         return new ShardDecl(name, ParseFirstClassBody(), s) { CarriedShapes = shapes, CarriedMarks = marks };
+    }
+
+    /// `*Author.Bundle.Publicator.!Template` — a shared shard or view, by its shard sigil (D19, D27).
+    private (IReadOnlyList<string> Path, string Name) ParseTemplateRef()
+    {
+        Expect(TokenKind.Star, "`*Author.Bundle.Publicator.!Template` — the template to copy");
+        var path = new List<string> { ExpectName("qualified path after '*'").Text };
+        while (true)
+        {
+            Expect(TokenKind.Dot, "'.'");
+            if (Check(TokenKind.ShardRef)) return (path, Advance().Text);
+            path.Add(ExpectName("path segment or !Template").Text);
+        }
     }
 
     private BuilderDecl ParseBuilder()
@@ -808,6 +830,26 @@ public sealed class Parser
         var s = Here; Advance();
         string name = Expect(TokenKind.Ident, "ShardView name").Text;
         if (Check(TokenKind.KwOn)) return ParseViewOn(s, name);
+        // `ShardView MapWindow from *Vein.Desktop.Document.!DocumentWindow { Content { … } }` (D27): a template view
+        // copied here, each `Slot { … }` filling the template's widget marked `slot Slot`.
+        if (Match(TokenKind.KwFrom))
+        {
+            var (path, template) = ParseTemplateRef();
+            var fills = new List<SlotFill>();
+            if (Match(TokenKind.LBrace))
+            {
+                SkipTerms();
+                while (!Check(TokenKind.RBrace) && !AtEnd)
+                {
+                    var fs = Here;
+                    string slot = Expect(TokenKind.Ident, "a slot's name, then `{` and what goes in it").Text;
+                    fills.Add(new SlotFill(slot, ParseViewBody(), fs));
+                    SkipTerms();
+                }
+                Expect(TokenKind.RBrace, "'}'");
+            }
+            return new TemplateUseDecl(true, name, path, template, fills, Array.Empty<Node>(), s);
+        }
         var (carriedShapes, carriedMarks) = ParseCarried();
         Expect(TokenKind.LBrace, "'{'");
         var members = new List<Node>();
@@ -885,6 +927,7 @@ public sealed class Parser
         var marks = new List<string>();
         string? bind = null;
         SocketSpec? socket = null;
+        string? slot = null;
         while (true)
         {
             if (Match(TokenKind.KwMark))
@@ -893,6 +936,7 @@ public sealed class Parser
                 while (Check(TokenKind.MarkRef)) marks.Add(Advance().Text);
             }
             else if (Match(TokenKind.KwAs)) bind = ExpectName("a name for the widget").Text;
+            else if (Check(TokenKind.Ident) && Cur.Text == "slot" && Peek().Kind == TokenKind.Ident) { Advance(); slot = Advance().Text; }
             else if (Check(TokenKind.Ident) && Cur.Text == "socket")
             {
                 var ss = Here; Advance();
@@ -904,7 +948,7 @@ public sealed class Parser
             else break;
         }
         var children = Check(TokenKind.LBrace) ? ParseViewBody() : new List<ViewItem>();
-        return new WidgetItem(builder, args, marks, bind, socket, children, s);
+        return new WidgetItem(builder, args, marks, bind, socket, children, s) { Slot = slot };
     }
 
     private BridgeDecl ParseBridge()

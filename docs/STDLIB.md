@@ -110,8 +110,10 @@ Vein.Desktop  — windows and widgets as identities: $Window $Panel $Toggle $Pic
                 @Edited @Submitted @Toggled @Picked @Slid @WindowClosed
                 an application's frame: MenuBar Menu MenuItem ($Shortcut { keys }) Toolbar StatusBar Split($Split { first }),
                 #Flat buttons, #Draggable → @Dropped { target, onto }; file dialogs @PickOpenFile @PickSaveFile → @FilePicked / @PickCancelled
+                a document app's shell, as TEMPLATES (D27): *Vein.Desktop.Document — $Document, ShardView DocumentWindow (slots
+                Menus Tools Sidebar Content Status), shard DocumentFiles (hooks documentNew, documentLoaded(text), documentText())
                 (stdlib/Desktop.vein; the Workbench's ▶ draws them — HOSTING.md "Desktop programs")
-Vein.Files    — @ReadFile @WriteFile → @FileLoaded @FileWritten @FileMissing; @ListFolder → @FolderListed { entries }
+Vein.Files    — @ReadFile @WriteFile → @FileLoaded @FileWritten @FileMissing; @ListFolder → @FolderListed { entries }; fileName(path), folderOf(path)
 ```
 
 A single conceptual identity (e.g. `Vein.Input.@MouseDown`) is defined **once**; each backend translates

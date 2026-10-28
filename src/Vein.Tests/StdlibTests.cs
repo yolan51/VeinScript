@@ -85,7 +85,9 @@ public class StdlibTests
         // answers, which is the shape a desktop library grows in.
         Assert.InRange(byKind[SymbolKind.Event], 5, 120);
         Assert.InRange(byKind[SymbolKind.Builder], 5, 90);     // 60 → 90 with the frame builders (MenuBar, Menu, …)
-        Assert.False(byKind.ContainsKey(SymbolKind.Shard));   // shards are never in the shared API
+        // A shard in the shared API is a TEMPLATE (D27): inside a publicator, with a `shared` doc, run nowhere until a
+        // bundle writes `shard X from *…!Name`. Never a running shard arriving with a `need`.
+        Assert.All(model.Symbols.Where(s => s.Kind == SymbolKind.Shard), s => Assert.True(s.Publicator is not null && !string.IsNullOrEmpty(s.Doc), s.Name));
     }
 
     [Fact]

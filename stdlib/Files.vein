@@ -114,6 +114,23 @@ bundle Files by Vein {
 
         shared("List a folder under a tag.")
         SF listAs(path: string, tag: string) { emit @ListFolder { path: path, tag: tag } }
+
+        // ---- paths ----------------------------------------------------------------------------------
+        // Both slashes are separators, so a path from a dialog (`C:\plans\work.plan`) and one built by hand
+        // (`C:/plans/work.plan`) answer the same.
+
+        shared("The last part of a path: fileName(\"C:/plans/work.plan\") is \"work.plan\".")
+        fn fileName(path: string) return string {
+            let parts = split(replace(path, "\\", "/"), "/")
+            return parts[len(parts) - 1]
+        }
+
+        shared("The folder a path is in: folderOf(\"C:/plans/work.plan\") is \"C:/plans\"; a bare name's is \".\".")
+        fn folderOf(path: string) return string {
+            let parts = split(replace(path, "\\", "/"), "/")
+            if len(parts) <= 1 { return "." }
+            return join(slice(parts, 0, len(parts) - 1), "/")
+        }
     }
 
     // WHY A `tag`, AND WHY IT IS THE ANSWER TO "I HAVE 19 FILES".

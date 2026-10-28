@@ -1,0 +1,53 @@
+// samples/desktop/notes.vein — a text editor with File ▸ New / Open… / Save / Save as…, recent files, the files
+// beside the open one, an unsaved dot and a status bar — in about forty lines, because all of that is the stdlib's
+// document shell (D27 templates, *Vein.Desktop.Document). This file writes only what is ITS: one note, and the
+// three hooks the shell calls.
+//
+//   In the Workbench, press ▶ (F5).
+//   veinc run samples/desktop/notes.vein --ticks 4      (its rules alone, with no window drawn)
+
+bundle Notes by you {
+    need "Vein.Desktop"
+    need "Vein.UI"
+    need "Vein.Core"
+
+    shape $Note { text: string }
+    builder Note { $Note   mark #Note }
+    mark #Note
+    mark #Body
+
+    shard Start {
+        run once {
+            bring Document("Notes", "", "txt", false, false, [], [])
+            bring Note("")
+        }
+    }
+
+    // The shell's window and its file side, copied in; the main pane is the note.
+    ShardView NotesWindow from *Vein.Desktop.Document.!DocumentWindow {
+        Content { TextArea("", "Write here…") mark #Body }
+    }
+    shard Files from *Vein.Desktop.Document.!DocumentFiles
+
+    // The note is the truth; the box shows it, and what is typed goes back into it.
+    shard Editing {
+        hear @Edited as e {
+            target $Field #Body on e.target as box {
+                target $Note as n { n.Note.text = e.value }
+                emit *Vein.Desktop.Document.@DocumentChanged { }
+            }
+        }
+        settled {
+            target $Note as n { target $Field #Body as box { if not (box.Field.value == n.Note.text) { box.Field.value = n.Note.text } } }
+        }
+    }
+
+    // The hooks: the shell asks for these by name.
+    SF documentNew() { target $Note as n { n.Note.text = "" } }
+    SF documentLoaded(text: string) { target $Note as n { n.Note.text = text } }
+    fn documentText() return string {
+        var text = ""
+        target $Note as n { text = n.Note.text }
+        return text
+    }
+}

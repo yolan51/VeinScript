@@ -30,7 +30,7 @@ public class PlannerSampleTests : IDisposable
                                 }
                                 line = line + " tabs:"
                                 target plan.Plan.~tabs as t { line = line + " " + t.Project.name }
-                                target a.Planner.~entries as e { line = line + " entry=" + e.Entry.name }
+                                target $Document as doc { target doc.Document.~entries as e { line = line + " entry=" + e.FolderFile.name } }
                                 emit *Vein.Console.Io.@Print { text: line }
                             }
                         }

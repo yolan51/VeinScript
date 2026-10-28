@@ -258,4 +258,295 @@ bundle Desktop by Vein {
         shared("From the host: the dialog was closed without a choice — or there is no window to show one in (`veinc run`).")
         event @PickCancelled { tag: string = "", reason: string = "" }
     }
+
+    // ---- a document app's shell, as TEMPLATES (D27) ------------------------------------------------------------
+    //
+    // Everything a program that opens and saves files repeats: the File menu and toolbar (New, Open…, Save, Save as…
+    // with their shortcuts), the system dialogs, "unsaved — do it again to discard", recent files, the files beside
+    // the open one, the window's title with its unsaved dot, a status bar. Nothing here runs by itself; a program
+    // takes it with two lines and writes only its own part:
+    //
+    //   bring Document("Planner", "example.plan", "plan", false, false, [], [])     // title, first file, extension
+    //   ShardView Main from *Vein.Desktop.Document.!DocumentWindow { Content { …its own widgets… } }
+    //   shard Files from *Vein.Desktop.Document.!DocumentFiles
+    //
+    // and three HOOKS the files shard calls:
+    //
+    //   SF documentNew()                      start an empty document
+    //   SF documentLoaded(text: string)       open one from its text
+    //   fn documentText() return string       the text to save
+    //
+    // A change the user makes is `emit *Vein.Desktop.Document.@DocumentChanged { }`. The window's slots are Menus (after
+    // File), Tools (after New/Open/Save), Sidebar (above Recent), Content (the main pane) and Status.
+    publicator Document {
+        shared("A recently opened file, listed in the sidebar.")
+        shape $RecentFile { path: string }
+
+        shared("A file beside the open one, of the same kind, listed in the sidebar.")
+        shape $FolderFile { name: string, path: string }
+
+        shared("The open document: its window title, its file (\"\" until saved), its extension, and whether it changed.")
+        shape $Document {
+            title: string, file: string = "", extension: string = "txt", dirty: bool = false, warned: bool = false,
+            ~<list> recents: owns $RecentFile, ~<list> entries: owns $FolderFile
+        }
+
+        shared("The document a program opens and saves: bring Document(\"Notes\", \"notes.txt\", \"txt\", false, false, [], []).")
+        builder Document { $Document   mark #Document }
+        shared("A recent file.")
+        builder RecentFile { $RecentFile   mark #RecentFile }
+        shared("A file beside the open one.")
+        builder FolderFile { $FolderFile   mark #FolderFile }
+        shared("The recent files, as `<extension>.recent.json` beside the program.")
+        loom<Json> SavedRecentFile { $RecentFile   mark #RecentFile }
+
+        shared("Carried by the document.")
+        mark #Document
+        shared("Carried by a recent file.")
+        mark #RecentFile
+        shared("Carried by a file beside the open one.")
+        mark #FolderFile
+        shared("File ▸ New, and the toolbar's New.")
+        mark #DocNew
+        shared("File ▸ Open…, and the toolbar's Open.")
+        mark #DocOpen
+        shared("File ▸ Save, and the toolbar's Save.")
+        mark #DocSave
+        shared("File ▸ Save as….")
+        mark #DocSaveAs
+        shared("A recent file's entry in the sidebar.")
+        mark #DocRecent
+        shared("A sidebar entry for a file beside the open one.")
+        mark #DocEntry
+        shared("The status bar's file name.")
+        mark #DocFileLabel
+        shared("The status bar's saved / unsaved.")
+        mark #DocSaveLabel
+        shared("Tag of the document's own reads and writes.")
+        mark #DocFile
+        shared("Tag of the recent files' reads and writes.")
+        mark #DocRecents
+        shared("Tag of the listing of the open file's folder.")
+        mark #DocFolder
+        shared("Tag of the Open dialog.")
+        mark #DocOpenPick
+        shared("Tag of the Save as dialog.")
+        mark #DocSavePick
+
+        shared("The user changed the document: it is unsaved now. Emit it from every change.")
+        event @DocumentChanged { }
+        shared("Start an empty document (the files shard then calls documentNew).")
+        event @DocumentFresh { }
+        shared("The recent files changed: they are written at the end of the frame.")
+        event @DocumentRecentsChanged { }
+
+        shared("A document app's window: menu bar, toolbar, a sidebar of recent and nearby files, the main pane, a status bar.")
+        ShardView DocumentWindow on $Document as d {
+            Window(d.Document.title, 1120.0, 700.0) {
+                MenuBar() slot Menus {
+                    Menu("File") {
+                        MenuItem("New") mark #DocNew as newItem
+                        attach $Shortcut to newItem { keys: "Ctrl+N" }
+                        MenuItem("Open…") mark #DocOpen as openItem
+                        attach $Shortcut to openItem { keys: "Ctrl+O" }
+                        MenuItem("Save") mark #DocSave as saveItem
+                        attach $Shortcut to saveItem { keys: "Ctrl+S" }
+                        MenuItem("Save as…") mark #DocSaveAs as saveAsItem
+                        attach $Shortcut to saveAsItem { keys: "Ctrl+Shift+S" }
+                    }
+                }
+                Toolbar(6.0) slot Tools {
+                    Button("New") mark #DocNew
+                    Button("Open") mark #DocOpen
+                    Button("Save") mark #DocSave
+                    Spacer(16.0)
+                }
+                Split(250.0) {
+                    Scroll(4000.0, 6.0) {
+                        Column(6.0) slot Sidebar
+                        Divider(1.0)
+                        Heading("Recent", 14.0)
+                        Column(2.0) socket !RecentFileItem(d.Document.~recents)
+                        Heading("In this folder", 14.0)
+                        Column(2.0) socket !FolderFileItem(d.Document.~entries)
+                    }
+                    Scroll(4000.0, 8.0) {
+                        Column(8.0) slot Content
+                    }
+                }
+                StatusBar(20.0) slot Status {
+                    Label("") mark #DocFileLabel
+                    Label("") mark #DocSaveLabel
+                }
+            }
+        }
+
+        shared("A recent file in the sidebar: a click opens it.")
+        ShardView RecentFileItem on $RecentFile as r {
+            Button(*Vein.Files.Io.fileName(r.RecentFile.path)) mark #Flat #DocRecent as item
+            attach $Tip to item { text: r.RecentFile.path }
+        }
+
+        shared("A file beside the open one, in the sidebar: a click opens it.")
+        ShardView FolderFileItem on $FolderFile as e {
+            Button(e.FolderFile.name) mark #Flat #DocEntry
+        }
+
+        // The file side. It CALLS the program's hooks — documentNew(), documentLoaded(text), documentText() — which a
+        // copy made with `from` resolves in the program, where they are written.
+        shared("A document app's files: New, Open…, Save, Save as…, unsaved warnings, recents, the folder, the title.")
+        shard DocumentFiles {
+            var recentsChanged = false
+            var started = false
+
+            hear *Vein.UI.Interaction.@Clicked as k {
+                target $Button #DocNew on k.target as b { do docLeave("new", "") }
+                target $Button #DocOpen on k.target as b { do docLeave("pick", "") }
+                target $Button #DocSave on k.target as b { do docSave(false) }
+                target $Button #DocSaveAs on k.target as b { do docSave(true) }
+                target $Owner #DocRecent on k.target as b { target $RecentFile on b.Owner.ownerId as r { do docLeave("open", r.RecentFile.path) } }
+                target $Owner #DocEntry on k.target as b { target $FolderFile on b.Owner.ownerId as e { do docLeave("open", e.FolderFile.path) } }
+            }
+
+            hear @DocumentFresh as x {
+                do documentNew()
+                target $Document as d {
+                    d.Document.file = ""
+                    d.Document.dirty = false
+                    d.Document.warned = false
+                }
+            }
+
+            hear @DocumentChanged as c {
+                target $Document as d {
+                    d.Document.dirty = true
+                    d.Document.warned = false
+                }
+            }
+
+            hear *Vein.Files.Io.@FileLoaded as f {
+                if f.tag == #DocRecents { weave SavedRecentFile(f.text) }
+                if f.tag == #DocFile {
+                    do documentLoaded(f.text)
+                    do docOpened(f.full)
+                }
+            }
+
+            hear *Vein.Files.Io.@FileMissing as f {
+                if f.tag == #DocFile { emit @DocumentFresh { } }
+            }
+
+            hear @Woven as w {
+                if w.loom == "SavedRecentFile" {
+                    target $Document as d {
+                        target $RecentFile as r { if not (d.Document.~recents has r) { d.Document.~recents.add(r) } }
+                    }
+                }
+            }
+
+            hear *Vein.Desktop.Events.@FilePicked as p {
+                if p.tag == #DocOpenPick { emit *Vein.Files.Io.@ReadFile { path: p.path, tag: #DocFile } }
+                if p.tag == #DocSavePick { emit *Vein.Files.Io.@WriteFile { path: p.path, text: documentText(), append: false, tag: #DocFile } }
+            }
+
+            hear *Vein.Files.Io.@FileWritten as w {
+                if w.tag == #DocFile { do docOpened(w.full) }
+            }
+
+            // "In this folder": every file of the document's extension beside the open one.
+            hear *Vein.Files.Io.@FolderListed as f {
+                if f.tag == #DocFolder {
+                    target $Document as d {
+                        d.Document.~entries.clear()
+                        target f.entries as name {
+                            if endsWith(name, "." + d.Document.extension) {
+                                bring FolderFile(name, f.full + "/" + name) as entry
+                                d.Document.~entries.add(entry)
+                            }
+                        }
+                    }
+                }
+            }
+
+            hear @DocumentRecentsChanged as r { recentsChanged = true }
+
+            settled {
+                target $Document as d {
+                    // Started on the first frame the document exists — not in `run once`, which cannot see a document
+                    // the program brings in its own `run once` (that bring commits after both have run).
+                    if not started {
+                        started = true
+                        emit *Vein.Files.Io.@ReadFile { path: d.Document.extension + ".recent.json", tag: #DocRecents }
+                        if d.Document.file == "" { emit @DocumentFresh { } } else { emit *Vein.Files.Io.@ReadFile { path: d.Document.file, tag: #DocFile } }
+                    }
+                    if recentsChanged {
+                        emit *Vein.Files.Io.@WriteFile { path: d.Document.extension + ".recent.json", text: toText<Json>(SavedRecentFile), append: false, tag: #DocRecents }
+                        recentsChanged = false
+                    }
+                    var name = "untitled"
+                    if not (d.Document.file == "") { name = *Vein.Files.Io.fileName(d.Document.file) }
+                    var dot = ""
+                    if d.Document.dirty { dot = " •" }
+                    target $Owner $Window as w { if w.Owner.ownerId == d { w.Window.title = d.Document.title + " — " + name + dot } }
+                    target $Text #DocFileLabel as t { t.Text.content = name }
+                    target $Text #DocSaveLabel as t {
+                        t.Text.content = "saved"
+                        if d.Document.dirty { t.Text.content = "unsaved" }
+                        if d.Document.warned { t.Text.content = "Unsaved changes — Save first, or do it again to discard them" }
+                    }
+                    // The folder listing writes `dir/name`, a dialog `dir\name`: compare the names.
+                    target $Owner #DocEntry as item {
+                        target $FolderFile on item.Owner.ownerId as e { if e.FolderFile.name == name { mark item #Accent } else { unmark item #Accent } }
+                    }
+                }
+            }
+
+            // New, Open and the sidebar's files leave the open document. Unsaved, the first try only warns.
+            SF docLeave(what: string, path: string) {
+                target $Document as d {
+                    if d.Document.dirty and not d.Document.warned {
+                        d.Document.warned = true
+                    } else {
+                        if what == "new" { emit @DocumentFresh { } }
+                        if what == "pick" { emit *Vein.Desktop.Events.@PickOpenFile { title: "Open", extension: d.Document.extension, tag: #DocOpenPick } }
+                        if what == "open" { emit *Vein.Files.Io.@ReadFile { path: path, tag: #DocFile } }
+                    }
+                }
+            }
+
+            SF docSave(asNew: bool) {
+                target $Document as d {
+                    if asNew or d.Document.file == "" {
+                        var suggested = "untitled." + d.Document.extension
+                        if not (d.Document.file == "") { suggested = *Vein.Files.Io.fileName(d.Document.file) }
+                        emit *Vein.Desktop.Events.@PickSaveFile { title: "Save as", extension: d.Document.extension, suggested: suggested, tag: #DocSavePick }
+                    } else {
+                        emit *Vein.Files.Io.@WriteFile { path: d.Document.file, text: documentText(), append: false, tag: #DocFile }
+                    }
+                }
+            }
+
+            // Opened or saved: this is the document's file now, as it is on disk; remembered; its folder listed.
+            SF docOpened(full: string) {
+                target $Document as d {
+                    d.Document.file = full
+                    d.Document.dirty = false
+                    d.Document.warned = false
+                }
+                var known = false
+                target $RecentFile as r { if lower(r.RecentFile.path) == lower(full) { known = true } }
+                if not known {
+                    bring RecentFile(full) as recent
+                    target $Document as d {
+                        d.Document.~recents.add(recent)
+                        var held = 0
+                        target d.Document.~recents as r { held += 1 }
+                        if held > 6 { target d.Document.~recents as r { if Index == 0 { d.Document.~recents.remove(r) } } }
+                    }
+                    emit @DocumentRecentsChanged { }
+                }
+                emit *Vein.Files.Io.@ListFolder { path: *Vein.Files.Io.folderOf(full), tag: #DocFolder }
+            }
+        }
+    }
 }

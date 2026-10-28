@@ -267,7 +267,12 @@ public sealed partial class Lower
         _loweredName = bundle.Name;
         _ownerKey = (bundle.Author ?? "local") + "." + bundle.Name;
 
-        // D26: every `ShardView … on $Shape` becomes a shard of today's statements before anything else looks.
+        // D27: templates copied in where a `from` asks (and stripped where they are declared); then D26: every
+        // `ShardView … on $Shape` becomes a shard of today's statements before anything else looks.
+        bundle = TemplateExpand.Apply(bundle, _diag, owner =>
+            Index.Owners.TryGetValue(owner, out var file)
+                ? BundleLoader.Load(file, new DiagnosticBag()).Bundles.FirstOrDefault(b => (b.Author ?? "local") + "." + b.Name == owner)
+                : null);
         bundle = ViewDesugar.Apply(bundle, _diag);
 
         // Before Collect, which keeps ONE declaration per name — so a duplicate is reported rather than
@@ -2751,9 +2756,14 @@ public sealed partial class Lower
 
     /// The declared field a `x.Shape.field` reads, when its receiver names a shape — so `.~` can be
     /// checked against what the field IS.
-    private FieldDecl? CollectionField(MemberExpr me) =>
-        me.Receiver is MemberExpr { Name: var shape } && _shapeFields.TryGetValue(shape, out var fs)
-            ? fs.FirstOrDefault(f => f.Name == me.Name) : null;
+    // A shape of THIS bundle, else one a needed bundle shares: `d.Document.~recents.add(r)` on the stdlib's $Document
+    // was VS0372 ("not a collection") in any program, because only local shapes were looked at.
+    private FieldDecl? CollectionField(MemberExpr me)
+    {
+        if (me.Receiver is not MemberExpr { Name: var shape }) return null;
+        if (_shapeFields.TryGetValue(shape, out var fs)) return fs.FirstOrDefault(f => f.Name == me.Name);
+        return ResolveUsed(Index.Shapes, "$", shape, me.Span, report: false)?.Value.Members.OfType<FieldDecl>().FirstOrDefault(f => f.Name == me.Name);
+    }
 
     /// `~` exactly where a field is a collection: a plain read of one is VS0373, `.~` on another field VS0372.
     private void CheckCollectionRead(MemberExpr me)

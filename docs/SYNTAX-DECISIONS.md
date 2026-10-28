@@ -986,6 +986,59 @@ only the drawer differs.
 4. **Windows from a view:** a view builds its window in `settled`, not in `run once`, so the Workbench's runner
    gives a program a few frames to open its first window.
 
+## D27 — Templates: `shard X from *A.B.P.!T`, `ShardView X from *A.B.P.!T { Slot { … } }`, `slot` {#templates}
+
+> **Reported as** `VS0386` (no shared template of that name, a template path that is not `*Author.Bundle.Publicator.!Name`,
+> or a fill for a slot the template does not have).
+
+**DECIDED and built (2026-10-28).** `TemplateExpand` copies templates in before D26's desugar. Samples:
+`samples/desktop/notes.vein` (a whole editor in ~40 lines) and `samples/desktop/planner/planner.vein`. Tests:
+`TemplateTests`.
+
+**The problem.** The planner was 892 lines, and two-thirds of them every app writes again:
+- the File menu and toolbar;
+- the dialogs and the unsaved warning;
+- recents and the files beside the open one;
+- the title's dot and the status bar.
+
+A library could hold the data and the functions, but not that BEHAVIOUR. The stdlib runs no shards, because a
+shard that arrived with a `need` would be invisible behaviour (stdlib/Core.vein says so). And a library window
+could not place the app's own views, since `socket !View` names a view the library cannot know.
+
+**The decision: share a TEMPLATE, inert until a bundle takes it.**
+```
+publicator Document {                                      // stdlib/Desktop.vein
+    shared("…") ShardView DocumentWindow on $Document as d { … Column(8.0) slot Content … }
+    shared("…") shard DocumentFiles { … do documentLoaded(f.text) … documentText() … }
+}
+
+// the program
+ShardView NotesWindow from *Vein.Desktop.Document.!DocumentWindow { Content { TextArea("", "Write here…") mark #Body } }
+shard Files from *Vein.Desktop.Document.!DocumentFiles
+fn documentText() return string { … }                      // a HOOK the template calls
+```
+- **Inert where declared.** A `shared("…")` shard or `ShardView … on` inside a publicator is a template. An
+  unshared shard there is still VS0108. A template never runs in its own bundle, and nothing runs because of a
+  `need`: behaviour arrives only where a bundle writes `from` and names the copy. The stdlib's rule stands.
+- **A copy reads as its new bundle.** Its bare names resolve there:
+  - the library's shared shapes, builders, events and looms come through that bundle's `need`;
+  - functions the template calls but does not define are HOOKS the using bundle writes. That is how a library
+    asks the app for its part (`documentNew()`, `documentLoaded(text)`, `documentText()`). A missing hook is an
+    unknown function.
+- **Slots.** `Widget(…) slot Name` in a template view is a hole. `Name { … }` in the `from` gives it
+  children, after its own. The fill may use the template's binding (`d`).
+- **Sockets come along.** A template view placing `socket !Item` brings `Item` from the same publicator, when the
+  bundle has no view of that name.
+- **One new word,** `slot`, contextual (a word only after a widget's `)`). `from` already meant a builder's base.
+
+**Found on the way, fixed:**
+- **A shape's fields from a NEEDED bundle are now seen by `.add`/`.remove`/`.move`.** It was VS0372 on the stdlib's
+  `$Document.~recents`.
+- **The desktop runner no longer reports text the program wrote into a box as the user typing it.** A
+  program's `box.Field.value = …` raised `@Edited`, which marked a fresh document unsaved.
+- **A template that starts something does it on its first `settled` frame.** In `run once` it cannot see the
+  identity the program brings in its own `run once`, because that bring commits after both have run.
+
 ## Reserved-word disposition
 
 Every keyword currently in [Lexer.cs](../src/Vein.Compiler/Lexing/Lexer.cs) `Keywords`, classified.
@@ -1040,6 +1093,7 @@ Still pending: tokens `LBracket`/`RBracket` if D9(a). **Never keywords:** `class
 - **D9** — brackets & list syntax: (a) vs (b). *(specs assume (a).)*
 - **D10** — user-defined generics timing. *(deferred.)*
 - **D26** — views: built. Open part: the web (needs web widgets as a `$Parent` tree).
+- **D27** — templates (`from`, `slot`): built. Next: the tabs and the board as templates too.
 - **Reserved block** — `transform`: assign a meaning or cut before v1.0. (`on` got one: D22.)
   *(The rest of what this list once held — `by`, `start`, `audience`, `bridge`, `bring`, `builder`,
   `mute`, `unmute` —

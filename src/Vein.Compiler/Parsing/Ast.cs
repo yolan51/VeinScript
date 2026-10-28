@@ -218,7 +218,23 @@ public abstract record ViewItem(SourceSpan Span) : Node(Span);
 /// brought as a widget of the view. Its parent is prepended by the desugar: the enclosing widget, or the socket.
 public sealed record WidgetItem(
     string Builder, IReadOnlyList<Expr> Args, IReadOnlyList<string> Marks, string? Bind,
-    SocketSpec? Socket, IReadOnlyList<ViewItem> Children, SourceSpan Span) : ViewItem(Span);
+    SocketSpec? Socket, IReadOnlyList<ViewItem> Children, SourceSpan Span) : ViewItem(Span)
+{
+    /// `Column(8.0) slot Content` (D27) — a hole in a TEMPLATE view: what a `from` fills it with becomes this widget's
+    /// children, after its own.
+    public string? Slot { get; init; }
+}
+
+/// `ShardView MapWindow from *Vein.Desktop.Document.!DocumentWindow { Content { … } }` and
+/// `shard Files from *Vein.Desktop.Document.!DocumentFiles { … }` (D27): a TEMPLATE, shared by another bundle,
+/// copied into this one under `Name` — a view with its slots filled, a shard with `Extra` members added.
+/// Rewritten by <see cref="Vein.Compiler.Parsing.TemplateExpand"/> before anything lowers it.
+public sealed record TemplateUseDecl(
+    bool IsView, string Name, IReadOnlyList<string> Path, string Template,
+    IReadOnlyList<SlotFill> Fills, IReadOnlyList<Node> Extra, SourceSpan Span) : Decl(Span);
+
+/// `Content { … }` inside a `ShardView … from …` — the widgets and statements for the template's slot `Content`.
+public sealed record SlotFill(string Slot, IReadOnlyList<ViewItem> Items, SourceSpan Span) : Node(Span);
 
 /// `socket !View(collection)` on a widget: that view is shown in it for each identity of the collection, in its
 /// order — or, with no collection, for every identity the view is on.

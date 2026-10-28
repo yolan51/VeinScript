@@ -300,6 +300,9 @@ internal sealed class DesktopRunner
     // go over another #Draggable widget raises @Dropped. Handlers see events even when a Button inside handled them
     // — a tab is a row whose button takes the press — and the Button's own click still happens, as it would.
 
+    /// Each text box, and the text the program last wrote into it.
+    private readonly Dictionary<TextBox, string> _written = new();
+
     /// Each draggable control, and the identity it draws.
     private readonly Dictionary<Control, long> _dragIds = new();
     private (long Id, Point Start, Control Control, bool Moving)? _drag;
@@ -698,7 +701,9 @@ internal sealed class DesktopRunner
                 if (existing is not TextBox box)
                 {
                     box = Replace(id, new TextBox { MinWidth = 220 });
-                    box.TextChanged += (_, _) => { if (!_syncing) Edit(id, box.Text ?? ""); };
+                    // A change the PROGRAM made (n.Value written below) arrives here too, after the sync has ended — so the
+                    // text it last wrote is not reported back as the user typing it.
+                    box.TextChanged += (_, _) => { if (!_syncing && !(_written.TryGetValue(box, out var w) && w == (box.Text ?? ""))) Edit(id, box.Text ?? ""); };
                     // On the way IN: a box that AcceptsReturn (#Multiline) uses Enter for its newline, so there Enter is
                     // left to it and Ctrl+Enter submits; a one-line box submits on Enter.
                     box.AddHandler(InputElement.KeyDownEvent, (_, e) =>
@@ -715,6 +720,7 @@ internal sealed class DesktopRunner
                 box.Watermark = n.Placeholder;
                 if ((box.Text ?? "") != n.Value)
                 {
+                    _written[box] = n.Value;
                     box.Text = n.Value;
                     box.CaretIndex = n.Value.Length;
                 }
