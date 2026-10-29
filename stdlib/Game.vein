@@ -10,8 +10,11 @@ bundle Game by Vein {
     publicator Collision {
         // HALF-extents, centred on the identity's place. `depth` is for 3D; 0 means "as wide as `width`",
         // so a 2D game never writes it and a 3D crate can stay `{ width: 0.5, height: 0.5 }`.
-        shared("A collision box: half-extents in world units, centred on the identity's place.")
-        shape $Collider { width: float, height: float, depth: float = 0.0 }
+        // LEFT AT 0 × 0 (the default), A HOST THAT DRAWS SIZES IT: the bounds of the model or picture it shows
+        // for the identity are written back here as half-extents (HOSTING.md "Colliders the host sizes") — so
+        // `attach $Collider to pillar { }` fits the pillar, and a builder need not repeat a model's size.
+        shared("A collision box: half-extents, centred on the place. Left at 0, the host sizes it from what it draws.")
+        shape $Collider { width: float = 0.0, height: float = 0.0, depth: float = 0.0 }
 
         // RAISED BY A HOST THAT HAS PHYSICS (Interp.FireCollided — the Godot addon does it for every
         // identity carrying `$Collider`): once when two boxes start to overlap, with the lower id as `a`.

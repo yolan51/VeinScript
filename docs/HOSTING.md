@@ -359,3 +359,12 @@ LevelThing` of `$Name`, `$Position`, `$Model`), which it also weaves at boot. A 
 is read from the program's own folder (the runtimes' `ReadFallback`), so a game whose saves go to the
 player's folder still reads the level it shipped with; writes always go to `FilesRoot`. A host previewing
 in an editor sets `FilesRoot` to the program's folder, so a move is saved into the project.
+
+## Colliders the host sizes
+
+A `*Vein.Game.Collision.$Collider` left at 0 × 0 (its default) is sized by the host from what it draws for the
+identity: `VeinGame.SizeCollider(id, halfWidth, halfHeight, halfDepth)` writes the half-extents of the model's
+bounds or the picture's rectangle — once, and never over a size the rules gave. So a program writes
+`attach $Collider to pillar { }`, or a builder `{ $Position $Model $Collider mark #Solid }`, and the box fits
+the asset; a host that draws nothing leaves it at 0, which collides with nothing. VeinGodot does it when a
+model or picture loads (and in the editor's preview).

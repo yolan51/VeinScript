@@ -134,4 +134,43 @@ public class MirrorTests : IDisposable
         Assert.Equal((2.0, 1.0), (pads[1].Number("Pad", "presses"), pads[1].Number("Pad", "released")));
         Assert.Equal(new[] { "ActionPressed fire 0", "ActionPressed fire 1", "ActionPressed fire 1", "ActionReleased fire 1" }, seen);
     }
+
+    // ---- colliders the host sizes ---------------------------------------------------------------------
+
+    private const string Boxes = """
+        bundle B by me {
+            need "Vein.Transform"
+            need "Vein.Game"
+            mark #Fit
+            mark #Sized
+            shard Make { run once {
+                let fit = spawn()
+                attach $Position to fit { x: 0.0, y: 0.0, z: 0.0 }
+                attach $Collider to fit { }
+                mark fit #Fit
+                let sized = spawn()
+                attach $Position to sized { x: 5.0, y: 0.0, z: 0.0 }
+                attach $Collider to sized { width: 0.4, height: 1.0 }
+                mark sized #Sized
+            } }
+        }
+        """;
+
+    [Theory]
+    [MemberData(nameof(Runtimes))]
+    public void A_collider_left_at_zero_takes_the_size_the_host_draws_and_a_given_one_is_kept(VeinRuntime mode)
+    {
+        var game = Start(Write("boxes.vein", Boxes), mode);
+        long fit = game.Entities.First(e => e.Carries("Fit")).Id, sized = game.Entities.First(e => e.Carries("Sized")).Id;
+        Assert.Equal(0.0, game.Colliders.First(c => c.Id == fit).HalfWidth);
+
+        Assert.True(game.SizeCollider(fit, 0.55, 3.0, 0.55));
+        var c = game.Colliders.First(c => c.Id == fit);
+        Assert.Equal((0.55, 3.0, 0.55), (c.HalfWidth, c.HalfHeight, c.HalfDepth));
+        Assert.False(game.SizeCollider(fit, 9.0, 9.0, 9.0));                 // sized once: asking again is free
+        Assert.Equal(0.55, game.Colliders.First(c => c.Id == fit).HalfWidth);
+
+        Assert.False(game.SizeCollider(sized, 2.0, 2.0, 2.0));               // the rules' own size is theirs
+        Assert.Equal(0.4, game.Colliders.First(c => c.Id == sized).HalfWidth);
+    }
 }

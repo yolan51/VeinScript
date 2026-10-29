@@ -28,6 +28,22 @@ public sealed partial class VeinGame
         return ok;
     }
 
+    /// Colliders the host sizes: an identity's `*Vein.Game.Collision.$Collider` left at 0 × 0 takes the
+    /// half-extents of what the host draws for it — a model's bounds, a picture's rectangle — so a program
+    /// need not repeat an asset's size. Only a collider still at 0 × 0 is written: a size the rules gave is
+    /// theirs, and asking again is free. True when it wrote.
+    public bool SizeCollider(long id, double halfWidth, double halfHeight, double halfDepth = 0)
+    {
+        if (!Running || !_runtime!.Alive(id) || !_runtime.Declared("Collider") || !_runtime.Has(id, "Collider")) return false;
+        if (Num(_runtime, id, "Collider", "width", 0) != 0 || Num(_runtime, id, "Collider", "height", 0) != 0) return false;
+        if (halfWidth <= 0 && halfHeight <= 0) return false;
+        _runtime.Publish(id, "Collider", "width", halfWidth);
+        _runtime.Publish(id, "Collider", "height", halfHeight);
+        _runtime.Publish(id, "Collider", "depth", halfDepth);
+        Changed();
+        return true;
+    }
+
     /// Put a mark on an identity.
     public bool Mark(long id, string mark)
     {
