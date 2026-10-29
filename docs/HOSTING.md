@@ -321,3 +321,29 @@ host owns, and the program reads them like any field. Everything else — what a
 disagree with what the language parses. A host maps the kinds to colours, e.g. the Workbench's
 (`src/Vein.Workbench/Assets/VeinScript.xshd`). `VeinGame.Open(path).Diagnostics` is the matching "problems"
 list: it compiles without running anything.
+
+## Editing help in an engine's editor (`VeinEditorSession`)
+
+One `VeinEditorSession(path, root)` per open `.vein` file gives an engine's script editor what the Workbench
+and `veinc lsp` give, from the same code (`EditorService`, `QuestionFill`), so three editors cannot disagree:
+
+| call | what it answers |
+|---|---|
+| `Completions(text, caret, typed)` | the list — each row replaces `[Start, caret)` with `Insert`; its `Extras` (`do ` before an SF call, a `need` line) go in when it is picked. `typed` is the key just typed, or null for Ctrl+Space |
+| `Question(text, q)` | the `?` key at `q`: a `FillEdit` (replace a range, place the caret) or a `FillProblem` (remove the `?`, say why), or null when that `?` is only a character |
+| `Signature(text, offset)` · `Hover(text, offset)` | the call being typed, with its active parameter · what a name is |
+| `Definition(text, line, col)` · `References(text, line, col)` | where a name is declared (File null = this text) · every site naming it. A click anywhere on a name counts, though a statement's site starts at its keyword |
+| `Symbols(text)` · `Fixes(text, diagnostic)` | the file's declarations, for an outline · the certain fixes for one of its problems |
+
+Offsets are 0-based; lines and columns 1-based, as diagnostics are. Every call runs with the stdlib
+(StdlibCache) and the library packages (VeinLibraries) in reach — inside an engine nothing above the
+project folder holds them, and `EditorService` alone found none of `Vein.*` there
+(`BundleSearch.WithFallback`). VeinGodot's script editor is the first host (`VeinCodeAssist`).
+
+## The rules in the editor's viewport (a preview)
+
+A host can show what a program places before it runs: `VeinGame.Open(path, VeinRuntime.Interpreter)`, then
+`Start()` and no `Step` — `run once` and the boot's events have run, no tick has. `Models`/`Drawables` are
+what to draw; `Reload(keepState: false)` after a save boots it again (a program that does not compile keeps
+the last preview, and `Diagnostics` says why). `Entities` gives one identity's shapes and marks, for an
+inspector. VeinGodot does this in Godot's 2D/3D viewport, with click-to-pick (its README).

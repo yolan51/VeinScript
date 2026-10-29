@@ -43,6 +43,22 @@ public static class SourceEdits
             ? segmentStart - 1
             : segmentStart;
 
+    /// Where `do ` goes in front of the SF call whose name was just completed at `nameStart` (D15) — so
+    /// choosing an SF is all it takes to spell it right — or null when it does not. The call starts where
+    /// the name does, or at the `*` of a qualified path; `do ` is added only when that starts a statement
+    /// (first on its line, or after a `{`) and is not already there: an SF inside an expression is a mistake
+    /// the compiler explains better than a silent edit would. One rule for every editor (Workbench, LSP, Godot).
+    public static int? DoBefore(string text, int nameStart)
+    {
+        if (nameStart < 0 || nameStart > text.Length) return null;
+        int call = nameStart > 0 && text[nameStart - 1] == '*' ? nameStart - 1 : nameStart;
+        int lineStart = call;
+        while (lineStart > 0 && text[lineStart - 1] != '\n') lineStart--;
+        string before = text[lineStart..call].TrimEnd();
+        if (before.EndsWith("do", StringComparison.Ordinal)) return null;
+        return before.Length == 0 || before.EndsWith('{') ? call : null;
+    }
+
     /// True when this line's first non-blank content is a `//`.
     public static bool IsCommented(string line) => line.TrimStart().StartsWith(Marker, StringComparison.Ordinal);
 

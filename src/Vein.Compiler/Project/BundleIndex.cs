@@ -244,7 +244,7 @@ public sealed class BundleIndex
     /// `.vein` files. Same discovery shape as DiscoveryPolicy — a project is found by where it sits.
     public static string? LocateNamed(string? startDir, string folderName)
     {
-        foreach (var seed in new[] { startDir, BundleSearch.Current, Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
+        foreach (var seed in new[] { startDir, BundleSearch.Current, Directory.GetCurrentDirectory(), AppContext.BaseDirectory, BundleSearch.Fallback })
         {
             if (string.IsNullOrEmpty(seed)) continue;
             string full;
@@ -433,8 +433,15 @@ public static class BundleSearch
 {
     private static readonly AsyncLocal<string?> _dir = new();
     private static readonly AsyncLocal<IReadOnlyList<string>?> _libraries = new();
+    private static readonly AsyncLocal<string?> _fallback = new();
 
     public static string? Current => _dir.Value;
+
+    /// Where a HOST unpacked the stdlib (Vein.Hosting's StdlibCache) — searched after everything else by
+    /// LocateNamed. Separate from `Current` because the editor's answers (EditorService) each set `Current`
+    /// to the project being edited, and inside an engine that project has no stdlib above it: the Godot
+    /// editor's completion, hover and `?` found nothing of `Vein.*` until the host's copy survived that.
+    public static string? Fallback => _fallback.Value;
 
     /// Library roots a HOST supplies — folders of bundles shipped as packages and unpacked outside the
     /// project (Vein.Hosting's VeinLibraries). Searched after the stdlib and the project's `bundles/`.
@@ -443,6 +450,15 @@ public static class BundleSearch
     public static IDisposable Scope(string? dir) => new Restore(dir);
 
     public static IDisposable WithLibraries(IReadOnlyList<string> roots) => new RestoreLibraries(roots);
+
+    public static IDisposable WithFallback(string? dir) => new RestoreFallback(dir);
+
+    private sealed class RestoreFallback : IDisposable
+    {
+        private readonly string? _previous;
+        public RestoreFallback(string? dir) { _previous = _fallback.Value; _fallback.Value = dir; }
+        public void Dispose() => _fallback.Value = _previous;
+    }
 
     private sealed class Restore : IDisposable
     {

@@ -108,12 +108,6 @@ public sealed class VeinCompletion : ICompletionData
     /// </remarks>
     internal static void AddDo(TextDocument doc, int nameStart)
     {
-        int call = nameStart;
-        if (call > 0 && doc.GetCharAt(call - 1) == '*') call--;
-
-        var line = doc.GetLineByOffset(call);
-        string before = doc.GetText(line.Offset, call - line.Offset).TrimEnd();
-        if (before.EndsWith("do", StringComparison.Ordinal)) return;
-        if (before.Length == 0 || before.EndsWith('{')) doc.Insert(call, "do ");
+        if (Vein.Compiler.Tooling.SourceEdits.DoBefore(doc.Text, nameStart) is { } call) doc.Insert(call, "do ");
     }
 }

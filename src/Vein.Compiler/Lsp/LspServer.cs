@@ -283,15 +283,10 @@ public sealed class LspServer
     };
 
     /// `do ` in front of an SF call that starts its statement (D15) — the Workbench's VeinCompletion.AddDo.
-    private static JsonObject? DoEdit(string text, int nameStart)
-    {
-        int call = nameStart > 0 && text[nameStart - 1] == '*' ? nameStart - 1 : nameStart;
-        int lineStart = call; while (lineStart > 0 && text[lineStart - 1] != '\n') lineStart--;
-        string before = text[lineStart..call].TrimEnd();
-        if (before.EndsWith("do", StringComparison.Ordinal)) return null;
-        if (before.Length != 0 && !before.EndsWith('{')) return null;
-        return new JsonObject { ["range"] = Range(text, call, call), ["newText"] = "do " };
-    }
+    private static JsonObject? DoEdit(string text, int nameStart) =>
+        SourceEdits.DoBefore(text, nameStart) is { } call
+            ? new JsonObject { ["range"] = Range(text, call, call), ["newText"] = "do " }
+            : null;
 
     private JsonNode? Hover(OpenDoc doc, EditorSnapshot s, int offset, JsonObject p) =>
         EditorService.Hover(s, offset) is { } text
