@@ -347,3 +347,15 @@ A host can show what a program places before it runs: `VeinGame.Open(path, VeinR
 what to draw; `Reload(keepState: false)` after a save boots it again (a program that does not compile keeps
 the last preview, and `Diagnostics` says why). `Entities` gives one identity's shapes and marks, for an
 inspector. VeinGodot does this in Godot's 2D/3D viewport, with click-to-pick (its README).
+
+**Moving things, and saving where they are.** The host only reports: when the viewport moves an identity,
+it raises `*Vein.Editing.Place.@Placed { target, x, y, z }` into the preview (`Emit("Placed", …)` — a raised
+event is handled at once, no `Step`). What that means is the program's: a copy of the stdlib's
+`*Vein.Editing.Level.!LevelFile` moves its `#Placed` things and writes its level file (a `loom<Json>
+LevelThing` of `$Name`, `$Position`, `$Model`), which it also weaves at boot. A thing spawned in code is not
+`#Placed`: show it, do not move it. Undo is the host's: raise `@Placed` with the old place.
+
+**A level is read from beside the program.** A relative `@ReadFile` that finds nothing under `FilesRoot`
+is read from the program's own folder (the runtimes' `ReadFallback`), so a game whose saves go to the
+player's folder still reads the level it shipped with; writes always go to `FilesRoot`. A host previewing
+in an editor sets `FilesRoot` to the program's folder, so a move is saved into the project.

@@ -859,6 +859,19 @@ public sealed class Interp
             ? Path.GetFullPath(Path.Combine(b, path))
             : path;
 
+    /// Where a relative READ looks when nothing is there under `BaseDirectory`: the program's own folder, set
+    /// by a host whose files land elsewhere (a game's saves in the player's folder, Godot's user://) — so a
+    /// file shipped beside the rules, a level, is still read, while every write still goes to `BaseDirectory`.
+    public string? ReadFallback { get; set; }
+
+    private string ResolveRead(string path)
+    {
+        string resolved = ResolvePath(path);
+        if (File.Exists(resolved) || ReadFallback is not { Length: > 0 } fallback || Path.IsPathRooted(path)) return resolved;
+        string beside = Path.GetFullPath(Path.Combine(fallback, path));
+        return File.Exists(beside) ? beside : resolved;
+    }
+
     private void DoReadFile(Dictionary<string, object?> payload)
     {
         string path = Str(payload.GetValueOrDefault("path"));
@@ -869,7 +882,7 @@ public sealed class Interp
 
         try
         {
-            string full = Path.GetFullPath(ResolvePath(path));
+            string full = Path.GetFullPath(ResolveRead(path));
             string text = File.ReadAllText(full);
             Emit("FileLoaded", new Dictionary<string, object?>(StringComparer.Ordinal)
             {

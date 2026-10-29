@@ -118,6 +118,10 @@ Vein.Desktop  — windows and widgets as identities: $Window $Panel $Toggle $Pic
                 ShardViews BoardPage BoardList (slot Tools), shard BoardActions (hook boardChanged(board))
                 settings (D28): DocumentFiles maxRecents = 6, BoardActions hideDone = false — `tune …` at the copy, `!Copy.name` in code
                 (stdlib/Desktop.vein; the Workbench's ▶ draws them — HOSTING.md "Desktop programs")
+Vein.Editing  — Place: @Placed { target, x, y, z } (an editor's viewport moved an identity), #Placed. Level: loom LevelThing
+                { $Name $Position $Model #Placed }, shard LevelFile (tune file = "level.json", movable = true) — a level
+                woven from a file beside the program and written back as the viewport moves its things (HOSTING.md
+                "The rules in the editor's viewport")
 Vein.Files    — @ReadFile @WriteFile → @FileLoaded @FileWritten @FileMissing; @ListFolder → @FolderListed { entries }; fileName(path), folderOf(path)
 ```
 

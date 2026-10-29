@@ -195,7 +195,7 @@ public sealed partial class VeinGame
     public bool Restore(VeinCheckpoint checkpoint)
     {
         if (_module is null || _runtime is not InterpRuntime) return false;
-        var next = new InterpRuntime(_module, FilesRoot ?? System.IO.Path.GetDirectoryName(Path)!, _sinks, _options.Pure);
+        var next = Reading(new InterpRuntime(_module, FilesRoot ?? System.IO.Path.GetDirectoryName(Path)!, _sinks, _options.Pure));
         _runtime.Shutdown();
         _runtime = next;
         Changed();

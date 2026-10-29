@@ -685,6 +685,14 @@ public sealed partial class VeinGame
 
     /// Front end, then the runtime: compiled when asked (Auto or Compiled) and the whole program compiles
     /// with no backend note; otherwise the interpreter, and the note says why.
+    /// A runtime that, after FilesRoot, reads beside the program: a game's saves go to the player's folder
+    /// (Godot's user://), and a file shipped with its rules — a level (Vein.Editing's LevelFile) — is still found.
+    private T Reading<T>(T runtime) where T : IGameRuntime
+    {
+        runtime.ReadFallback = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(Path));
+        return runtime;
+    }
+
     private Prepared Prepare()
     {
         var (module, diagnostics) = Compile(Path);
@@ -694,14 +702,14 @@ public sealed partial class VeinGame
 
         string baseDirectory = FilesRoot ?? System.IO.Path.GetDirectoryName(Path)!;
         if (_mode == VeinRuntime.Interpreter)
-            return new Prepared(new InterpRuntime(module, baseDirectory, _sinks, _options.Pure), diagnostics, "", module);
+            return new Prepared(Reading(new InterpRuntime(module, baseDirectory, _sinks, _options.Pure)), diagnostics, "", module);
 
         // Compiled ahead of time (an exported game): load the bytes, no compiler. Bytes that do not load —
         // built by an older backend — fall through to compiling here, as if there were none.
         if (_precompiled is { } image && VeinBuild.LoadForHost(image) is { Program: { } ready })
         {
             Precompiled = true;
-            return new Prepared(new CompiledRuntime(ready, _sinks, baseDirectory), diagnostics, "", module);
+            return new Prepared(Reading(new CompiledRuntime(ready, _sinks, baseDirectory)), diagnostics, "", module);
         }
         Precompiled = false;
 
@@ -710,8 +718,8 @@ public sealed partial class VeinGame
         catch (Exception ex) { build = new HostBuild(null, Array.Empty<string>(), new[] { $"{ex.GetType().Name}: {ex.Message}" }, ""); }
 
         return build.Program is { } program
-            ? new Prepared(new CompiledRuntime(program, _sinks, baseDirectory), diagnostics, "", module)
-            : new Prepared(new InterpRuntime(module, baseDirectory, _sinks, _options.Pure), diagnostics, "not compiled: " + build.Reason, module);
+            ? new Prepared(Reading(new CompiledRuntime(program, _sinks, baseDirectory)), diagnostics, "", module)
+            : new Prepared(Reading(new InterpRuntime(module, baseDirectory, _sinks, _options.Pure)), diagnostics, "not compiled: " + build.Reason, module);
     }
 
     /// The same front end `veinc run` uses: an `app` manifest is linked into one module, anything else

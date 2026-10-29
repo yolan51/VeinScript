@@ -1,0 +1,75 @@
+// stdlib/Editing.vein — VeinScript Standard Library : Vein.Editing
+// What an editor's viewport and a program say to each other, and a level kept in a file the viewport edits.
+//
+//   need "Vein.Editing"
+//   shard Level from *Vein.Editing.Level.!LevelFile { tune file = "level.json" }
+//
+// The level's things are identities like any others — a $Name, a $Position, a $Rotation, a $Model and the mark
+// #Placed — woven from the file at boot. An editor that shows the program (VeinGodot's viewport) moves one by
+// raising @Placed; the copied shard moves it and writes the file back. THE HOST ONLY REPORTS, THE RULES DECIDE:
+// the editor never edits the file, so what a level is, and whether a thing may move, stay VeinScript.
+//
+// Identities a program spawns in code are not #Placed: the editor shows them, and does not move them.
+
+bundle Editing by Vein {
+
+    publicator Place {
+        // (x, y, z) is in the space of the identity's $Position. The rules decide what it means: a LevelFile copy
+        // moves the thing and saves its level; a program can hear it too.
+        shared("An editor's viewport moved an identity to (x, y, z).")
+        event @Placed { target: Entity, x: float, y: float, z: float }
+
+        shared("An identity an editor may move in its viewport — a level's thing (LevelFile).")
+        mark #Placed
+    }
+
+    publicator Level {
+        // Not $Rotation as well: a record names its values by field, and its x, y, z would overwrite the
+        // position's (VS0389). A level's things are placed, not turned, for now.
+        shared("One thing of a level, as its file holds it: its name, where it is, what it looks like.")
+        loom<Json> LevelThing {
+            *Vein.Core.Meta.$Name
+            *Vein.Transform.Spatial.$Position
+            *Vein.Graphics.Models.$Model
+            mark #Placed
+        }
+
+        shared("Tag of a level file's reads and writes.")
+        mark #LevelData
+
+        // Its things are woven from the file at boot; one an editor moves (@Placed) is moved and the file written
+        // again. Copy it:  shard Level from *Vein.Editing.Level.!LevelFile { tune file = "level.json" }
+        shared("A level in a file beside the program, which an editor's viewport can rearrange.")
+        shard LevelFile {
+            tune("The level's file, beside the program.")
+            var file = "level.json"
+            tune("Whether an editor's viewport may move the level's things.")
+            var movable = true
+
+            run once { emit *Vein.Files.Io.@ReadFile { path: file, tag: #LevelData } }
+
+            hear *Vein.Files.Io.@FileLoaded as f {
+                if f.tag == #LevelData { weave LevelThing(f.text) }
+            }
+
+            hear *Vein.Editing.Place.@Placed as p {
+                if movable {
+                    target $Position #Placed on p.target as t {
+                        t.Position.x = p.x
+                        t.Position.y = p.y
+                        t.Position.z = p.z
+                    }
+                    emit @LevelMoved { }
+                }
+            }
+
+            // Written in a second step, once the move is committed: toText reads the world as it is.
+            hear @LevelMoved as m {
+                emit *Vein.Files.Io.@WriteFile { path: file, text: toText<Json>(LevelThing), append: false, tag: #LevelData }
+            }
+        }
+
+        shared("A LevelFile copy moved one of its things; the file is written as it hears this.")
+        event @LevelMoved { }
+    }
+}

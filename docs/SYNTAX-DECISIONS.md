@@ -674,7 +674,9 @@ frame.
 > `VS0366` (a format that cannot be read: an unknown word, a word said twice or empty, `delimiter` without
 > a Csv base, a `from` cycle), `VS0367` (an unknown format in `loom<…>`, or an unknown `from` base),
 > `VS0368` (a warning: a `columns` name the loom lacks), `VS0369` (the a310032 spellings, naming the new
-> one) and `VS0370` (`weave X(…)` with anything but one argument). The way out: `VS0379` (`toText(…)` of
+> one) and `VS0370` (`weave X(…)` with anything but one argument). `VS0389`: a loom whose shapes share a field
+> name (`$Position` and `$Rotation` both have `x`) — a record names its values by field, so one overwrote
+> the other, silently (found 2026-10-28, writing Vein.Editing's level loom). The way out: `VS0379` (`toText(…)` of
 > something that is not a loom) and `VS0380` (`toText<F>` of an unknown format).
 
 **DECIDED.** A program that already has its shapes should come alive from a string loaded from anywhere — a

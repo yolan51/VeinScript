@@ -3003,6 +3003,15 @@ public sealed partial class Lower
         var flat = FlattenFormat(b.Loom, fr.Decl, fr.Key, b.Span, out _, out _);
         if (ResolveBringTarget(Array.Empty<string>(), b.Name, b.Span) is not { } target) return;
         var prms = WovenParams(target);
+        // A record names its values by FIELD, so two shapes with a field of the same name share one value:
+        // `loom<Json> Thing { $Position $Rotation }` wrote the rotation's x, y, z as the position's, silently.
+        if (prms.GroupBy(p => p.Name, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1) is { } clash)
+        {
+            _diag.Error("VS0389", $"loom<{b.Loom}> {b.Name}: {string.Join(" and ", clash.Select(p => "$" + (p.From ?? "?")).Distinct())} both have " +
+                $"a field `{clash.Key}`, and a record names its values by field — one would overwrite the other. Keep one of them " +
+                "in this loom, and give the other a loom of its own.", b.Span);
+            return;
+        }
         _looms.Add(new LoomInfo(b.Name, b.Loom, flat, prms.Select(ToWeaveParam).ToList(), b.Span));
 
         if (flat is not { Columns: { } columns }) return;

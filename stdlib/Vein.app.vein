@@ -23,6 +23,7 @@ app Vein {
     load "Audio.vein"
     load "Graphics.vein"
     load "Coop.vein"
+    load "Editing.vein"
     load "StringParser.vein"
     load "Weaving/Weaving.vein"
 }

@@ -524,10 +524,22 @@ public sealed class VeinWorld
     private string ResolvePath(string path) =>
         BaseDirectory is { Length: > 0 } b && !Path.IsPathRooted(path) ? Path.GetFullPath(Path.Combine(b, path)) : path;
 
+    /// Interp.ReadFallback's twin: where a relative READ looks when nothing is there under BaseDirectory — the
+    /// program's own folder, so a file shipped beside the rules (a level) is read while writes stay put.
+    public string? ReadFallback { get; set; }
+
+    private string ResolveRead(string path)
+    {
+        string resolved = ResolvePath(path);
+        if (File.Exists(resolved) || ReadFallback is not { Length: > 0 } fallback || Path.IsPathRooted(path)) return resolved;
+        string beside = Path.GetFullPath(Path.Combine(fallback, path));
+        return File.Exists(beside) ? beside : resolved;
+    }
+
     public void ReadFile(string path, string tag)
     {
         string text;
-        try { text = File.ReadAllText(ResolvePath(path)); }
+        try { text = File.ReadAllText(ResolveRead(path)); }
         catch (Exception ex) { FileMissing?.Invoke(path, ex.Message, tag); return; }
         FileLoaded?.Invoke(path, text, tag);
     }

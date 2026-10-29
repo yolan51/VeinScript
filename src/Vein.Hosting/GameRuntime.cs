@@ -23,6 +23,8 @@ internal interface IGameRuntime
     string Name { get; }
     /// Where a relative `@ReadFile` / `@WriteFile` path is anchored (VeinGame.FilesRoot).
     string? FilesRoot { set; }
+    /// Where a relative READ looks when it finds nothing under FilesRoot: the program's own folder (VeinGame sets it).
+    string? ReadFallback { set; }
     bool Running { get; }
     int Tick { get; }
     IReadOnlyList<string> MutedMarks { get; }

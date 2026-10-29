@@ -117,6 +117,7 @@ internal sealed class CompiledRuntime : IGameRuntime
     public long Spawn() => _world.Spawn();
 
     public string? FilesRoot { set => _world.BaseDirectory = value; }
+    public string? ReadFallback { set => _world.ReadFallback = value; }
 
     public void Resume() => Guard(_world.Resume);
     public long SpawnAt(long id) => _world.SpawnAt((int)id);

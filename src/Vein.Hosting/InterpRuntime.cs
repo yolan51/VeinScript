@@ -28,6 +28,7 @@ internal sealed class InterpRuntime : IGameRuntime
 
     public string Name => "interpreter";
     public string? FilesRoot { set => _interp.BaseDirectory = value; }
+    public string? ReadFallback { set => _interp.ReadFallback = value; }
     public bool Running => !_interp.Stopped;
     public int Tick => _interp.Tick;
     public IReadOnlyList<string> MutedMarks => _interp.MutedMarks.OrderBy(m => m, StringComparer.Ordinal).ToList();

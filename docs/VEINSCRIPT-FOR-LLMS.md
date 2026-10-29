@@ -769,6 +769,7 @@ stepper, web preview, AI assistant that compiles suggestions before offering the
 | VS0355 / VS0356 | `tune` not on a shard var / a setting without a literal starting value |
 | VS0357 / VS0358 | a `vein.settings` line naming no setting / a value of the wrong type |
 | VS0387 / VS0388 | `!S.x` where `x` is not a setting of `S` / a value of the wrong type for it |
+| VS0389 | a loom whose shapes share a field name (`$Position` + `$Rotation`): one value would overwrite the other — keep one, give the other its own loom |
 
 ---
 
