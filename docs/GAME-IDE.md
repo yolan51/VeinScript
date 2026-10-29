@@ -1,5 +1,19 @@
 # VeinScript for 2D/3D games, and the IDE that would make it one
 
+> **Where it went (2026-10-28): Godot IS the IDE.** VeinGodot's addon puts the Workbench into Godot's editor,
+> each part a thin view over this repo's engine-neutral code:
+> - **the viewport:** the rules previewed in the 2D/3D view before Play, a click picks an identity (the dock's
+>   Identity tab), and a level's things are dragged — Vein.Editing's `@Placed`, a `LevelFile` copy writes the
+>   level file, Ctrl+Z undoes; see HOSTING.md "The rules in the editor's viewport";
+> - **editing:** completion, `?`, signature help, hover, Ctrl+click/F12, references, outline and quick fixes in
+>   Godot's script editor (Vein.Hosting's `VeinEditorSession`);
+> - **understanding:** a VeinScript tab beside 2D/3D/Script with the event flow as a node graph, events, symbols,
+>   IR, execution, formats and dependencies (`VeinViews`);
+> - **project tools:** New Scene, Packages and Run Checks;
+> - **the cloud:** assistant, Lounge, publishing, DNA and Chain (Vein.Cloud and its `VeinTools`).
+>
+> The renderer is Godot's; nothing here draws a scene. The sections below are the history of how it got here.
+
 > **Superseded again (2026-10-13): borrow an engine, don't build one.** Both engine routes below stalled
 > in the same place — rendering and UI — and neither was a language problem. VeinScript now runs only the
 > RULES inside an existing engine (Godot 4 .NET chosen), through the engine-neutral `Vein.Hosting` seam:
