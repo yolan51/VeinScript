@@ -5,6 +5,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <RootNamespace>Vein.Cloud</RootNamespace>
+    <!-- Packed too (tools/pack.sh): an engine's editor (VeinGodot's) signs in, asks the assistant, reads the
+         Lounge and publishes with the same client the Workbench uses. Editor-only there: no game ships it. -->
+    <Version>0.1.0</Version>
+    <Authors>Yohann</Authors>
+    <Description>The VeinScript cloud client: sign-in, the assistant, the Lounge, publishing and the catalogue.</Description>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
   </PropertyGroup>
 
   <ItemGroup>

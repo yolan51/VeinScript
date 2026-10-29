@@ -101,38 +101,11 @@ internal sealed class DnaPanel : UserControl
         Render();
     }
 
-    private static (string? Json, string Error) Run(string tool, string file, string[] inputs)
-    {
-        try
-        {
-            var psi = new ProcessStartInfo(tool) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
-            foreach (var a in new[] { "relatives", file }.Concat(inputs).Concat(new[] { "--json", "--top", "20" })) psi.ArgumentList.Add(a);
-            using var p = Process.Start(psi)!;
-            var stdout = p.StandardOutput.ReadToEndAsync();
-            var stderr = p.StandardError.ReadToEndAsync();
-            if (!p.WaitForExit(180_000)) { try { p.Kill(true); } catch { } return (null, "took longer than 3 minutes"); }
-            return p.ExitCode == 0 ? (stdout.Result, "") : (null, stderr.Result.Trim().Split('\n').LastOrDefault() ?? $"exit {p.ExitCode}");
-        }
-        catch (Exception ex) { return (null, ex.Message); }
-    }
+    // Finding and running veindna is Vein.Cloud's VeinTools — the same for VeinGodot's DNA tab.
+    private static (string? Json, string Error) Run(string tool, string file, string[] inputs) => Vein.Cloud.VeinTools.DnaRelatives(tool, file, inputs);
 
     /// `VEIN_DNA`, else the VeinDNA repository beside the one this Workbench was built from.
-    private static string? Tool()
-    {
-        if (Environment.GetEnvironmentVariable("VEIN_DNA") is { Length: > 0 } env && File.Exists(env)) return env;
-        string exe = OperatingSystem.IsWindows() ? "veindna.exe" : "veindna";
-        for (var d = new DirectoryInfo(AppContext.BaseDirectory); d is not null; d = d.Parent)
-        {
-            if (!File.Exists(Path.Combine(d.FullName, "VeinScript.sln"))) continue;
-            foreach (var config in new[] { "Release", "Debug" })
-            {
-                string candidate = Path.Combine(d.Parent?.FullName ?? d.FullName, "VeinDNA", "src", "Vein.Dna.Cli", "bin", config, "net8.0", exe);
-                if (File.Exists(candidate)) return candidate;
-            }
-            return null;
-        }
-        return null;
-    }
+    private static string? Tool() => Vein.Cloud.VeinTools.DnaTool(AppContext.BaseDirectory);
 
     // ---- drawing --------------------------------------------------------------------------------------
 

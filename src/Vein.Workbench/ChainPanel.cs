@@ -29,7 +29,6 @@ internal sealed class ChainPanel : UserControl
     private static readonly IBrush Good = new SolidColorBrush(Color.FromRgb(0x82, 0xE0, 0xAA));
     private static readonly IBrush Bad = new SolidColorBrush(Color.FromRgb(0xF4, 0x70, 0x67));
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
 
     private readonly ComboBox _account = new() { FontSize = 12, MinWidth = 140 };
     private readonly Button _refresh = new() { Content = "Refresh", Padding = new Thickness(10, 2), FontSize = 12 };
@@ -89,60 +88,24 @@ internal sealed class ChainPanel : UserControl
         _ = RefreshAsync();
     }
 
+    // Finding the chain, asking its node and running its wallet are Vein.Cloud's VeinTools — the same for
+    // VeinGodot's Chain tab. This panel only draws.
     private void Locate()
     {
-        string? Env(string n) => Environment.GetEnvironmentVariable(n) is { Length: > 0 } v ? v : null;
-        _repo = Env("VEIN_CHAIN");
-        if (_repo is null)
-            for (var d = new DirectoryInfo(AppContext.BaseDirectory); d is not null; d = d.Parent)
-                if (File.Exists(Path.Combine(d.FullName, "VeinScript.sln")))
-                {
-                    string beside = Path.Combine(d.Parent?.FullName ?? d.FullName, "VeinChain");
-                    if (Directory.Exists(beside)) _repo = beside;
-                    break;
-                }
-        _net = Env("VEIN_CHAIN_NET");
-        string? current = _repo is null ? null : Path.Combine(_repo, "demos", "four-nodes", "data", "current.txt");
-        if (_net is null && current is not null && File.Exists(current) && File.ReadAllText(current).Trim() is { Length: > 0 } cur && Directory.Exists(cur))
-            _net = cur;
-        _http = (Env("VEIN_CHAIN_HTTP") ?? "http://localhost:8545").TrimEnd('/');
-        _wallet = null;
-        if (_repo is not null)
-            foreach (var config in new[] { "Release", "Debug" })
-            {
-                string w = Path.Combine(_repo, "src", "VeinChain.Wallet", "bin", config, "net8.0", OperatingSystem.IsWindows() ? "veinchain-wallet.exe" : "veinchain-wallet");
-                if (File.Exists(w)) { _wallet = w; break; }
-            }
+        var chain = global::Vein.Cloud.VeinTools.LocateChain(AppContext.BaseDirectory);
+        (_repo, _net, _wallet, _http) = (chain.Repo, chain.Net, chain.Wallet, chain.Http);
     }
+
+    private global::Vein.Cloud.VeinTools.Chain Chain => new(_repo, _net, _wallet, _http ?? "http://localhost:8545");
 
     // ---- reading ----------------------------------------------------------------------------------------
 
-    private async Task<JsonElement?> Rpc(object question)
-    {
-        try
-        {
-            using var response = await Http.PostAsync(_http + "/rpc", new StringContent(JsonSerializer.Serialize(question), Encoding.UTF8, "application/json"));
-            return JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
-        }
-        catch { return null; }
-    }
+    private Task<JsonElement?> Rpc(object question) => global::Vein.Cloud.VeinTools.ChainRpc(Chain.Http, question);
 
-    private string? KeyOf(string? who) => KeysOf(who) is { } keys ? VeinCrypto.PublicKey(keys) : null;
-
-    private string? KeysOf(string? who)
-    {
-        if (who is null || _net is null) return null;
-        string file = Path.Combine(_net, "keys", who + ".key");
-        try { return File.Exists(file) ? File.ReadAllText(file).Trim() : null; } catch { return null; }
-    }
+    private string? KeyOf(string? who) => _net is null ? null : global::Vein.Cloud.VeinTools.ChainKey(_net, who);
 
     /// `bundle X by author` in the open file → "author.X".
-    private string? PackageOfFile()
-    {
-        if (_file is null || !File.Exists(_file)) return null;
-        var m = System.Text.RegularExpressions.Regex.Match(File.ReadAllText(_file), @"(?m)^\s*bundle\s+([A-Za-z][A-Za-z0-9_]*)\s+by\s+([A-Za-z][A-Za-z0-9_]*)");
-        return m.Success ? m.Groups[2].Value + "." + m.Groups[1].Value : null;
-    }
+    private string? PackageOfFile() => global::Vein.Cloud.VeinTools.PackageOf(_file);
 
     private async Task RefreshAsync()
     {
@@ -261,18 +224,15 @@ internal sealed class ChainPanel : UserControl
     private async Task LinkAsync(string who)
     {
         if (Session is not { } session) { _log.Text = "Sign in to ShardStore first (Cloud ▸ Sign In)."; return; }
-        string name = "shardstore:" + (session.Handle.Length > 0 ? session.Handle : session.UserId);
-        string? key = KeyOf(who), keys = KeysOf(who);
-        if (key is null || keys is null) { _log.Text = $"No key file for {who}."; return; }
+        string name = global::Vein.Cloud.VeinTools.LinkName(session);
+        string? key = KeyOf(who);
+        if (key is null) { _log.Text = $"No key file for {who}."; return; }
         await WalletAsync("register", who, "author", name);
         try
         {
-            // The proof ShardStore checks: this key's owner signs a link naming this user and the time, so the
-            // link cannot be made for a key you do not hold, nor replayed (VeinDNA base44/functions/chainLink.ts).
-            long nonce = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            string signature = VeinCrypto.Sign($"vein-link-v1\nuser={session.UserId}\nnonce={nonce}\n", keys);
-            await global::Vein.Cloud.VeinCloudClient.PostAsync("chainLink", new { chain_key = key, chain_identity = name, nonce, signature }, session.Token);
-            _log.Text += $"\nShardStore now knows {name} is {Short(key ?? "")}.";
+            // The proof ShardStore checks (VeinTools.LinkAsync; VeinDNA base44/functions/chainLink.ts).
+            await global::Vein.Cloud.VeinTools.LinkAsync(session, Chain, who);
+            _log.Text += $"\nShardStore now knows {name} is {Short(key)}.";
         }
         catch (Exception ex)
         {
@@ -287,29 +247,16 @@ internal sealed class ChainPanel : UserControl
         if (_wallet is null || _net is null) { _log.Text = "veinchain-wallet not found — dotnet build the VeinChain repository."; return; }
         if (args.Length > 1 && args[1] is null) { _log.Text = "pick an account first"; return; }
         _log.Text = "veinchain-wallet " + string.Join(" ", args) + " …";
-        var (code, output) = await Task.Run(() =>
-        {
-            try
-            {
-                var psi = new ProcessStartInfo(_wallet) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
-                psi.ArgumentList.Add(_net);
-                foreach (var a in args) psi.ArgumentList.Add(a);
-                using var p = Process.Start(psi)!;
-                var o = p.StandardOutput.ReadToEndAsync();
-                var e = p.StandardError.ReadToEndAsync();
-                p.WaitForExit(120_000);
-                return (p.ExitCode, (o.Result + e.Result).Trim());
-            }
-            catch (Exception ex) { return (1, ex.Message); }
-        });
+        var chain = Chain;
+        var (code, output) = await Task.Run(() => global::Vein.Cloud.VeinTools.Wallet(chain, args));
         _log.Text = $"veinchain-wallet {string.Join(" ", args)}\n{output}";
         await RefreshAsync();
     }
 
     // ---- drawing --------------------------------------------------------------------------------------------
 
-    private static string Vein(long units) => (units / 1_000_000.0).ToString("#,0.######", System.Globalization.CultureInfo.InvariantCulture) + " VEIN";
-    private static string Short(string key) => key.Length > 24 ? key[..14] + "…" + key[^6..] : key;
+    private static string Vein(long units) => global::Vein.Cloud.VeinTools.Vein(units);
+    private static string Short(string key) => global::Vein.Cloud.VeinTools.Short(key);
 
     private static Button Action(string text, Action click)
     {

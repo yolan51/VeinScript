@@ -32,8 +32,23 @@ public static class VeinCloudClient
 {
     /// One client for the process, as System.Net.Http intends: a fresh HttpClient per request exhausts
     /// the socket pool under any real load. Mirrors NetHttp.cs.
-    private static readonly Lazy<HttpClient> Shared = new(() =>
-        new HttpClient { Timeout = TimeSpan.FromSeconds(30) });
+    private static readonly object Gate = new();
+    private static HttpClient? _shared;
+
+    private static HttpClient Shared
+    {
+        get { lock (Gate) return _shared ??= new HttpClient { Timeout = TimeSpan.FromSeconds(30) }; }
+    }
+
+    /// Let go of the shared client — its connection pool and the timer that tidies it. For a host that
+    /// UNLOADS this assembly (Godot's editor at every C# rebuild): a live pool keeps code of the unloading
+    /// context reachable, and the editor then cannot reload. The next request makes a new client.
+    public static void Release()
+    {
+        HttpClient? held;
+        lock (Gate) { held = _shared; _shared = null; }
+        held?.Dispose();
+    }
 
     /// Test/host seam. When set, answers instead of touching the network.
     public static Func<CloudRequest, CloudResponse>? Hook;
@@ -64,7 +79,7 @@ public static class VeinCloudClient
         }
 
         using var message = new HttpRequestMessage(HttpMethod.Get, absoluteUrl);
-        using var response = await Shared.Value.SendAsync(message, ct).ConfigureAwait(false);
+        using var response = await Shared.SendAsync(message, ct).ConfigureAwait(false);
         string text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
         if (!response.IsSuccessStatusCode)
@@ -93,7 +108,7 @@ public static class VeinCloudClient
                 if (bearer is not null)
                     message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
 
-                using var response = await Shared.Value.SendAsync(message, ct).ConfigureAwait(false);
+                using var response = await Shared.SendAsync(message, ct).ConfigureAwait(false);
                 string text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
                 answer = new CloudResponse((int)response.StatusCode, text,

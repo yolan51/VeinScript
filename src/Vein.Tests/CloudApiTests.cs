@@ -33,6 +33,19 @@ public class CloudApiTests : IDisposable
 
     private static CloudSession Signed => new("tok-123", "u1", "a@b.test", "Alice", "user");
 
+    // ---- releasing the client (a host that unloads this assembly: Godot's editor) -----------------------
+
+    [Fact]
+    public async Task Releasing_the_shared_client_is_safe_any_number_of_times_and_requests_still_work()
+    {
+        VeinCloudClient.Release();
+        VeinCloudClient.Release();
+        Answer("""{"access_token":"tok-9","user":{"id":"u9","email":"r@b.test","full_name":"","role":"user"}}""");
+        var session = await AuthApi.LoginAsync("r@b.test", "pw");
+        Assert.Equal("tok-9", session.Token);
+        VeinCloudClient.Release();
+    }
+
     // ---- login ------------------------------------------------------------------------------------
 
     [Fact]
