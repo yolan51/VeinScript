@@ -1,0 +1,40 @@
+bundle BuilderVariants by you {
+
+    shape $Position { x: float, y: float, z: float }
+    shape $Prize { value: int, sound: string }
+
+    mark #Coin
+    mark #Shiny
+
+    builder Coin { $Position   $Prize   mark #Coin }
+
+    builder BigCoin from Coin { value = 5 }
+
+    builder GoldCoin from BigCoin { sound = "gold.wav"   mark #Shiny }
+
+    shard Boot {
+        run once {
+            bring Coin(1.0, 0.0, 0.0, 1, "ping.wav")   // the base, all five
+            bring BigCoin(2.0, 0.0, 0.0, "ping.wav")   // four: value is fixed
+            bring GoldCoin(3.0, 0.0, 0.0)              // three: value and sound are both fixed
+        }
+    }
+
+    shard Show {
+        settled {
+            target $Position $Prize #Coin as c {
+                emit *Vein.Console.Io.@Print {
+                    text: "coin at x=" + c.Position.x + " worth " + c.Prize.value + " goes " + c.Prize.sound
+                }
+            }
+        }
+    }
+
+    shard Shine {
+        settled {
+            var shiny = 0
+            target $Prize #Shiny as s { shiny = shiny + 1 }
+            emit *Vein.Console.Io.@Print { text: "shiny coins: " + shiny }
+        }
+    }
+}

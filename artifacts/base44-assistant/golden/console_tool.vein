@@ -1,0 +1,67 @@
+bundle ConsoleTool by you {
+
+    need "Vein.Console"
+
+    shape $Score { name: string, points: int }
+    mark #Score
+    builder Score { $Score   mark #Score }
+
+    fn grade(points: int) return string {
+        if points >= 90 { return "A" }
+        if points >= 75 { return "B" }
+        return "C"
+    }
+
+    event @Show { }
+
+    shard Board {
+
+        run once {
+            var who = env("USERNAME")
+            if len(who) == 0 { who = env("USER") }
+            if len(who) == 0 { who = "there" }
+
+            bring Score("Grace Hopper", 88)
+            bring Score("Linus", 71)
+
+            do print("hello " + who + " — type `<name> <points>`, `show`, or `quit`.")
+            do printInline("score> ")
+        }
+
+        hear @Input as i {
+            let parts = words(trim(i.text))
+            let n = len(parts)
+
+            if n == 0 {
+                do printInline("score> ")     // an empty line: ask again
+            } else {
+                if parts[0] == "quit" { do quit(0) }
+                if parts[0] == "show" { emit @Show { } }
+
+                if not (parts[0] == "quit") and not (parts[0] == "show") {
+                    if n < 2 or not isNumber(parts[n - 1]) {
+                        do printError("type a name, then the points — e.g. `Ada Lovelace 95`")
+                    } else {
+                        let name = join(slice(parts, 0, n - 1), " ")
+                        bring Score(name, int(parts[n - 1]))
+                        do print("added " + name)
+                    }
+                    do printInline("score> ")
+                }
+            }
+        }
+
+        hear @Show as s {
+            do print(padRight("name", 16) + padLeft("points", 6) + "  grade")
+            target $Score #Score by Score.points as row {        // ascending: a query has no descending yet (D13)
+                do print(padRight(row.Score.name, 16) + padLeft(row.Score.points, 6) + "  " + grade(row.Score.points))
+            }
+            do printInline("score> ")
+        }
+
+        hear @InputEnded as e {
+            do print("")
+            do print("bye — " + e.lines + " line(s) read.")
+        }
+    }
+}

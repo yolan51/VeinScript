@@ -1,0 +1,19 @@
+bundle Store by you {
+
+    publicator Orders {
+        shared("A customer placed an order.")
+        event @Ordered { item: string, qty: int }
+
+        shared("An order was accepted and is going out.")
+        event @Shipped { item: string }
+    }
+
+    start @Ordered { item: "widget", qty: 3 }
+
+    shard Fulfilment {
+        hear @Ordered as o {
+            emit *Vein.Console.Io.@Print { text: "[Store] order: " + o.qty + " x " + o.item }
+            emit @Shipped { item: o.item }
+        }
+    }
+}

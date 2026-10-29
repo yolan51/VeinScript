@@ -1,0 +1,22 @@
+bundle Wire by you {
+
+    shard Listener {
+        hear *you.Gate.Doors.@Opened as o {
+            emit *Vein.Net.Peer.@Listen { as: #Hub, at: o.at, key: "shared-secret" }
+            emit *Vein.Console.Io.@Print { text: "[Wire] listening as #Hub on " + o.at }
+        }
+    }
+
+    shard Inbox {
+        hear *Vein.Net.Peer.@Message as m {
+            emit *Vein.Console.Io.@Print { text: "[Wire] " + m.from + ": " + m.text }
+            emit *Vein.Net.Peer.@Send { to: m.from, text: "ack " + m.text }
+        }
+    }
+
+    shard Reachability {
+        hear *Vein.Net.Peer.@Undelivered as u {
+            emit *Vein.Console.Io.@Print { text: "  (" + u.to + " unreachable)" }
+        }
+    }
+}

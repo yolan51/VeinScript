@@ -1,0 +1,483 @@
+bundle Coop by net {
+    need "Vein.Coop"
+    need "Vein.Transform"
+    need "Vein.UI"
+    need "Vein.Graphics"
+
+    publicator Session {
+        shared("Host a co-op game: players who know `key` join on `port`.")
+        event @HostGame { port: int = 9750, key: string }
+
+        shared("Join the co-op game at `at` (\"host\" or \"host:port\") with its key.")
+        event @JoinGame { at: string, key: string }
+
+        shared("Player `player` takes a seat: build their avatar, with $Seat { player } and #Synced. On the host; player 0 at start.")
+        event @Seated { player: int }
+
+        shared("Player `player` left: remove what was theirs. On the host.")
+        event @Unseated { player: int }
+
+        shared("Players in the game now, the host included — for a HUD.")
+        event @RosterChanged { players: int }
+
+        shared("Send the game's own line to the other players: from the host to every partner, from a partner to the host.")
+        event @CoopSay { text: string }
+
+        shared("A line another player's game said with @CoopSay; `player` is who (0: the host).")
+        event @CoopHeard { player: int, text: string }
+    }
+
+    publicator Wiring {
+        shared("A line for the transport to carry to network name `to` (\"CoopHost\": the host).")
+        event @CoopOut { to: string, text: string, fast: bool = false }
+
+        shared("A line the transport brought from network name `sender`.")
+        event @CoopIn { sender: string, text: string }
+
+        shared("The transport could not deliver a line to `to`.")
+        event @CoopLost { to: string, text: string }
+    }
+
+    shape $CoopSession { role: string = "solo", me: int = 0, now: float = 0.0, heard: float = 0.0, beat: float = 0.0, share: float = 0.0, players: int = 1 }
+
+    shape $Partner { name: string, player: int, heard: float = 0.0, held: string = "," }
+
+    shape $CoopSent { seat: int = -1, image: string = "", model: string = "", anim: string = "", text: string = "" }
+    shape $Told { id: Entity }
+    mark #Told
+
+    shape $Mirrored {
+        host: int, at: float = 0.0, t: float = 0.0, span: float = 0.05,
+        fx: float = 0.0, fy: float = 0.0, fz: float = 0.0, tx: float = 0.0, ty: float = 0.0, tz: float = 0.0,
+        rfx: float = 0.0, rfy: float = 0.0, rfz: float = 0.0, rtx: float = 0.0, rty: float = 0.0, rtz: float = 0.0
+    }
+
+    fn rest(parts: list<string>, first: int) return string {
+        var joined = ""
+        var i = first
+        while i < len(parts) {
+            if i > first { joined = joined + "|" }
+            joined = joined + parts[i]
+            i += 1
+        }
+        return joined
+    }
+
+    fn q(v: float) return string { return "" + float(int(v * 100.0)) / 100.0 }
+
+    fn turn(a: float, b: float, k: float) return float {
+        var d = b - a
+        while d > 3.141592653589793 { d = d - 6.283185307179586 }
+        while d < -3.141592653589793 { d = d + 6.283185307179586 }
+        return a + d * k
+    }
+
+    fn freeSeat() return int {
+        var seat = 0
+        var p = 3
+        while p >= 1 {
+            var taken = false
+            target $Partner as q { if q.Partner.player == p { taken = true } }
+            if not taken { seat = p }
+            p -= 1
+        }
+        return seat
+    }
+
+    SF tell(text: string, fast: bool) {
+        target $Partner as p { emit @CoopOut { to: p.Partner.name, text: text, fast: fast } }
+    }
+
+    fn looks(e: Entity) return string {
+        var seat = -1
+        var image = ""
+        var model = ""
+        var anim = ""
+        var words = ""
+        target $Seat on e as s { seat = s.Seat.player }
+        target $Image on e as i { image = i.Image.source }
+        target $Model on e as m { model = m.Model.source }
+        target $Animation on e as a { anim = a.Animation.name }
+        target $Text on e as w { words = w.Text.content }
+        return seat + "|" + image + "|" + model + "|" + anim + "|" + words
+    }
+
+    fn place(e: Entity) return string {
+        var line = ""
+        target $Position on e as p { line = q(p.Position.x) + "|" + q(p.Position.y) + "|" + q(p.Position.z) }
+        var turned = "0|0|0"
+        target $Rotation on e as r { turned = q(r.Rotation.x) + "|" + q(r.Rotation.y) + "|" + q(r.Rotation.z) }
+        return line + "|" + turned
+    }
+
+    SF catchUp(partner: string) {
+        target $Position #Synced #Told as e {
+            emit @CoopOut { to: partner, text: "H|S|" + e + "|" + place(e) + "|" + looks(e) }
+        }
+    }
+
+    SF leave(p: Entity) {
+        target $Partner on p as gone {
+            let player = gone.Partner.player
+            target split(gone.Partner.held, ",") as action {
+                if not (action == "") { emit *Vein.Input.Actions.@ActionReleased { action: action, player: player } }
+            }
+            emit *Vein.Coop.Session.@PlayerLeft { player: player }
+            emit @Unseated { player: player }
+            target $CoopSession as s {
+                s.CoopSession.players = s.CoopSession.players - 1
+                emit @RosterChanged { players: s.CoopSession.players }
+            }
+            destroy gone
+        }
+    }
+
+    shard Seats #Authority {
+        run once { emit @Seated { player: 0 } }
+    }
+
+    shard Host #Authority {
+        hear @CoopIn as i {
+            target $CoopSession as s {
+                let parts = split(i.text, "|")
+                if s.CoopSession.role == "host" and len(parts) >= 2 and parts[0] == "C" {
+                    let now = s.CoopSession.now
+                    var who = -1
+                    target $Partner as p {
+                        if p.Partner.name == i.sender {
+                            p.Partner.heard = now
+                            who = p.Partner.player
+                        }
+                    }
+
+                    if parts[1] == "HELLO" and who < 0 {
+                        let seat = freeSeat()
+                        if seat == 0 {
+                            emit @CoopOut { to: i.sender, text: "H|FULL" }
+                        } else {
+                            let p = spawn()
+                            attach $Partner to p { name: i.sender, player: seat, heard: now }
+                            emit @CoopOut { to: i.sender, text: "H|WELCOME|" + seat }
+                            do catchUp(i.sender)
+                            s.CoopSession.players = s.CoopSession.players + 1
+                            emit *Vein.Coop.Session.@PlayerJoined { player: seat }
+                            emit @Seated { player: seat }
+                            emit @RosterChanged { players: s.CoopSession.players }
+                        }
+                    }
+
+                    if parts[1] == "ACT" and who >= 0 and len(parts) >= 5 {
+                        let action = parts[3]
+                        target $Partner as p {
+                            if p.Partner.name == i.sender {
+                                if parts[2] == "1" {
+                                    if indexOf(p.Partner.held, "," + action + ",") < 0 { p.Partner.held = p.Partner.held + action + "," }
+                                    emit *Vein.Input.Actions.@ActionPressed { action: action, strength: float(parts[4]), player: who }
+                                } else {
+                                    var kept = ","
+                                    target split(p.Partner.held, ",") as h { if not (h == "") and not (h == action) { kept = kept + h + "," } }
+                                    p.Partner.held = kept
+                                    emit *Vein.Input.Actions.@ActionReleased { action: action, player: who }
+                                }
+                            }
+                        }
+                    }
+
+                    if parts[1] == "SAY" and who >= 0 { emit @CoopHeard { player: who, text: rest(parts, 2) } }
+                }
+            }
+        }
+
+        hear @CoopLost as l {
+            target $Partner as p { if p.Partner.name == l.to { do leave(p) } }
+        }
+    }
+
+    shard Share #Authority {
+        tune("Times a second the host tells its partners where everything is.")
+        var rate: float = 20.0
+
+        each tick as t {
+            target $CoopSession as s {
+                s.CoopSession.share = s.CoopSession.share + t.delta
+                var partners = 0
+                target $Partner as p { partners += 1 }
+                if s.CoopSession.role == "host" and partners > 0 and s.CoopSession.share >= 1.0 / rate {
+                    s.CoopSession.share = 0.0
+
+                    target $Told as k {
+                        if not (k.Told.id carries #Synced) {
+                            do tell("H|G|" + k.Told.id, false)
+                            unmark k.Told.id #Told
+                            destroy k
+                        }
+                    }
+
+                    var motion = "H|P|"
+                    var batch = 0
+                    target $Position #Synced as e {
+                        let seen = looks(e)
+                        if e carries #Told {
+                            target $CoopSent on e as c {
+                                let was = c.CoopSent.seat + "|" + c.CoopSent.image + "|" + c.CoopSent.model + "|" + c.CoopSent.anim + "|" + c.CoopSent.text
+                                if not (was == seen) { do tell("H|L|" + e + "|" + seen, false) }
+                            }
+                            if batch > 0 { motion = motion + ";" }
+                            motion = motion + e + "," + replace(place(e), "|", ",")
+                            batch += 1
+                            if len(motion) > 900 {
+                                do tell(motion, true)
+                                motion = "H|P|"
+                                batch = 0
+                            }
+                        } else {
+                            do tell("H|S|" + e + "|" + place(e) + "|" + seen, false)
+                            mark e #Told
+                            let k = spawn()
+                            attach $Told to k { id: e }
+                        }
+                        let parts = split(seen, "|")
+                        attach $CoopSent to e { seat: int(parts[0]), image: parts[1], model: parts[2], anim: parts[3], text: rest(parts, 4) }
+                    }
+                    if batch > 0 { do tell(motion, true) }
+                }
+            }
+        }
+    }
+
+    fn mirrorOf(id: int) return Entity {
+        var found = 0
+        target $Mirrored as m { if m.Mirrored.host == id { found = m } }
+        return found
+    }
+
+    SF dress(m: Entity, parts: list<string>, first: int) {
+        let seat = int(parts[first])
+        if seat >= 0 { attach $Seat to m { player: seat } } else { unattach $Seat from m }
+        if parts[first + 1] == "" { unattach $Image from m } else { attach $Image to m { source: parts[first + 1] } }
+        if parts[first + 2] == "" { unattach $Model from m } else { attach $Model to m { source: parts[first + 2] } }
+        if parts[first + 3] == "" { unattach $Animation from m } else { attach $Animation to m { name: parts[first + 3] } }
+        let words = rest(parts, first + 4)
+        if words == "" { unattach $Text from m } else { attach $Text to m { content: words } }
+    }
+
+    shard Guest {
+        hear @CoopIn as i {
+            target $CoopSession as s {
+                let parts = split(i.text, "|")
+                let role = s.CoopSession.role
+                if (role == "joining" or role == "client") and len(parts) >= 2 and parts[0] == "H" {
+                    s.CoopSession.heard = s.CoopSession.now
+
+                    if parts[1] == "WELCOME" and role == "joining" and len(parts) >= 3 {
+                        let me = int(parts[2])
+                        s.CoopSession.role = "client"
+                        s.CoopSession.me = me
+                        mute #Authority
+                        target $Position #Synced as e { if not (e carries #Mirror) { destroy e } }
+                        emit *Vein.Coop.Session.@CoopStarted { role: "client", player: me }
+                    }
+
+                    if parts[1] == "FULL" {
+                        s.CoopSession.role = "solo"
+                        emit *Vein.Coop.Session.@CoopEnded { reason: "the game is full" }
+                    }
+
+                    if parts[1] == "S" and len(parts) >= 14 {
+                        let id = int(parts[2])
+                        if mirrorOf(id) == 0 {
+                            let x = float(parts[3])
+                            let y = float(parts[4])
+                            let z = float(parts[5])
+                            let rx = float(parts[6])
+                            let ry = float(parts[7])
+                            let rz = float(parts[8])
+                            let m = spawn()
+                            attach $Position to m { x: x, y: y, z: z }
+                            attach $Rotation to m { x: rx, y: ry, z: rz }
+                            attach $Mirrored to m {
+                                host: id, at: s.CoopSession.now, t: 1.0,
+                                fx: x, fy: y, fz: z, tx: x, ty: y, tz: z, rfx: rx, rfy: ry, rfz: rz, rtx: rx, rty: ry, rtz: rz
+                            }
+                            do dress(m, parts, 9)
+                            mark m #Mirror
+                        }
+                    }
+
+                    if parts[1] == "L" and len(parts) >= 8 {
+                        let m = mirrorOf(int(parts[2]))
+                        if not (m == 0) { do dress(m, parts, 3) }
+                    }
+
+                    if parts[1] == "P" and len(parts) >= 3 {
+                        let now = s.CoopSession.now
+                        target split(rest(parts, 2), ";") as entry {
+                            let v = split(entry, ",")
+                            if len(v) >= 7 {
+                                let id = int(v[0])
+                                target $Mirrored $Position $Rotation as m {
+                                    if m.Mirrored.host == id {
+                                        var span = now - m.Mirrored.at
+                                        if span < 0.02 { span = 0.02 }
+                                        if span > 0.25 { span = 0.25 }
+                                        m.Mirrored.span = span
+                                        m.Mirrored.at = now
+                                        m.Mirrored.t = 0.0
+                                        m.Mirrored.fx = m.Position.x
+                                        m.Mirrored.fy = m.Position.y
+                                        m.Mirrored.fz = m.Position.z
+                                        m.Mirrored.rfx = m.Rotation.x
+                                        m.Mirrored.rfy = m.Rotation.y
+                                        m.Mirrored.rfz = m.Rotation.z
+                                        m.Mirrored.tx = float(v[1])
+                                        m.Mirrored.ty = float(v[2])
+                                        m.Mirrored.tz = float(v[3])
+                                        m.Mirrored.rtx = float(v[4])
+                                        m.Mirrored.rty = float(v[5])
+                                        m.Mirrored.rtz = float(v[6])
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if parts[1] == "G" and len(parts) >= 3 {
+                        let m = mirrorOf(int(parts[2]))
+                        if not (m == 0) { destroy m }
+                    }
+
+                    if parts[1] == "SAY" { emit @CoopHeard { player: 0, text: rest(parts, 2) } }
+                }
+            }
+        }
+
+        hear @CoopLost as l {
+            target $CoopSession as s {
+                if l.to == "CoopHost" and (s.CoopSession.role == "joining" or s.CoopSession.role == "client") {
+                    s.CoopSession.role = "solo"
+                    emit *Vein.Coop.Session.@CoopEnded { reason: "the host could not be reached" }
+                }
+            }
+        }
+
+        hear *Vein.Input.Actions.@ActionPressed as a {
+            target $CoopSession as s {
+                if s.CoopSession.role == "client" and a.player == 0 {
+                    emit @CoopOut { to: "CoopHost", text: "C|ACT|1|" + a.action + "|" + a.strength }
+                }
+            }
+        }
+        hear *Vein.Input.Actions.@ActionReleased as a {
+            target $CoopSession as s {
+                if s.CoopSession.role == "client" and a.player == 0 {
+                    emit @CoopOut { to: "CoopHost", text: "C|ACT|0|" + a.action + "|0" }
+                }
+            }
+        }
+    }
+
+    shard Session {
+        tune("Seconds of silence after which a partner has left, or the host has gone.")
+        var leaveAfter: float = 4.0
+        tune("Seconds between a joined player's \"still here\" beats.")
+        var beatEvery: float = 0.5
+
+        run once {
+            let s = spawn()
+            attach $CoopSession to s { }
+        }
+
+        hear @HostGame as h {
+            target $CoopSession as s {
+                if s.CoopSession.role == "solo" {
+                    s.CoopSession.role = "host"
+                    emit *Vein.Coop.Session.@CoopStarted { role: "host", player: 0 }
+                }
+            }
+        }
+
+        hear @JoinGame as j {
+            target $CoopSession as s {
+                if s.CoopSession.role == "solo" {
+                    s.CoopSession.role = "joining"
+                    s.CoopSession.heard = s.CoopSession.now
+                    emit @CoopOut { to: "CoopHost", text: "C|HELLO" }
+                    emit @CoopOut { to: "CoopHost", text: "C|BEAT", fast: true }
+                }
+            }
+        }
+
+        hear @CoopSay as y {
+            target $CoopSession as s {
+                if s.CoopSession.role == "host" { do tell("H|SAY|" + y.text, false) }
+                if s.CoopSession.role == "client" { emit @CoopOut { to: "CoopHost", text: "C|SAY|" + y.text } }
+            }
+        }
+
+        each tick as t {
+            target $CoopSession as s {
+                s.CoopSession.now = s.CoopSession.now + t.delta
+                let now = s.CoopSession.now
+                let role = s.CoopSession.role
+
+                if role == "host" {
+                    target $Partner as p { if now - p.Partner.heard > leaveAfter { do leave(p) } }
+                }
+
+                if role == "joining" or role == "client" {
+                    s.CoopSession.beat = s.CoopSession.beat + t.delta
+                    if s.CoopSession.beat >= beatEvery {
+                        s.CoopSession.beat = 0.0
+                        emit @CoopOut { to: "CoopHost", text: "C|BEAT", fast: true }
+                    }
+                    if now - s.CoopSession.heard > leaveAfter {
+                        s.CoopSession.role = "solo"
+                        emit *Vein.Coop.Session.@CoopEnded { reason: "the host stopped answering" }
+                    }
+                }
+
+                target $Mirrored $Position $Rotation as m {
+                    m.Mirrored.t = m.Mirrored.t + t.delta
+                    var k = m.Mirrored.t / m.Mirrored.span
+                    if k > 1.0 { k = 1.0 }
+                    m.Position.x = m.Mirrored.fx + (m.Mirrored.tx - m.Mirrored.fx) * k
+                    m.Position.y = m.Mirrored.fy + (m.Mirrored.ty - m.Mirrored.fy) * k
+                    m.Position.z = m.Mirrored.fz + (m.Mirrored.tz - m.Mirrored.fz) * k
+                    m.Rotation.x = turn(m.Mirrored.rfx, m.Mirrored.rtx, k)
+                    m.Rotation.y = turn(m.Mirrored.rfy, m.Mirrored.rty, k)
+                    m.Rotation.z = turn(m.Mirrored.rfz, m.Mirrored.rtz, k)
+                }
+
+                let me = s.CoopSession.me
+                target $Seat as e {
+                    if e.Seat.player == me and not (e carries #Mine) { mark e #Mine }
+                    if not (e.Seat.player == me) and e carries #Mine { unmark e #Mine }
+                }
+            }
+        }
+    }
+
+    shard Wire {
+        tune("Carry co-op lines over Vein.Net. Off, the program carries @CoopOut and @CoopIn itself (a test).")
+        var wired: bool = true
+
+        hear @HostGame as h {
+            if wired { emit *Vein.Net.Peer.@Listen { as: "CoopHost", at: h.port, key: h.key } }
+        }
+        hear @JoinGame as j {
+            if wired {
+                emit *Vein.Net.Peer.@Listen { as: "coop-" + cryptoToken(6), at: 0, key: j.key }
+                emit *Vein.Net.Peer.@Link { name: "CoopHost", at: j.at, key: j.key }
+            }
+        }
+        hear @CoopOut as o {
+            if wired { emit *Vein.Net.Peer.@Send { to: o.to, text: o.text, fast: o.fast } }
+        }
+        hear *Vein.Net.Peer.@Message as m {
+            if wired and (startsWith(m.text, "C|") or startsWith(m.text, "H|")) { emit @CoopIn { sender: "" + m.from, text: m.text } }
+        }
+        hear *Vein.Net.Peer.@Undelivered as u {
+            if wired and (startsWith(u.text, "C|") or startsWith(u.text, "H|")) { emit @CoopLost { to: "" + u.to, text: u.text } }
+        }
+    }
+}

@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Network CO-OP for a hosted VeinScript game: one player hosts and runs the rules, up to three join and
+       show mirrors (stdlib/Coop.vein is the vocabulary, net.Coop the bundle). Engine-neutral like
+       Vein.Hosting — a Godot game, the Workbench and a headless test all drive it the same way — and a
+       package of its own, so LiteNetLib reaches only the games that play together. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Vein.Coop</RootNamespace>
+    <Version>0.1.0</Version>
+    <Authors>Yohann</Authors>
+    <Description>Network co-op for VeinScript games: a host runs the rules, partners send input and see mirrors (UDP, LiteNetLib).</Description>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Vein.Hosting\Vein.Hosting.csproj" />
+    <!-- UDP with reliable and unreliable channels, made for games. 1.x on purpose: pinned, MIT. -->
+    <PackageReference Include="LiteNetLib" Version="1.3.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Vein.Coop.Tests" />
+  </ItemGroup>
+</Project>

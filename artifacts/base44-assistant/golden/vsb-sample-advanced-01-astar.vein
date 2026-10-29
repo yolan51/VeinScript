@@ -1,0 +1,233 @@
+bundle AStar by advanced {
+    shape $Cell {
+        grid: int
+        x: int
+        y: int
+        wall: bool
+        g: int = 0           // steps from the start, the best found so far
+        f: int = 0           // g + the heuristic: the priority
+        parent: Entity       // where the best path to this cell came from; 0 at the start
+    }
+    shape $Search {
+        grid: int
+        start: Entity
+        goal: Entity
+        gx: int
+        gy: int
+        next: Entity         // the search to run after this one; 0 when it is the last
+        state: string = "waiting"   // "waiting", "searching", "found", "no path"
+        closedCells: int = 0
+        pathCells: int = 0
+        pathWalls: int = 0
+        pathJoined: bool = false    // every hop is to a 4-neighbour, and it ends at the start
+        drawn: string = ""
+    }
+    mark #Open
+    mark #Closed
+    mark #Path
+    mark #Active
+
+    event @Begin { search: Entity }
+    event @Reached { search: Entity }
+    event @NoPath { search: Entity }
+    event @AllDone { }
+
+    SF check(name: string, good: bool) {
+        if good { emit *Vein.Console.Io.@Print { text: "ok   " + name } } else { emit *Vein.Console.Io.@Print { text: "FAIL " + name } }
+    }
+
+    fn gap(a: int, b: int) return int {
+        if a > b { return a - b }
+        return b - a
+    }
+    fn manhattan(ax: int, ay: int, bx: int, by2: int) return int {
+        return gap(ax, bx) + gap(ay, by2)
+    }
+
+    fn maze(which: int) return string {
+        if which == 0 {
+            return "S...#...#..." +
+                   "....#.#.#..." +
+                   "....#.#.#..." +
+                   "....#.#.#..." +
+                   "....#.#....." +
+                   "....#.#.#..." +
+                   "......#.#..." +
+                   "....#.#.#..G"
+        }
+        return "S...#...#..." +
+               "....#.#.#..." +
+               "....#.#.#..." +
+               "....#.#.#..." +
+               "....#.#.#..." +
+               "....#.#.#..." +
+               "......#.#..." +
+               "....#.#.#..G"
+    }
+
+    SF load(s: Entity, which: int, after: Entity) {
+        let m = maze(which)
+        var entry: Entity = 0
+        var goal: Entity = 0
+        var gx = 0
+        var gy = 0
+        repeat 8 as y {
+            repeat 12 as x {
+                let ch = m[y * 12 + x]
+                let c = spawn()
+                attach $Cell to c { grid: which, x: x, y: y, wall: ch == "#" }
+                if ch == "S" { entry = c }
+                if ch == "G" {
+                    goal = c
+                    gx = x
+                    gy = y
+                }
+            }
+        }
+        attach $Search to s { grid: which, start: entry, goal: goal, gx: gx, gy: gy, next: after }
+    }
+
+    shard Seed {
+        run once {
+            let first = spawn()
+            let second = spawn()
+            do load(first, 0, second)
+            do load(second, 1, 0)
+            emit @Begin { search: first }
+        }
+    }
+
+    shard Begin {
+        hear @Begin as b {
+            target $Search on b.search as s {
+                s.Search.state = "searching"
+                mark s #Active
+                target $Cell on s.Search.start as c {
+                    c.Cell.g = 0
+                    c.Cell.f = manhattan(c.Cell.x, c.Cell.y, s.Search.gx, s.Search.gy)
+                    mark c #Open
+                }
+            }
+        }
+    }
+
+    shard Step {
+        each tick {
+            target $Search #Active as s {
+                var popped = false
+                target $Cell #Open by Cell.f as c {
+                    popped = true
+                    unmark c #Open
+                    mark c #Closed
+                    s.Search.closedCells += 1
+                    if c == s.Search.goal {
+                        emit @Reached { search: s }
+                    } else {
+                        target $Cell as n {
+                            if n.Cell.grid == c.Cell.grid and not n.Cell.wall and
+                               manhattan(n.Cell.x, n.Cell.y, c.Cell.x, c.Cell.y) == 1 and
+                               not (n carries #Closed) {
+                                let g = c.Cell.g + 1
+                                if not (n carries #Open) or g < n.Cell.g {
+                                    n.Cell.g = g
+                                    n.Cell.f = g + manhattan(n.Cell.x, n.Cell.y, s.Search.gx, s.Search.gy)
+                                    n.Cell.parent = c
+                                    mark n #Open
+                                }
+                            }
+                        }
+                    }
+                    break       // only the first: this is "dequeue the minimum"
+                }
+                if not popped { emit @NoPath { search: s } }
+            }
+        }
+    }
+
+    SF finish(s: Entity, after: Entity) {
+        unmark s #Active
+        target $Cell #Open as o { unmark o #Open }
+        if after == 0 {
+            emit @AllDone { }
+        } else {
+            emit @Begin { search: after }
+        }
+    }
+
+    shard Finish {
+        hear @Reached as r {
+            target $Search on r.search as s {
+                var cur: Entity = s.Search.goal
+                var cells = 0
+                var walls = 0
+                var joined = true
+                var reachedStart = false
+                var px = 0
+                var py = 0
+                var hops = 0
+                while not (cur == 0) and hops < 200 {
+                    hops += 1
+                    target $Cell on cur as p {
+                        cells += 1
+                        if p.Cell.wall { walls += 1 }
+                        if cells > 1 and not (manhattan(p.Cell.x, p.Cell.y, px, py) == 1) { joined = false }
+                        if cur == s.Search.start { reachedStart = true }
+                        px = p.Cell.x
+                        py = p.Cell.y
+                        mark p #Path
+                        cur = p.Cell.parent
+                    }
+                }
+                s.Search.state = "found"
+                s.Search.pathCells = cells
+                s.Search.pathWalls = walls
+                s.Search.pathJoined = joined and reachedStart
+                do finish(s, s.Search.next)
+            }
+        }
+        hear @NoPath as r {
+            target $Search on r.search as s {
+                s.Search.state = "no path"
+                do finish(s, s.Search.next)
+            }
+        }
+    }
+
+    shard Report {
+        hear @AllDone as done {
+            var marked = 0
+            target $Cell #Path as p { if p.Cell.grid == 0 { marked += 1 } }
+            var row = ""
+            target $Cell as c {
+                if c.Cell.grid == 0 {
+                    if c.Cell.wall {
+                        row = row + "#"
+                    } else if c carries #Path {
+                        row = row + "*"
+                    } else if c carries #Closed {
+                        row = row + "-"
+                    } else {
+                        row = row + "."
+                    }
+                    if c.Cell.x == 11 {
+                        emit *Vein.Console.Io.@Print { text: "     " + row }
+                        row = ""
+                    }
+                }
+            }
+            target $Search as s {
+                if s.Search.grid == 0 {
+                    do check("maze 0: A* finds a path", s.Search.state == "found")
+                    do check("it is 31 cells, 30 steps: the shortest, worked out by hand above", s.Search.pathCells == 31)
+                    do check("it goes through no wall", s.Search.pathWalls == 0)
+                    do check("each hop is to a 4-neighbour, from the goal back to the start", s.Search.pathJoined)
+                    do check("the path is on the grid as data: 31 cells carry #Path", marked == 31)
+                    do check("the heuristic paid: fewer cells closed (" + s.Search.closedCells + ") than the 75 open ones", s.Search.closedCells < 75)
+                } else {
+                    do check("maze 1, goal walled off: the search reports no path", s.Search.state == "no path")
+                    do check("only after closing all 50 cells reachable from its start", s.Search.closedCells == 50)
+                }
+            }
+        }
+    }
+}

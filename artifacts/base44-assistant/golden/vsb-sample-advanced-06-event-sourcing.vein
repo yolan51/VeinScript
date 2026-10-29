@@ -1,0 +1,317 @@
+bundle EventSourcing by advanced {
+    shape $Account { name: string = "" }
+
+    shape $Fact {
+        enum Kind { Deposited, Withdrawn, Transferred, Rejected }
+        kind: Kind
+        seq: int = 0
+        account: Entity = 0
+        other: Entity = 0
+        amount: int = 0
+        reason: string = ""
+    }
+
+    shape $Books { balance: int = 0, entries: int = 0 }
+    shape $AsOf { balance: int = 0, entries: int = 0, version: int = 0 }
+    shape $Vault { total: int = 0, deposits: int = 0, withdrawals: int = 0, rejected: int = 0 }
+
+    event @Deposit { account: Entity, amount: int }
+    event @Withdraw { account: Entity, amount: int }
+    event @Transfer { payer: Entity, payee: Entity, amount: int }
+    event @Deposited { account: Entity, amount: int }
+    event @Withdrawn { account: Entity, amount: int }
+    event @Transferred { payer: Entity, payee: Entity, amount: int }
+    event @Rejected { account: Entity, other: Entity, amount: int, reason: string }
+    event @Appended { fact: Entity, seq: int }
+    event @Replay { upTo: int }
+    event @Replayed { upTo: int }
+
+    SF check(name: string, good: bool) {
+        if good { emit *Vein.Console.Io.@Print { text: "ok   " + name } } else { emit *Vein.Console.Io.@Print { text: "FAIL " + name } }
+    }
+
+    fn effect(kind: Kind, account: Entity, other: Entity, amount: int, who: Entity) return int {
+        match kind {
+            when Deposited { if account == who { return amount } }
+            when Withdrawn { if account == who { return 0 - amount } }
+            when Transferred {
+                if account == who { return 0 - amount }
+                if other == who { return amount }
+            }
+            else { }
+        }
+        return 0
+    }
+    fn touches(kind: Kind, account: Entity, other: Entity, who: Entity) return bool {
+        if kind == Kind.Rejected { return false }
+        return account == who or other == who
+    }
+    fn flow(kind: Kind, amount: int) return int {
+        if kind == Kind.Deposited { return amount }
+        if kind == Kind.Withdrawn { return 0 - amount }
+        return 0
+    }
+
+    fn balanceAt(who: Entity, upTo: int) return int {
+        var balance = 0
+        target $Fact as f {
+            if upTo < 0 or f.Fact.seq <= upTo { balance += effect(f.Fact.kind, f.Fact.account, f.Fact.other, f.Fact.amount, who) }
+        }
+        return balance
+    }
+    fn entriesAt(who: Entity, upTo: int) return int {
+        var entries = 0
+        target $Fact as f {
+            if (upTo < 0 or f.Fact.seq <= upTo) and touches(f.Fact.kind, f.Fact.account, f.Fact.other, who) { entries += 1 }
+        }
+        return entries
+    }
+
+    shard Teller {
+        hear @Deposit as c {
+            if c.amount <= 0 {
+                emit @Rejected { account: c.account, other: 0, amount: c.amount, reason: "amount must be positive" }
+            } else {
+                emit @Deposited { account: c.account, amount: c.amount }
+            }
+        }
+        hear @Withdraw as c {
+            let have = balanceAt(c.account, -1)
+            if c.amount <= 0 {
+                emit @Rejected { account: c.account, other: 0, amount: c.amount, reason: "amount must be positive" }
+            } else {
+                if have < c.amount {
+                    emit @Rejected { account: c.account, other: 0, amount: c.amount, reason: "insufficient funds: has " + have }
+                } else {
+                    emit @Withdrawn { account: c.account, amount: c.amount }
+                }
+            }
+        }
+        hear @Transfer as c {
+            let have = balanceAt(c.payer, -1)
+            var payeeExists = false
+            target $Account on c.payee as p { payeeExists = true }
+            var why = ""
+            if c.amount <= 0 { why = "amount must be positive" }
+            if why == "" and c.payer == c.payee { why = "same account" }
+            if why == "" and not payeeExists { why = "no such account" }
+            if why == "" and have < c.amount { why = "insufficient funds: has " + have }
+            if why == "" {
+                emit @Transferred { payer: c.payer, payee: c.payee, amount: c.amount }
+            } else {
+                emit @Rejected { account: c.payer, other: c.payee, amount: c.amount, reason: why }
+            }
+        }
+    }
+
+    shard Ledger {
+        var version: int = 0
+        hear @Deposited as d {
+            version += 1
+            let f = spawn()
+            attach $Fact to f { kind: Kind.Deposited, seq: version, account: d.account, amount: d.amount }
+            emit @Appended { fact: f, seq: version }
+        }
+        hear @Withdrawn as d {
+            version += 1
+            let f = spawn()
+            attach $Fact to f { kind: Kind.Withdrawn, seq: version, account: d.account, amount: d.amount }
+            emit @Appended { fact: f, seq: version }
+        }
+        hear @Transferred as d {
+            version += 1
+            let f = spawn()
+            attach $Fact to f { kind: Kind.Transferred, seq: version, account: d.payer, other: d.payee, amount: d.amount }
+            emit @Appended { fact: f, seq: version }
+        }
+        hear @Rejected as d {
+            version += 1
+            let f = spawn()
+            attach $Fact to f { kind: Kind.Rejected, seq: version, account: d.account, other: d.other, amount: d.amount, reason: d.reason }
+            emit @Appended { fact: f, seq: version }
+        }
+    }
+
+    shard Projector {
+        hear @Appended as a {
+            target $Fact on a.fact as f {
+                let amount = f.Fact.amount
+                match f.Fact.kind {
+                    when Deposited {
+                        target $Books on f.Fact.account as b {
+                            b.Books.balance = b.Books.balance + amount
+                            b.Books.entries = b.Books.entries + 1
+                        }
+                        target $Vault as v {
+                            v.Vault.total = v.Vault.total + amount
+                            v.Vault.deposits = v.Vault.deposits + amount
+                        }
+                    }
+                    when Withdrawn {
+                        target $Books on f.Fact.account as b {
+                            b.Books.balance = b.Books.balance - amount
+                            b.Books.entries = b.Books.entries + 1
+                        }
+                        target $Vault as v {
+                            v.Vault.total = v.Vault.total - amount
+                            v.Vault.withdrawals = v.Vault.withdrawals + amount
+                        }
+                    }
+                    when Transferred {
+                        target $Books on f.Fact.account as b {
+                            b.Books.balance = b.Books.balance - amount
+                            b.Books.entries = b.Books.entries + 1
+                        }
+                        target $Books on f.Fact.other as b {
+                            b.Books.balance = b.Books.balance + amount
+                            b.Books.entries = b.Books.entries + 1
+                        }
+                    }
+                    when Rejected { target $Vault as v { v.Vault.rejected = v.Vault.rejected + 1 } }
+                }
+            }
+        }
+    }
+
+    shard Replayer {
+        hear @Replay as r {
+            target $Account as acct {
+                attach $AsOf to acct { balance: balanceAt(acct, r.upTo), entries: entriesAt(acct, r.upTo), version: r.upTo }
+            }
+            emit @Replayed { upTo: r.upTo }
+        }
+    }
+
+    shard Bank {
+        var alice: Entity = 0
+        var bob: Entity = 0
+        var carol: Entity = 0
+        run once {
+            alice = spawn()
+            attach $Account to alice { name: "alice" }
+            attach $Books to alice { }
+            bob = spawn()
+            attach $Account to bob { name: "bob" }
+            attach $Books to bob { }
+            carol = spawn()
+            attach $Account to carol { name: "carol" }
+            attach $Books to carol { }
+            let vault = spawn()
+            attach $Vault to vault { }
+        }
+
+        each tick as t {
+            let k = t.frame
+            if k == 2 { emit @Deposit { account: alice, amount: 100 } }                 // 1 deposited
+            if k == 3 { emit @Deposit { account: bob, amount: 50 } }                    // 2 deposited
+            if k == 4 { emit @Withdraw { account: alice, amount: 30 } }                 // 3 withdrawn
+            if k == 5 { emit @Withdraw { account: bob, amount: 80 } }                   // 4 rejected: overdraft
+            if k == 6 { emit @Transfer { payer: alice, payee: carol, amount: 40 } }     // 5 transferred
+            if k == 7 { emit @Transfer { payer: bob, payee: carol, amount: 60 } }       // 6 rejected: overdraft
+            if k == 8 { emit @Deposit { account: carol, amount: -5 } }                  // 7 rejected: negative
+            if k == 9 { emit @Transfer { payer: carol, payee: carol, amount: 10 } }     // 8 rejected: same account
+            if k == 10 { emit @Transfer { payer: alice, payee: 999, amount: 10 } }      // 9 rejected: no such account
+            if k == 11 { emit @Deposit { account: bob, amount: 25 } }                   // 10 deposited
+            if k == 12 { emit @Transfer { payer: bob, payee: alice, amount: 75 } }      // 11 transferred
+            if k == 13 { emit @Withdraw { account: carol, amount: 15 } }                // 12 withdrawn
+            if k == 20 { emit @Replay { upTo: 3 } }
+            if k == 21 { emit @Replay { upTo: 0 } }
+            if k == 22 { emit @Replay { upTo: 12 } }
+            if k == 23 { do audit() }
+        }
+
+        hear @Replayed as r {
+            var ok = true
+            var matchesLive = true
+            target $Account $AsOf $Books as acct {
+                if r.upTo == 3 {
+                    if acct == alice and not (acct.AsOf.balance == 70) { ok = false }
+                    if acct == bob and not (acct.AsOf.balance == 50) { ok = false }
+                    if acct == carol and not (acct.AsOf.balance == 0) { ok = false }
+                }
+                if r.upTo == 0 and not (acct.AsOf.balance == 0 and acct.AsOf.entries == 0) { ok = false }
+                if not (acct.AsOf.balance == acct.Books.balance and acct.AsOf.entries == acct.Books.entries) { matchesLive = false }
+            }
+            if r.upTo == 3 { do check("replayed to version 3: alice 70, bob 50, carol 0, as they were then", ok) }
+            if r.upTo == 0 { do check("replayed to version 0: every account empty", ok) }
+            if r.upTo == 12 { do check("a full replay rebuilds exactly what the live projection holds", matchesLive) }
+        }
+    }
+
+    SF audit() {
+        var balances = ""
+        var entries = ""
+        var sum = 0
+        target $Account $Books as acct {
+            balances = balances + acct.Account.name + "=" + acct.Books.balance + " "
+            entries = entries + acct.Account.name + "=" + acct.Books.entries + " "
+            sum += acct.Books.balance
+        }
+        do check("balances: alice 105, bob 0, carol 25", balances == "alice=105 bob=0 carol=25 ")
+        do check("history per account counts accepted facts: 4, 3, 2", entries == "alice=4 bob=3 carol=2 ")
+
+        var facts = 0
+        var contiguous = true
+        var refusals = 0
+        target $Fact by Fact.seq as f {
+            facts += 1
+            if not (f.Fact.seq == Index + 1) { contiguous = false }
+            if f.Fact.kind == Kind.Rejected { refusals += 1 }
+        }
+        do check("the log holds twelve facts, numbered without a gap", facts == 12 and contiguous)
+        do check("five commands were refused, and each refusal is in the log", refusals == 5)
+
+        var overdraft = false
+        var negative = false
+        var toSelf = false
+        var unknown = false
+        target $Fact as f {
+            if f.Fact.kind == Kind.Rejected {
+                if f.Fact.amount == 80 and f.Fact.reason == "insufficient funds: has 50" { overdraft = true }
+                if f.Fact.reason == "amount must be positive" and f.Fact.amount == -5 { negative = true }
+                if f.Fact.reason == "same account" { toSelf = true }
+                if f.Fact.reason == "no such account" and f.Fact.other == 999 { unknown = true }
+            }
+        }
+        do check("an overdraft is refused, with the balance it lacked", overdraft)
+        do check("a negative deposit is refused", negative)
+        do check("a transfer to oneself is refused", toSelf)
+        do check("a transfer to an account that does not exist is refused", unknown)
+
+        var moved5 = ""
+        var moved6 = ""
+        target $Fact as f {
+            target $Account as acct {
+                let d = effect(f.Fact.kind, f.Fact.account, f.Fact.other, f.Fact.amount, acct)
+                if f.Fact.seq == 5 { moved5 = moved5 + acct.Account.name + "=" + d + " " }
+                if f.Fact.seq == 6 { moved6 = moved6 + acct.Account.name + "=" + d + " " }
+            }
+        }
+        do check("an accepted transfer is one fact moving both sides", moved5 == "alice=-40 bob=0 carol=40 ")
+        do check("a refused transfer moves neither side", moved6 == "alice=0 bob=0 carol=0 ")
+
+        target $Vault as v {
+            do check("total money is 130: 175 deposited less 45 withdrawn", v.Vault.total == 130 and v.Vault.deposits == 175 and v.Vault.withdrawals == 45)
+            do check("and it equals the sum of the balances", v.Vault.total == sum)
+            do check("the projection counted the five refusals", v.Vault.rejected == 5)
+        }
+
+        var holds = true
+        var neverNegative = true
+        var versions = 0
+        target $Fact as v {
+            versions += 1
+            var external = 0
+            target $Fact as f { if f.Fact.seq <= v.Fact.seq { external += flow(f.Fact.kind, f.Fact.amount) } }
+            var inAccounts = 0
+            target $Account as acct {
+                let bal = balanceAt(acct, v.Fact.seq)
+                inAccounts += bal
+                if bal < 0 { neverNegative = false }
+            }
+            if not (inAccounts == external) { holds = false }
+        }
+        do check("at all twelve versions, transfers neither made nor lost money", holds and versions == 12)
+        do check("no balance was below zero at any version", neverNegative)
+    }
+}

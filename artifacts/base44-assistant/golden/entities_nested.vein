@@ -1,0 +1,41 @@
+bundle EntitiesNested by you {
+
+    shape $Deck { title: string }
+    mark #Deck
+
+    builder Deck { $Deck   mark #Deck }
+
+    shape $Card { face: string }
+    mark #Card
+
+    builder Card { $Card   mark #Card }
+
+    shard Seed {
+        run once {
+            bring Deck("trumps")
+            bring Card("ace")
+            bring Card("king")
+        }
+    }
+
+    shard Show {
+        settled {
+            target $Deck #Deck as d {
+                target $Card #Card as c {
+                    emit *Vein.Console.Io.@Print { text: d.Deck.title + " / " + c.Card.face }
+                }
+            }
+        }
+    }
+
+    shard Suits {
+        settled {
+            target $Deck #Deck as d {
+                let suits = ["hearts", "spades"]
+                target suits as s {
+                    emit *Vein.Console.Io.@Print { text: "   " + d.Deck.title + " has " + s }
+                }
+            }
+        }
+    }
+}

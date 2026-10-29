@@ -1,0 +1,22 @@
+bundle Quests by you {
+
+    publicator Journal {
+        shared("A quest moved forward a step.")
+        event @QuestAdvanced { quest: string, step: int }
+
+        shared("A quest is done.")
+        event @QuestCompleted { quest: string }
+    }
+
+    shard Log {
+        hear *you.Combat.Fight.@Died as d {
+            emit @QuestAdvanced { quest: "Slay " + d.who, step: 1 }
+        }
+
+        hear *you.Inventory.Bag.@InventoryChanged as c {
+            if c.item == "rusty key" {
+                emit @QuestCompleted { quest: "Slay Grub" }
+            }
+        }
+    }
+}

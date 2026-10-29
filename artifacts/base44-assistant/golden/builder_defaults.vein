@@ -1,0 +1,84 @@
+bundle BuilderDefaults by you {
+
+    shape $Content {
+        title: string
+        body: string = "(no description yet)"
+    }
+
+    shape $Style {
+        class: string = "panel"
+        accent: string = "#4444aa"
+        padded: bool = true
+    }
+
+    shape $Layout {
+        column: int = 0
+        order: int = 0
+    }
+
+    mark #Panel
+
+    builder Panel { $Content $Style $Layout   mark #Panel }
+
+    shard Build {
+        run once {
+            bring Panel("Welcome")
+
+            bring Panel("Install", "Run veinc new, then veinc run.")
+
+            bring Panel("Danger", base, "panel warn", "#aa4444")
+
+            bring Panel("Footer", base, base, base, false, 1, 9)
+
+            bring Panel (
+                "salu",     // title: string   from $Content   REQUIRED — give it a value
+                base,     // body: string   from $Content   optional — default "(no description yet)"
+                base,     // class: string   from $Style   optional — default "panel"
+                base,     // accent: string   from $Style   optional — default "#4444aa"
+                base,     // padded: bool   from $Style   optional — default true
+                base,     // column: int   from $Layout   optional — default 0
+                base      // order: int   from $Layout   optional — default 0
+            )
+        }
+    }
+
+    shard Show {
+        settled {
+            emit *Vein.Console.Io.@Print { text: "-- panels, in the column/order the layout asked for --" }
+
+            target $Content #Panel by Layout.order as p {
+                emit *Vein.Console.Io.@Print { text: "   " + p.Content.title }
+                emit *Vein.Console.Io.@Print { text: "      " + p.Content.body }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "-- the styling each one ended up with --" }
+            target $Style #Panel by Layout.order as p {
+                emit *Vein.Console.Io.@Print {
+                    text: "   class=" + p.Style.class + "  accent=" + p.Style.accent +
+                          "  padded=" + p.Style.padded + "  col=" + p.Layout.column
+                }
+            }
+        }
+    }
+
+    shape $Draft { title: string, note: string, slug: string = "untitled" }
+    mark #Draft
+
+    builder Draft { $Draft   mark #Draft }
+
+    shard Sketch {
+        run once { bring Draft("Untitled", "", base) }
+    }
+
+    shard ShowDraft {
+        settled {
+            emit *Vein.Console.Io.@Print { text: "-- an empty value where there is no default, the default where there is --" }
+            target $Draft #Draft as d {
+                emit *Vein.Console.Io.@Print {
+                    text: "   title=[" + d.Draft.title + "] note=[" + d.Draft.note +
+                          "] slug=[" + d.Draft.slug + "]"
+                }
+            }
+        }
+    }
+}

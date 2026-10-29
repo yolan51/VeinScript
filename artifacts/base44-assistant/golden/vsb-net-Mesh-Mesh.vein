@@ -1,0 +1,274 @@
+bundle Mesh by net {
+    need "Vein.Math"
+
+    publicator Wire {
+        shared("A node of the mesh, named by its network identity; #Wired carries its frames over Vein.Net, `transit: false` carries only its own.")
+        shape $MeshNode { name: string, now: float = 0.0, nextId: int = 0, relayed: int = 0, duplicates: int = 0, transit: bool = true }
+
+        shared("A node's direct link to a neighbour, and when it last heard from it (`up` once it has).")
+        shape $Neighbor { node: Entity, peer: string, heard: float = 0.0, up: bool = false }
+
+        shared("How a node reaches `dest`: through neighbour `via`, `hops` away (16: unreachable).")
+        shape $Route { node: Entity, dest: string, via: string, hops: int = 16 }
+
+        shared("A message waiting at a node for a route to its destination.")
+        shape $Held { node: Entity, frame: string, dest: string, since: float = 0.0 }
+
+        shared("This node's frames go over Vein.Net: `@Send` to its neighbours, `@Message` from them.")
+        mark #Wired
+
+        shared("Send a message from this node to `dest` (a node name, or \"*\" for every node).")
+        event @MeshSend { node: Entity, dest: string, kind: string, payload: string }
+
+        shared("A message reached this node: who sent it, what kind, what it says.")
+        event @MeshDelivered { node: Entity, origin: string, kind: string, payload: string, id: string }
+
+        shared("A message was given up: no route to its destination within `holdFor` seconds.")
+        event @MeshDropped { node: Entity, dest: string, kind: string }
+
+        shared("A neighbour came up: heard from, for the first time or again.")
+        event @PeerUp { node: Entity, peer: string }
+
+        shared("A neighbour went down: silent for `deadAfter`, or a frame to it could not be sent.")
+        event @PeerDown { node: Entity, peer: string }
+
+        shared("A frame for the transport to send to neighbour `to`.")
+        event @FrameOut { node: Entity, to: string, text: string }
+
+        shared("A frame the transport received from neighbour `sender`.")
+        event @FrameIn { node: Entity, sender: string, text: string }
+
+        shared("The transport could not deliver a frame to neighbour `peer`.")
+        event @FrameFailed { node: Entity, peer: string, text: string }
+    }
+
+    shape $Seen { node: Entity, id: string, at: float = 0.0 }
+
+    fn dataFrame(id: string, origin: string, dest: string, ttl: int, kind: string, payload: string) return string {
+        return "M|D|" + id + "|" + origin + "|" + dest + "|" + ttl + "|" + kind + "|" + payload
+    }
+
+    fn rest(parts: list<string>, first: int) return string {
+        var joined = ""
+        var i = first
+        while i < len(parts) {
+            if i > first { joined = joined + "|" }
+            joined = joined + parts[i]
+            i += 1
+        }
+        return joined
+    }
+
+    fn nextHop(n: Entity, dest: string) return string {
+        var via = ""
+        target $Route as r {
+            if r.Route.node == n and r.Route.dest == dest and r.Route.hops < 16 {
+                target $Neighbor as b { if b.Neighbor.node == n and b.Neighbor.peer == r.Route.via and b.Neighbor.up { via = r.Route.via } }
+            }
+        }
+        return via
+    }
+
+    SF relay(n: Entity, name: string, came: string, id: string, origin: string, dest: string, ttl: int, kind: string, payload: string, now: float) {
+        var seen = false
+        target $Seen as s { if s.Seen.node == n and s.Seen.id == id { seen = true } }
+        if seen {
+            target $MeshNode on n as m { m.MeshNode.duplicates = m.MeshNode.duplicates + 1 }
+        } else {
+            let memo = spawn()
+            attach $Seen to memo { node: n, id: id, at: now }
+            if dest == name or dest == "*" {
+                emit @MeshDelivered { node: n, origin: origin, kind: kind, payload: payload, id: id }
+            }
+            var transit = true
+            target $MeshNode on n as m { transit = m.MeshNode.transit }
+            let mine = came == name
+            if not transit and not mine {
+            } else if dest == "*" {
+                if ttl > 0 {
+                    target $Neighbor as b {
+                        if b.Neighbor.node == n and b.Neighbor.up and not (b.Neighbor.peer == came) {
+                            emit @FrameOut { node: n, to: b.Neighbor.peer, text: dataFrame(id, origin, dest, ttl - 1, kind, payload) }
+                        }
+                    }
+                }
+            } else if not (dest == name) {
+                let via = nextHop(n, dest)
+                if not (via == "") and ttl > 0 {
+                    emit @FrameOut { node: n, to: via, text: dataFrame(id, origin, dest, ttl - 1, kind, payload) }
+                    if not (came == name) { target $MeshNode on n as m { m.MeshNode.relayed = m.MeshNode.relayed + 1 } }
+                } else {
+                    let h = spawn()
+                    attach $Held to h { node: n, frame: dataFrame(id, origin, dest, ttl, kind, payload), dest: dest, since: now }
+                }
+            }
+        }
+    }
+
+    SF lose(n: Entity, peer: string) {
+        target $Neighbor as b {
+            if b.Neighbor.node == n and b.Neighbor.peer == peer and b.Neighbor.up {
+                b.Neighbor.up = false
+                emit @PeerDown { node: n, peer: peer }
+            }
+        }
+        target $Route as r { if r.Route.node == n and r.Route.via == peer { r.Route.hops = 16 } }
+    }
+
+    shard Send {
+        hear @MeshSend as s {
+            target $MeshNode on s.node as n {
+                let id = n.MeshNode.name + "-" + n.MeshNode.nextId
+                n.MeshNode.nextId = n.MeshNode.nextId + 1
+                do relay(n, n.MeshNode.name, n.MeshNode.name, id, n.MeshNode.name, s.dest, 16, s.kind, s.payload, n.MeshNode.now)
+            }
+        }
+    }
+
+    shard Receive {
+        hear @FrameIn as f {
+            target $MeshNode on f.node as n {
+                var known = false
+                target $Neighbor as b {
+                    if b.Neighbor.node == n and b.Neighbor.peer == f.sender {
+                        known = true
+                        b.Neighbor.heard = n.MeshNode.now
+                        if not b.Neighbor.up {
+                            b.Neighbor.up = true
+                            emit @PeerUp { node: n, peer: f.sender }
+                        }
+                    }
+                }
+                if not known {
+                    let b = spawn()
+                    attach $Neighbor to b { node: n, peer: f.sender, heard: n.MeshNode.now, up: true }
+                    emit @PeerUp { node: n, peer: f.sender }
+                }
+
+                let parts = split(f.text, "|")
+                if len(parts) >= 3 and parts[1] == "R" {
+                    do learn(n, n.MeshNode.name, f.sender, parts[2])
+                }
+                if len(parts) >= 8 and parts[1] == "D" {
+                    do relay(n, n.MeshNode.name, f.sender, parts[2], parts[3], parts[4], int(parts[5]), parts[6], rest(parts, 7), n.MeshNode.now)
+                }
+            }
+        }
+
+        hear @FrameFailed as f {
+            target $MeshNode on f.node as n {
+                do lose(n, f.peer)
+                let parts = split(f.text, "|")
+                if len(parts) >= 8 and parts[1] == "D" {
+                    let h = spawn()
+                    attach $Held to h { node: n, frame: f.text, dest: parts[4], since: n.MeshNode.now }
+                }
+            }
+        }
+    }
+
+    SF learn(n: Entity, name: string, came: string, table: string) {
+        target split(table, ",") as entry {
+            let colon = indexOf(entry, ":")
+            if colon > 0 {
+                let dest = substring(entry, 0, colon)
+                let hops = min(16, int(substring(entry, colon + 1, len(entry) - colon - 1)) + 1)
+                if not (dest == name) {
+                    var found = false
+                    target $Route as r {
+                        if r.Route.node == n and r.Route.dest == dest {
+                            found = true
+                            if r.Route.via == came or hops < r.Route.hops {
+                                r.Route.via = came
+                                r.Route.hops = hops
+                            }
+                        }
+                    }
+                    if not found and hops < 16 {
+                        let r = spawn()
+                        attach $Route to r { node: n, dest: dest, via: came, hops: hops }
+                    }
+                }
+            }
+        }
+    }
+
+    shard Clock {
+        tune("Seconds between a node's route adverts (they double as its heartbeat).")
+        var advertEvery: float = 1.0
+        tune("Seconds of silence after which a neighbour is down.")
+        var deadAfter: float = 3.5
+        tune("Seconds a message waits for a route before it is dropped.")
+        var holdFor: float = 60.0
+        tune("Seconds a node remembers a message id it has seen.")
+        var seenFor: float = 30.0
+
+        var sinceAdvert: float = 0.0
+        var sinceSweep: float = 0.0
+
+        each tick as t {
+            target $MeshNode as n { n.MeshNode.now = n.MeshNode.now + t.delta }
+
+            sinceAdvert = sinceAdvert + t.delta
+            if sinceAdvert >= advertEvery {
+                sinceAdvert = 0.0
+                target $MeshNode as n {
+                    target $Neighbor as b {
+                        if b.Neighbor.node == n {
+                            var table = n.MeshNode.name + ":0"
+                            target $Route as r {
+                                if r.Route.node == n and n.MeshNode.transit {
+                                    var hops = r.Route.hops
+                                    if r.Route.via == b.Neighbor.peer { hops = 16 }
+                                    table = table + "," + r.Route.dest + ":" + hops
+                                }
+                            }
+                            emit @FrameOut { node: n, to: b.Neighbor.peer, text: "M|R|" + table }
+                        }
+                    }
+                }
+            }
+
+            sinceSweep = sinceSweep + t.delta
+            if sinceSweep >= 0.25 {
+                sinceSweep = 0.0
+                target $MeshNode as n {
+                    let now = n.MeshNode.now
+                    target $Neighbor as b {
+                        if b.Neighbor.node == n and b.Neighbor.up and now - b.Neighbor.heard > deadAfter { do lose(n, b.Neighbor.peer) }
+                    }
+                    target $Held as h {
+                        if h.Held.node == n {
+                            let via = nextHop(n, h.Held.dest)
+                            if not (via == "") {
+                                emit @FrameOut { node: n, to: via, text: h.Held.frame }
+                                destroy h
+                            } else if now - h.Held.since > holdFor {
+                                let parts = split(h.Held.frame, "|")
+                                emit @MeshDropped { node: n, dest: h.Held.dest, kind: parts[6] }
+                                destroy h
+                            }
+                        }
+                    }
+                    target $Seen as s { if s.Seen.node == n and now - s.Seen.at > seenFor { destroy s } }
+                }
+            }
+        }
+    }
+
+    shard Wire {
+        hear @FrameOut as f {
+            target $MeshNode #Wired on f.node as n { emit *Vein.Net.Peer.@Send { to: f.to, text: f.text } }
+        }
+        hear *Vein.Net.Peer.@Message as m {
+            if startsWith(m.text, "M|") {
+                target $MeshNode #Wired as n { emit @FrameIn { node: n, sender: m.from, text: m.text } }
+            }
+        }
+        hear *Vein.Net.Peer.@Undelivered as u {
+            if startsWith(u.text, "M|") {
+                target $MeshNode #Wired as n { emit @FrameFailed { node: n, peer: u.to, text: u.text } }
+            }
+        }
+    }
+}

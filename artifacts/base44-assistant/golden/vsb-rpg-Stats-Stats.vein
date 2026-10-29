@@ -1,0 +1,98 @@
+bundle Stats by rpg {
+    need "Vein.Math"
+
+    publicator Sheet {
+        shared("Hit points. `regen` per second; `max` follows vitality when the identity has $Derived.")
+        shape $Life { hp: float = 100.0, max: float = 100.0, regen: float = 0.0 }
+
+        shared("Mana for skills. `regen` per second; `max` follows energy when the identity has $Derived.")
+        shape $Mana { mp: float = 30.0, max: float = 30.0, regen: float = 2.0 }
+
+        shared("The four attributes: strength (damage), dexterity (crit, armor), vitality (life), energy (mana).")
+        shape $Attributes { strength: int = 10, dexterity: int = 10, vitality: int = 10, energy: int = 10 }
+
+        shared("What worn gear adds — written by rpg.Equipment, read here.")
+        shape $Gear { damage: float = 0.0, armor: float = 0.0, life: float = 0.0, mana: float = 0.0, crit: float = 0.0 }
+
+        shared("What passives and buffs add: attributes, flat stats, and `increased` damage (0.2 = +20%). Written by rpg.Passives.")
+        shape $Boost {
+            strength: int = 0, dexterity: int = 0, vitality: int = 0, energy: int = 0,
+            damage: float = 0.0, armor: float = 0.0, life: float = 0.0, mana: float = 0.0, crit: float = 0.0, increased: float = 0.0
+        }
+
+        shared("The numbers combat uses, derived every frame from $Attributes, $Gear and $Boost.")
+        shape $Derived { damage: float = 0.0, armor: float = 0.0, crit: float = 0.0, maxLife: float = 0.0, maxMana: float = 0.0 }
+    }
+
+    mark #Gameplay
+
+    shard Derive {
+        tune("Base damage before strength.")
+        var baseDamage: float = 2.0
+        tune("Damage per point of strength.")
+        var damagePerStrength: float = 0.5
+        tune("Life before vitality.")
+        var baseLife: float = 40.0
+        tune("Life per point of vitality.")
+        var lifePerVitality: float = 6.0
+        tune("Mana before energy.")
+        var baseMana: float = 10.0
+        tune("Mana per point of energy.")
+        var manaPerEnergy: float = 4.0
+        tune("Crit chance per point of dexterity (0.003 = 0.3%).")
+        var critPerDexterity: float = 0.003
+        tune("Armor per point of dexterity.")
+        var armorPerDexterity: float = 0.4
+
+        each tick {
+            target $Attributes $Gear $Derived as c {
+                var str = 0
+                var dex = 0
+                var vit = 0
+                var ene = 0
+                var damage = 0.0
+                var armor = 0.0
+                var life = 0.0
+                var mana = 0.0
+                var crit = 0.0
+                var increased = 0.0
+                target $Boost on c as b {
+                    str = b.Boost.strength
+                    dex = b.Boost.dexterity
+                    vit = b.Boost.vitality
+                    ene = b.Boost.energy
+                    damage = b.Boost.damage
+                    armor = b.Boost.armor
+                    life = b.Boost.life
+                    mana = b.Boost.mana
+                    crit = b.Boost.crit
+                    increased = b.Boost.increased
+                }
+                let strength = c.Attributes.strength + str
+                let dexterity = c.Attributes.dexterity + dex
+                c.Derived.damage = (baseDamage + strength * damagePerStrength + c.Gear.damage + damage) * (1.0 + increased)
+                c.Derived.armor = dexterity * armorPerDexterity + c.Gear.armor + armor
+                c.Derived.crit = min(0.75, 0.05 + dexterity * critPerDexterity + c.Gear.crit + crit)
+                c.Derived.maxLife = baseLife + (c.Attributes.vitality + vit) * lifePerVitality + c.Gear.life + life
+                c.Derived.maxMana = baseMana + (c.Attributes.energy + ene) * manaPerEnergy + c.Gear.mana + mana
+            }
+        }
+        settled {
+            target $Life $Derived as c {
+                c.Life.max = c.Derived.maxLife
+                c.Life.hp = min(c.Life.hp, c.Derived.maxLife)
+            }
+            target $Mana $Derived as c {
+                c.Mana.max = c.Derived.maxMana
+                c.Mana.mp = min(c.Mana.mp, c.Derived.maxMana)
+            }
+        }
+    }
+
+    shard Regen #Gameplay {
+        each tick as t {
+            target $Life as l { if l.Life.hp > 0.0 { l.Life.hp = min(l.Life.max, l.Life.hp + l.Life.regen * t.delta) } }
+            target $Mana as m { m.Mana.mp = min(m.Mana.max, m.Mana.mp + m.Mana.regen * t.delta) }
+        }
+    }
+}

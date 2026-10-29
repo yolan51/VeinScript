@@ -1,0 +1,113 @@
+bundle Save by core {
+    need "Vein.Files"
+
+    publicator Slots {
+        shared("Remember `value` under `key` in `slot`. Written to the slot's file at once.")
+        event @Save { slot: string = "save", key: string, value: string }
+
+        shared("Read a slot back: one @Loaded per key it holds, then @LoadDone.")
+        event @Load { slot: string = "save" }
+
+        shared("One remembered value, as @Load reads it back.")
+        event @Loaded { slot: string, key: string, value: string }
+
+        shared("A @Load finished. `found` is false when the slot was never saved.")
+        event @LoadDone { slot: string, found: bool }
+
+        shared("Forget everything in a slot.")
+        event @Clear { slot: string = "save" }
+    }
+
+    shape $Slot { name: string, text: string, ready: bool = false, pending: string = "" }
+
+    fn put(text: string, key: string, value: string) return string {
+        var out = ""
+        target lines(text) as line {
+            if len(line) > 0 and not (startsWith(line, key + "=")) { out += line + "\n" }
+        }
+        return out + key + "=" + replace(value, "\n", " ") + "\n"
+    }
+
+    fn merge(text: string, pending: string) return string {
+        var out = text
+        target lines(pending) as line {
+            let at = indexOf(line, "=")
+            if at > 0 { out = put(out, substring(line, 0, at), substring(line, at + 1, len(line) - at - 1)) }
+        }
+        return out
+    }
+
+    fn file(folder: string, slot: string) return string { return folder + "/" + slot + ".save" }
+
+    SF settle(folder: string, name: string, earlier: string) {
+        target $Slot as k {
+            if k.Slot.name == name and not k.Slot.ready {
+                k.Slot.text = merge(earlier, k.Slot.pending)
+                k.Slot.pending = ""
+                k.Slot.ready = true
+                emit *Vein.Files.Io.@WriteFile { path: file(folder, name), text: k.Slot.text, append: false, tag: "core.Save/write" }
+            }
+        }
+    }
+
+    shard Store {
+        tune("The folder slot files are written in, under the host's files root.")
+        let folder = "saves"
+
+        hear @Save as s {
+            var known = 0
+            target $Slot as k {
+                if k.Slot.name == s.slot {
+                    known = 1
+                    if k.Slot.ready {
+                        k.Slot.text = put(k.Slot.text, s.key, s.value)
+                        emit *Vein.Files.Io.@WriteFile { path: file(folder, s.slot), text: k.Slot.text, append: false, tag: "core.Save/write" }
+                    } else {
+                        k.Slot.pending = put(k.Slot.pending, s.key, s.value)
+                    }
+                }
+            }
+            if known == 0 {
+                let slot = spawn()
+                attach $Slot to slot { name: s.slot, text: "", ready: false, pending: put("", s.key, s.value) }
+                emit *Vein.Files.Io.@ReadFile { path: file(folder, s.slot), tag: "core.Save/merge/" + s.slot }
+            }
+        }
+
+        hear @Clear as c {
+            var known = 0
+            target $Slot as k {
+                if k.Slot.name == c.slot {
+                    known = 1
+                    k.Slot.text = ""
+                    k.Slot.pending = ""
+                    k.Slot.ready = true
+                }
+            }
+            if known == 0 {
+                let slot = spawn()
+                attach $Slot to slot { name: c.slot, text: "", ready: true, pending: "" }
+            }
+            emit *Vein.Files.Io.@WriteFile { path: file(folder, c.slot), text: "", append: false, tag: "core.Save/write" }
+        }
+
+        hear @Load as l { emit *Vein.Files.Io.@ReadFile { path: file(folder, l.slot), tag: "core.Save/load/" + l.slot } }
+
+        hear *Vein.Files.Io.@FileLoaded as f {
+            if startsWith(f.tag, "core.Save/load/") {
+                let slot = substring(f.tag, 15, len(f.tag) - 15)
+                target lines(f.text) as line {
+                    let at = indexOf(line, "=")
+                    if at > 0 { emit @Loaded { slot: slot, key: substring(line, 0, at), value: substring(line, at + 1, len(line) - at - 1) } }
+                }
+                emit @LoadDone { slot: slot, found: true }
+            }
+            if startsWith(f.tag, "core.Save/merge/") { do settle(folder, substring(f.tag, 16, len(f.tag) - 16), f.text) }
+        }
+
+        hear *Vein.Files.Io.@FileMissing as m {
+            if startsWith(m.tag, "core.Save/load/") { emit @LoadDone { slot: substring(m.tag, 15, len(m.tag) - 15), found: false } }
+            if startsWith(m.tag, "core.Save/merge/") { do settle(folder, substring(m.tag, 16, len(m.tag) - 16), "") }
+        }
+    }
+}

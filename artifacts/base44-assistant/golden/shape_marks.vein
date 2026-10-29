@@ -1,0 +1,62 @@
+bundle ShapeMarks by you {
+
+    mark #CameraFollow
+    mark #Rendered
+    mark #Cullable
+    mark #Ghost
+    mark #Shielded
+
+    shape $GameCamera { zoom: float, #CameraFollow, #Rendered, #Cullable }
+
+    shape $Shield { hp: int
+                    mark #Shielded }
+
+    shape $Ghost { alpha: float, #Ghost }
+
+    shape $Actor { n: int }
+
+    builder Cam { $Actor   $GameCamera }
+
+    builder Ghost { $Ghost }
+
+    shard Boot {
+        run once {
+            bring Cam(1, 2.5)
+            bring Ghost(0.5)
+        }
+    }
+
+    shard Guard {
+        settled {
+            target $Actor as b {
+                attach $Shield to b { hp: 7 }
+            }
+        }
+    }
+
+    shard Drop {
+        settled {
+            target $Actor $Shield as b {
+                unattach $Shield from b
+            }
+        }
+    }
+
+    shard Watch {
+        settled {
+            var carrying = 0
+            target $Actor $Shield as b { carrying = carrying + 1 }
+            var marked = 0
+            target $Actor #Shielded as b { marked = marked + 1 }
+            emit *Vein.Console.Io.@Print { text: "shield: carrying " + carrying + ", marked " + marked }
+
+            var cams = 0
+            target $GameCamera #CameraFollow #Rendered #Cullable as c { cams = cams + 1 }
+            emit *Vein.Console.Io.@Print { text: "cameras wearing all four marks: " + cams }
+
+            var ghosts = 0
+            target $Ghost #Ghost as g { ghosts = ghosts + 1 }
+            emit *Vein.Console.Io.@Print { text: "identities from a builder with no mark line: " + ghosts }
+        }
+    }
+}

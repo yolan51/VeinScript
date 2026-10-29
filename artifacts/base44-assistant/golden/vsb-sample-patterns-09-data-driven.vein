@@ -1,0 +1,43 @@
+bundle DataDriven by patterns {
+    shape $Item { name: string, price: int, rarity: string }
+    mark #Stock
+
+    SF check(name: string, good: bool) {
+        if good { emit *Vein.Console.Io.@Print { text: "ok   " + name } } else { emit *Vein.Console.Io.@Print { text: "FAIL " + name } }
+    }
+
+    fn catalogue() return string {
+        return "Sword,30,common;Shield,25,common;Wand,80,rare;Crown,500,legendary"
+    }
+
+    shard Load {
+        run once {
+            target split(catalogue(), ";") as line {
+                let f = split(line, ",")
+                let e = spawn()
+                attach $Item to e { name: f[0], price: int(f[1]), rarity: f[2] }
+                mark e #Stock
+            }
+        }
+    }
+
+    shard Shop {
+        var checked: int = 0
+        settled {
+            checked += 1
+            if checked == 1 {
+                var affordable = 0
+                var total = 0
+                var rare = ""
+                target $Item #Stock by Item.price as it {
+                    total += 1
+                    if it.Item.price <= 100 { affordable += 1 }
+                    if not (it.Item.rarity == "common") { rare = rare + it.Item.name + " " }
+                }
+                do check("four items loaded from one line of data", total == 4)
+                do check("three are affordable", affordable == 3)
+                do check("sorted by price, the rare ones are the wand then the crown", rare == "Wand Crown ")
+            }
+        }
+    }
+}

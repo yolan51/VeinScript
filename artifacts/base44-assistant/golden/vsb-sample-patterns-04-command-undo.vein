@@ -1,0 +1,45 @@
+bundle CommandUndo by patterns {
+    shape $Canvas { x: int = 0 }
+    event @Move { step: int }
+    event @Undo { }
+
+    SF check(name: string, good: bool) {
+        if good { emit *Vein.Console.Io.@Print { text: "ok   " + name } } else { emit *Vein.Console.Io.@Print { text: "FAIL " + name } }
+    }
+
+    shard Setup {
+        run once {
+            let c = spawn()
+            attach $Canvas to c { }
+            emit @Move { step: 5 }
+            emit @Move { step: 3 }
+            emit @Move { step: -1 }
+            emit @Undo { }
+            emit @Undo { }
+        }
+    }
+
+    shard History {
+        var log = [0]
+        var checked: int = 0
+        hear @Move as m {
+            target $Canvas as c { c.Canvas.x = c.Canvas.x + m.step }
+            log += m.step
+        }
+        hear @Undo as u {
+            if len(log) > 1 {
+                let last = log[len(log) - 1]
+                log = remove(log, len(log) - 1)
+                target $Canvas as c { c.Canvas.x = c.Canvas.x - last }
+            }
+        }
+        settled {
+            checked += 1
+            if checked == 1 { target $Canvas as c {
+                do check("three moves, the last two undone: back to 5", c.Canvas.x == 5)
+                do check("one command left in the history", len(log) == 2)
+                do check("and it is the first one", log[1] == 5)
+            } }
+        }
+    }
+}

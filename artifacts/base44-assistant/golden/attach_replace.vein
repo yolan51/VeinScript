@@ -1,0 +1,31 @@
+bundle AttachReplace by you {
+
+    shape $Price { amount: int, currency: string = "EUR" }
+    mark #Item
+
+    shard Seed {
+        run once {
+            let e = spawn()
+            attach $Price to e { amount: 5, currency: "USD" }
+            mark e #Item
+        }
+    }
+
+    shard Reprice {
+        each tick {
+            target $Price #Item as p {
+                if p.Price.amount == 5 {
+                    attach $Price to p { amount: 9 }
+                }
+            }
+        }
+    }
+
+    shard Report {
+        settled {
+            target $Price #Item as p {
+                emit *Vein.Console.Io.@Print { text: "e" + Entity + " " + p.Price.amount + " " + p.Price.currency }
+            }
+        }
+    }
+}

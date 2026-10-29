@@ -1,0 +1,115 @@
+bundle RpgDemoCopyPaste by yolan  {
+    need "Vein.Console"
+
+    shape $Stats  { hp: int folds sum, max: int, atk: int, name: string }
+    shape $Foe    { reward: int = 5 }          // marks something as an enemy
+    mark #Player
+    mark #Alive
+
+    shape $Game   { enum Phase { Explore, Fight, Win, Over }  phase: Phase, gold: int = 0 }
+    mark #World
+
+    event @Attack { from: Entity, to: Entity }
+    event @Slain  { who: Entity, name: string, reward: int }
+
+    SF say(text: string) { emit *Vein.Console.Io.@Print { text: text } }
+
+    shard Setup {
+        run once {
+            let p = spawn()
+            attach $Stats to p { hp: 30, max: 30, atk: 6, name: "Hero" }
+            mark p #Player
+            mark p #Alive
+
+            do spawnFoe("Goblin", 12, 3, 4)
+            do spawnFoe("Orc",    18, 5, 8)
+            do spawnFoe("Dragon", 40, 9, 25)
+
+            let w = spawn()
+            attach $Game to w { phase: Phase.Explore }
+            mark w #World
+
+            do say("A hero enters the dungeon. Three foes await.")
+        }
+    }
+
+    SF spawnFoe(name: string, hp: int, atk: int, reward: int) {
+        let e = spawn()
+        attach $Stats to e { hp: hp, max: hp, atk: atk, name: name }
+        attach $Foe to e { reward: reward }
+        mark e #Alive
+    }
+
+    shard Combat {
+        each tick {
+            target $Game #World as g {
+                if not (g.Game.phase == Phase.Explore) { continue }
+
+                target $Stats $Foe #Alive as foe {
+                    emit @Attack { from: playerOf(), to: foe }
+                    continue
+                }
+            }
+        }
+
+        hear @Attack as a {
+            target $Stats as attacker {
+                if not (attacker == a.from) { continue }
+                target $Stats #Alive as victim {
+                    if not (victim == a.to) { continue }
+                    victim.Stats.hp -= attacker.Stats.atk
+                    do say(attacker.Stats.name + " hits " + victim.Stats.name +
+                        " for " + attacker.Stats.atk + ". (" +
+                        victim.Stats.name + " hp " + victim.Stats.hp + ")")
+                }
+            }
+        }
+    }
+
+    fn playerOf() return Entity {
+        target $Stats #Player as p { return p }
+        return spawn()   // unreachable in practice
+    }
+
+    shard Resolve {
+        settled {
+            target $Stats #Alive as e {
+                if e.Stats.hp <= 0 {
+                    unmark e #Alive
+                    if e carries #Player {
+                        do say(e.Stats.name + " has fallen. Game over.")
+                    } else {
+                        emit @Slain { who: e, name: e.Stats.name, reward: foeReward(e) }
+                    }
+                }
+            }
+
+            target $Stats #Player #Alive as p {
+                target $Stats $Foe #Alive as foe {
+                    p.Stats.hp -= foe.Stats.atk
+                    do say(foe.Stats.name + " strikes back for " + foe.Stats.atk +
+                        ". (Hero hp " + p.Stats.hp + ")")
+                }
+            }
+        }
+
+        hear @Slain as s {
+            do say("You slew the " + s.name + "! +" + s.reward + " gold.")
+            target $Game #World as g { g.Game.gold += s.reward }
+
+            target $Game #World as g {
+                let foes = 0
+                target $Foe #Alive as f { foes += 1 }
+                if foes == 0 {
+                    g.Game.phase = Phase.Win
+                    do say("The dungeon is cleared! Gold: " + g.Game.gold)
+                }
+            }
+        }
+    }
+
+    fn foeReward(e: Entity) return int {
+        target $Foe as f { if f == e { return f.Foe.reward } }
+        return 0
+    }
+}

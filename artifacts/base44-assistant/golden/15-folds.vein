@@ -1,0 +1,60 @@
+bundle Motion by you {
+
+    mark #Moving
+
+    builder Mover {
+        *Vein.Transform.Spatial.$Position
+        *Vein.Transform.Spatial.$Velocity
+        mark #Moving
+    }
+
+    builder Ticker {
+        *Vein.Time.Clock.$Clock
+        mark #Clock
+    }
+    mark #Clock
+
+    shard Start {
+        run once {
+            bring Mover(0.0, 100.0, 0.0,  0.0, 0.0, 0.0)
+            bring Ticker(0.0, 0.5)
+        }
+    }
+
+    shard Gravity {
+        each tick { target $Velocity #Moving as m { m.Velocity.y -= 4.9 } }
+    }
+
+    shard Wind {
+        each tick { target $Velocity #Moving as m { m.Velocity.x += 1.0 } }
+    }
+
+    shard Clock {
+        each tick { target $Clock #Clock as c { c.Clock.now += c.Clock.delta } }
+    }
+
+    shard Step {
+        each tick {
+            target $Position $Velocity #Moving as m {
+                m.Position.x += m.Velocity.x * 0.5
+                m.Position.y += m.Velocity.y * 0.5
+            }
+        }
+    }
+
+    shard Report {
+        settled {
+            target $Clock #Clock as c {
+                emit *Vein.Console.Io.@Print { text: "t = " + *Vein.Math.Round.roundTo(c.Clock.now, 2) }
+            }
+            target $Position $Velocity #Moving as m {
+                emit *Vein.Console.Io.@Print {
+                    text: "  at " + *Vein.Math.Round.roundTo(m.Position.x, 2) +
+                          ", " + *Vein.Math.Round.roundTo(m.Position.y, 2) +
+                          "   v " + *Vein.Math.Round.roundTo(m.Velocity.x, 2) +
+                          ", " + *Vein.Math.Round.roundTo(m.Velocity.y, 2)
+                }
+            }
+        }
+    }
+}

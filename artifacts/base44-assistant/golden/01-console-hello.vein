@@ -1,0 +1,13 @@
+bundle App {
+    start @Boot { }        // this program's entry — fired once when it runs
+    event @Boot { }
+
+    shard Main {
+        hear @Boot as b {
+            emit *Vein.Console.Io.@Print { text: "Type something (Ctrl+Z / Ctrl+D to end):" }
+        }
+        hear *Vein.Console.Io.@Input as i {
+            emit *Vein.Console.Io.@Print { text: "you said " + i.text }
+        }
+    }
+}

@@ -1,0 +1,52 @@
+bundle MatchOrders by you {
+
+    shape $Order { status: string, item: string }
+    mark #Order
+
+    builder Order { $Order   mark #Order }
+
+    shard Seed {
+        run once {
+            bring Order("Pending", "widget")
+            bring Order("Paid",    "gadget")
+            bring Order("Shipped", "gizmo")
+
+            bring Order("OnHold",  "sprocket")
+        }
+    }
+
+    shard Advance {
+        each tick {
+            target $Order #Order as o {
+                match o.Order.status {
+                    when Pending { o.Order.status = "Paid" }
+                    when Paid    { o.Order.status = "Shipped" }
+                }
+            }
+        }
+    }
+
+    shard Report {
+        settled {
+            target $Order #Order as o {
+                match o.Order.status {
+                    when Pending { emit *Vein.Console.Io.@Print { text: o.Order.item + ": waiting for payment" } }
+                    when Paid    { emit *Vein.Console.Io.@Print { text: o.Order.item + ": payment received" } }
+                    when Shipped { emit *Vein.Console.Io.@Print { text: o.Order.item + ": on the way" } }
+                    else         { emit *Vein.Console.Io.@Print { text: o.Order.item + ": status " + o.Order.status } }
+                }
+            }
+        }
+    }
+
+    shard Ops {
+        settled {
+            target $Order #Order as o {
+                match o.Order.status {
+                    when Paid    { emit *Vein.Console.Io.@Print { text: "  [ops] pack " + o.Order.item } }
+                    when Shipped { emit *Vein.Console.Io.@Print { text: "  [ops] manifest " + o.Order.item } }
+                }
+            }
+        }
+    }
+}

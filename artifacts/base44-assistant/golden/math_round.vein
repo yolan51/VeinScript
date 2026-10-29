@@ -1,0 +1,37 @@
+bundle MathRound by you {
+
+    shard Rounding {
+        run once {
+            emit *Vein.Console.Io.@Print { text: "trunc  2.7 = " + *Vein.Math.Round.trunc(2.7) }
+            emit *Vein.Console.Io.@Print { text: "trunc -2.7 = " + *Vein.Math.Round.trunc(-2.7) }
+            emit *Vein.Console.Io.@Print { text: "floor  2.7 = " + *Vein.Math.Round.floor(2.7) }
+            emit *Vein.Console.Io.@Print { text: "floor -2.7 = " + *Vein.Math.Round.floor(-2.7) }
+            emit *Vein.Console.Io.@Print { text: "ceil   2.1 = " + *Vein.Math.Round.ceil(2.1) }
+            emit *Vein.Console.Io.@Print { text: "ceil  -2.1 = " + *Vein.Math.Round.ceil(-2.1) }
+
+            emit *Vein.Console.Io.@Print { text: "round  2.5 = " + *Vein.Math.Round.round(2.5) }
+            emit *Vein.Console.Io.@Print { text: "round  2.4 = " + *Vein.Math.Round.round(2.4) }
+            emit *Vein.Console.Io.@Print { text: "round -2.5 = " + *Vein.Math.Round.round(-2.5) }
+        }
+    }
+
+    shard Places {
+        run once {
+            emit *Vein.Console.Io.@Print { text: "raw        = " + (0.1 + 0.2) }
+            emit *Vein.Console.Io.@Print { text: "to 2 dp    = " + *Vein.Math.Round.roundTo(0.1 + 0.2, 2) }
+            emit *Vein.Console.Io.@Print { text: "pi to 2    = " + *Vein.Math.Round.roundTo(3.14159, 2) }
+            emit *Vein.Console.Io.@Print { text: "pi to 4    = " + *Vein.Math.Round.roundTo(3.14159, 4) }
+            emit *Vein.Console.Io.@Print { text: "pow10 3    = " + *Vein.Math.Round.pow10(3) }
+        }
+    }
+
+    shard Roots {
+        run once {
+            emit *Vein.Console.Io.@Print { text: "sqrt 16    = " + *Vein.Math.Roots.sqrt(16.0) }
+            emit *Vein.Console.Io.@Print { text: "sqrt 2     = " + *Vein.Math.Round.roundTo(*Vein.Math.Roots.sqrt(2.0), 4) }
+
+            emit *Vein.Console.Io.@Print { text: "dist 3,4   = " + *Vein.Math.Roots.distance(0.0, 0.0, 3.0, 4.0) }
+            emit *Vein.Console.Io.@Print { text: "dist same  = " + *Vein.Math.Roots.distance(2.0, 2.0, 2.0, 2.0) }
+        }
+    }
+}

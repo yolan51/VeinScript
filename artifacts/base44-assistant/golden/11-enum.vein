@@ -1,0 +1,37 @@
+bundle EnumState by you {
+
+    shape $Match {
+        enum State { Kickoff, Play, Over }
+        state: State
+        clock: int
+    }
+    mark #Match
+
+    builder Referee { $Match   mark #Match }
+
+    shard Boot { run once { bring Referee(State.Kickoff, 0) } }
+
+    shard Whistle {
+        each tick {
+            target $Match #Match as m {
+                m.Match.clock = m.Match.clock + 1
+
+                if m.Match.state == State.Kickoff { m.Match.state = State.Play }
+                if m.Match.state == State.Play and m.Match.clock >= 3 { m.Match.state = State.Over }
+            }
+        }
+    }
+
+    shard Commentary {
+        settled {
+            target $Match #Match as m {
+                match m.Match.state {
+                    when Kickoff { emit *Vein.Console.Io.@Print { text: "t" + m.Match.clock + " awaiting kickoff" } }
+                    when Play    { emit *Vein.Console.Io.@Print { text: "t" + m.Match.clock + " in play" } }
+                    when Over    { emit *Vein.Console.Io.@Print { text: "t" + m.Match.clock + " full time" } }
+                    else         { emit *Vein.Console.Io.@Print { text: "t" + m.Match.clock + " NO STATE" } }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,11 @@
+// publicators/Marks.vein — MEMBERSHIP, with no data. This file becomes `publicator Marks`.
+//
+// A mark is an identity tag: an entity either carries it or does not. Use one when the answer is yes/no
+// and there is nothing to store — `#Active` rather than a shape with a single `active: bool`, because a
+// query can then ask for it directly: `target $Gauge #Active as p { … }`.
+//
+// A shape and a mark MAY share a name: `$Enemy` and `#Enemy` are different things, different keyword and
+// different sigil.
+
+shared("This identity is currently in play.")
+mark #Active

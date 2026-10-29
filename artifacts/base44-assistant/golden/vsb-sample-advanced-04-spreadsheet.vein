@@ -1,0 +1,302 @@
+bundle Spreadsheet by advanced {
+    shape $Cell {
+        name: string
+        formula: string = ""
+        value: float = 0.0
+        dirty: bool = true       // every cell starts uncomputed
+        err: string = ""
+        recomputes: int = 0
+        level: int = 0           // in which pass of its recalculation it was computed: the order, visible
+    }
+
+    shape $Ref { from: Entity, to: Entity }
+
+    type Num { v: float, at: int }
+
+    event @Wire { }
+    event @Edit { name: string, formula: string }
+    event @Dirty { cell: Entity }
+
+    SF check(name: string, good: bool) {
+        if good { emit *Vein.Console.Io.@Print { text: "ok   " + name } } else { emit *Vein.Console.Io.@Print { text: "FAIL " + name } }
+    }
+
+    fn sheet() return string {
+        return "A1=5;B1=A1*2;C1=B1+1;D1=C1-A1;A2=3;A3=4;A4=SUM(A1:A3);E1=7;E2=E1/2+(A2*3);E3=MAX(A1:A3)"
+    }
+
+    fn isDigit(c: string) return bool { return (c >= "0" and c <= "9") or c == "." }
+    fn isLetter(c: string) return bool { return (c >= "A" and c <= "Z") or (c >= "a" and c <= "z") }
+
+    fn skip(s: string, i: int) return int {
+        var j = i
+        while j < len(s) and s[j] == " " { j += 1 }
+        return j
+    }
+
+    fn word(s: string, i: int) return string {
+        var j = i
+        while j < len(s) and (isLetter(substring(s, j, 1)) or isDigit(substring(s, j, 1))) { j += 1 }
+        return substring(s, i, j - i)
+    }
+
+    fn colOf(name: string) return string {
+        var j = 0
+        while j < len(name) and isLetter(substring(name, j, 1)) { j += 1 }
+        return upper(substring(name, 0, j))
+    }
+    fn rowOf(name: string) return int {
+        var j = 0
+        while j < len(name) and isLetter(substring(name, j, 1)) { j += 1 }
+        return int(substring(name, j, len(name) - j))
+    }
+    fn inRange(name: string, lo: string, hi: string) return bool {
+        let c = colOf(name)
+        let r = rowOf(name)
+        return c >= colOf(lo) and c <= colOf(hi) and r >= rowOf(lo) and r <= rowOf(hi)
+    }
+
+    fn refersTo(f: string, name: string) return bool {
+        var i = 0
+        var yes = false
+        while i < len(f) {
+            if isLetter(substring(f, i, 1)) {
+                let w = word(f, i)
+                var j = i + len(w)
+                if j < len(f) and f[j] == ":" {
+                    let w2 = word(f, j + 1)
+                    if inRange(name, w, w2) { yes = true }
+                    j = j + 1 + len(w2)
+                } else if not (j < len(f) and f[j] == "(") {
+                    if upper(w) == name { yes = true }
+                }
+                i = j
+            } else {
+                i += 1
+            }
+        }
+        return yes
+    }
+
+    fn valueOf(name: string) return float {
+        var v = 0.0
+        target $Cell as c { if c.Cell.name == upper(name) { v = c.Cell.value } }
+        return v
+    }
+    fn aggregate(fname: string, lo: string, hi: string) return float {
+        var total = 0.0
+        var best = 0.0
+        var seen = 0
+        target $Cell as c {
+            if inRange(c.Cell.name, lo, hi) {
+                total = total + c.Cell.value
+                if seen == 0 or c.Cell.value > best { best = c.Cell.value }
+                seen += 1
+            }
+        }
+        var v = 0.0
+        match fname {
+            when SUM { v = total }
+            when MAX { v = best }
+        }
+        return v
+    }
+
+    fn expr(s: string, i: int) return Num {
+        let first = term(s, i)
+        var v = first.v
+        var at = skip(s, first.at)
+        while at < len(s) and (s[at] == "+" or s[at] == "-") {
+            let op = s[at]
+            let next = term(s, at + 1)
+            if op == "+" { v = v + next.v } else { v = v - next.v }
+            at = skip(s, next.at)
+        }
+        return Num { v: v, at: at }
+    }
+
+    fn term(s: string, i: int) return Num {
+        let first = factor(s, i)
+        var v = first.v
+        var at = skip(s, first.at)
+        while at < len(s) and (s[at] == "*" or s[at] == "/") {
+            let op = s[at]
+            let next = factor(s, at + 1)
+            if op == "*" { v = v * next.v } else { v = v / next.v }
+            at = skip(s, next.at)
+        }
+        return Num { v: v, at: at }
+    }
+
+    fn factor(s: string, i: int) return Num {
+        let at = skip(s, i)
+        if at >= len(s) { return Num { v: 0.0, at: at } }
+        let c = substring(s, at, 1)
+        if c == "(" {
+            let inner = expr(s, at + 1)
+            return Num { v: inner.v, at: skip(s, inner.at) + 1 }
+        }
+        if c == "-" {
+            let f = factor(s, at + 1)
+            return Num { v: 0.0 - f.v, at: f.at }
+        }
+        let w = word(s, at)
+        let after = at + len(w)
+        if isDigit(c) { return Num { v: float(w), at: after } }
+        if after < len(s) and s[after] == "(" {
+            let lo = word(s, after + 1)
+            let hi = word(s, after + 2 + len(lo))
+            return Num { v: aggregate(upper(w), upper(lo), upper(hi)), at: after + 3 + len(lo) + len(hi) }
+        }
+        return Num { v: valueOf(w), at: after }
+    }
+
+    shard Load {
+        run once {
+            target split(sheet(), ";") as row {
+                let eq = indexOf(row, "=")
+                let c = spawn()
+                attach $Cell to c { name: substring(row, 0, eq), formula: substring(row, eq + 1, len(row) - eq - 1) }
+            }
+            emit @Wire { }
+        }
+
+        hear @Wire as w {
+            target $Cell as reader {
+                target $Cell as read {
+                    if refersTo(reader.Cell.formula, read.Cell.name) {
+                        let r = spawn()
+                        attach $Ref to r { from: read, to: reader }
+                    }
+                }
+            }
+        }
+
+        hear @Edit as e {
+            target $Cell as c {
+                if c.Cell.name == e.name {
+                    c.Cell.formula = e.formula
+                    target $Ref as r { if r.Ref.to == c { destroy r } }
+                    target $Cell as read {
+                        if refersTo(e.formula, read.Cell.name) {
+                            let r = spawn()
+                            attach $Ref to r { from: read, to: c }
+                        }
+                    }
+                    emit @Dirty { cell: c }
+                }
+            }
+        }
+
+        hear @Dirty as d {
+            target $Cell on d.cell as c {
+                if not c.Cell.dirty {
+                    c.Cell.dirty = true
+                    target $Ref as r { if r.Ref.from == d.cell { emit @Dirty { cell: r.Ref.to } } }
+                }
+            }
+        }
+    }
+
+    shard Recalc {
+        var pass = 0
+        each tick {
+            var computed = 0
+            var waiting = 0
+            target $Cell as c {
+                if c.Cell.dirty {
+                    var ready = true
+                    var broken = false
+                    target $Ref as r {
+                        if r.Ref.to == c {
+                            target $Cell on r.Ref.from as input {
+                                if input.Cell.dirty { ready = false }
+                                if not (input.Cell.err == "") { broken = true }
+                            }
+                        }
+                    }
+                    if ready {
+                        if broken {
+                            c.Cell.err = "#CYCLE"
+                        } else {
+                            c.Cell.value = expr(c.Cell.formula, 0).v
+                            c.Cell.err = ""
+                        }
+                        c.Cell.dirty = false
+                        c.Cell.recomputes += 1
+                        c.Cell.level = pass + 1
+                        computed += 1
+                    } else {
+                        waiting += 1
+                    }
+                }
+            }
+            if computed > 0 {
+                pass += 1
+            } else {
+                if waiting > 0 {
+                    target $Cell as c {
+                        if c.Cell.dirty {
+                            c.Cell.err = "#CYCLE"
+                            c.Cell.dirty = false
+                        }
+                    }
+                }
+                pass = 0
+            }
+        }
+    }
+
+    fn errOf(name: string) return string {
+        var v = ""
+        target $Cell as c { if c.Cell.name == name { v = c.Cell.err } }
+        return v
+    }
+    fn recomputesOf(name: string) return int {
+        var v = 0
+        target $Cell as c { if c.Cell.name == name { v = c.Cell.recomputes } }
+        return v
+    }
+    fn levelOf(name: string) return int {
+        var v = 0
+        target $Cell as c { if c.Cell.name == name { v = c.Cell.level } }
+        return v
+    }
+
+    shard Script {
+        var frame = 0
+        var before = 0
+        each tick as t {
+            frame = t.frame
+            if t.frame == 8 { emit @Edit { name: "A1", formula: "10" } }
+            if t.frame == 16 { emit @Edit { name: "A1", formula: "C1+1" } }
+            if t.frame == 21 { emit @Edit { name: "A1", formula: "2" } }
+        }
+        settled {
+            if frame == 6 {
+                do check("initial values: B1=A1*2, C1=B1+1, D1=C1-A1", valueOf("B1") == 10.0 and valueOf("C1") == 11.0 and valueOf("D1") == 6.0)
+                do check("SUM(A1:A3) and MAX(A1:A3) over a range", valueOf("A4") == 12.0 and valueOf("E3") == 5.0)
+                do check("precedence and parentheses: E1/2+(A2*3)", valueOf("E2") == 12.5)
+                do check("the first calculation ran in dependency order, one level per pass", levelOf("A1") == 1 and levelOf("B1") == 2 and levelOf("C1") == 3 and levelOf("D1") == 4)
+                target $Cell as c { before += c.Cell.recomputes }
+            }
+            if frame == 15 {
+                var total = 0
+                target $Cell as c { total += c.Cell.recomputes }
+                do check("an edit to A1 propagates through B1, C1 and D1", valueOf("B1") == 20.0 and valueOf("C1") == 21.0 and valueOf("D1") == 11.0)
+                do check("the ranges follow the edit", valueOf("A4") == 17.0 and valueOf("E3") == 10.0)
+                do check("minimal: only the 6 cells downstream of A1 were recomputed, each once", total - before == 6 and recomputesOf("E2") == 1 and recomputesOf("A2") == 1)
+                do check("the diamond: D1 reads A1 twice over, waited for C1, and was computed once", recomputesOf("D1") == 2 and levelOf("D1") == 4 and levelOf("C1") == 3)
+            }
+            if frame == 20 {
+                do check("A1=C1+1 closes a cycle, and A1, B1, C1 report #CYCLE", errOf("A1") == "#CYCLE" and errOf("B1") == "#CYCLE" and errOf("C1") == "#CYCLE")
+                var dirty = 0
+                target $Cell as c { if c.Cell.dirty { dirty += 1 } }
+                do check("the cycle did not hang: nothing is left dirty, and E2 is untouched", dirty == 0 and errOf("E2") == "" and valueOf("E2") == 12.5)
+            }
+            if frame == 27 {
+                do check("breaking the cycle recovers every cell", valueOf("B1") == 4.0 and valueOf("C1") == 5.0 and valueOf("D1") == 3.0 and valueOf("A4") == 9.0 and errOf("D1") == "")
+            }
+        }
+    }
+}

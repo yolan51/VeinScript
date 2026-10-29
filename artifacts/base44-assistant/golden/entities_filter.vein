@@ -1,0 +1,71 @@
+bundle EntitiesFilter by you {
+
+    need "Vein.Filter"
+
+    shape $Row { title: string, rank: int }
+    mark #Row
+
+    builder Row { $Row   mark #Row }
+
+    shard Seed {
+        run once {
+            bring Row("alpha",   1)
+            bring Row("beta",    2)
+            bring Row("gamma",   3)
+            bring Row("delta",   4)
+            bring Row("epsilon", 5)
+            bring Row("zeta",   -2)
+        }
+    }
+
+    shard Show {
+        settled {
+            emit *Vein.Console.Io.@Print { text: "-- rank between 2 and 4 --" }
+            target $Row #Row as r {
+                if between(r.Row.rank, 2, 4) {
+                    emit *Vein.Console.Io.@Print { text: "   " + r.Row.title + " rank " + r.Row.rank }
+                }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "-- and the ones outside it --" }
+            target $Row #Row as r {
+                if outside(r.Row.rank, 2, 4) {
+                    emit *Vein.Console.Io.@Print { text: "   " + r.Row.title + " rank " + r.Row.rank }
+                }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "-- first three positions --" }
+            target $Row #Row as r {
+                if firstN(Index, 3) { emit *Vein.Console.Io.@Print { text: "   " + Index + " " + r.Row.title } }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "-- striped: even positions --" }
+            target $Row #Row as r {
+                if even(Index) { emit *Vein.Console.Io.@Print { text: "   " + Index + " " + r.Row.title } }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "-- negative ranks --" }
+            target $Row #Row as r {
+                if sign(r.Row.rank) < 0 {
+                    emit *Vein.Console.Io.@Print { text: "   " + r.Row.title + " rank " + r.Row.rank }
+                }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "-- ranks divisible by 2 --" }
+            target $Row #Row as r {
+                if divisible(r.Row.rank, 2) {
+                    emit *Vein.Console.Io.@Print { text: "   " + r.Row.title + " rank " + r.Row.rank }
+                }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "-- by rank, ascending --" }
+            repeat 8 as pass {
+                target $Row #Row as r {
+                    if r.Row.rank == pass - 2 {
+                        emit *Vein.Console.Io.@Print { text: "   rank " + r.Row.rank + "  " + r.Row.title }
+                    }
+                }
+            }
+        }
+    }
+}

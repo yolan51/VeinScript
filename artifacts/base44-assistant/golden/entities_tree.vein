@@ -1,0 +1,66 @@
+bundle EntitiesTree by you {
+
+    shape $Deck { title: string, count: int folds sum }
+    shape $Card { title: string }
+
+    shape $Parent { of: Entity }
+
+    mark #Deck
+    mark #Card
+
+    builder Deck { $Deck          mark #Deck }
+    builder Card { $Card $Parent  mark #Card }
+
+    event @Show { deck: Entity, title: string }
+
+    shard Seed {
+        run once {
+            bring Deck("Ship",    0) as ship
+            bring Deck("Backlog", 0) as backlog
+
+            bring Card("nav is a query",   ship)
+            bring Card("bring … as",       ship)
+            bring Card("packed ECS",       backlog)
+            bring Card("TLS for peers",    backlog)
+            bring Card("a JS backend",     backlog)
+
+            emit @Show { deck: ship,    title: "Ship" }
+            emit @Show { deck: backlog, title: "Backlog" }
+        }
+    }
+
+    shard Show {
+        hear @Show as d {
+            emit *Vein.Console.Io.@Print { text: "== " + d.title }
+
+            target $Card $Parent as c {
+                if c.Parent.of == d.deck {
+                    emit *Vein.Console.Io.@Print { text: "   - " + c.Card.title }
+                }
+            }
+        }
+    }
+
+    shard Count {
+        each tick {
+            target $Card $Parent as c { c.Parent.of.Deck.count += 1 }
+        }
+    }
+
+    shard Tally {
+        settled {
+            target $Deck #Deck as d {
+                emit *Vein.Console.Io.@Print { text: d.Deck.title + " holds " + d.Deck.count + " card(s)" }
+            }
+        }
+    }
+    shard Links {
+        settled {
+            target $Card $Parent as c {
+                emit *Vein.Console.Io.@Print {
+                    text: "card e" + Entity + " '" + c.Card.title + "' → parent e" + c.Parent.of
+                }
+            }
+        }
+    }
+}

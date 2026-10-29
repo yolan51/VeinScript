@@ -1,0 +1,38 @@
+bundle EntitiesBind by you {
+
+    shape $Node { name: string }
+    shape $Edge { to: Entity, weight: int folds sum }
+
+    mark #Node
+    mark #Edge
+
+    builder Node { $Node   mark #Node }
+    builder Edge { $Edge   mark #Edge }
+
+    shard Seed {
+        run once {
+            bring Node("hub")  as hub
+            bring Node("leaf") as leaf
+
+            bring Edge(hub,  1)
+            bring Edge(leaf, 2)
+            bring Edge(hub,  3)
+        }
+    }
+
+    shard Report {
+        settled {
+            target $Edge #Edge as e {
+                emit *Vein.Console.Io.@Print { text: "edge e" + Entity + " → e" + e.Edge.to + " w=" + e.Edge.weight }
+            }
+        }
+    }
+
+    shard Nodes {
+        settled {
+            target $Node #Node as n {
+                emit *Vein.Console.Io.@Print { text: "node e" + Entity + " " + n.Node.name }
+            }
+        }
+    }
+}

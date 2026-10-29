@@ -1,0 +1,41 @@
+bundle EntitiesOrdered by you {
+
+    shape $Row { title: string, rank: int }
+    mark #Row
+
+    builder Row { $Row   mark #Row }
+
+    shard Seed {
+        run once {
+            bring Row("delta",   4)
+            bring Row("alpha",   1)
+            bring Row("Zeta",   -2)
+            bring Row("charlie", 3)
+            bring Row("bravo",   1)
+        }
+    }
+
+    shard Show {
+        settled {
+            emit *Vein.Console.Io.@Print { text: "-- spawn order --" }
+            target $Row #Row as r {
+                emit *Vein.Console.Io.@Print { text: "   " + r.Row.rank + "  " + r.Row.title }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "-- by rank --" }
+            target $Row #Row by Row.rank as r {
+                emit *Vein.Console.Io.@Print { text: "   " + r.Row.rank + "  " + r.Row.title }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "-- by title --" }
+            target $Row #Row by Row.title as r {
+                emit *Vein.Console.Io.@Print { text: "   " + r.Row.title }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "-- ties keep spawn order --" }
+            target $Row #Row by Row.rank as r {
+                if r.Row.rank == 1 { emit *Vein.Console.Io.@Print { text: "   " + r.Row.title } }
+            }
+        }
+    }
+}

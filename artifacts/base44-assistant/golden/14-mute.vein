@@ -1,0 +1,30 @@
+bundle Pausing by you {
+    event @Paused { }
+
+    shard Menu {
+        var t: int = 0
+        each tick {
+            t += 1
+            if t == 3 {
+                emit *Vein.Console.Io.@Print { text: "menu opens" }
+                mute Game
+                emit @Paused { }
+            }
+            if t == 5 {
+                emit *Vein.Console.Io.@Print { text: "menu closes" }
+                unmute Game
+            }
+        }
+    }
+
+    shard Game {
+        var frame: int = 0
+        each tick {
+            frame += 1
+            emit *Vein.Console.Io.@Print { text: "play frame " + frame }
+        }
+        hear @Paused as p {
+            emit *Vein.Console.Io.@Print { text: "game heard the pause" }
+        }
+    }
+}

@@ -1,0 +1,31 @@
+bundle EntitiesChance by you {
+
+    shape $Health { hp: int folds sum }
+
+    shard Seed {
+        run once {
+            repeat 4 {
+                let e = spawn()
+                attach $Health to e { hp: 20 }
+                mark e #Mob
+            }
+        }
+    }
+
+    shard Rot {
+        each tick {
+            target $Health #Mob as self {
+                chance 50% { self.Health.hp -= 1 }
+                chance 25% { self.Health.hp -= 3 }
+            }
+        }
+    }
+
+    shard Report {
+        settled {
+            target $Health #Mob as self {
+                emit *Vein.Console.Io.@Print { text: "mob e" + Entity + " hp=" + self.Health.hp }
+            }
+        }
+    }
+}

@@ -1,0 +1,73 @@
+bundle GameCollision by you {
+
+    need "Vein.Game"
+    need "Vein.Transform"
+
+    mark #Collidable
+
+    fn abs(v: float) return float {
+        if v < 0.0 { return 0.0 - v }
+        return v
+    }
+
+    shard Arena {
+        run once {
+            let a = spawn()
+            attach $Position to a { x: 0.0, y: 0.0, z: 0.0 }
+            attach $Collider to a { width: 2.0, height: 2.0 }
+            attach $Body to a { mass: 1.0, restitution: 0.5 }
+            mark a #Collidable
+
+            let b = spawn()
+            attach $Position to b { x: 3.0, y: 0.0, z: 0.0 }
+            attach $Collider to b { width: 2.0, height: 2.0 }
+            attach $Body to b { mass: 2.0, restitution: 0.1 }
+            mark b #Collidable
+
+            let c = spawn()
+            attach $Position to c { x: 7.0, y: 0.0, z: 0.0 }
+            attach $Collider to c { width: 2.0, height: 2.0 }
+            attach $Body to c { mass: 4.0, restitution: 0.9 }
+            mark c #Collidable
+
+            let d = spawn()
+            attach $Position to d { x: 30.0, y: 0.0, z: 0.0 }
+            attach $Collider to d { width: 1.0, height: 1.0 }
+            attach $Body to d { mass: 1.0, restitution: 0.0 }
+            mark d #Collidable
+        }
+    }
+
+    shard Overlaps {
+        settled {
+            target $Position $Collider #Collidable as a {
+                target $Position $Collider #Collidable as b {
+                    if a.Position.x < b.Position.x {
+                        let dx = abs(b.Position.x - a.Position.x)
+                        let dy = abs(b.Position.y - a.Position.y)
+
+                        if dx < a.Collider.width + b.Collider.width {
+                            if dy < a.Collider.height + b.Collider.height {
+                                emit *Vein.Console.Io.@Print {
+                                    text: "overlap: box at " + a.Position.x + " and box at " + b.Position.x +
+                                          "  (gap " + dx + ")"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    shard Bodies {
+        settled {
+            target $Position $Body #Collidable as e {
+                emit *Vein.Console.Io.@Print {
+                    text: "  body at " + e.Position.x + "  mass " + e.Body.mass +
+                          "  bounce " + e.Body.restitution
+                }
+            }
+        }
+    }
+}

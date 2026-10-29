@@ -1,0 +1,497 @@
+bundle Demo {
+    need "Vein.Core"
+
+    publicator DemoCore {
+        shared("Hit points and mana for any living identity.")
+        shape $Health {
+            hp: int folds sum      // many shards may drain hp in one tick; sum the deltas
+            mp: int
+        }
+
+        shared("Damage applied after mitigation.")
+        event @Damaged {
+            amount: int
+            victim: Entity
+            $Health.hp = 0             // pull one field off $Health (defaulted, so optional at emit)
+            var note: string = "hit"   // a `var` member — same `=`/required rule as a field
+        }
+    }
+
+    SF hurt(victim: Entity, amount: int) {
+        emit @Damaged {
+            amount: amount
+            victim: victim
+        }
+    }
+
+    shard Drain {
+        each tick {
+            target $Health #Enemy as self {
+                self.Health.hp -= 1
+
+                chance 30% {
+                    emit @Damaged {
+                        amount: 5
+                        victim: self
+                    }
+                }
+            }
+        }
+
+        settled {
+            target $Health #Enemy as self {
+                if self.Health.hp <= 0 {
+                    mark self #Dead
+                }
+            }
+        }
+    }
+}
+
+bundle Demo {
+    event @Request   { path: string }
+    event @Hit       { amount: int = 1 }     // default 1 — omit it to accept the default
+    event @SyncedHit { amount: int }         // no default — auto-filled from context on emit
+    event @Response  { status: int, body: string }
+
+    shard Source {
+        hear @Request as req { emit @Hit }               // amount omitted → default 1
+    }
+
+    bridge Sync {
+        hear @Hit as h { emit @SyncedHit }               // amount auto-filled from h (current context)
+    }
+
+    shard Report {
+        hear @SyncedHit as s {
+            emit @Response { status: 200, body: "amount " + s.amount + " from " + s.from.kind + "." + s.from.name }
+        }
+    }
+}
+
+bundle Demo {
+    event @Request  { path: string }
+    event @Damage   { amount: int }
+    event @Response { status: int, body: string }
+
+    shard Combat $Session #Trusted {
+        hear @Request as req { emit @Damage { amount: 5 } }
+    }
+
+    shard Sneaky {
+        hear @Request as req { emit @Damage { amount: 99 } }
+    }
+
+    shard Auditor {
+        hear @Damage as d audience $Session #Trusted {
+            emit @Response { status: 200, body: "audited trusted damage " + d.amount + " from " + d.from.kind + "." + d.from.name }
+        }
+    }
+}
+
+bundle Site {
+    need "Vein.Web"
+
+    publicator SiteApi {
+        shared("An inbound HTTP request.")
+        event @Request { path: string }
+
+        shared("A fragment of HTML contributed by some shard.")
+        event @Html { markup: string }
+
+        shared("Signal that all fragments are in; assemble the page.")
+        event @Render { }
+
+        shared("The response to send back.")
+        event @Response { status: int, body: string }
+    }
+
+    shard Header {
+        hear @Request as req { emit @Html { markup: "<h1>VeinScript</h1>" } }
+    }
+
+    shard Body {
+        hear @Request as req {
+            emit @Html { markup: "<p>Reactive page, assembled from fragments.</p>" }
+        }
+    }
+
+    shard Kernel {
+        hear @Request as req { emit @Render { } }
+    }
+
+    ShardView Page {
+        var html: string
+
+        hear @Html as f {
+            html += f.markup
+        }
+
+        hear @Render as r {
+            emit @Response {
+                status: 200
+                body: "<html><body>" + html + "</body></html>"
+            }
+        }
+    }
+}
+
+bundle App {
+    need "Vein.Web"
+
+    publicator PageApi {
+        event @Request  { path: string }
+        event @Html     { markup: string }
+        event @Script   { code: string }
+        event @Style    { css: string }
+        event @Render   { }
+        event @Response { status: int, body: string }
+    }
+
+    builder Heading    { text: string   markup = "<h1>" + text + "</h1>" }
+    builder CounterView { markup = "<p>Count: <span id=\"n\">0</span></p>" }
+    builder Button     { label: string  markup = "<button onclick=\"inc()\">" + label + "</button>" }
+    builder Item       { label: string  markup = "<li>" + label + "</li>" }
+    builder IncFn      { code = "let c=0; function inc(){ c+=1; document.getElementById('n').innerText=c; }" }
+    builder BaseCss    { css = "body{font-family:sans-serif;margin:2rem} button{cursor:pointer}" }
+
+    shard Ui {
+        hear @Request as req {
+            bring BaseCss()
+            bring Heading("Counter")
+            bring CounterView()
+            bring Button("+1")
+            bring 8 Item("row")        // build eight list items
+            bring IncFn()
+        }
+    }
+
+    shard Kernel {
+        hear @Request as req { emit @Render { } }
+    }
+
+    ShardView MyPage {
+        var html: string
+        var js: string
+        var css: string
+
+        hear @Html as f   { html += f.markup }
+        hear @Script as s { js += s.code }
+        hear @Style as st { css += st.css }
+
+        hear @Render as r {
+            emit @Response {
+                status: 200
+                body: "<!doctype html><html><head><style>" + css + "</style></head><body>" + html + "<script>" + js + "</script></body></html>"
+            }
+        }
+    }
+}
+
+bundle App {
+    need "Vein.Web"
+
+    publicator PageApi {
+        event @Request  { path: string }
+        event @Html     { markup: string }
+        event @Render   { }
+        event @Response { status: int, body: string }
+
+        shape $Heading { text: string }
+        shape $Button  { label: string, id: string, class: string, onclick: string }
+    }
+
+    builder Heading {
+        $Heading
+        markup = "<h1>" + text + "</h1>"
+    }
+    builder Button {
+        $Button
+        markup = "<button id=\"" + id + "\" class=\"" + class + "\" onclick=\"" + onclick + "()\">" + label + "</button>"
+    }
+
+    shard Ui {
+        hear @Request as req {
+            bring Heading("Counter")
+            bring Button("+1", "inc", "primary", "inc")
+        }
+    }
+
+    shard Kernel {
+        hear @Request as req { emit @Render { } }
+    }
+
+    ShardView MyPage {
+        var html: string
+        hear @Html as f { html += f.markup }
+        hear @Render as r {
+            emit @Response { status: 200, body: "<html><body>" + html + "</body></html>" }
+        }
+    }
+}
+
+bundle App {
+    need "Vein.Web"
+
+    publicator PageApi {
+        event @Request  { path: string }
+        event @Html     { markup: string }
+        event @Script   { code: string }
+        event @Style    { css: string }
+        event @Render   { }
+        event @Response { status: int, body: string }
+
+        shape $Id    { name: string }
+        shape $Class { name: string }
+        shape $Fn    { name: string, body: string }
+
+        shape $Control { id: Id, class: Class, onclick: Fn, label: string }
+    }
+
+    builder Display {
+        slot: Id
+        initial: string
+        markup = "<span id=\"" + slot.name + "\">" + initial + "</span>"
+    }
+    builder Button {
+        b: Control
+        markup = "<button id=\"" + b.id.name + "\" class=\"" + b.class.name + "\" onclick=\"" + b.onclick.name + "()\">" + b.label + "</button>"
+    }
+    builder Define {
+        f: Fn
+        code = "function " + f.name + "(){ " + f.body + " }"
+    }
+    builder Rule {
+        c: Class
+        decl: string
+        css = "." + c.name + "{" + decl + "}"
+    }
+
+    shard Ui {
+        hear @Request as req {
+            let counter = Id { name: "counter" }
+            let primary = Class { name: "primary" }
+            let inc     = Fn { name: "inc", body: "let e=document.getElementById('" + counter.name + "'); e.innerText=(+e.innerText)+1" }
+
+            bring Rule(primary, "cursor:pointer;font-weight:bold")
+            bring Display(counter, "0")
+            bring Button(Control { id: counter, class: primary, onclick: inc, label: "+1" })
+            bring Define(inc)
+        }
+    }
+
+    shard Kernel { hear @Request as req { emit @Render { } } }
+
+    ShardView MyPage {
+        var html: string
+        var js: string
+        var css: string
+        hear @Html as f   { html += f.markup }
+        hear @Script as s { js += s.code }
+        hear @Style as st { css += st.css }
+        hear @Render as r {
+            emit @Response { status: 200, body: "<!doctype html><html><head><style>" + css + "</style></head><body>" + html + "<script>" + js + "</script></body></html>" }
+        }
+    }
+}
+
+bundle Entities {
+    need "Vein.Core"
+
+    shape $Health {
+        hp: int folds sum      // many shards may drain hp in one tick; sum the deltas
+    }
+
+    shard Spawner {
+        run once {
+            repeat 3 {
+                let e = spawn()
+                attach $Health to e { hp: 5 }
+                mark e #Enemy
+            }
+        }
+    }
+
+    shard Drain {
+        each tick {
+            target $Health #Enemy as self { self.Health.hp -= 1 }
+        }
+    }
+
+    shard Poison {
+        each tick {
+            target $Health #Enemy as self { self.Health.hp -= 1 }
+        }
+    }
+
+    shard Undertaker {
+        settled {
+            target $Health #Enemy as self {
+                emit *Vein.Console.Io.@Print { text: "enemy " + Entity + " hp " + self.Health.hp }
+                if self.Health.hp <= 0 {
+                    mark self #Dead
+                    unmark self #Enemy
+                    emit *Vein.Console.Io.@Print { text: "enemy " + Entity + " died" }
+                }
+            }
+        }
+    }
+}
+
+bundle ConsoleRoles by you {
+
+    event @Begin { }
+
+    shard Boot {
+        hear @Begin as b {
+            match here() {
+                when #Main {
+                    emit *Vein.Console.Io.@Console { name: #Alpha, firsttext: "Alpha — I echo." }
+                    emit *Vein.Console.Io.@Console { name: #Beta,  firsttext: "Beta — I count." }
+                }
+            }
+        }
+    }
+
+    shard Driver {
+        var round: int
+
+        every 2 {
+            match here() {
+                when #Main {
+                    round += 1
+                    let workers = [#Alpha, #Beta]
+                    emit *Vein.Console.Io.@Send { to: pick(workers), text: "ping " + round }
+                }
+            }
+        }
+    }
+
+    shard Worker {
+        var seen: int
+
+        hear *Vein.Console.Io.@Message as m audience #Main {
+            seen += 1
+            emit *Vein.Console.Io.@Print { text: m.from + " → " + m.text + " (#" + seen + ")" }
+        }
+    }
+
+    shard Reachability {
+        hear *Vein.Console.Io.@Undelivered as u {
+            emit *Vein.Console.Io.@Print { text: "  (" + u.to + " is not running)" }
+        }
+    }
+}
+
+bundle NetPeer by you {
+
+    event @Begin { }
+
+    shard Boot {
+        hear @Begin as b {
+            emit *Vein.Net.Peer.@Listen { as: #Hub, at: 9700, key: "shared-secret" }
+
+            emit *Vein.Net.Peer.@Link { name: #Spoke, at: "10.0.0.5:9701", key: "shared-secret" }
+        }
+    }
+
+    shard Trusted {
+        hear *Vein.Net.Peer.@Message as m audience #Spoke {
+            emit *Vein.Net.Peer.@Send { to: m.from, text: "ack " + m.text }
+        }
+    }
+
+    shard Fetcher {
+        hear @Begin as b {
+            emit *Vein.Net.Http.@Fetch { url: "https://httpbin.org/ip", method: "GET", body: "" }
+        }
+        hear *Vein.Net.Http.@Fetched as r {
+            emit *Vein.Console.Io.@Print { text: r.status + " " + r.body }
+        }
+        hear *Vein.Net.Http.@Failed as f {
+            emit *Vein.Console.Io.@Print { text: "unreachable " + f.url + " — " + f.reason }
+        }
+    }
+}
+
+bundle ChatRoster by you {
+
+    shape $Client { addr: string }
+
+    shard Relay {
+        var known: bool
+
+        hear *Vein.Net.Peer.@Message as m {
+            known = false
+            target $Client as self {
+                if self.Client.addr == m.from { known = true }
+            }
+
+            if not known {
+                let e = spawn()
+                attach $Client to e { addr: m.from }
+                emit *Vein.Console.Io.@Print { text: "* " + m.from + " joined" }
+            }
+
+            target $Client as self {
+                if not (self.Client.addr == m.from) {
+                    emit *Vein.Net.Peer.@Send { to: self.Client.addr, text: m.from + ": " + m.text }
+                }
+            }
+        }
+    }
+
+    shard Reachability {
+        hear *Vein.Net.Peer.@Undelivered as u {
+            target $Client as self {
+                if self.Client.addr == u.to {
+                    destroy self
+                    emit *Vein.Console.Io.@Print { text: "* " + u.to + " left" }
+                }
+            }
+        }
+    }
+}
+
+bundle Store by you {
+
+    publicator Orders {
+        shared("A customer placed an order.")
+        event @Ordered { item: string, qty: int }
+
+        shared("An order was accepted and is going out.")
+        event @Shipped { item: string }
+    }
+
+    start @Ordered { item: "widget", qty: 3 }
+
+    shard Fulfilment {
+        hear @Ordered as o {
+            emit *Vein.Console.Io.@Print { text: "[Store] " + o.qty + " x " + o.item }
+            emit @Shipped { item: o.item }
+        }
+    }
+}
+
+bundle UseDemo by you {
+
+    need "Vein.Console"                    // print / send / spawn …
+    need "Vein.Math"                       // $Vec2 / $Vec3 / $Color …
+    need "Vein.Web"                        // &Heading / &Button / &Paragraph …
+
+    event @Placed { $Vec2, label: string }
+
+    shard Demo {
+        run once {
+            do print("bare call, resolved through `use Console`")     // *Vein.Console.Io.print
+            bring Button("Go")                                     // *Vein.Web.Elements.&Button
+            emit @Placed { x: 1.0, y: 2.0, label: "origin" }
+        }
+    }
+
+    shard Watch {
+        hear @Placed as p {
+            do *Vein.Console.Io.print(p.label + " at " + p.x + "," + p.y)
+        }
+    }
+}

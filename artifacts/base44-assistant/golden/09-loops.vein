@@ -1,0 +1,51 @@
+bundle Loops by you {
+
+    shape $Score { who: string, points: int }
+    mark #Player
+    builder Player { $Score   mark #Player }
+
+    shard Counting {
+        run once {
+            var i = 0
+            while i < 10 {
+                i = i + 1
+                if i == 2 { continue }
+                if i == 5 { break }
+                emit *Vein.Console.Io.@Print { text: "while i=" + i }
+            }
+
+            repeat 3 as r {
+                emit *Vein.Console.Io.@Print { text: "repeat r=" + r + " Index=" + Index }
+            }
+
+            repeat 10 as r {
+                if r == 2 { break }
+                emit *Vein.Console.Io.@Print { text: "capped r=" + r }
+            }
+
+            var seen = 0
+            target words("alpha beta skip gamma") as w {
+                if w == "skip" { continue }
+                seen = seen + 1
+                emit *Vein.Console.Io.@Print { text: "word " + seen + " = " + w }
+            }
+        }
+    }
+
+    shard Make {
+        run once {
+            bring Player("Ada", 30)
+            bring Player("Grace", 20)
+            bring Player("Alan", 10)
+        }
+    }
+
+    shard Report {
+        each tick {
+            target $Score #Player as p {
+                if p.Score.points < 15 { continue }
+                emit *Vein.Console.Io.@Print { text: p.Score.who + " scored " + p.Score.points }
+            }
+        }
+    }
+}

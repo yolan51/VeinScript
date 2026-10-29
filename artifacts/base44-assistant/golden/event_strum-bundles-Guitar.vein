@@ -1,0 +1,13 @@
+bundle Guitar by alice {
+
+    publicator Api {
+        shared("A guitar string was strummed.")
+        event @Strum { note: string, fret: int }
+    }
+
+    shard Player {
+        hear @Strum as s {
+            emit *Vein.Console.Io.@Print { text: "[guitar] heard its own Strum: note " + s.note + " on fret " + s.fret }
+        }
+    }
+}

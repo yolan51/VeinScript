@@ -1,0 +1,37 @@
+bundle Functions by you {
+
+    start @Boot { }
+    event @Boot { }
+
+    publicator Api {
+        shared("Score bonus for a streak, capped at 50.")
+        fn bonus(streak: int) return int {
+            if streak <= 0 { return 0 }
+            if streak > 10 { return 50 }
+            return streak * 5
+        }
+
+        shared("Announce a score to the console.")
+        SF announce(label: string, value: int) {
+            emit *Vein.Console.Io.@Print { text: label + ": " + value }
+        }
+    }
+
+    fn fib(n: int) return int {
+        if n <= 1 { return n }
+        return fib(n - 1) + fib(n - 2)
+    }
+
+    shard Scoreboard {
+        hear @Boot as b {
+            do announce("streak 3 bonus", bonus(3))
+            do announce("streak 99 bonus", bonus(99))
+
+            do announce("fib(10)", fib(10))
+
+            emit *Vein.Console.Io.@Print { text: "clamp(99, 0, 10) = " + *Vein.Math.Scalars.clamp(99.0, 0.0, 10.0) }
+
+            do *Vein.Console.Io.print("— all of the above came from four function calls")
+        }
+    }
+}

@@ -1,0 +1,115 @@
+bundle StringParserDemo by you {
+
+    need "Vein.Console"
+    need "Vein.StringParser"
+
+    mark #Command
+    mark #Roles
+    mark #Wire
+    mark #Rooms
+    mark #Exits
+    mark #Moves
+    mark #Mesh
+    mark #Motd
+
+    shard Server {
+        run once {
+            do parseLines("say hello   there\r\nkick bob\ndance", #Command)                 // 1 — a Windows line end too
+            do parsePairs("ann=admin; bob = mod ;url=a=b;nonsense;;", ";", "=", #Roles)   // 2
+            do parseFields("K|bob|ann|10|spam, again", "|", #Wire)                        // 3
+            do parseFields("a|b|c|d|e|f|g|h|i|j", "|", "slot" + 1)                        // 3 — a computed tag
+            do parseWords("hall cave\ntower", #Rooms)                                     // 4
+            do parseSplit("north,,east", ",", #Exits)                                     // 5
+            do parseChars("wwd", #Moves)                                                  // 6
+            do parsePairs("S1=9811:S2+S4; S2=9812:S1+S3; S3=9813:S2+S4; S4=9814:S3+S1; S5=9815:S6+S1; S6=9816:S5+S2; S7=9817",
+                          ";", "=", #Mesh)                                                  // 7 — S7 has no neighbours
+            do parseText("welcome to the dungeon\nbe kind", #Motd)                        // 8
+
+        }
+
+        hear @Line as l {
+            match l.tag {
+                when #Command {
+                    if l.first == "say" or l.first == "kick" {
+                        do print("> " + l.first + " " + l.rest + "   (" + l.words + " words)")
+                    } else {
+                        do print("? unknown command: " + l.first)
+                    }
+                }
+                when #Motd { do print("motd line " + (l.index + 1) + ": " + l.text + " (" + l.words + " words)") }
+            }
+        }
+
+        hear @Pair as p {
+            match p.tag {
+                when #Roles { do print("role " + p.key + " = " + p.value) }
+
+                when #Mesh {
+                    var line = p.key + " port " + int(before(p.value, ":")) + " ->"
+                    let near = pieces(after(p.value, ":"), "+")
+                    target near as n { line = line + " " + n }
+                    if len(near) == 0 { line = line + " (no neighbours)" }
+                    do print(line)
+                }
+            }
+        }
+
+        hear @Unparsed as u {
+            match u.tag { when #Roles { do print("! not a role: " + u.text) } }
+        }
+
+        hear @Fields as f {
+            match f.tag {
+                when #Wire {
+                    if f.f0 == "K" { do print(f.f1 + " kicked by " + f.f2 + " for " + f.f3 + " min: " + f.f4) }
+                }
+            }
+            if f.tag == "slot1" {
+                do print(f.tag + ": " + f.count + " fields, the 8th is " + f.f7 + ", past it: " + f.rest)
+            }
+        }
+
+        hear @Word as w {
+            match w.tag {
+                when #Rooms { do print("room " + w.line + "." + (w.index + 1) + ": " + w.text) }
+                when #Motd { do print("motd word: " + w.text) }
+            }
+        }
+
+        hear @Piece as p {
+            match p.tag {
+                when #Exits {
+                    var shown = p.text
+                    if shown == "" { shown = "(none)" }
+                    do print("exit " + (p.index + 1) + ": " + shown + "   then: " + p.rest)
+                }
+            }
+        }
+
+        hear @Char as c {
+            match c.tag {
+                when #Moves {
+                    if c.text == "w" { do print("move: up") }
+                    if c.text == "d" { do print("move: right") }
+                }
+            }
+        }
+
+        hear @Parsed as d {
+            match d.tag {
+                when #Command { do print("commands: " + d.count) }
+                when #Roles { do print("roles: " + d.count) }
+                when #Rooms { do print("rooms: " + d.count) }
+                when #Moves { do print("moves: " + d.count) }
+                when #Mesh { do print("servers: " + d.count) }
+                when #Motd { do helpers() }
+            }
+        }
+    }
+
+    SF helpers() {
+        let typed = "whisper   bob hi"
+        do print("verb [" + firstWord(typed) + "] to [" + afterFirstWord(typed) + "]")
+        do print("third of a,b: [" + pieceAt(split("a,b", ","), 2) + "] — past the end is empty, never an error")
+    }
+}

@@ -1,0 +1,26 @@
+bundle Lobby by you {
+    event @Chat { text: string }
+
+    shard Ledger          { run once { emit @Chat { text: "hi from Ledger" } } }
+    shard Billing         { run once { emit @Chat { text: "hi from Billing" } } }
+    shard Spammer #Banned { run once { emit @Chat { text: "hi from Spammer" } } }
+    shard Kiosk           { run once { emit @Chat { text: "hi from Kiosk" } } }
+
+    shard AllBut {
+        hear @Chat as c audience not !Ledger not !Spammer {
+            emit *Vein.Console.Io.@Print { text: "all-but: " + c.text }
+        }
+    }
+
+    shard OnlyLedger {
+        hear @Chat as c audience !Ledger {
+            emit *Vein.Console.Io.@Print { text: "only-ledger: " + c.text }
+        }
+    }
+
+    shard Unbanned {
+        hear @Chat as c audience not #Banned {
+            emit *Vein.Console.Io.@Print { text: "unbanned: " + c.text }
+        }
+    }
+}

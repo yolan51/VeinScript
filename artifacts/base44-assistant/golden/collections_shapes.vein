@@ -1,0 +1,106 @@
+bundle CollectionShapes by you {
+
+    need "Vein.Console"
+
+    shape $Person { name: string }
+    shape $Item   { name: string }
+    shape $Server { name: string }
+    shape $Guild  { name: string, ~<set> members: $Person }
+    shape $Bag    { name: string, ~<list> items: owns $Item }
+    shape $Hero   { name: string, ~<map> slots: string | owns $Item }
+    shape $Net    { from: string, ~<map> ping: $Server | float }
+
+    mark #Thing
+
+    builder Person { $Person mark #Thing }
+    builder Item   { $Item   mark #Thing }
+    builder Server { $Server mark #Thing }
+    builder Guild  { $Guild  mark #Thing }
+    builder Bag    { $Bag    mark #Thing }
+    builder Hero   { $Hero   mark #Thing }
+    builder Net    { $Net    mark #Thing }
+
+    event @Show { }
+    event @Change { }
+    event @Again { }
+    event @End { }
+    event @Last { }
+
+    shard Shapes {
+        run once {
+            bring Person("Ann") as ann
+            bring Person("Bob") as bob
+            bring Guild("Owls", [ann, bob]) as owls             // bring fills a collection of identities too
+            bring Person("Cy") as cy
+            owls.Guild.~members.add(cy)                          // Cy was brought in this same event: counts
+
+            bring Item("rope") as rope
+            bring Item("lamp") as lamp
+            bring Item("coin") as coin
+            bring Bag("pack", [rope, lamp]) as pack
+            bring Bag("chest", [coin]) as chest
+
+            bring Item("sword") as sword
+            bring Item("axe") as axe
+            bring Hero("Hal") as hal
+            hal.Hero.~slots.put("hand", sword)
+
+            bring Server("S2") as s2
+            bring Server("S3") as s3
+            bring Net("S1") as net
+            net.Net.~ping.put(s2, 12.5)
+            net.Net.~ping.put(s3, 40.0)
+            emit @Show { }
+        }
+
+        hear @Show as s {
+            target $Guild.~members as g, m { do print(g.Guild.name + ": " + m.Person.name) }     // one line per member
+            target $Bag.~items as b, i { do print(b.Bag.name + " holds " + i.Item.name) }
+            target $Hero.~slots as h, e { target $Item on e.value as i { do print(h.Hero.name + "'s " + e.key + ": " + i.Item.name) } }
+            target $Net.~ping as n, e { target $Server on e.key as srv { do print(n.Net.from + " -> " + srv.Server.name + " " + e.value + " ms") } }
+            do print("items alive: " + countItems())
+            emit @Change { }
+        }
+
+        hear @Change as c {
+            do print("-- Bob leaves the Owls, the rope is thrown away, the lamp moves to the chest, Hal swaps to an axe")
+            target $Guild as g { target $Person as p { if p.Person.name == "Bob" { g.Guild.~members.remove(p) } } }   // a link: Bob lives on
+            target $Bag as b {
+                if b.Bag.name == "pack" { target $Item as i { if i.Item.name == "rope" { b.Bag.~items.remove(i) } } }   // owned: the rope ends
+                if b.Bag.name == "chest" { target $Item as i { if i.Item.name == "lamp" { b.Bag.~items.add(i) } } }     // a move: the lamp lives on
+            }
+            target $Hero as h { target $Item as i { if i.Item.name == "axe" { h.Hero.~slots.put("hand", i) } } }        // the sword is replaced: it ends
+            emit @Again { }
+        }
+
+        hear @Again as a {
+            target $Guild.~members as g, m { do print(g.Guild.name + ": " + m.Person.name) }
+            var people = 0
+            target $Person as p { people = people + 1 }
+            do print("people alive: " + people)
+            target $Bag as b { if len(b.Bag.~items) == 0 { do print(b.Bag.name + " holds nothing") } }
+            target $Bag.~items as b, i { do print(b.Bag.name + " holds " + i.Item.name) }
+            target $Hero.~slots as h, e { target $Item on e.value as i { do print(h.Hero.name + "'s " + e.key + ": " + i.Item.name) } }
+            do print("items alive: " + countItems())
+            emit @End { }
+        }
+
+        hear @End as e {
+            do print("-- the chest is destroyed, and S3 goes down")
+            target $Bag as b { if b.Bag.name == "chest" { destroy b } }          // the coin and the lamp end with it
+            target $Server as srv { if srv.Server.name == "S3" { destroy srv } } // and S3 leaves the ping map
+            emit @Last { }
+        }
+
+        hear @Last as l {
+            do print("items alive: " + countItems())
+            target $Net.~ping as n, e { target $Server on e.key as srv { do print(n.Net.from + " -> " + srv.Server.name + " " + e.value + " ms") } }
+        }
+    }
+
+    fn countItems() return int {
+        var n = 0
+        target $Item as i { n = n + 1 }
+        return n
+    }
+}

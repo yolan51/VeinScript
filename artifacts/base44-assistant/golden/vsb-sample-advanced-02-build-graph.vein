@@ -1,0 +1,285 @@
+bundle BuildGraph by advanced {
+    shape $Target {
+        name: string
+        graph: int
+        waiting: int folds sum = 0   // dependencies not yet placed: Kahn's in-degree
+        wave: int = -1               // which wave of the sort placed it; -1 while it waits
+        held: int folds sum = 0      // cycle search: leftover targets that still need this one
+        peeledAt: int = -1           // cycle search: the frame it was shown not to be on a cycle
+    }
+    shape $DependsOn { from: Entity, to: Entity }
+    shape $Graph {
+        id: int
+        state: string = "sorting"
+        since: int = 0               // the frame the current state began
+        cycle: string = ""
+    }
+    mark #Tgt
+    mark #Waiting                    // not placed yet
+    mark #Leftover                   // stuck when the sort ended, and not yet peeled
+    mark #Edge
+    mark #Dirty
+    mark #Spreading
+
+    builder Tgt { $Target   mark #Tgt #Waiting }
+    builder Dep { $DependsOn   mark #Edge }
+
+    event @GraphDone { graph: Entity }
+    event @Touch { name: string, round: int }
+    event @Quiet { round: int }
+
+    fn joined(acc: string, name: string) return string {
+        if acc == "" { return name }
+        return acc + " " + name
+    }
+
+    SF check(name: string, good: bool) {
+        if good { emit *Vein.Console.Io.@Print { text: "ok   " + name } } else { emit *Vein.Console.Io.@Print { text: "FAIL " + name } }
+    }
+
+    shard Seed {
+        run once {
+            bring Tgt("README.md", 0) as readme
+            bring Tgt("util.h", 0) as utilH
+            bring Tgt("util.c", 0) as utilC
+            bring Tgt("net.h", 0) as netH
+            bring Tgt("net.c", 0) as netC
+            bring Tgt("main.c", 0) as mainC
+            bring Tgt("util.o", 0) as utilO
+            bring Tgt("net.o", 0) as netO
+            bring Tgt("main.o", 0) as mainO
+            bring Tgt("docs", 0) as docs
+            bring Tgt("libnet.a", 0) as libnet
+            bring Tgt("tests", 0) as tests
+            bring Tgt("app", 0) as exe          // `app` is a keyword
+            bring Dep(utilO, utilC)
+            bring Dep(utilO, utilH)
+            bring Dep(netO, netC)
+            bring Dep(netO, netH)
+            bring Dep(netO, utilH)
+            bring Dep(mainO, mainC)
+            bring Dep(mainO, utilH)
+            bring Dep(mainO, netH)
+            bring Dep(docs, readme)
+            bring Dep(libnet, netO)
+            bring Dep(libnet, utilO)
+            bring Dep(tests, utilO)
+            bring Dep(exe, mainO)
+            bring Dep(exe, libnet)
+            let g0 = spawn()
+            attach $Graph to g0 { id: 0, since: 2 }
+
+            bring Tgt("a", 1) as a
+            bring Tgt("b", 1) as b
+            bring Tgt("c", 1) as c
+            bring Tgt("d", 1) as d
+            bring Tgt("e", 1) as e
+            bring Dep(a, b)
+            bring Dep(b, c)
+            bring Dep(c, a)
+            bring Dep(e, a)
+            let g1 = spawn()
+            attach $Graph to g1 { id: 1, since: 2 }
+        }
+    }
+
+    shard InDegree {
+        each tick as t {
+            if t.frame == 1 {
+                target $DependsOn #Edge as d {
+                    target $Target on d.DependsOn.from as x { x.Target.waiting += 1 }
+                }
+            }
+        }
+    }
+
+    shard Kahn {
+        each tick as t {
+            if t.frame >= 2 {
+                target $Target #Tgt #Waiting as x {
+                    if x.Target.waiting == 0 {
+                        x.Target.wave = t.frame - 2
+                        unmark x #Waiting
+                        target $DependsOn #Edge as d {
+                            if d.DependsOn.to == x {
+                                target $Target on d.DependsOn.from as up { up.Target.waiting -= 1 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    shard SortStatus {
+        each tick as t {
+            target $Graph as g {
+                if g.Graph.state == "sorting" and t.frame >= g.Graph.since + 1 {
+                    var stillWaiting = 0
+                    var placedLast = 0
+                    target $Target #Tgt as x {
+                        if x.Target.graph == g.Graph.id {
+                            if x carries #Waiting { stillWaiting += 1 }
+                            if x.Target.wave == t.frame - 3 { placedLast += 1 }
+                        }
+                    }
+                    if stillWaiting == 0 {
+                        g.Graph.state = "sorted"
+                        emit @GraphDone { graph: g }
+                    } else if placedLast == 0 {
+                        g.Graph.state = "peeling"
+                        g.Graph.since = t.frame
+                        target $Target #Tgt #Waiting as x {
+                            if x.Target.graph == g.Graph.id { mark x #Leftover }
+                        }
+                        target $DependsOn #Edge as d {
+                            target $Target #Waiting on d.DependsOn.from as down {
+                                if down.Target.graph == g.Graph.id {
+                                    target $Target on d.DependsOn.to as up { up.Target.held += 1 }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    shard Peel {
+        each tick as t {
+            target $Target #Tgt #Leftover as x {
+                if x.Target.held == 0 {
+                    x.Target.peeledAt = t.frame
+                    unmark x #Leftover
+                    target $DependsOn #Edge as d {
+                        if d.DependsOn.from == x {
+                            target $Target on d.DependsOn.to as down { down.Target.held -= 1 }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    shard PeelStatus {
+        each tick as t {
+            target $Graph as g {
+                if g.Graph.state == "peeling" and t.frame >= g.Graph.since + 2 {
+                    var peeledLast = 0
+                    var onCycle = ""
+                    target $Target #Tgt as x {
+                        if x.Target.graph == g.Graph.id {
+                            if x.Target.peeledAt == t.frame - 1 { peeledLast += 1 }
+                            if x carries #Leftover { onCycle = joined(onCycle, x.Target.name) }
+                        }
+                    }
+                    if peeledLast == 0 {
+                        g.Graph.state = "cycle"
+                        g.Graph.cycle = onCycle
+                        emit @GraphDone { graph: g }
+                    }
+                }
+            }
+        }
+    }
+
+    shard Touch {
+        var round: int = 0
+        hear @Touch as h {
+            round = h.round
+            target $Target #Tgt as x {
+                if x.Target.graph == 0 and x.Target.name == h.name { mark x #Dirty }
+            }
+            target $Graph as g { if g.Graph.id == 0 { mark g #Spreading } }
+        }
+
+        each tick {
+            target $Graph #Spreading as g {
+                var newly = 0
+                target $DependsOn #Edge as d {
+                    target $Target #Dirty on d.DependsOn.to as changed {
+                        target $Target on d.DependsOn.from as down {
+                            if not (down carries #Dirty) {
+                                mark down #Dirty
+                                newly += 1
+                            }
+                        }
+                    }
+                }
+                if newly == 0 {
+                    unmark g #Spreading
+                    emit @Quiet { round: round }
+                }
+            }
+        }
+    }
+
+    shard Script {
+        var finished: int = 0
+        hear @GraphDone as done {
+            finished += 1
+            if finished == 2 {
+                var order = ""
+                var placed = 0
+                var lastWave = -1
+                var lastName = ""
+                target $Target #Tgt by Target.wave as x {
+                    if x.Target.graph == 0 {
+                        order = joined(order, x.Target.name)
+                        placed += 1
+                        lastWave = x.Target.wave
+                        lastName = x.Target.name
+                    }
+                }
+                var edges = 0
+                var backwards = 0
+                target $DependsOn #Edge as d {
+                    target $Target on d.DependsOn.from as down {
+                        target $Target on d.DependsOn.to as up {
+                            if down.Target.graph == 0 {
+                                edges += 1
+                                if not (up.Target.wave < down.Target.wave) { backwards += 1 }
+                            }
+                        }
+                    }
+                }
+                do check("all 13 targets ordered in 4 waves, app last", placed == 13 and lastWave == 3 and lastName == "app")
+                do check("a valid order: on all 14 edges the dependency is built in an earlier wave", edges == 14 and backwards == 0)
+                do check("wave by wave, declaration order inside a wave", order ==
+                    "README.md util.h util.c net.h net.c main.c util.o net.o main.o docs libnet.a tests app")
+
+                var built = ""
+                target $Target #Tgt as x {
+                    if x.Target.graph == 1 and x.Target.wave >= 0 { built = built + x.Target.name }
+                }
+                target $Graph as g {
+                    if g.Graph.id == 1 {
+                        do check("graph 1: the cycle is reported", g.Graph.state == "cycle")
+                        do check("it names a b c, and not e, which only waits on a", g.Graph.cycle == "a b c")
+                    }
+                }
+                do check("what does not touch the cycle still builds: d", built == "d")
+
+                emit @Touch { name: "net.h", round: 1 }
+            }
+        }
+
+        hear @Quiet as q {
+            var dirty = ""
+            target $Target #Tgt #Dirty by Target.name as x { dirty = joined(dirty, x.Target.name) }
+            var rebuild = ""
+            target $Target #Tgt #Dirty by Target.wave as x {
+                if x.Target.wave > 0 { rebuild = joined(rebuild, x.Target.name) }
+            }
+            if q.round == 1 {
+                do check("net.h changed: dirty is exactly what is downstream of it", dirty == "app libnet.a main.o net.h net.o")
+                do check("and the rebuild runs in build order", rebuild == "net.o main.o libnet.a app")
+                target $Target #Dirty as x { unmark x #Dirty }
+                emit @Touch { name: "util.h", round: 2 }
+            } else {
+                do check("util.h changed: dirty is exactly its downstream, rebuilt in order", dirty ==
+                    "app libnet.a main.o net.o tests util.h util.o" and rebuild == "util.o net.o main.o libnet.a tests app")
+            }
+        }
+    }
+}

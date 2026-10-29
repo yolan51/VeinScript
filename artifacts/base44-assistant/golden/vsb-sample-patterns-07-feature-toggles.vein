@@ -1,0 +1,34 @@
+bundle Toggles by patterns {
+    shape $Stats { debugLines: int = 0, hints: int = 0, gameplay: int = 0 }
+    mark #Debug
+    mark #Tutorial
+
+    SF check(name: string, good: bool) {
+        if good { emit *Vein.Console.Io.@Print { text: "ok   " + name } } else { emit *Vein.Console.Io.@Print { text: "FAIL " + name } }
+    }
+
+    shard Setup { run once { let s = spawn()
+        attach $Stats to s { } } }
+
+    shard Overlay #Debug { each tick { target $Stats as s { s.Stats.debugLines += 1 } } }
+    shard Hints #Tutorial { each tick { target $Stats as s { s.Stats.hints += 1 } } }
+    shard Game { each tick { target $Stats as s { s.Stats.gameplay += 1 } } }
+
+    shard Switchboard {
+        var frame: int = 0
+        run once { mute #Debug }
+        each tick {
+            frame += 1
+            if frame == 3 { mute #Tutorial }
+        }
+        settled {
+            if frame == 10 {
+                target $Stats as s {
+                    do check("a muted feature never ran", s.Stats.debugLines == 0)
+                    do check("a feature runs until it is muted", s.Stats.hints == 3)
+                    do check("everything else carries on", s.Stats.gameplay == 10)
+                }
+            }
+        }
+    }
+}

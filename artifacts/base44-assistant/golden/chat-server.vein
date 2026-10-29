@@ -1,0 +1,47 @@
+bundle ChatServer by you {
+
+    shape $Client { addr: string }
+
+    shard Boot {
+        run once {
+            emit *Vein.Net.Peer.@Listen { as: #Server, at: 9700, key: "chat-secret" }
+            emit *Vein.Console.Io.@Print { text: "server listening on 9700 — waiting for clients" }
+        }
+    }
+
+    shard Relay {
+        var known: bool
+
+        hear *Vein.Net.Peer.@Message as m {
+            known = false
+            target $Client as self {
+                if self.Client.addr == m.from { known = true }
+            }
+
+            if not known {
+                let e = spawn()
+                attach $Client to e { addr: m.from }
+                emit *Vein.Console.Io.@Print { text: "* " + m.from + " joined" }
+            }
+
+            emit *Vein.Console.Io.@Print { text: m.from + ": " + m.text }
+
+            target $Client as self {
+                if not (self.Client.addr == m.from) {
+                    emit *Vein.Net.Peer.@Send { to: self.Client.addr, text: m.from + ": " + m.text }
+                }
+            }
+        }
+    }
+
+    shard Reachability {
+        hear *Vein.Net.Peer.@Undelivered as u {
+            target $Client as self {
+                if self.Client.addr == u.to {
+                    destroy self
+                    emit *Vein.Console.Io.@Print { text: "* " + u.to + " left" }
+                }
+            }
+        }
+    }
+}

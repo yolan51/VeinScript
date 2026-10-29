@@ -1,0 +1,73 @@
+bundle Destroying by you {
+
+    shape $Health { hp: int }
+    shape $Shield { sp: int }
+    mark #Alive
+    mark #Guarded
+
+    builder Mob { $Health, $Shield   mark #Alive   mark #Guarded }
+
+    shard Spawn {
+        run once {
+            bring Mob(10, 5)
+            bring Mob(20, 5)
+            bring Mob(30, 5)
+        }
+    }
+
+    shard Cull {
+        each tick {
+            target $Health #Alive as m {
+                if m.Health.hp < 15 { unmark m #Alive }
+            }
+        }
+    }
+
+    shard Disarm {
+        each tick {
+            target $Shield #Guarded as m {
+                if m.Shield.sp > 0 { unattach $Shield from m }
+            }
+        }
+    }
+
+    shard Reap {
+        each tick {
+            target $Health #Alive as m {
+                if m.Health.hp > 25 { destroy m }
+            }
+        }
+    }
+
+    shard During {
+        each tick {
+            var alive = 0
+            var shielded = 0
+            var living = 0
+
+            target $Health #Alive as a { alive = alive + 1 }
+            target $Shield as s { shielded = shielded + 1 }
+            target $Health as h { living = living + 1 }
+
+            emit *Vein.Console.Io.@Print {
+                text: "during   alive " + alive + "   shielded " + shielded + "   entities " + living
+            }
+        }
+    }
+
+    shard After {
+        settled {
+            var alive = 0
+            var shielded = 0
+            var living = 0
+
+            target $Health #Alive as a { alive = alive + 1 }
+            target $Shield as s { shielded = shielded + 1 }
+            target $Health as h { living = living + 1 }
+
+            emit *Vein.Console.Io.@Print {
+                text: "after    alive " + alive + "   shielded " + shielded + "   entities " + living
+            }
+        }
+    }
+}

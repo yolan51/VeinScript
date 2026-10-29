@@ -1,0 +1,42 @@
+bundle Page by web {
+    need "Vein.Web"
+
+    publicator Document {
+        shared("This request's <title>. Without one, the page uses the `title` tune var.")
+        event @Title { text: string }
+
+        shared("Markup for <head>: a <meta>, a <link> to a font or a stylesheet.")
+        event @Head { markup: string }
+    }
+
+    ShardView Assemble {
+        tune("The page title when a request gives none (@Title).")
+        let title = "VeinScript"
+        tune("The page's language, <html lang>.")
+        let lang = "en"
+
+        var html: string = ""
+        var css: string = ""
+        var js: string = ""
+        var head: string = ""
+        var named: string = ""
+
+        hear *Vein.Web.Http.@Html as h { html += h.markup }
+        hear *Vein.Web.Http.@Style as s { css += s.css }
+        hear *Vein.Web.Http.@Script as c { js += c.code }
+        hear @Title as t { named = t.text }
+        hear @Head as m { head += m.markup }
+
+        hear *Vein.Web.Http.@Render as r {
+            var name = named
+            if name == "" { name = title }
+            emit *Vein.Web.Http.@Response {
+                status: 200,
+                body: "<!doctype html><html lang=\"" + lang + "\"><head><meta charset=\"utf-8\">" +
+                      "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
+                      "<title>" + name + "</title>" + head + "<style>" + css + "</style></head><body>" +
+                      html + "<script>" + js + "</script></body></html>"
+            }
+        }
+    }
+}

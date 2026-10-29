@@ -1,0 +1,29 @@
+bundle FetchDemo by you {
+
+    shard Boot {
+        run once {
+            emit *Vein.Console.Io.@Print { text: "asking httpbin for an IP…" }
+            emit *Vein.Net.Http.@Fetch  { url: "https://httpbin.org/ip", method: "GET", body: "" }
+        }
+    }
+
+    shard Poller {
+        var n: int
+
+        every 5 {
+            n += 1
+            emit *Vein.Net.Http.@Fetch { url: "https://httpbin.org/uuid", method: "GET", body: "" }
+        }
+    }
+
+    shard Results {
+        hear *Vein.Net.Http.@Fetched as r {
+            emit *Vein.Console.Io.@Print { text: r.status + " " + r.url }
+            emit *Vein.Console.Io.@Print { text: r.body }
+        }
+
+        hear *Vein.Net.Http.@Failed as f {
+            emit *Vein.Console.Io.@Print { text: "unreachable " + f.url + " — " + f.reason }
+        }
+    }
+}

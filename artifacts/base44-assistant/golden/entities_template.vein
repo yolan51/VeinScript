@@ -1,0 +1,41 @@
+bundle EntitiesTemplate by you {
+
+    shape $Health { hp: int folds sum }
+    shape $Shield { sp: int folds sum }
+
+    builder Unit { $Health $Shield   mark #Unit }
+    builder Mob  { $Health           mark #Unit }
+    builder Ward { $Shield           mark #Unit }
+
+    shard Seed {
+        run once {
+            bring Unit(12, 6)
+            bring Mob(12)
+            bring Ward(6)
+            bring 2 Unit(4, 2)     // the count makes two separate identities, not one shared
+        }
+    }
+
+    shard Wear {
+        each tick {
+            target $Health $Shield #Unit as self {
+                self.Health.hp -= 1
+                self.Shield.sp -= 2
+            }
+        }
+    }
+
+    shard Report {
+        settled {
+            target $Health $Shield #Unit as self {
+                emit *Vein.Console.Io.@Print { text: "unit  e" + Entity + " hp=" + self.Health.hp + " sp=" + self.Shield.sp }
+            }
+            target $Health #Unit as self {
+                emit *Vein.Console.Io.@Print { text: "  health e" + Entity + " hp=" + self.Health.hp }
+            }
+            target $Shield #Unit as self {
+                emit *Vein.Console.Io.@Print { text: "  shield e" + Entity + " sp=" + self.Shield.sp }
+            }
+        }
+    }
+}

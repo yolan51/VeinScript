@@ -1,0 +1,36 @@
+bundle Hud by you {
+
+    SF show(msg: string) {
+        do *Vein.Console.Io.print("[hud] " + msg)
+    }
+
+    shard Screen {
+        run once {
+            do show("— the dungeon —")
+        }
+
+        hear *you.Game.Turns.@Moved as m {
+            do show(m.who + " enters " + m.room)
+        }
+
+        hear *you.Combat.Fight.@Damaged as d audience *you.Combat.!Resolver {
+            do show(d.target + " takes " + d.amount + ", " + d.left + " left")
+        }
+
+        hear *you.Combat.Fight.@Healed as h {
+            do show(h.who + " healed " + h.amount)
+        }
+
+        hear *you.Inventory.Bag.@InventoryChanged as c {
+            do show(c.who + " now carries " + c.count + " item(s): " + c.item)
+        }
+
+        hear *you.Quests.Journal.@QuestAdvanced as q {
+            do show("quest: " + q.quest + " (step " + q.step + ")")
+        }
+
+        hear *you.Quests.Journal.@QuestCompleted as q {
+            do show("quest complete: " + q.quest)
+        }
+    }
+}

@@ -1,0 +1,51 @@
+bundle App {
+    need "Vein.Web"
+
+    publicator PageApi {
+        event @Request  { path: string }
+        event @Html     { markup: string }
+        event @Script   { code: string }
+        event @Style    { css: string }
+        event @Render   { }
+        event @Response { status: int, body: string }
+    }
+
+    builder Heading    { text: string   markup = "<h1>" + text + "</h1>" }
+    builder CounterView { markup = "<p>Count: <span id=\"n\">0</span></p>" }
+    builder Button     { label: string  markup = "<button onclick=\"inc()\">" + label + "</button>" }
+    builder Item       { label: string  markup = "<li>" + label + "</li>" }
+    builder IncFn      { code = "let c=0; function inc(){ c+=1; document.getElementById('n').innerText=c; }" }
+    builder BaseCss    { css = "body{font-family:sans-serif;margin:2rem} button{cursor:pointer}" }
+
+    shard Ui {
+        hear @Request as req {
+            bring BaseCss()
+            bring Heading("Counter")
+            bring CounterView()
+            bring Button("+1")
+            bring 8 Item("row")        // build three list items
+            bring IncFn()
+        }
+    }
+
+    shard Kernel {
+        hear @Request as req { emit @Render { } }
+    }
+
+    ShardView MyPage {
+        var html: string
+        var js: string
+        var css: string
+
+        hear @Html as f   { html += f.markup }
+        hear @Script as s { js += s.code }
+        hear @Style as st { css += st.css }
+
+        hear @Render as r {
+            emit @Response {
+                status: 200
+                body: "<!doctype html><html><head><style>" + css + "</style></head><body>" + html + "<script>" + js + "</script></body></html>"
+            }
+        }
+    }
+}

@@ -1,0 +1,42 @@
+bundle MathTrig by you {
+
+    fn check(name: string, got: float, want: float) return string {
+        if *Vein.Math.Scalars.abs(got - want) < 0.000001 { return "ok    " + name }
+        return "FAIL  " + name + " = " + got + ", want " + want
+    }
+
+    shard Trig {
+        run once {
+            let pi = *Vein.Math.Angles.pi()
+
+            emit *Vein.Console.Io.@Print { text: check("sin 0", *Vein.Math.Angles.sin(0.0), 0.0) }
+            emit *Vein.Console.Io.@Print { text: check("sin pi/6", *Vein.Math.Angles.sin(pi / 6.0), 0.5) }
+            emit *Vein.Console.Io.@Print { text: check("sin pi/4", *Vein.Math.Angles.sin(pi / 4.0), 0.7071067811865476) }
+            emit *Vein.Console.Io.@Print { text: check("sin pi/2", *Vein.Math.Angles.sin(pi / 2.0), 1.0) }
+            emit *Vein.Console.Io.@Print { text: check("sin pi", *Vein.Math.Angles.sin(pi), 0.0) }
+            emit *Vein.Console.Io.@Print { text: check("sin -pi/2", *Vein.Math.Angles.sin(0.0 - pi / 2.0), -1.0) }
+            emit *Vein.Console.Io.@Print { text: check("sin 3pi", *Vein.Math.Angles.sin(3.0 * pi), 0.0) }
+            emit *Vein.Console.Io.@Print { text: check("sin -7.5", *Vein.Math.Angles.sin(-7.5), -0.9379999767747389) }
+            emit *Vein.Console.Io.@Print { text: check("sin 100", *Vein.Math.Angles.sin(100.0), -0.5063656411097588) }
+
+            emit *Vein.Console.Io.@Print { text: check("cos 0", *Vein.Math.Angles.cos(0.0), 1.0) }
+            emit *Vein.Console.Io.@Print { text: check("cos pi/3", *Vein.Math.Angles.cos(pi / 3.0), 0.5) }
+            emit *Vein.Console.Io.@Print { text: check("cos pi", *Vein.Math.Angles.cos(pi), -1.0) }
+            emit *Vein.Console.Io.@Print { text: check("cos -2", *Vein.Math.Angles.cos(-2.0), -0.4161468365471424) }
+
+            emit *Vein.Console.Io.@Print { text: check("atan2 1,1", *Vein.Math.Angles.atan2(1.0, 1.0), pi / 4.0) }
+            emit *Vein.Console.Io.@Print { text: check("atan2 1,-1", *Vein.Math.Angles.atan2(1.0, -1.0), 3.0 * pi / 4.0) }
+            emit *Vein.Console.Io.@Print { text: check("atan2 -1,-1", *Vein.Math.Angles.atan2(-1.0, -1.0), -3.0 * pi / 4.0) }
+            emit *Vein.Console.Io.@Print { text: check("atan2 -1,1", *Vein.Math.Angles.atan2(-1.0, 1.0), 0.0 - pi / 4.0) }
+            emit *Vein.Console.Io.@Print { text: check("atan2 0,1", *Vein.Math.Angles.atan2(0.0, 1.0), 0.0) }
+            emit *Vein.Console.Io.@Print { text: check("atan2 1,0", *Vein.Math.Angles.atan2(1.0, 0.0), pi / 2.0) }
+            emit *Vein.Console.Io.@Print { text: check("atan2 0,-1", *Vein.Math.Angles.atan2(0.0, -1.0), pi) }
+            emit *Vein.Console.Io.@Print { text: check("atan2 -1,0", *Vein.Math.Angles.atan2(-1.0, 0.0), 0.0 - pi / 2.0) }
+            emit *Vein.Console.Io.@Print { text: check("atan2 0,0", *Vein.Math.Angles.atan2(0.0, 0.0), 0.0) }
+            emit *Vein.Console.Io.@Print { text: check("atan2 0.1,2", *Vein.Math.Angles.atan2(0.1, 2.0), 0.0499583957219428) }
+            emit *Vein.Console.Io.@Print { text: check("atan2 3,-0.5", *Vein.Math.Angles.atan2(3.0, -0.5), 1.7359450042095235) }
+
+            emit *Vein.Console.Io.@Print { text: check("atan2 of sin,cos 2.5", *Vein.Math.Angles.atan2(*Vein.Math.Angles.sin(2.5), *Vein.Math.Angles.cos(2.5)), 2.5) }
+        }
+    }
+}

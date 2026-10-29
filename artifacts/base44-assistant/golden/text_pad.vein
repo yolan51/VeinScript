@@ -1,0 +1,13 @@
+bundle TextPad by you {
+
+    shard Table {
+        run once {
+            emit *Vein.Console.Io.@Print { text: padRight("id", 4) + padRight("task", 12) + "done" }
+            emit *Vein.Console.Io.@Print { text: padLeft(7, 3) + " " + padRight("buy milk", 12) + "no" }
+            emit *Vein.Console.Io.@Print { text: padLeft(12, 3) + " " + padRight("walk dog", 12) + "yes" }
+
+            emit *Vein.Console.Io.@Print { text: "order " + padLeft(42, 6, "0") }
+            emit *Vein.Console.Io.@Print { text: "[" + padLeft("much too long", 4) + "]" }
+        }
+    }
+}

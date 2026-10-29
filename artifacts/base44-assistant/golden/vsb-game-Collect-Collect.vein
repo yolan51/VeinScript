@@ -1,0 +1,112 @@
+bundle Collect by game {
+    need "Vein.Transform"
+    need "Vein.UI"
+    need "Vein.Graphics"
+    need "Vein.Game"
+
+    publicator Pickups {
+        shared("Something a #Collector picks up by touching it (needs a $Collider). `sound` plays when taken.")
+        shape $Collectable { value: int = 1, sound: string = "" }
+
+        shared("Picks up the $Collectable things it touches.")
+        mark #Collector
+
+        shared("A collectable on its way out: shrinking and rising. Not collectable any more.")
+        mark #Taken
+
+        shared("Spawns collectables in waves. `model` (3D) or `image` (2D), the clip to play, how many, how far.")
+        shape $Waves { model: string = "", image: string = "", clip: string = "", first: int = 4, growth: int = 1, area: float = 13.0, sound: string = "", wave: int = 0 }
+
+        shared("A #Collector picked up a $Collectable worth `value`.")
+        event @Collected { collector: Entity, item: Entity, value: int }
+
+        shared("A wave began with `items` collectables.")
+        event @WaveStarted { wave: int, items: int }
+
+        shared("For a HUD: the score, how many are left in this wave, and which wave.")
+        event @ScoreChanged { score: int, left: int, wave: int }
+
+        shared("Every collectable of a wave has been taken.")
+        event @WaveCleared { wave: int }
+    }
+
+    mark #Gameplay
+
+    shard Pickup #Gameplay {
+        hear *Vein.Game.Collision.@Collided as c {
+            target $Position #Collector as who {
+                if who == c.a or who == c.b {
+                    var other = c.a
+                    if who == c.a { other = c.b }
+                    target $Position $Collectable on other as item {
+                        unattach $Collectable from item
+                        unattach $Collider from item
+                        mark item #Taken
+                        attach $Scale to item { x: 1.0, y: 1.0, z: 1.0 }
+                        emit @Collected { collector: who, item: item, value: item.Collectable.value }
+                        if not (item.Collectable.sound == "") {
+                            emit *Vein.Audio.Sound.@PlaySound { source: item.Collectable.sound, volume: 0.6 }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    shard Fade #Gameplay {
+        tune("How fast a taken collectable shrinks: its whole size takes 1 / shrink seconds.")
+        var shrink: float = 2.5
+        tune("How fast a taken collectable rises while it shrinks: metres per second.")
+        var rise: float = 3.0
+        each tick as t {
+            target $Scale $Position #Taken as g {
+                g.Scale.x = g.Scale.x - shrink * t.delta
+                g.Scale.y = g.Scale.x
+                g.Scale.z = g.Scale.x
+                g.Position.y = g.Position.y + rise * t.delta
+                if g.Scale.x <= 0.05 { destroy g }
+            }
+        }
+    }
+
+    shard Spawner {
+        var pending: int = 1
+        hear @WaveCleared as w { pending = 1 }
+        each tick {
+            if pending == 1 {
+                pending = 0
+                target $Waves as s {
+                    s.Waves.wave += 1
+                    let many = s.Waves.first + (s.Waves.wave - 1) * s.Waves.growth
+                    repeat many {
+                        let g = spawn()
+                        attach $Position to g { x: random() * 2.0 * s.Waves.area - s.Waves.area, y: 0.0, z: random() * 2.0 * s.Waves.area - s.Waves.area }
+                        attach $Collectable to g { value: 1, sound: s.Waves.sound }
+                        attach $Collider to g { width: 0.35, height: 0.6 }
+                        if not (s.Waves.model == "") { attach $Model to g { source: s.Waves.model } }
+                        if not (s.Waves.image == "") { attach $Image to g { source: s.Waves.image } }
+                        if not (s.Waves.clip == "") { attach $Animation to g { name: s.Waves.clip } }
+                    }
+                    emit @WaveStarted { wave: s.Waves.wave, items: many }
+                }
+            }
+        }
+    }
+
+    shard Score {
+        var score: int = 0
+        var left: int = 0
+        var wave: int = 0
+        hear @WaveStarted as w {
+            wave = w.wave
+            left = w.items
+            emit @ScoreChanged { score: score, left: left, wave: wave }
+        }
+        hear @Collected as c {
+            score += c.value
+            left -= 1
+            emit @ScoreChanged { score: score, left: left, wave: wave }
+            if left == 0 { emit @WaveCleared { wave: wave } }
+        }
+    }
+}

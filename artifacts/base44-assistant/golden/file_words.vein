@@ -1,0 +1,140 @@
+bundle FileWords by you {
+
+    shape $Line { n: int, text: string, words: int }
+    shape $Word { n: int, line: int, text: string }
+
+    mark #Line
+    mark #Word
+
+    builder Line { $Line   mark #Line }
+    builder Word { $Word   mark #Word }
+
+    mark #Heading
+
+    mark #Blank
+
+    event @Parsed { path: string, lines: int }
+    event @Reported { text: string }
+
+    shard Seed {
+        run once {
+            emit *Vein.Console.Io.@Print { text: "writing sample-doc.txt…" }
+
+            emit *Vein.Files.Io.@WriteFile {
+                path: "sample-doc.txt",
+                append: false,
+                text: "# VeinScript\n" +
+                      "\n" +
+                      "A file is one string until you split it.\n" +
+                      "Then it is identities.\n" +
+                      "\n" +
+                      "# Why identities\n" +
+                      "A line that is an identity can be marked and queried.\n" +
+                      "A line that is a string cannot even be looked at.\n"
+            }
+        }
+    }
+
+    shard Loader {
+        hear *Vein.Files.Io.@FileWritten as w {
+            if w.path == "sample-doc.txt" {
+                emit *Vein.Console.Io.@Print { text: "wrote " + w.bytes + " bytes; reading it back…" }
+                emit *Vein.Files.Io.@ReadFile { path: w.path }
+            }
+        }
+
+        hear *Vein.Files.Io.@FileMissing as m {
+            emit *Vein.Console.Io.@Print { text: "could not use " + m.path + ": " + m.reason }
+        }
+    }
+
+    shard Parser {
+        var seen: int
+
+        hear *Vein.Files.Io.@FileLoaded as f {
+            seen = 0
+
+            target lines(f.text) as line {
+
+                let number = Index + 1
+                seen = seen + 1
+
+                bring Line(number, line, len(words(line))) as e
+
+                if line == "" { mark e #Blank }
+
+                target words(line) as w {
+                    let position = Index + 1
+                    bring Word(position, number, w)
+
+                    if position == 1 {
+                        if w == "#" { mark e #Heading }
+                    }
+                }
+            }
+
+            emit @Parsed { path: f.path, lines: seen }
+        }
+    }
+
+    shard Report {
+        var body: string
+        var wordCount: int
+        var longest: string
+        var longestLen: int
+
+        hear @Parsed as p {
+            emit *Vein.Console.Io.@Print { text: "parsed " + p.lines + " line(s) of " + p.path }
+
+            body = "report for " + p.path + "\n" +
+                   "lines: " + p.lines + "\n"
+
+            body = body + "\nheadings:\n"
+            target $Line #Heading as l {
+                body = body + "  line " + l.Line.n + ": " + l.Line.text + "\n"
+                emit *Vein.Console.Io.@Print { text: "  heading at line " + l.Line.n + ": " + l.Line.text }
+            }
+
+            body = body + "\nline identities, in bring order:\n"
+            target $Line #Line as l {
+                if l.Line.n < 4 {
+                    body = body + "  e" + Entity + "  line " + l.Line.n + ": " + l.Line.text + "\n"
+                }
+            }
+
+            var blanks: int
+            blanks = 0
+            target $Line #Blank as b { blanks = blanks + 1 }
+            body = body + "\nblank lines: " + blanks + "\n"
+
+            wordCount = 0
+            longest = ""
+            longestLen = 0
+            target $Word as w {
+                wordCount = wordCount + 1
+                if len(w.Word.text) > longestLen {
+                    longestLen = len(w.Word.text)
+                    longest = w.Word.text
+                }
+            }
+
+            body = body + "words: " + wordCount + "\n" +
+                          "longest word: " + longest + " (" + longestLen + ")\n"
+
+            emit *Vein.Console.Io.@Print { text: "  " + wordCount + " words; longest is '" + longest + "'" }
+            emit @Reported { text: body }
+        }
+    }
+
+    shard Writer {
+        hear @Reported as r {
+            emit *Vein.Files.Io.@WriteFile { path: "sample-doc.report.txt", text: r.text, append: false }
+        }
+
+        hear *Vein.Files.Io.@FileWritten as w {
+            if w.path == "sample-doc.report.txt" {
+                emit *Vein.Console.Io.@Print { text: "report written to " + w.path + " (" + w.bytes + " bytes)" }
+            }
+        }
+    }
+}

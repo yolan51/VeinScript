@@ -1,0 +1,23 @@
+bundle Movement by kit {
+
+    need "Vein.Transform"
+
+    publicator Drive {
+        shared("How fast a thing moves, per tick, on each axis.")
+        shape $Mover { dx: float, dy: float }
+
+        shared("Wear this to be moved by the kit.")
+        mark #Moving
+    }
+
+    shape $Budget { remaining: int }
+
+    shard Drift {
+        each tick {
+            target $Position $Mover #Moving as m {
+                m.Position.x = m.Position.x + m.Mover.dx
+                m.Position.y = m.Position.y + m.Mover.dy
+            }
+        }
+    }
+}

@@ -1,0 +1,71 @@
+bundle ControlCenter by you {
+
+    shape $Worker { addr: string }
+
+    shard Boot {
+        run once {
+            match here() {
+                when #Control {
+                    emit *Vein.Console.Io.@Print { text: "CONTROL — waiting for workers." }
+                    emit *Vein.Console.Io.@Print { text: "Start others with VEIN_CONSOLE=Alpha / =Beta." }
+                }
+
+                else {
+                    emit *Vein.Console.Io.@Print { text: "WORKER " + here() + " — type a line and press Enter." }
+
+                    emit *Vein.Console.Io.@Send { to: #Control, text: "reporting in" }
+                }
+            }
+        }
+    }
+
+    shard Relay {
+        var known: bool
+
+        hear *Vein.Console.Io.@Message as m {
+            match here() {
+                when #Control {
+                    known = false
+                    target $Worker as w {
+                        if w.Worker.addr == m.from { known = true }
+                    }
+
+                    if not known {
+                        let e = spawn()
+                        attach $Worker to e { addr: m.from }
+                        emit *Vein.Console.Io.@Print { text: "* " + m.from + " joined" }
+                    }
+
+                    emit *Vein.Console.Io.@Print { text: m.from + ": " + m.text }
+
+                    target $Worker as w {
+                        if not (w.Worker.addr == m.from) {
+                            emit *Vein.Console.Io.@Send { to: w.Worker.addr, text: m.from + ": " + m.text }
+                        }
+                    }
+                }
+
+                else { emit *Vein.Console.Io.@Print { text: "  <- " + m.text } }
+            }
+        }
+    }
+
+    shard Typing {
+        hear *Vein.Console.Io.@Input as i {
+            match here() {
+                when #Control { emit *Vein.Console.Io.@Print { text: "(control relays; it does not chat)" } }
+                else { emit *Vein.Console.Io.@Send { to: #Control, text: i.text } }
+            }
+        }
+    }
+
+    shard Reachability {
+        hear *Vein.Console.Io.@Undelivered as u {
+            emit *Vein.Console.Io.@Print { text: "(no one is listening as " + u.to + " — is Control running?)" }
+
+            target $Worker as w {
+                if w.Worker.addr == u.to { destroy w }
+            }
+        }
+    }
+}

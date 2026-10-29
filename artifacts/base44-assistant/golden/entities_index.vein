@@ -1,0 +1,53 @@
+bundle EntitiesIndex by you {
+
+    shape $Row  { title: string }
+    shape $Wide { extra: int }
+
+    mark #Row
+
+    builder Row  { $Row         mark #Row }
+    builder Wide { $Row $Wide   mark #Row }
+
+    shard Seed {
+        run once {
+            bring Row("alpha")
+            bring Wide("beta",    4)
+            bring Wide("gamma",   2)
+            bring Row("delta")
+            bring Wide("epsilon", 3)
+            bring Row("zeta")
+        }
+    }
+
+    shard Numbered {
+        settled {
+            emit *Vein.Console.Io.@Print { text: "-- all six, numbered --" }
+            target $Row #Row as r {
+                emit *Vein.Console.Io.@Print { text: (Index + 1) + ". " + r.Row.title }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "-- top 3 --" }
+            target $Row #Row as r {
+                if Index < 3 { emit *Vein.Console.Io.@Print { text: "   " + r.Row.title } }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "-- even positions --" }
+            target $Row #Row as r {
+                if Index % 2 == 0 { emit *Vein.Console.Io.@Print { text: "   " + Index + " " + r.Row.title } }
+            }
+
+            target $Row #Row as r {
+                if Index == 0 { emit *Vein.Console.Io.@Print { text: "first is " + r.Row.title } }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "-- first two of the wide ones --" }
+            target $Row $Wide #Row as r {
+
+                    emit *Vein.Console.Io.@Print {
+                        text: "   " + Index + " " + r.Row.title + " extra=" + r.Wide.extra
+                    }
+
+            }
+        }
+    }
+}

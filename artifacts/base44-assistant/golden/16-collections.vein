@@ -1,0 +1,73 @@
+bundle CollectionValues by you {
+
+    need "Vein.Console"
+
+    shape $Dice   { ~<list> rolls: int }
+    shape $Car    { name: string, ~<set> tags: string }
+    shape $Chat   { ~<ring 3> lines: string }
+    shape $Crate  { ~<list> weights: float }
+    shape $Board  { name: string, ~<map> scores: string | int }
+
+    mark #Thing
+
+    builder Dice  { $Dice  mark #Thing }
+    builder Car   { $Car   mark #Thing }
+    builder Chat  { $Chat  mark #Thing }
+    builder Crate { $Crate mark #Thing }
+    builder Board { $Board mark #Thing }
+
+    event @Show { }
+    event @Change { }
+    event @Again { }
+
+    shard Values {
+        run once {
+            bring Dice([4, 2, 6, 2]) as dice                     // a list keeps both 2s
+            bring Car("Zip", ["fast", "red", "fast"]) as car    // a set: "fast" once
+            bring Chat([]) as chat
+            bring Crate([1.5, 2.25]) as crate
+            bring Board("Arena") as board                        // the map takes no argument: it starts empty
+
+            chat.Chat.~lines.add("a", "b", "c", "d", "e")        // a ring of 3 keeps c d e
+            board.Board.~scores.put("ann", 3)
+            board.Board.~scores.put("bob", 5)
+
+            emit @Show { }
+        }
+
+        hear @Show as s {
+            target $Dice as d { do print("rolls: " + d.Dice.~rolls + " (" + len(d.Dice.~rolls) + " rolls)") }
+            target $Car as c { do print("tags: " + c.Car.~tags) }
+            target $Chat as c { do print("chat: " + c.Chat.~lines) }
+            target $Crate as c { do print("weights: " + c.Crate.~weights) }
+            target $Board as b {
+                do print("ann: " + b.Board.~scores["ann"] + "   bob: " + b.Board.~scores["bob"] + "   cy: " + b.Board.~scores["cy"])
+            }
+            emit @Change { }
+        }
+
+        hear @Change as c {
+            target $Dice as d {
+                d.Dice.~rolls.remove(2)              // a list drops EVERY 2
+                d.Dice.~rolls.add(1, 1)
+            }
+            target $Car as car { car.Car.~tags.add("red", "new") }   // "red" is there already: a set ignores it
+            target $Chat as ch { ch.Chat.~lines.clear() }
+            target $Board as b {
+                b.Board.~scores.put("ann", 9)        // a second put REPLACES, and keeps ann's place
+                b.Board.~scores.put("dee", 2)
+            }
+            emit @Again { }
+        }
+
+        hear @Again as a {
+            do print("after the changes:")
+            target $Dice as d { do print("rolls: " + d.Dice.~rolls) }
+            target $Car as c {
+                do print("tags: " + c.Car.~tags + " (red? " + c.Car.~tags.has("red") + ", blue? " + c.Car.~tags.has("blue") + ")")
+            }
+            target $Chat as c { do print("chat: " + c.Chat.~lines) }
+            target $Board.~scores as b, e { do print(e.key + " = " + e.value) }       // one line per pair, in put order
+        }
+    }
+}

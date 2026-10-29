@@ -1,0 +1,34 @@
+bundle PeerSpoke by you {
+
+    shard Boot {
+        run once {
+            emit *Vein.Net.Peer.@Listen { as: #Spoke, at: 9701, key: "shared-secret" }
+
+            emit *Vein.Net.Peer.@Link { name: #Hub, at: "127.0.0.1:9700", key: "shared-secret" }
+
+            emit *Vein.Console.Io.@Print { text: "spoke up as #Spoke — pinging #Hub every 2s" }
+        }
+    }
+
+    shard Pinger {
+        var round: int
+
+        every 2 {
+            round += 1
+            emit *Vein.Console.Io.@Print { text: "→ Hub: ping " + round }
+            emit *Vein.Net.Peer.@Send { to: #Hub, text: "ping " + round }
+        }
+    }
+
+    shard Replies {
+        hear *Vein.Net.Peer.@Message as m audience #Hub {
+            emit *Vein.Console.Io.@Print { text: m.from + " replied: " + m.text }
+        }
+    }
+
+    shard Reachability {
+        hear *Vein.Net.Peer.@Undelivered as u {
+            emit *Vein.Console.Io.@Print { text: "  (" + u.to + " is not up — start samples/net_peer.vein)" }
+        }
+    }
+}

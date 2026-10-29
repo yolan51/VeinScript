@@ -1,0 +1,30 @@
+bundle Observers by patterns {
+    shape $Session { user: string = "" }
+    mark #Trusted
+    event @Damage { amount: int }
+
+    SF check(name: string, good: bool) {
+        if good { emit *Vein.Console.Io.@Print { text: "ok   " + name } } else { emit *Vein.Console.Io.@Print { text: "FAIL " + name } }
+    }
+
+    shard Server $Session #Trusted { run once { emit @Damage { amount: 5 } } }
+    shard Client { run once { emit @Damage { amount: 1 } } }
+    shard Cheater { run once { emit @Damage { amount: 999 } } }
+
+    shard Ledger {
+        var trusted: int = 0
+        var fair: int = 0
+        var everyone: int = 0
+        hear @Damage as d audience $Session #Trusted { trusted += d.amount }
+        hear @Damage as d audience not !Cheater { fair += d.amount }
+        hear @Damage as d { everyone += d.amount }
+        settled {
+            if everyone > 0 and trusted >= 0 {
+                do check("audience $Session #Trusted: only the server", trusted == 5)
+                do check("audience not !Cheater: everyone but the cheater", fair == 6)
+                do check("no audience: everyone", everyone == 1005)
+                everyone = -1000000
+            }
+        }
+    }
+}

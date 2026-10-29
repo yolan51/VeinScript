@@ -1,0 +1,41 @@
+bundle ChatClient by you {
+
+    fn ServerAddress() return string { return "999.999.999.999:9700" }
+
+    shard Session {
+        var joined: bool
+
+        run once {
+            emit *Vein.Console.Io.@Print { text: "your name:" }
+        }
+
+        hear *Vein.Console.Io.@Input as i {
+            let first = not joined
+
+            if first {
+                joined = true
+
+                emit *Vein.Net.Peer.@Listen { as: i.text, at: 0, key: "chat-secret" }
+                emit *Vein.Net.Peer.@Link { name: #Server, at: ServerAddress(), key: "chat-secret" }
+
+                emit *Vein.Net.Peer.@Send { to: #Server, text: "is here" }
+                emit *Vein.Console.Io.@Print { text: "joined as " + i.text + " — type away" }
+            }
+
+            if not first {
+                emit *Vein.Net.Peer.@Send { to: #Server, text: i.text }
+            }
+        }
+
+        hear *Vein.Net.Peer.@Undelivered as u {
+            emit *Vein.Console.Io.@Print { text: "  (cannot reach " + ServerAddress() + " — is the server running?)" }
+        }
+    }
+
+    shard Incoming {
+        hear *Vein.Net.Peer.@Message as m audience #Server {
+            emit *Vein.Console.Io.@Print { text: m.text }
+        }
+    }
+
+}

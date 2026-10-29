@@ -1,0 +1,64 @@
+bundle App {
+    need "Vein.Web"
+
+    publicator PageApi {
+        event @Request  { path: string }
+        event @Html     { markup: string }
+        event @Script   { code: string }
+        event @Style    { css: string }
+        event @Render   { }
+        event @Response { status: int, body: string }
+
+        shape $Id    { name: string }
+        shape $Class { name: string }
+        shape $Fn    { name: string, body: string }
+
+        shape $Control { id: Id, class: Class, onclick: Fn, label: string }
+    }
+
+    builder Display {
+        slot: Id
+        initial: string
+        markup = "<span id=\"" + slot.name + "\">" + initial + "</span>"
+    }
+    builder Button {
+        b: Control
+        markup = "<button id=\"" + b.id.name + "\" class=\"" + b.class.name + "\" onclick=\"" + b.onclick.name + "()\">" + b.label + "</button>"
+    }
+    builder Define {
+        f: Fn
+        code = "function " + f.name + "(){ " + f.body + " }"
+    }
+    builder Rule {
+        c: Class
+        decl: string
+        css = "." + c.name + "{" + decl + "}"
+    }
+
+    shard Ui {
+        hear @Request as req {
+            let counter = Id { name: "counter" }
+            let primary = Class { name: "primary" }
+            let inc     = Fn { name: "inc", body: "let e=document.getElementById('" + counter.name + "'); e.innerText=(+e.innerText)+1" }
+
+            bring Rule(primary, "cursor:pointer;font-weight:bold")
+            bring Display(counter, "0")
+            bring Button(Control { id: counter, class: primary, onclick: inc, label: "+1" })
+            bring Define(inc)
+        }
+    }
+
+    shard Kernel { hear @Request as req { emit @Render { } } }
+
+    ShardView MyPage {
+        var html: string
+        var js: string
+        var css: string
+        hear @Html as f   { html += f.markup }
+        hear @Script as s { js += s.code }
+        hear @Style as st { css += st.css }
+        hear @Render as r {
+            emit @Response { status: 200, body: "<!doctype html><html><head><style>" + css + "</style></head><body>" + html + "<script>" + js + "</script></body></html>" }
+        }
+    }
+}

@@ -1,0 +1,45 @@
+bundle TransformHierarchy by you {
+
+    need "Vein.Transform"
+    need "Vein.Core"
+
+    mark #Thing
+    mark #Platform
+
+    shard Boot {
+        run once {
+            let platform = spawn()
+            attach $Position to platform { x: 10.0, y: 0.0, z: 0.0 }
+            mark platform #Thing
+            mark platform #Platform
+
+            let crate = spawn()
+            attach $Position to crate { x: 2.0, y: 0.0, z: 0.0 }
+            attach $Parent to crate { of: platform }
+            mark crate #Thing
+
+            let bolt = spawn()
+            attach $Position to bolt { x: 0.5, y: 0.0, z: 0.0 }
+            attach $Parent to bolt { of: crate }
+            mark bolt #Thing
+
+            let free = spawn()
+            attach $Position to free { x: 7.0, y: 0.0, z: 0.0 }
+            mark free #Thing
+        }
+    }
+
+    shard Drive {
+        each tick {
+            target $Position #Platform as p { p.Position.x = p.Position.x + 5.0 }
+        }
+    }
+
+    shard Show {
+        settled {
+            target $Position $World #Thing as t {
+                emit *Vein.Console.Io.@Print { text: "local " + t.Position.x + "  world " + t.World.x }
+            }
+        }
+    }
+}

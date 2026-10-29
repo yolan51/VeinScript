@@ -1,0 +1,45 @@
+bundle TextSearch by you {
+
+    shard Look {
+        run once {
+            let line = "  ERROR: disk full on /dev/sda1  "
+            let trimmed = trim(line)
+
+            emit *Vein.Console.Io.@Print { text: "trimmed  = [" + trimmed + "]" }
+
+            emit *Vein.Console.Io.@Print { text: "contains = " + contains(trimmed, "disk full") }
+            emit *Vein.Console.Io.@Print { text: "starts   = " + startsWith(trimmed, "ERROR") }
+            emit *Vein.Console.Io.@Print { text: "ends     = " + endsWith(trimmed, "sda1") }
+
+            emit *Vein.Console.Io.@Print { text: "empty in = " + contains(trimmed, "") }
+
+            emit *Vein.Console.Io.@Print { text: "at       = " + indexOf(trimmed, "disk") }
+            emit *Vein.Console.Io.@Print { text: "missing  = " + indexOf(trimmed, "network") }
+
+            let colon = indexOf(trimmed, ":")
+            emit *Vein.Console.Io.@Print { text: "level    = " + substring(trimmed, 0, colon) }
+            emit *Vein.Console.Io.@Print { text: "rest     = " + substring(trimmed, colon + 2) }
+
+            emit *Vein.Console.Io.@Print { text: "past end = [" + substring(trimmed, 900) + "]" }
+            emit *Vein.Console.Io.@Print { text: "too long = [" + substring("abc", 1, 99) + "]" }
+
+            emit *Vein.Console.Io.@Print { text: "replaced = " + replace(trimmed, "ERROR", "WARN") }
+            emit *Vein.Console.Io.@Print { text: "absent   = " + replace("abc", "zz", "!") }
+
+            emit *Vein.Console.Io.@Print { text: "upper    = " + upper("MiXeD") }
+            emit *Vein.Console.Io.@Print { text: "lower    = " + lower("MiXeD") }
+
+            emit *Vein.Console.Io.@Print { text: "same?    = " + (lower("HELLO") == lower("hello")) }
+        }
+    }
+
+    shard Filter {
+        run once {
+            target lines("ok: started\nERROR: no disk\nok: ready\nERROR: no net") as line {
+                if startsWith(line, "ERROR") {
+                    emit *Vein.Console.Io.@Print { text: "! " + substring(line, indexOf(line, " ") + 1) }
+                }
+            }
+        }
+    }
+}

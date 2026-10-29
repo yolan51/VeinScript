@@ -1,0 +1,90 @@
+bundle Characters by you {
+
+    fn isDigit(c: string) return bool { return c >= "0" and c <= "9" }
+    fn isLower(c: string) return bool { return c >= "a" and c <= "z" }
+    fn isUpper(c: string) return bool { return c >= "A" and c <= "Z" }
+    fn isLetter(c: string) return bool { return isLower(c) or isUpper(c) }
+
+    fn isIdentChar(c: string) return bool { return isLetter(c) or isDigit(c) or c == "_" }
+
+    shape $Word { text: string, ok: bool, why: string }
+    mark #Rejected
+    builder Candidate { $Word   mark #Checked }
+    mark #Checked
+
+    shard Check {
+        var ok: bool
+        var why: string
+
+        run once {
+            emit *Vein.Console.Io.@Print { text: "identifier check" }
+
+            target words("count _x 9lives has-dash ok_2 Zeta") as w {
+                ok = true
+                why = ""
+
+                if not (isLetter(w[0]) or w[0] == "_") {
+                    ok = false
+                    why = "starts with '" + w[0] + "'"
+                }
+
+                if ok {
+                    target chars(w) as c {
+                        if not isIdentChar(c) {
+                            ok = false
+                            why = "contains '" + c + "'"
+                        }
+                    }
+                }
+
+                bring Candidate(w, ok, why)
+            }
+
+            emit @Checked { }
+        }
+    }
+
+    event @Checked { }
+
+    shard Report {
+        hear @Checked as c {
+            target $Word #Checked as w {
+                if w.Word.ok {
+                    emit *Vein.Console.Io.@Print { text: "  ok       " + w.Word.text }
+                }
+                if not w.Word.ok {
+                    emit *Vein.Console.Io.@Print { text: "  rejected  " + w.Word.text + "   " + w.Word.why }
+                }
+            }
+        }
+    }
+
+    shard Shift {
+        var out: string
+
+        hear @Checked as c {
+            out = ""
+            target chars("attack at dawn") as ch {
+                if isLower(ch) {
+                    out = out + chr(code("a") + (code(ch) - code("a") + 13) % 26)
+                }
+                if not isLower(ch) { out = out + ch }
+            }
+            emit *Vein.Console.Io.@Print { text: "rot13: " + out }
+        }
+    }
+
+    shard Casing {
+        hear @Checked as c {
+            if not ("Zeta" == "zeta") {
+                emit *Vein.Console.Io.@Print { text: "ordinal: Zeta is not zeta" }
+            }
+            if lower("Zeta") == lower("zeta") {
+                emit *Vein.Console.Io.@Print { text: "lowered: Zeta is zeta" }
+            }
+            if "Z" < "a" {
+                emit *Vein.Console.Io.@Print { text: "and every capital sorts before every lowercase" }
+            }
+        }
+    }
+}

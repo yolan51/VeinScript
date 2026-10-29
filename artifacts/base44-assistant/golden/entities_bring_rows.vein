@@ -1,0 +1,42 @@
+bundle EntitiesBringRows by you {
+
+    shape $Row { title: string, rank: int }
+    mark #Row
+
+    builder Row { $Row   mark #Row }
+
+    shard Seed {
+        run once {
+            let ranks = [4, 1, -2, 3, 1]
+
+            ordered by &Row.rank {
+                bring Row("literal", 0)
+
+                target ranks as r {
+                    if r > -2 {
+                        bring Row("src" + Index, r)
+                    }
+                }
+            }
+        }
+    }
+
+    shard Show {
+        settled {
+            emit *Vein.Console.Io.@Print { text: "-- spawn order, which is now rank order --" }
+            target $Row #Row as r {
+                emit *Vein.Console.Io.@Print { text: "   e" + Entity + "  rank " + r.Row.rank + "  " + r.Row.title }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "-- ties keep the order the rows arrived in --" }
+            target $Row #Row as r {
+                if r.Row.rank == 1 { emit *Vein.Console.Io.@Print { text: "   " + r.Row.title } }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "-- the filtered row never arrived --" }
+            target $Row #Row as r {
+                if r.Row.rank < 0 { emit *Vein.Console.Io.@Print { text: "   should not appear: " + r.Row.title } }
+            }
+        }
+    }
+}

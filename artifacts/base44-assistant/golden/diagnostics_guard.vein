@@ -1,0 +1,59 @@
+bundle DiagnosticsGuard by you {
+
+    shape $Row { title: string, rank: int }
+    mark #Row
+
+    builder Row { $Row   mark #Row }
+
+    event @RowArrived { title: string, rank: int }
+
+    shard Collector {
+        hear *Vein.Diagnostics.Report.@DiagnosticRaised as d {
+            if d.severity == 0 { emit *Vein.Console.Io.@Print { text: "   note  | " + d.message } }
+            if d.severity == 1 { emit *Vein.Console.Io.@Print { text: "   WARN  | " + d.message } }
+            if d.severity == 2 { emit *Vein.Console.Io.@Print { text: "   ERROR | " + d.message } }
+        }
+    }
+
+    shard Source {
+        run once {
+            emit *Vein.Console.Io.@Print { text: "-- four rows arrive --" }
+
+            emit @RowArrived { title: "write the docs", rank: 2 }   // fine
+            emit @RowArrived { title: "ship it", rank: 0 }          // odd: rank 0 is not a rank
+            emit @RowArrived { title: "", rank: 5 }                 // broken: no title
+
+            let row = fromJson("{\"title\":\"paint it\",\"rnk\":9}")
+            emit @RowArrived { title: row.title, rank: row.rank }
+        }
+    }
+
+    shard Guard {
+        hear @RowArrived as r {
+
+            if r.title == "" {
+                do *Vein.Diagnostics.Report.error("row rejected: a row with no title cannot be shown")
+            } else {
+                if r.rank < 1 {
+                    do *Vein.Diagnostics.Report.warn(
+                        "row \"" + r.title + "\" has rank [" + r.rank +
+                        "] — sent as 0, or the field name was misspelled and never arrived at all")
+                }
+
+                bring Row(r.title, r.rank)
+            }
+        }
+    }
+
+    shard Report {
+        settled {
+            do *Vein.Diagnostics.Report.info("4 rows arrived, and these are the ones that were kept")
+
+            target $Row #Row by Row.rank as r {
+                emit *Vein.Console.Io.@Print {
+                    text: "   kept: rank " + r.Row.rank + "  " + r.Row.title
+                }
+            }
+        }
+    }
+}

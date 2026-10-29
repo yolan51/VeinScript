@@ -1,0 +1,77 @@
+bundle Inventory by core {
+    need "Vein.Transform"
+    need "Vein.Math"
+
+    publicator Carrying {
+        shared("Holds up to `capacity` items; `count` is how many it holds.")
+        shape $Bag { capacity: int = 20, count: int = 0 }
+
+        shared("In someone's bag.")
+        shape $InBag { owner: Entity }
+
+        shared("Picks up loose things that come within `radius`, without being asked.")
+        shape $Magnet { radius: float = 1.2 }
+
+        shared("Lying in the world, free to pick up.")
+        mark #Loose
+
+        shared("Take this item into this bag.")
+        event @PickUp { who: Entity, item: Entity }
+
+        shared("Took it.")
+        event @PickedUp { who: Entity, item: Entity }
+
+        shared("Could not take it: the bag is full.")
+        event @BagFull { who: Entity, item: Entity }
+
+        shared("Put this item down where its owner stands.")
+        event @PutDown { who: Entity, item: Entity }
+
+        shared("Put it down.")
+        event @PutDownDone { who: Entity, item: Entity }
+    }
+
+    shard Hands {
+        hear @PickUp as p {
+            target $Position #Loose on p.item as i {
+                target $Bag on p.who as b {
+                    if b.Bag.count < b.Bag.capacity {
+                        b.Bag.count = b.Bag.count + 1
+                        unmark i #Loose
+                        unattach $Position from i
+                        attach $InBag to i { owner: b }
+                        emit @PickedUp { who: b, item: i }
+                    } else {
+                        emit @BagFull { who: b, item: i }
+                    }
+                }
+            }
+        }
+
+        hear @PutDown as p {
+            target $Position $Bag on p.who as o {
+                target $InBag on p.item as i {
+                    if i.InBag.owner == o {
+                        unattach $InBag from i
+                        attach $Position to i { x: o.Position.x, y: o.Position.y, z: o.Position.z }
+                        mark i #Loose
+                        o.Bag.count = max(0, o.Bag.count - 1)
+                        emit @PutDownDone { who: o, item: i }
+                    }
+                }
+            }
+        }
+    }
+
+    shard Reach {
+        each tick {
+            target $Position $Magnet $Bag as o {
+                target $Position #Loose as i {
+                    let dx = i.Position.x - o.Position.x
+                    let dz = i.Position.z - o.Position.z
+                    if dx * dx + dz * dz <= o.Magnet.radius * o.Magnet.radius { emit @PickUp { who: o, item: i } }
+                }
+            }
+        }
+    }
+}

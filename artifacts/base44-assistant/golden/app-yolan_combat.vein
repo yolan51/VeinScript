@@ -1,0 +1,19 @@
+bundle Combat by yolan {
+    start @Request { path: "/" }        // this bundle's own boot event + default payload
+
+    publicator Api {
+        shared("an inbound request")
+        event @Request { path: string }
+    }
+
+    event @Damage { amount: int }       // bundle-level → private to this bundle
+
+    shape $Health { hp: int folds sum }
+
+    shard Kernel {
+        hear @Request as req {
+            emit @Damage { amount: 5 }
+            emit *alice.Combat.Api.@Loot { gold: 5 }
+        }
+    }
+}

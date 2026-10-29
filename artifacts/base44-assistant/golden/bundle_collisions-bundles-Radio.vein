@@ -1,0 +1,10 @@
+bundle Radio by acme {
+
+    publicator Wire {
+        shared("Broadcast a line to a channel.")
+        event @Dispatch { channel: string, text: string }
+
+        shared("A channel an identity is tuned to.")
+        shape $Channel { name: string }
+    }
+}

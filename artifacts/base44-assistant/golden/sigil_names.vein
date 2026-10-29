@@ -1,0 +1,37 @@
+bundle SigilNames by you {
+
+    shape $Switch { on: int }
+    mark  #Switch
+    event @Switch { n: int }
+
+    builder Switch { $Switch   mark #Switch }
+
+    shard Boot {
+        run once {
+            bring Switch(1)
+            bring Switch(0)
+        }
+    }
+
+    shard Flip {
+        settled {
+            target $Switch #Switch as s {
+                emit @Switch { n: s.Switch.on }
+            }
+        }
+    }
+
+    shard Listen {
+        hear @Switch as e {
+            emit *Vein.Console.Io.@Print { text: "@Switch says n=" + e.n }
+        }
+    }
+
+    shard Report {
+        settled {
+            var switches = 0
+            target $Switch #Switch as s { switches = switches + 1 }
+            emit *Vein.Console.Io.@Print { text: "$Switch #Switch matched " + switches }
+        }
+    }
+}

@@ -1,0 +1,45 @@
+bundle TargetNot by you {
+    shape $Smurf { name: string }
+    mark #Hidden
+    mark #Shtroumphe
+    mark #Blue
+
+    builder Smurf { $Smurf   mark #Blue }
+
+    shard Seed {
+        run once {
+            bring Smurf("Papa")
+            bring Smurf("Brainy") as brainy
+            mark brainy #Hidden
+            bring Smurf("Clumsy") as clumsy
+            mark clumsy #Shtroumphe
+            bring Smurf("Hefty") as hefty
+            mark hefty #Hidden
+            mark hefty #Shtroumphe
+            bring Smurf("Vanity")
+        }
+    }
+
+    shard Show {
+        hear *Vein.Time.Clock.@Ticked as t {
+            if t.frame == 1 {
+                target $Smurf not #Hidden as s {
+                    emit *Vein.Console.Io.@Print { text: "not hidden: " + s.Smurf.name + " (#" + string(Index) + ")" }
+                }
+                target $Smurf not #Hidden not #Shtroumphe as s {
+                    emit *Vein.Console.Io.@Print { text: "neither: " + s.Smurf.name + " (#" + string(Index) + ")" }
+                }
+                target $Smurf #Blue not #Shtroumphe as s {
+                    emit *Vein.Console.Io.@Print { text: "blue, not shtroumphe: " + s.Smurf.name }
+                }
+            }
+            if t.frame == 2 {
+                target $Smurf #Shtroumphe as s {
+                    target $Smurf not #Hidden on s as x {
+                        emit *Vein.Console.Io.@Print { text: "shtroumphe, not hidden: " + x.Smurf.name }
+                    }
+                }
+            }
+        }
+    }
+}

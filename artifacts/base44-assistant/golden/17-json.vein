@@ -1,0 +1,51 @@
+bundle JsonRoundtrip by you {
+
+    shape $Row { title: string, rank: int, done: bool }
+    mark #Row
+
+    builder Row { $Row   mark #Row }
+
+    shard Ingest {
+        run once {
+            let payload = "{\"rows\":[" +
+                          "{\"title\":\"delta\",\"rank\":4,\"done\":false}," +
+                          "{\"title\":\"alpha\",\"rank\":1,\"done\":true}," +
+                          "{\"title\":\"Zeta\",\"rank\":-2,\"done\":false}]}"
+
+            let doc = fromJson(payload)
+
+            emit *Vein.Console.Io.@Print { text: "parsed " + len(doc.rows) + " rows" }
+
+            ordered by &Row.rank {
+                target doc.rows as row: $Row {
+                    bring Row(row.title, row.rank, row.done)
+                }
+            }
+        }
+    }
+
+    shard Report {
+        settled {
+            emit *Vein.Console.Io.@Print { text: "-- as identities, in the order they were brought --" }
+            target $Row #Row as r {
+                emit *Vein.Console.Io.@Print {
+                    text: "   " + r.Row.rank + "  " + r.Row.title + "  done=" + r.Row.done
+                }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "-- serialised back --" }
+            target $Row #Row by Row.rank as r {
+                emit *Vein.Console.Io.@Print { text: "   " + toJson(r.Row) }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "-- values are typed, not text --" }
+            target $Row #Row as r {
+                if r.Row.rank == 1 {
+                    emit *Vein.Console.Io.@Print {
+                        text: "   rank+1 = " + (r.Row.rank + 1) + ", and done is " + r.Row.done
+                    }
+                }
+            }
+        }
+    }
+}

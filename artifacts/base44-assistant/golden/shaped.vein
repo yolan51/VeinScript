@@ -1,0 +1,41 @@
+bundle App {
+    need "Vein.Web"
+
+    publicator PageApi {
+        event @Request  { path: string }
+        event @Html     { markup: string }
+        event @Render   { }
+        event @Response { status: int, body: string }
+
+        shape $Heading { text: string }
+        shape $Button  { label: string, id: string, class: string, onclick: string }
+    }
+
+    builder Heading {
+        $Heading
+        markup = "<h1>" + text + "</h1>"
+    }
+    builder Button {
+        $Button
+        markup = "<button id=\"" + id + "\" class=\"" + class + "\" onclick=\"" + onclick + "()\">" + label + "</button>"
+    }
+
+    shard Ui {
+        hear @Request as req {
+            bring Heading("Counter")
+            bring Button("+1", "inc", "primary", "inc")
+        }
+    }
+
+    shard Kernel {
+        hear @Request as req { emit @Render { } }
+    }
+
+    ShardView MyPage {
+        var html: string
+        hear @Html as f { html += f.markup }
+        hear @Render as r {
+            emit @Response { status: 200, body: "<html><body>" + html + "</body></html>" }
+        }
+    }
+}

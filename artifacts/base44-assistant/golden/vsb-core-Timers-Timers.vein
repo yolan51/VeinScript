@@ -1,0 +1,38 @@
+bundle Timers by core {
+    need "Vein.Math"
+
+    publicator Clock {
+        shared("Fires @TimerDone after `seconds` — once, or every `seconds` when `repeat`. `tag` says which.")
+        shape $Timer { seconds: float = 1.0, left: float = -1.0, repeat: bool = false, tag: string = "" }
+
+        shared("A $Timer ran out: the identity carrying it, and its tag.")
+        event @TimerDone { entity: Entity, tag: string }
+
+        shared("`left` counts down to 0. The owner acts when it is 0 or less, then sets it back to `seconds`.")
+        shape $Cooldown { seconds: float = 1.0, left: float = 0.0 }
+    }
+
+    mark #Gameplay
+
+    shard Count #Gameplay {
+        var dt: float = 0.0
+        hear *Vein.Time.Clock.@Ticked as c { dt = c.delta }
+        each tick {
+            target $Timer as x {
+                if x.Timer.left < 0.0 { x.Timer.left = x.Timer.seconds }
+                x.Timer.left = x.Timer.left - dt
+                if x.Timer.left <= 0.0 {
+                    emit @TimerDone { entity: Entity, tag: x.Timer.tag }
+                    if x.Timer.repeat {
+                        x.Timer.left = x.Timer.left + x.Timer.seconds
+                    } else {
+                        unattach $Timer from x
+                    }
+                }
+            }
+            target $Cooldown as y {
+                if y.Cooldown.left > 0.0 { y.Cooldown.left = max(0.0, y.Cooldown.left - dt) }
+            }
+        }
+    }
+}

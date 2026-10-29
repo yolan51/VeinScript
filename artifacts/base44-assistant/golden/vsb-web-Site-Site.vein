@@ -1,0 +1,86 @@
+bundle Site by web {
+    need "Vein.Web"
+    need "Vein.WebTheme"
+
+    publicator Shell {
+        shared("The whole look on the cool Slate palette: reset, motion, nav, hero, cards, controls, prose, layout, theme toggle.")
+        SF look() {
+            bring *Vein.WebTheme.Palettes.&Slate()
+            bring *Vein.WebTheme.Foundation.&Reset()
+            bring *Vein.WebTheme.Foundation.&Motion()
+            bring *Vein.WebTheme.Components.&NavBar()
+            bring *Vein.WebTheme.Components.&HeroArea()
+            bring *Vein.WebTheme.Components.&Cards()
+            bring *Vein.WebTheme.Components.&Controls()
+            bring *Vein.WebTheme.Components.&Prose()
+            bring *Vein.WebTheme.Components.&Layout()
+            bring *Vein.WebTheme.Behaviours.&ThemeToggle()
+            bring *Vein.WebTheme.Behaviours.&Clock("clk")
+        }
+
+        shared("The same look on the warm Ink palette.")
+        SF lookInk() {
+            bring *Vein.WebTheme.Palettes.&Ink()
+            bring *Vein.WebTheme.Foundation.&Reset()
+            bring *Vein.WebTheme.Foundation.&Motion()
+            bring *Vein.WebTheme.Components.&NavBar()
+            bring *Vein.WebTheme.Components.&HeroArea()
+            bring *Vein.WebTheme.Components.&Cards()
+            bring *Vein.WebTheme.Components.&Controls()
+            bring *Vein.WebTheme.Components.&Prose()
+            bring *Vein.WebTheme.Components.&Layout()
+            bring *Vein.WebTheme.Behaviours.&ThemeToggle()
+            bring *Vein.WebTheme.Behaviours.&Clock("clk")
+        }
+
+        shared("One link of the site's nav. Bring each once, in `run once`; navBar draws them in that order.")
+        shape $NavLink { href: string, label: string }
+
+        shared("Carried by every NavLink.")
+        mark #NavLink
+
+        shared("A nav link identity: bring NavLink(\"/about\", \"About\").")
+        builder NavLink { $NavLink   mark #NavLink }
+
+        shared("The nav bar: every NavLink, the current page in bold, a clock and the theme button.")
+        SF navBar(path: string) {
+            bring *Vein.Web.Elements.&Open("nav")
+            target $NavLink #NavLink as i {
+                if path == i.NavLink.href {
+                    bring *Vein.Web.Elements.&Raw("<b>" + i.NavLink.label + "</b>")
+                } else {
+                    bring *Vein.Web.Elements.&Link(i.NavLink.href, i.NavLink.label)
+                }
+            }
+            bring *Vein.Web.Elements.&Raw("<span class='clock' id='clk' style='margin-left:auto'></span>")
+            bring *Vein.Web.Elements.&Raw("<button onclick='theme()'>theme</button>")
+            bring *Vein.Web.Elements.&Close("nav")
+        }
+
+        shared("A page header: its title and a lead line.")
+        shape $Hero { title: string, sub: string }
+        shared("A page header, centred.")
+        builder Hero { $Hero   markup = "<header class='hero'><h1>" + title + "</h1><p>" + sub + "</p></header>" }
+
+        shared("A raised card: a heading and its text.")
+        shape $Card { title: string, body: string }
+        shared("A card. Put several between grid() and endGrid().")
+        builder Card { $Card   markup = "<div class='card'><h3>" + title + "</h3><p>" + body + "</p></div>" }
+
+        shared("The page's footer line.")
+        shape $Footer { note: string }
+        shared("The page footer.")
+        builder Footer { $Footer   markup = "<footer>" + note + "</footer>" }
+
+        shared("Open a grid that wraps cards into columns; close it with endGrid().")
+        SF grid() { bring *Vein.Web.Elements.&OpenAs("div", "grid") }
+        shared("Close a grid().")
+        SF endGrid() { bring *Vein.Web.Elements.&Close("div") }
+
+        shared("Open the readable main column; close it with endMain().")
+        SF main() { bring *Vein.Web.Elements.&Open("main") }
+        shared("Close a main().")
+        SF endMain() { bring *Vein.Web.Elements.&Close("main") }
+    }
+
+}

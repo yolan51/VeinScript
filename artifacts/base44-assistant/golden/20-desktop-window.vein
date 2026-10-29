@@ -1,0 +1,31 @@
+bundle Counter by you {
+    need "Vein.Desktop"
+    need "Vein.UI"
+
+    mark #Plus
+    mark #Reset
+    mark #Shown
+
+    shard Build {
+        run once {
+            bring Window("Counter", 320.0, 200.0) as w
+            bring Heading(w, "Clicks", 20.0)
+            bring Label(w, "0") as shown
+            mark shown #Shown
+            bring Row(w, 8.0) as buttons
+            bring Button(buttons, "+1") as plus
+            mark plus #Plus
+            bring Button(buttons, "Reset") as reset
+            mark reset #Reset
+        }
+    }
+
+    shard Clicks {
+        var n = 0
+        hear *Vein.UI.Interaction.@Clicked as c {
+            target $Button #Plus on c.target as b { n += 1 }
+            target $Button #Reset on c.target as b { n = 0 }
+            target $Text #Shown as t { t.Text.content = string(n) }
+        }
+    }
+}

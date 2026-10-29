@@ -1,0 +1,195 @@
+bundle Cameras by game {
+    need "Vein.Transform"
+    need "Vein.UI"
+    need "Vein.Math"
+    need "Vein.Input"
+
+    publicator Rigs {
+        shared("Orbit the #CameraTarget: yaw around it, tilt above it, distance away. Right-drag or right stick turns it; the wheel zooms.")
+        shape $OrbitCamera { yaw: float = 0.0, tilt: float = 0.56, distance: float = 9.4 }
+
+        shared("Follow the #CameraTarget in 2D, easing toward it.")
+        shape $Follow2D { ease: float = 5.0 }
+
+        shared("What a camera looks at and follows.")
+        mark #CameraTarget
+
+        shared("Carried by the shards that walk the player and follow it; the free camera mutes it while flying.")
+        mark #Walking
+
+        shared("The camera mode changed: \"follow\" or \"free\" — for a HUD.")
+        event @CameraMode { mode: string }
+    }
+
+    shard Orbit #Walking {
+        each tick as t {
+            target $Position #CameraTarget as h {
+                target $Position $Rotation $OrbitCamera as e {
+                    let k = min(1.0, 5.0 * t.delta)
+                    let flat = cos(e.OrbitCamera.tilt) * e.OrbitCamera.distance
+                    e.Position.x = lerp(e.Position.x, h.Position.x + sin(e.OrbitCamera.yaw) * flat, k)
+                    e.Position.y = lerp(e.Position.y, h.Position.y + sin(e.OrbitCamera.tilt) * e.OrbitCamera.distance, k)
+                    e.Position.z = lerp(e.Position.z, h.Position.z + cos(e.OrbitCamera.yaw) * flat, k)
+                    e.Rotation.y = e.OrbitCamera.yaw
+                    e.Rotation.x = 0.06 - e.OrbitCamera.tilt      // look down at the target, a little above its feet
+                }
+            }
+        }
+    }
+
+    shard OrbitControl #Walking {
+        tune("How far a right-drag turns the orbit: radians per pixel.")
+        var mouseTurn: float = 0.006
+        tune("How fast the right stick turns the orbit: radians per second at full tilt.")
+        var stickTurn: float = 2.5
+        var looking: int = 0
+        var lastX: float = 0.0
+        var lastY: float = 0.0
+        var lookX: float = 0.0
+        var lookY: float = 0.0
+        hear *Vein.Input.Mouse.@MouseDown as m {
+            if m.button == 2 {
+                looking = 1
+                lastX = m.x
+                lastY = m.y
+            }
+            target $OrbitCamera as e {
+                if m.button == 4 { e.OrbitCamera.distance = clamp(e.OrbitCamera.distance - 1.0, 3.0, 25.0) }
+                if m.button == 5 { e.OrbitCamera.distance = clamp(e.OrbitCamera.distance + 1.0, 3.0, 25.0) }
+            }
+        }
+        hear *Vein.Input.Mouse.@MouseUp as m { if m.button == 2 { looking = 0 } }
+        hear *Vein.Input.Mouse.@MouseMove as m {
+            if looking == 1 {
+                target $OrbitCamera as e {
+                    e.OrbitCamera.yaw = e.OrbitCamera.yaw - (m.x - lastX) * mouseTurn
+                    e.OrbitCamera.tilt = clamp(e.OrbitCamera.tilt + (m.y - lastY) * mouseTurn, 0.05, 1.4)
+                }
+            }
+            lastX = m.x
+            lastY = m.y
+        }
+        hear *Vein.Input.Gamepad.@AxisMoved as m {
+            if m.axis == "RightX" { lookX = m.value }
+            if m.axis == "RightY" { lookY = m.value }
+        }
+        each tick as t {
+            target $OrbitCamera as e {
+                e.OrbitCamera.yaw = e.OrbitCamera.yaw - lookX * stickTurn * t.delta
+                e.OrbitCamera.tilt = clamp(e.OrbitCamera.tilt + lookY * stickTurn * t.delta, 0.05, 1.4)
+            }
+        }
+    }
+
+    shard Fly {
+        var flying: int = 0
+        var yaw: float = 0.0
+        var pitch: float = -0.5
+        tune("How fast the free camera flies: metres per second.")
+        var speed: float = 8.0
+        tune("How far a right-drag turns the free camera: radians per pixel.")
+        var mouseTurn: float = 0.005
+        tune("How fast the right stick turns the free camera: radians per second at full tilt.")
+        var stickTurn: float = 2.5
+        var ahead: int = 0
+        var behind: int = 0
+        var leftward: int = 0
+        var rightward: int = 0
+        var rise: int = 0
+        var sink: int = 0
+        var looking: int = 0
+        var lastX: float = 0.0
+        var lastY: float = 0.0
+        var moveX: float = 0.0
+        var moveZ: float = 0.0
+        var lookX: float = 0.0
+        var lookY: float = 0.0
+
+        hear *Vein.Input.Actions.@ActionPressed as a {
+            if a.action == "camera_toggle" {
+                if flying == 0 {
+                    flying = 1
+                    mute #Walking
+                    target $Rotation $OrbitCamera as e {
+                        yaw = e.Rotation.y
+                        pitch = e.Rotation.x
+                    }
+                    emit @CameraMode { mode: "free" }
+                } else {
+                    flying = 0
+                    unmute #Walking
+                    emit @CameraMode { mode: "follow" }
+                }
+            }
+            if a.action == "move_forward" { ahead = 1 }
+            if a.action == "move_back" { behind = 1 }
+            if a.action == "move_left" { leftward = 1 }
+            if a.action == "move_right" { rightward = 1 }
+            if a.action == "fly_up" { rise = 1 }
+            if a.action == "fly_down" { sink = 1 }
+        }
+        hear *Vein.Input.Actions.@ActionReleased as a {
+            if a.action == "move_forward" { ahead = 0 }
+            if a.action == "move_back" { behind = 0 }
+            if a.action == "move_left" { leftward = 0 }
+            if a.action == "move_right" { rightward = 0 }
+            if a.action == "fly_up" { rise = 0 }
+            if a.action == "fly_down" { sink = 0 }
+        }
+        hear *Vein.Input.Mouse.@MouseDown as m {
+            if m.button == 2 {
+                looking = 1
+                lastX = m.x
+                lastY = m.y
+            }
+        }
+        hear *Vein.Input.Mouse.@MouseUp as m { if m.button == 2 { looking = 0 } }
+        hear *Vein.Input.Mouse.@MouseMove as m {
+            if looking == 1 and flying == 1 {
+                yaw = yaw - (m.x - lastX) * mouseTurn
+                pitch = clamp(pitch - (m.y - lastY) * mouseTurn, -1.5, 1.5)
+            }
+            lastX = m.x
+            lastY = m.y
+        }
+        hear *Vein.Input.Gamepad.@AxisMoved as m {
+            if m.axis == "LeftX" { moveX = m.value }
+            if m.axis == "LeftY" { moveZ = m.value }
+            if m.axis == "RightX" { lookX = m.value }
+            if m.axis == "RightY" { lookY = m.value }
+        }
+
+        each tick as t {
+            if flying == 1 {
+                yaw = yaw - lookX * stickTurn * t.delta
+                pitch = clamp(pitch - lookY * stickTurn * t.delta, -1.5, 1.5)
+                let forward = ahead - behind - moveZ
+                let side = rightward - leftward + moveX
+                let fx = 0.0 - sin(yaw) * cos(pitch)
+                let fy = sin(pitch)
+                let fz = 0.0 - cos(yaw) * cos(pitch)
+                let rx = cos(yaw)
+                let rz = 0.0 - sin(yaw)
+                target $Position $Rotation $OrbitCamera as e {
+                    e.Position.x = e.Position.x + (fx * forward + rx * side) * speed * t.delta
+                    e.Position.y = e.Position.y + (fy * forward + rise - sink) * speed * t.delta
+                    e.Position.z = e.Position.z + (fz * forward + rz * side) * speed * t.delta
+                    e.Rotation.x = pitch
+                    e.Rotation.y = yaw
+                }
+            }
+        }
+    }
+
+    shard Follow2D #Walking {
+        each tick as t {
+            target $Position #CameraTarget as h {
+                target $Position $Follow2D as e {
+                    let k = min(1.0, e.Follow2D.ease * t.delta)
+                    e.Position.x = lerp(e.Position.x, h.Position.x, k)
+                    e.Position.y = lerp(e.Position.y, h.Position.y, k)
+                }
+            }
+        }
+    }
+}

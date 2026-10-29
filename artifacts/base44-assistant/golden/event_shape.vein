@@ -1,0 +1,26 @@
+bundle EventShapes by you {
+
+    shape $Rules { seed: int, players: int = 2 }
+
+    start @NewGame { seed: 42, mode: "duel" }
+
+    event @NewGame  { $Rules, mode: string }
+    event @Placed   { $Rules, *Vein.Math.Values.$Vec2, label: string }
+    event @Response { status: int, body: string }
+
+    builder Ping { *Vein.Math.Values.$Vec2, note: string }
+
+    shard Board {
+        hear @NewGame as g {
+            emit @Placed { seed: g.seed, players: g.players, x: 1.5, y: -2.0, label: g.mode }
+        }
+
+        hear @Placed as p {
+            bring Ping(p.x, p.y, p.label + " seed=" + p.seed + " players=" + p.players)
+        }
+
+        hear @Ping as k {
+            emit @Response { status: 200, body: k.note + " at " + k.x + "," + k.y }
+        }
+    }
+}

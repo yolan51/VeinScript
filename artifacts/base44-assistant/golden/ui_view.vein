@@ -1,0 +1,68 @@
+bundle UiView by you {
+
+    need "Vein.Math"
+    need "Vein.UI"
+
+    mark #Hud
+
+    shard Boot {
+        run once {
+            let screen = spawn()
+            attach $View to screen { width: 1280.0, height: 720.0 }
+
+            let score = spawn()
+            attach $Text to score { content: "SCORE 0" }
+            attach $Font to score { size: 24.0 }
+            attach $Rect to score { x: 0.0, y: 0.0, width: 160.0, height: 28.0 }
+            mark score #Hud
+
+            let timer = spawn()
+            attach $Text to timer { content: "01:30" }
+            attach $Font to timer { size: 24.0 }
+            attach $Rect to timer { x: 0.0, y: 0.0, width: 96.0, height: 28.0 }
+            mark timer #Hud
+
+            let title = spawn()
+            attach $Text to title { content: "PAUSED" }
+            attach $Font to title { size: 48.0 }
+            attach $Rect to title { x: 0.0, y: 0.0, width: 240.0, height: 56.0 }
+            mark title #Hud
+        }
+    }
+
+    shard Layout {
+        settled {
+            target $View as v {
+                target $Text $Rect $Font #Hud as w {
+                    var margin = 16.0
+
+                    if w.Text.content == "SCORE 0" {
+                        w.Rect.x = margin
+                        w.Rect.y = margin
+                    }
+                    if w.Text.content == "01:30" {
+                        w.Rect.x = v.View.width - w.Rect.width - margin
+                        w.Rect.y = margin
+                    }
+                    if w.Text.content == "PAUSED" {
+                        w.Rect.x = (v.View.width - w.Rect.width) / 2.0
+                        w.Rect.y = (v.View.height - w.Rect.height) / 2.0
+                    }
+                }
+            }
+        }
+    }
+
+    shard Report {
+        settled {
+            target $View as v {
+                emit *Vein.Console.Io.@Print { text: "view " + v.View.width + "x" + v.View.height }
+            }
+            target $Text $Rect $Font #Hud as w {
+                emit *Vein.Console.Io.@Print {
+                    text: w.Text.content + " at " + w.Rect.x + "," + w.Rect.y + " @" + w.Font.size + "px"
+                }
+            }
+        }
+    }
+}

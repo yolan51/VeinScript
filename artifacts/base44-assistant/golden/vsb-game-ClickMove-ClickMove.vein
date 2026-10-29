@@ -1,0 +1,98 @@
+bundle ClickMove by game {
+    need "Vein.Transform"
+    need "Vein.Math"
+
+    publicator Walking {
+        shared("Walks to where the player clicks, or follows the pointer while the left button is held.")
+        shape $ClickMover {
+            speed: float = 6.0, plane: string = "xz",
+            tx: float = 0.0, tz: float = 0.0, moving: int = 0, held: int = 0,
+            follow: Entity = 0, reach: float = 0.0
+        }
+
+        shared("A walker reached where it was going (a clicked point, or within reach of what it followed).")
+        event @Arrived { walker: Entity }
+    }
+
+    mark #Gameplay
+
+    shard Pointer {
+        var px: float = 0.0
+        var pz: float = 0.0
+        hear *Vein.Input.Mouse.@MouseWorld as m {
+            target $ClickMover as w {
+                if w.ClickMover.plane == "xz" {
+                    px = m.x
+                    pz = m.z
+                    if w.ClickMover.held == 1 {
+                        w.ClickMover.tx = px
+                        w.ClickMover.tz = pz
+                    }
+                }
+            }
+        }
+        hear *Vein.Input.Mouse.@MouseMove as m {
+            target $ClickMover as w {
+                if w.ClickMover.plane == "xy" {
+                    px = m.x
+                    pz = m.y
+                    if w.ClickMover.held == 1 {
+                        w.ClickMover.tx = px
+                        w.ClickMover.tz = pz
+                    }
+                }
+            }
+        }
+        hear *Vein.Input.Mouse.@MouseDown as m {
+            if m.button == 1 {
+                target $ClickMover as w {
+                    w.ClickMover.held = 1
+                    w.ClickMover.tx = px
+                    w.ClickMover.tz = pz
+                    w.ClickMover.moving = 1
+                    w.ClickMover.follow = 0
+                }
+            }
+        }
+        hear *Vein.Input.Mouse.@MouseUp as m { if m.button == 1 { target $ClickMover as w { w.ClickMover.held = 0 } } }
+    }
+
+    shard Walk #Gameplay {
+        each tick as t {
+            target $Position $Rotation $ClickMover as w {
+                var stop = 0.1
+                if not (w.ClickMover.follow == 0) {
+                    target $Position on w.ClickMover.follow as f {
+                        w.ClickMover.tx = f.Position.x
+                        if w.ClickMover.plane == "xz" { w.ClickMover.tz = f.Position.z } else { w.ClickMover.tz = f.Position.y }
+                        w.ClickMover.moving = 1
+                    }
+                    stop = max(0.1, w.ClickMover.reach)
+                }
+                if w.ClickMover.moving == 1 {
+                    var here = w.Position.z
+                    if w.ClickMover.plane == "xy" { here = w.Position.y }
+                    let dx = w.ClickMover.tx - w.Position.x
+                    let dz = w.ClickMover.tz - here
+                    let dist = sqrt(dx * dx + dz * dz)
+                    if dist <= stop {
+                        if w.ClickMover.held == 0 {
+                            w.ClickMover.moving = 0
+                            emit @Arrived { walker: w }
+                        }
+                    } else {
+                        let step = min(dist - stop * 0.5, w.ClickMover.speed * t.delta)
+                        w.Position.x = w.Position.x + dx / dist * step
+                        if w.ClickMover.plane == "xz" {
+                            w.Position.z = w.Position.z + dz / dist * step
+                            w.Rotation.y = atan2(dx, dz)
+                        } else {
+                            w.Position.y = w.Position.y + dz / dist * step
+                            w.Rotation.z = atan2(dz, dx)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

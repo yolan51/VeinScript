@@ -1,0 +1,23 @@
+bundle Causality by patterns {
+    event @Ordered { item: string, price: int }
+    event @Paid { item: string }
+    event @Shipped { item: string }
+
+    SF check(name: string, good: bool) {
+        if good { emit *Vein.Console.Io.@Print { text: "ok   " + name } } else { emit *Vein.Console.Io.@Print { text: "FAIL " + name } }
+    }
+
+    shard Shop { run once { emit @Ordered { item: "lamp", price: 40 } } }
+    shard Bank { hear @Ordered as o { if o.price < 100 { emit @Paid { item: o.item } } } }
+    shard Warehouse { hear @Paid as p { emit @Shipped { item: p.item } } }
+
+    shard Audit {
+        var paidBy: string = ""
+        hear @Paid as p { paidBy = p.from.name }
+        hear @Shipped as s {
+            do check("the order reached shipping through payment", s.item == "lamp")
+            do check("each event says who sent it", contains(paidBy, "Bank") and contains(s.from.name, "Warehouse"))
+            do check("and which event caused it", not ("" + s.cause == ""))
+        }
+    }
+}

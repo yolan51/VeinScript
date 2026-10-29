@@ -1,0 +1,16 @@
+bundle Inventory by you {
+
+    publicator Bag {
+        shared("The contents of a bag changed.")
+        event @InventoryChanged { who: string, item: string, count: int }
+    }
+
+    shard Satchel {
+        var carried = 0
+
+        hear *you.Loot.Drops.@ItemPicked as p {
+            carried += 1
+            emit @InventoryChanged { who: p.who, item: p.item, count: carried }
+        }
+    }
+}

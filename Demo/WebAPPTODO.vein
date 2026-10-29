@@ -1,0 +1,326 @@
+// Demo/WebAPPTODO.vein — samples/desktop/todo.vein, for the web: groups as tabs, priorities in colour,
+// progress, "hide done", saved beside the program.
+//
+//   veinc serve Demo/WebAPPTODO.vein --port 8080
+//   then open http://localhost:8080/
+//
+// THE ONE THING THAT IS DIFFERENT FROM THE DESKTOP APP: every request starts from an EMPTY world (`veinc serve`
+// runs each request on a fresh interpreter). So the files are the program's memory, and a request is a short
+// story told in events, each one seeing what the one before it committed:
+//
+//   @Request  → read groups.json → weave it → read tasks.json → weave it      (the world is back)
+//   @Ready    → do the one thing asked (add, tick, re-prioritise, remove)
+//   @Save     → write both files with toText<Json>, the SAME looms that read them, and answer "ok"
+//   @Draw     → the page: the markup, the stylesheet and the script, as fragments a ShardView puts together
+//
+// The browser posts every action to /api and reloads the page. Which tab is open and "hide done" are the
+// browser's own business (localStorage), as they were the window's on the desktop.
+
+bundle WebTodo by you {
+    need "Vein.Web"
+    need "Vein.WebTheme"
+
+    // ---- the data: the same two shapes as the desktop app, and a task gets an id the browser can name -----
+
+    shape $Group { name: string }
+    shape $Task { id: int, group: string, text: string, done: bool = false, priority: int = 1 }
+
+    // What this request asked for, as an identity every shard can look at.
+    shape $Ask { path: string, action: string, group: string, text: string, priority: int, id: int }
+
+    mark #Group
+    mark #Task
+    mark #Ask
+    mark #GroupsFile       // file tags (RULES 28c)
+    mark #TasksFile
+
+    builder Group { $Group   mark #Group }
+    builder Task { $Task   mark #Task }
+    builder Ask { $Ask   mark #Ask }
+
+    // The files, both ways: `weave` reads them, `toText<Json>` writes them.
+    loom<Json> SavedGroup { $Group   mark #Group }
+    loom<Json> SavedTask { $Task   mark #Task }
+
+    event @Ready { }       // both files are woven: the world is this request's again
+    event @Save { }        // the change is committed: write it down
+    event @Draw { }        // draw the page from what is now true
+
+    // ---- 1. the request, and the world coming back from the files ---------------------------------------
+
+    shard Load {
+        hear @Request as r {
+            // The task's number travels as `task`, not `id`: a request field called `id` reads back as 0.
+            if r.path == "/api" {
+                bring Ask(r.path, r.action, trim(r.group), trim(r.text), int(r.priority), int(r.task))
+            } else {
+                bring Ask(r.path, "", "", "", 0, 0)
+            }
+            emit *Vein.Files.Io.@ReadFile { path: "groups.json", tag: #GroupsFile }
+        }
+
+        hear *Vein.Files.Io.@FileLoaded as f {
+            if f.tag == #GroupsFile { weave SavedGroup(f.text) }
+            if f.tag == #TasksFile { weave SavedTask(f.text) }
+        }
+
+        // No file yet is an empty list: carry on as if it had been read.
+        hear *Vein.Files.Io.@FileMissing as f {
+            if f.tag == #GroupsFile { emit *Vein.Files.Io.@ReadFile { path: "tasks.json", tag: #TasksFile } }
+            if f.tag == #TasksFile { emit @Ready { } }
+        }
+
+        hear @Woven as w {
+            if w.loom == "SavedGroup" { emit *Vein.Files.Io.@ReadFile { path: "tasks.json", tag: #TasksFile } }
+            if w.loom == "SavedTask" { emit @Ready { } }
+        }
+    }
+
+    // ---- 2. the one thing asked: data only ---------------------------------------------------------------
+
+    shard Act {
+        hear @Ready as ready {
+            target $Ask as a {
+                if a.Ask.path == "/" { emit @Draw { } }
+                if a.Ask.path == "/api" {
+                    do apply(a.Ask.action, a.Ask.group, a.Ask.text, a.Ask.priority, a.Ask.id)
+                    emit @Save { }
+                }
+            }
+        }
+    }
+
+    SF apply(action: string, group: string, text: string, priority: int, id: int) {
+        if action == "addGroup" and not (group == "") and not hasGroup(group) { bring Group(group) }
+        if action == "addTask" and not (text == "") and hasGroup(group) { bring Task(nextId(), group, text, false, level(priority)) }
+        if action == "dropGroup" {
+            target $Task as t { if t.Task.group == group { destroy t } }
+            target $Group as g { if g.Group.name == group { destroy g } }
+        }
+        target $Task as t {
+            if t.Task.id == id {
+                if action == "toggle" { t.Task.done = not t.Task.done }
+                if action == "priority" { t.Task.priority = level(priority) }
+                if action == "delete" { destroy t }
+            }
+        }
+    }
+
+    // ---- 3. what it remembers: the same looms, the other way ----------------------------------------
+
+    shard Store {
+        hear @Save as s {
+            emit *Vein.Files.Io.@WriteFile { path: "groups.json", text: toText<Json>(SavedGroup), tag: #GroupsFile }
+            emit *Vein.Files.Io.@WriteFile { path: "tasks.json", text: toText<Json>(SavedTask), tag: #TasksFile }
+            emit @Response { status: 200, body: "ok" }
+        }
+    }
+
+    // ---- 4. the page: markup ------------------------------------------------------------------------
+
+    shard Markup {
+        hear @Draw as d {
+            bring OpenAs("main", "app")
+            bring Raw("<header class='top'><div class='logo'>VS</div><h1>To-do</h1>" +
+                      "<button class='ghost theme' onclick='theme()' title='Light or dark'>&#9680;</button></header>")
+            bring Raw("<form class='row' data-act='addGroup'><input name='group' placeholder='New group, e.g. Shopping' autocomplete='off'>" +
+                      "<button>Add group</button></form>")
+            bring Raw("<label class='switch'><input type='checkbox' id='hideDone'> Hide done tasks</label>")
+
+            bring OpenAs("nav", "tabs")
+            target $Group as g {
+                bring Raw("<button class='tab' data-tab='" + esc(g.Group.name) + "'>" + esc(g.Group.name) +
+                          "<span class='badge'>" + left(g.Group.name) + "</span></button>")
+            }
+            bring Close("nav")
+
+            target $Group as g { do section(g.Group.name) }
+            if groups() == 0 { bring Raw("<p class='empty'>No group yet. Name one above, then press Enter.</p>") }
+            bring Close("main")
+        }
+    }
+
+    // One group: its header, its progress, its entry row and its tasks.
+    SF section(name: string) {
+        let all = total(name)
+        let open = left(name)
+        var status = "empty"
+        if all > 0 { status = string(open) + " of " + string(all) + " left" }
+
+        bring Raw("<section class='group' data-group='" + esc(name) + "' hidden>")
+        bring Raw("<div class='head'><h2>" + esc(name) + "</h2><span class='status'>" + status + "</span>" +
+                  "<button class='ghost' data-act='dropGroup' data-group='" + esc(name) + "'>Remove group</button></div>")
+        bring Raw("<progress value='" + (all - open) + "' max='" + max1(all) + "'></progress>")
+        bring Raw("<form class='row' data-act='addTask' data-group='" + esc(name) + "'>" +
+                  "<input name='text' placeholder='Add a task to " + esc(name) + "' autocomplete='off'>" +
+                  "<select name='priority'>" + options(1) + "</select><button>Add</button></form>")
+        bring OpenAs("ul", "tasks")
+        target $Task as t {
+            if t.Task.group == name { do row(t.Task.id, t.Task.text, t.Task.done, t.Task.priority) }
+        }
+        bring Close("ul")
+        bring Raw("</section>")
+    }
+
+    // One task: its priority (the colour), its checkbox and its ✕.
+    SF row(id: int, text: string, done: bool, priority: int) {
+        var cls = "task"
+        var checked = ""
+        if done {
+            cls = "task done"
+            checked = " checked"
+        }
+        bring Raw("<li class='" + cls + "'>" +
+                  "<select class='chip p" + priority + "' data-act='priority' data-id='" + id + "' title='Priority'>" + options(priority) + "</select>" +
+                  "<label><input type='checkbox' data-act='toggle' data-id='" + id + "'" + checked + "><span>" + esc(text) + "</span></label>" +
+                  "<button class='x' data-act='delete' data-id='" + id + "' title='Remove this task'>&#10005;</button></li>")
+    }
+
+    // ---- 4. the page: style ------------------------------------------------------------------------------
+
+    shard Styling {
+        hear @Draw as d {
+            bring Slate()
+            bring Reset()
+            bring Css("main.app{max-width:640px;margin:2.5rem auto;padding:0 16px}" +
+                      ".top{display:flex;align-items:center;gap:.75rem}" +
+                      ".logo{width:40px;height:40px;border-radius:10px;background:var(--brand);color:var(--ink);display:grid;place-items:center;font-weight:800;letter-spacing:.02em}" +
+                      ".top h1{margin:0;font-size:1.6rem;flex:1}" +
+                      ".row{display:flex;gap:.5rem;margin:1rem 0}.row input{flex:1;min-width:0}" +
+                      "input,select,button{font:inherit;padding:.5rem .75rem;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg)}" +
+                      "button{cursor:pointer;background:var(--brand);color:var(--ink);border-color:transparent}" +
+                      "button.ghost{background:transparent;color:var(--muted);border-color:var(--line)}" +
+                      ".switch{display:flex;align-items:center;gap:.5rem;color:var(--muted);font-size:.9rem}")
+            bring Css(".tabs{display:flex;gap:.4rem;flex-wrap:wrap;margin:1.1rem 0 .8rem}" +
+                      ".tab{background:transparent;color:var(--fg);border:1px solid var(--line)}" +
+                      ".tab.on{background:var(--brand);color:var(--ink);border-color:var(--brand)}" +
+                      ".badge{display:inline-block;min-width:1.5em;margin-left:.45em;padding:0 .45em;border-radius:999px;background:var(--line);color:var(--fg);font-size:.75rem;text-align:center}" +
+                      ".tab.on .badge{background:rgba(255,255,255,.25);color:inherit}" +
+                      ".group{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:1rem 1.1rem;box-shadow:var(--shadow)}" +
+                      ".head{display:flex;align-items:center;gap:.8rem}.head h2{margin:0;font-size:1.2rem;flex:1}" +
+                      ".status{color:var(--muted);font-size:.9rem}" +
+                      "progress{width:100%;height:8px;margin:.8rem 0 .1rem;accent-color:var(--brand)}")
+            bring Css(".tasks{list-style:none;margin:.4rem 0 0;padding:0;max-height:360px;overflow:auto}" +
+                      ".task{display:flex;align-items:center;gap:.6rem;padding:.45rem .1rem;border-bottom:1px solid var(--line)}" +
+                      ".task:last-child{border-bottom:none}" +
+                      ".task label{flex:1;display:flex;gap:.55rem;align-items:center;cursor:pointer}" +
+                      ".task.done span{opacity:.5;text-decoration:line-through}" +
+                      ".chip{padding:.2rem .4rem;font-size:.8rem;border-color:transparent;color:var(--fg)}" +
+                      ".p1{background:rgba(235,66,54,.18)}.p2{background:rgba(235,66,54,.42)}" +
+                      ".p3{background:rgba(235,66,54,.7);color:#fff}.p4{background:rgb(235,66,54);color:#fff}" +
+                      ".x{background:transparent;color:var(--muted);border:none;padding:.2rem .5rem}.x:hover{color:rgb(235,66,54)}" +
+                      "body.hide-done .task.done{display:none}" +
+                      ".empty{color:var(--muted);text-align:center;margin:2.5rem 0}")
+        }
+    }
+
+    // ---- 4. the page: behaviour ---------------------------------------------------------------------------
+
+    shard Behaviour {
+        hear @Draw as d {
+            bring ThemeToggle()
+            // Every action is one POST to /api, then a reload: the page is always drawn from the files.
+            bring Js("function post(d){var b=new URLSearchParams(Object.assign({action:'',group:'',text:'',priority:'1',task:'0'},d));" +
+                     "return fetch('/api',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b}).then(function(){location.reload()})}")
+            // One group at a time, the way the window shows one: the open tab is remembered by the browser.
+            bring Js("function show(n){var hit=null;document.querySelectorAll('.group').forEach(function(g){var on=g.dataset.group===n;g.hidden=!on;if(on)hit=g});" +
+                     "if(!hit){var f=document.querySelector('.group');if(f&&f.dataset.group!==n){show(f.dataset.group)}return}" +
+                     "document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('on',t.dataset.tab===n)});localStorage.setItem('todo.tab',n)}")
+            bring Js("document.addEventListener('click',function(e){var t=e.target.closest('[data-tab]');if(t){show(t.dataset.tab);return}" +
+                     "var b=e.target.closest('button[data-act]');if(!b)return;" +
+                     "if(b.dataset.act==='dropGroup'&&!confirm('Remove '+b.dataset.group+' and every task in it?'))return;" +
+                     "post({action:b.dataset.act,group:b.dataset.group||'',task:b.dataset.id||'0'})});")
+            bring Js("document.addEventListener('change',function(e){var el=e.target;" +
+                     "if(el.dataset.act==='toggle')post({action:'toggle',task:el.dataset.id});" +
+                     "if(el.dataset.act==='priority')post({action:'priority',task:el.dataset.id,priority:String(el.selectedIndex+1)});" +
+                     "if(el.id==='hideDone'){document.body.classList.toggle('hide-done',el.checked);localStorage.setItem('todo.hide',el.checked?'1':'')}});")
+            bring Js("document.addEventListener('submit',function(e){var f=e.target;if(!f.dataset.act)return;e.preventDefault();" +
+                     "var d=Object.fromEntries(new FormData(f));" +
+                     "if(f.dataset.act==='addGroup'){if(!d.group.trim())return;localStorage.setItem('todo.tab',d.group.trim())}" +
+                     "if(f.dataset.act==='addTask'&&!d.text.trim())return;" +
+                     "post({action:f.dataset.act,group:f.dataset.group||d.group||'',text:d.text||'',priority:String((f.querySelector('select')||{selectedIndex:0}).selectedIndex+1)})});")
+            bring Js("(function(){var h=localStorage.getItem('todo.hide')==='1';var c=document.getElementById('hideDone');if(c)c.checked=h;" +
+                     "document.body.classList.toggle('hide-done',h);show(localStorage.getItem('todo.tab')||'')})();")
+        }
+    }
+
+    // Every fragment of the page, put together once: markup in <body>, style in <head>, script at the end.
+    ShardView Page {
+        var html: string
+        var css: string
+        var js: string
+
+        hear @Html as f   { html += f.markup }
+        hear @Style as s  { css += s.css }
+        hear @Script as c { js += c.code }
+
+        hear @Draw as d { emit @Render { path: "/" } }
+        hear @Render as v {
+            if not (html == "") {
+                emit @Response { status: 200, body: "<!doctype html><html><head><meta charset=\"utf-8\">" +
+                    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>To-do</title><style>" + css +
+                    "</style></head><body>" + html + "<script>" + js + "</script></body></html>" }
+            }
+        }
+    }
+
+    // ---- small answers -------------------------------------------------------------------------------
+
+    fn levels() return list<string> { return ["Low", "Medium", "High", "Very high"] }
+
+    fn options(chosen: int) return string {
+        var html = ""
+        target levels() as name {
+            var sel = ""
+            if Index + 1 == chosen { sel = " selected" }
+            html = html + "<option" + sel + ">" + name + "</option>"
+        }
+        return html
+    }
+
+    fn level(n: int) return int {
+        if n < 1 { return 1 }
+        if n > 4 { return 4 }
+        return n
+    }
+
+    fn hasGroup(name: string) return bool {
+        var found = false
+        target $Group as g { if g.Group.name == name { found = true } }
+        return found
+    }
+
+    fn groups() return int {
+        var n = 0
+        target $Group as g { n += 1 }
+        return n
+    }
+
+    fn nextId() return int {
+        var top = 0
+        target $Task as t { if t.Task.id > top { top = t.Task.id } }
+        return top + 1
+    }
+
+    fn total(group: string) return int {
+        var n = 0
+        target $Task as t { if t.Task.group == group { n += 1 } }
+        return n
+    }
+
+    fn left(group: string) return int {
+        var n = 0
+        target $Task as t { if t.Task.group == group and not t.Task.done { n += 1 } }
+        return n
+    }
+
+    fn max1(n: int) return int {
+        if n < 1 { return 1 }
+        return n
+    }
+
+    // Text a person typed, made safe to put inside the page.
+    fn esc(s: string) return string {
+        return replace(replace(replace(replace(replace(s, "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), "\"", "&quot;"), "'", "&#39;")
+    }
+}

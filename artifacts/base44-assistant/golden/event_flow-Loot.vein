@@ -1,0 +1,22 @@
+bundle Loot by you {
+
+    publicator Drops {
+        shared("An item fell to the floor.")
+        event @ItemDropped { item: string, finder: string }
+
+        shared("Someone picked an item up.")
+        event @ItemPicked { who: string, item: string }
+    }
+
+    shard Dropper {
+        hear *you.Combat.Fight.@Died as d {
+            emit @ItemDropped { item: "rusty key", finder: d.by }
+        }
+    }
+
+    shard Picker {
+        hear @ItemDropped as i {
+            emit @ItemPicked { who: i.finder, item: i.item }
+        }
+    }
+}

@@ -1,0 +1,62 @@
+bundle DiagnosticsDemo by you {
+
+    shape $Row { title: string, rank: int }
+    mark #Row
+
+    builder Row { $Row   mark #Row }
+
+    shard Collector {
+        hear *Vein.Diagnostics.Report.@DiagnosticRaised as d {
+            if d.severity == 0 { emit *Vein.Console.Io.@Print { text: "   note  | " + d.message } }
+            if d.severity == 1 { emit *Vein.Console.Io.@Print { text: "   WARN  | " + d.message } }
+            if d.severity == 2 { emit *Vein.Console.Io.@Print { text: "   ERROR | " + d.message } }
+        }
+    }
+
+    shard Validate {
+        run once {
+            emit *Vein.Console.Io.@Print { text: "-- checking the rows --" }
+
+            bring Row("write the docs", 3)
+            bring Row("", -1)
+
+            do *Vein.Diagnostics.Report.info("2 rows to check")
+            do *Vein.Diagnostics.Report.warn("a row has an empty title")
+            do *Vein.Diagnostics.Report.error("a row has rank -1, which is not a rank")
+        }
+    }
+
+    shard Compute {
+        run once {
+            emit *Vein.Console.Io.@Print { text: "-- dividing --" }
+            emit *Vein.Console.Io.@Print { text: "   5 % 2 = " + (5 % 2) }
+
+            let empty = 2 - 2
+            emit *Vein.Console.Io.@Print { text: "   5 % " + empty + " = " + (5 % empty) }
+            emit *Vein.Console.Io.@Print { text: "   THIS LINE NEVER PRINTS" }
+        }
+    }
+
+    shard Recover {
+        hear *Vein.Diagnostics.Report.@DiagnosticRaised as d {
+            if d.shard == "Compute" and d.severity == 2 {
+                emit *Vein.Console.Io.@Print { text: "   recovered from " + d.shard + " (" + d.phase + ", " + d.file + " line " + d.line + "): using 0" }
+            }
+        }
+    }
+
+    shard Carry_on {
+        settled {
+            emit *Vein.Console.Io.@Print { text: "-- the program is still alive --" }
+            target $Row #Row as r {
+                emit *Vein.Console.Io.@Print { text: "   row: [" + r.Row.title + "] rank " + r.Row.rank }
+            }
+        }
+    }
+
+    shard Unreachable {
+        hear *Vein.Net.Http.@Failed as f {
+            do *Vein.Diagnostics.Report.error("no answer from " + f.url + ": " + f.reason)
+        }
+    }
+}

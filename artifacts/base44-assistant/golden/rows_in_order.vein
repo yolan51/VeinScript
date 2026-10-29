@@ -1,0 +1,58 @@
+bundle RowsInOrder by you {
+
+    event @RowArrived { title: string, rank: int }
+
+    shape $Row { title: string, rank: int }
+    mark #Row
+
+    builder Row { $Row   mark #Row }
+
+    shard Source {
+        run once {
+            emit @RowArrived { title: "gamma", rank: 3 }
+            emit @RowArrived { title: "alpha", rank: 1 }
+            emit @RowArrived { title: "beta",  rank: 2 }
+        }
+    }
+
+    shard Ingest {
+        hear @RowArrived as r {
+            emit *Vein.Console.Io.@Print { text: "ingesting " + r.title }
+            bring Row(r.title, r.rank)
+
+            target $Row #Row as x {
+                emit *Vein.Console.Io.@Print { text: "   visible now: " + x.Row.title }
+            }
+        }
+    }
+
+    shard Listing {
+        settled {
+            emit *Vein.Console.Io.@Print { text: "rows, in the order they were brought:" }
+            target $Row #Row as r {
+                emit *Vein.Console.Io.@Print {
+                    text: "   e" + Entity + "  " + r.Row.title + "  (rank " + r.Row.rank + ")"
+                }
+            }
+            emit *Vein.Console.Io.@Print {
+                text: "ranks read 3, 1, 2 — no query sorts on `rank`. The next shard shows what does."
+            }
+        }
+    }
+
+    shard ByRank {
+        settled {
+            emit *Vein.Console.Io.@Print { text: "the same rows, ordered by rank:" }
+
+            repeat 3 as i {
+                target $Row #Row as r {
+                    if r.Row.rank == i + 1 {
+                        emit *Vein.Console.Io.@Print {
+                            text: "   e" + Entity + "  " + r.Row.title + "  (rank " + r.Row.rank + ")"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

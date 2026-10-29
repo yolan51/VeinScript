@@ -1,0 +1,42 @@
+bundle TextSplitJoin by you {
+
+    shard Apart {
+        run once {
+            let cells = split("north,,south,east", ",")
+            emit *Vein.Console.Io.@Print { text: "cells    = " + len(cells) + " → " + join(cells, "|") }
+
+            let rows = lines("first\r\nsecond\nthird")
+            emit *Vein.Console.Io.@Print { text: "lines    = " + len(rows) + " → " + join(rows, "/") }
+
+            let ws = words("  the   quick  brown   ")
+            emit *Vein.Console.Io.@Print { text: "words    = " + len(ws) + " → " + join(ws, ".") }
+
+            let cs = chars("abc")
+            emit *Vein.Console.Io.@Print { text: "chars    = " + len(cs) + " → " + join(cs, "-") }
+        }
+    }
+
+    shard Together {
+        run once {
+            let parts = split("2026-09-06", "-")
+
+            emit *Vein.Console.Io.@Print { text: "dashes   = " + join(parts, "-") }
+            emit *Vein.Console.Io.@Print { text: "slashes  = " + join(parts, "/") }
+            emit *Vein.Console.Io.@Print { text: "nothing  = " + join(parts, "") }
+
+            let original = "a,b,,c"
+            emit *Vein.Console.Io.@Print { text: "round    = " + (join(split(original, ","), ",") == original) }
+
+            emit *Vein.Console.Io.@Print { text: "as text  = " + string(parts) }
+        }
+    }
+
+    shard Table {
+        run once {
+            target lines("ada,36\ngrace,45\nalan,41") as row {
+                let f = split(row, ",")
+                emit *Vein.Console.Io.@Print { text: upper(substring(f[0], 0, 1)) + substring(f[0], 1) + " is " + f[1] }
+            }
+        }
+    }
+}

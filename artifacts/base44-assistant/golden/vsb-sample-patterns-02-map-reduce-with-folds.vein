@@ -1,0 +1,58 @@
+bundle MapReduce by patterns {
+    shape $Boss { damage: int folds sum, topHit: int folds max, weakest: int folds min }
+    mark #Boss
+
+    SF check(name: string, good: bool) {
+        if good { emit *Vein.Console.Io.@Print { text: "ok   " + name } } else { emit *Vein.Console.Io.@Print { text: "FAIL " + name } }
+    }
+
+    shard Spawn {
+        run once {
+            let b = spawn()
+            attach $Boss to b { weakest: 1000 }
+            mark b #Boss
+        }
+    }
+
+    shard Archer {
+        each tick {
+            target $Boss as b {
+                b.Boss.damage += 3
+                b.Boss.topHit = 3
+                b.Boss.weakest = 3
+            }
+        }
+    }
+    shard Knight {
+        each tick {
+            target $Boss as b {
+                b.Boss.damage += 10
+                b.Boss.topHit = 10
+                b.Boss.weakest = 10
+            }
+        }
+    }
+    shard Wizard {
+        each tick {
+            target $Boss as b {
+                b.Boss.damage += 7
+                b.Boss.topHit = 7
+                b.Boss.weakest = 7
+            }
+        }
+    }
+
+    shard Report {
+        var ticks: int = 0
+        settled {
+            ticks += 1
+            if ticks == 1 {
+                target $Boss as b {
+                    do check("folds sum: every hit counts (3 + 10 + 7)", b.Boss.damage == 20)
+                    do check("folds max: the biggest hit wins", b.Boss.topHit == 10)
+                    do check("folds min: the smallest one", b.Boss.weakest == 3)
+                }
+            }
+        }
+    }
+}

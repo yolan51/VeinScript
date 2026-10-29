@@ -1,0 +1,63 @@
+bundle WebSite by you {
+
+    need "Vein.Web"                          // &Heading / &Paragraph / &Link — bare, via `need`
+
+    shard Home {
+        hear @Request as r {
+            if r.path == "/" {
+                bring Heading("VeinScript")
+                bring Paragraph("A site assembled from events.")
+                bring Link("/about", "about")
+                bring JumpLine()
+                bring Link("/greet", "say hello")
+            }
+        }
+    }
+
+    shard About {
+        hear @Request as r {
+            if r.path == "/about" {
+                bring Heading("About")
+                bring Paragraph("Every page here is a set of fragments emitted by shards.")
+                bring Link("/", "home")
+            }
+        }
+    }
+
+    shard Greet {
+        hear @Request as r {
+            if r.path == "/greet" {
+                if r.method == "GET" {
+                    bring Heading("Say hello")
+                    emit @Html { markup: "<form method=\"post\" action=\"/greet\"><input name=\"who\" placeholder=\"your name\"><button>send</button></form>" }
+                    bring Link("/", "home")
+                }
+
+                if r.method == "POST" {
+                    bring Heading("Hello " + r.who)
+                    bring Paragraph("Submitted with " + r.method + ", body: " + r.body)
+                    bring Link("/greet", "again")
+                }
+            }
+        }
+    }
+
+    shard Router {
+        hear @Request as r { emit @Render { path: r.path } }
+    }
+
+    ShardView Page {
+        var html: string
+
+        hear @Html as h { html += h.markup }
+
+        hear @Render as v {
+            if not (html == "") {
+                emit @Response {
+                    status: 200
+                    body: "<!doctype html><html><head><meta charset=\"utf-8\"><title>VeinScript</title></head><body>" + html + "</body></html>"
+                }
+            }
+        }
+    }
+}

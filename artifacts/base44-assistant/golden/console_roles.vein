@@ -1,0 +1,61 @@
+bundle Roles by you {
+
+    shard Boot {
+        run once {
+            match here() {
+                when #Main {
+                    emit *Vein.Console.Io.@Print   { text: "Main — launching Alpha, Beta and Gamma." }
+                    emit *Vein.Console.Io.@Console { name: #Alpha, firsttext: "Alpha — I echo." }
+                    emit *Vein.Console.Io.@Console { name: #Beta,  firsttext: "Beta — I count." }
+                    emit *Vein.Console.Io.@Console { name: #Gamma, firsttext: "Gamma — I relay to Alpha." }
+                }
+            }
+        }
+    }
+
+    shard Driver {
+        var round: int
+
+        every 2 {
+            match here() {
+                when #Main {
+                    round += 1
+                    let workers = [#Alpha, #Beta, #Gamma]
+                    let dest = pick(workers)
+                    emit *Vein.Console.Io.@Print { text: "→ " + dest + ": ping " + round }
+                    emit *Vein.Console.Io.@Send  { to: dest, text: "ping " + round }
+                }
+                when #Alpha {
+                    round += 1
+                    let workers = [#Alpha, #Beta, #Gamma]
+                    let dest = pick(workers)
+                    emit *Vein.Console.Io.@Print { text: "arrow → " + #Beta + " : FROM ALPHA TEST " + round }
+                    emit *Vein.Console.Io.@Send  { to: #Beta, text: " FROM ALPHA TEST " + round }
+                }
+            }
+        }
+    }
+
+    shard Reachability {
+        hear *Vein.Console.Io.@Undelivered as u {
+            emit *Vein.Console.Io.@Print { text: "  (" + u.to + " is not running — closed?)" }
+        }
+    }
+
+    shard Worker {
+        var seen: int
+
+        hear *Vein.Console.Io.@Message as m {
+            match here() {
+                when #Alpha { emit *Vein.Console.Io.@Send { to: #Main,  text: "Alpha echoes: " + m.text } }
+                when #Gamma { emit *Vein.Console.Io.@Send { to: #Alpha, text: "Gamma relays: " + m.text } }
+				when #Beta {
+				    seen += 1
+				    emit *Vein.Console.Io.@Print { text: m.from + " → " + m.text }
+				    emit *Vein.Console.Io.@Send  { to: #Main, text: "Beta has now seen " + seen }
+				}
+                else { emit *Vein.Console.Io.@Print { text: m.from + " → " + m.text } }
+            }
+        }
+    }
+}

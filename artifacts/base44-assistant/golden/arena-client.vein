@@ -1,0 +1,39 @@
+bundle ArenaClient by you {
+
+    fn ServerAddress() return string { return "127.0.0.1:9701" }
+
+    shard Session {
+        var joined: bool
+
+        run once {
+            emit *Vein.Console.Io.@Print { text: "your name:" }
+        }
+
+        hear *Vein.Console.Io.@Input as i {
+            let first = not joined
+            let line = trim(i.text)
+
+            if first {
+                joined = true
+                emit *Vein.Net.Peer.@Listen { as: line, at: 0, key: "arena-secret" }
+                emit *Vein.Net.Peer.@Link { name: #Arena, at: ServerAddress(), key: "arena-secret" }
+                emit *Vein.Net.Peer.@Send { to: #Arena, text: "join" }
+                emit *Vein.Console.Io.@Print { text: "joined as " + line + " — move with w/a/s/d + Enter" }
+            }
+
+            if not first {
+                emit *Vein.Net.Peer.@Send { to: #Arena, text: "move " + line }
+            }
+        }
+
+        hear *Vein.Net.Peer.@Undelivered as u {
+            emit *Vein.Console.Io.@Print { text: "  (cannot reach " + ServerAddress() + " — is the server running?)" }
+        }
+    }
+
+    shard Incoming {
+        hear *Vein.Net.Peer.@Message as m audience #Arena {
+            emit *Vein.Console.Io.@Print { text: m.text }
+        }
+    }
+}

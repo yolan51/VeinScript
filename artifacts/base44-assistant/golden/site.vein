@@ -1,0 +1,46 @@
+bundle Site {
+    need "Vein.Web"
+
+    publicator SiteApi {
+        shared("An inbound HTTP request.")
+        event @Request { path: string }
+
+        shared("A fragment of HTML contributed by some shard.")
+        event @Html { markup: string }
+
+        shared("Signal that all fragments are in; assemble the page.")
+        event @Render { }
+
+        shared("The response to send back.")
+        event @Response { status: int, body: string }
+    }
+
+    shard Header {
+        hear @Request as req { emit @Html { markup: "<h1>VeinScript</h1>" } }
+    }
+
+    shard Body {
+        hear @Request as req {
+            emit @Html { markup: "<p>Reactive page, assembled from fragments.</p>" }
+        }
+    }
+
+    shard Kernel {
+        hear @Request as req { emit @Render { } }
+    }
+
+    ShardView Page {
+        var html: string
+
+        hear @Html as f {
+            html += f.markup
+        }
+
+        hear @Render as r {
+            emit @Response {
+                status: 200
+                body: "<html><body>" + html + "</body></html>"
+            }
+        }
+    }
+}

@@ -1,0 +1,85 @@
+bundle EntitiesChars by you {
+
+    shape $Ch { n: int, text: string, value: int }
+
+    mark #Letter
+    mark #Digit
+    mark #Other
+
+    builder Ch { $Ch   mark #Scanned }
+    mark #Scanned
+
+    event @Scanned { count: int }
+
+    shard Scan {
+        var seen: int
+
+        run once {
+            seen = 0
+
+            target chars("Vein 42!") as c {
+                let position = Index + 1
+                seen = seen + 1
+
+                bring Ch(position, c, code(c)) as e
+
+                if (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") { mark e #Letter }
+                if c >= "0" and c <= "9" { mark e #Digit }
+                if not ((c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9")) {
+                    mark e #Other
+                }
+            }
+
+            emit @Scanned { count: seen }
+        }
+    }
+
+    shard Report {
+        hear @Scanned as s {
+            emit *Vein.Console.Io.@Print { text: "scanned " + s.count + " characters" }
+
+            target $Ch #Scanned as c {
+                emit *Vein.Console.Io.@Print {
+                    text: "  " + c.Ch.n + " '" + c.Ch.text + "' = " + c.Ch.value
+                }
+            }
+        }
+    }
+
+    shard Letters {
+        var total: int
+
+        hear @Scanned as s {
+            total = 0
+            target $Ch #Letter as c {
+                if c.Ch.value >= 65 and c.Ch.value <= 90 { total = total + c.Ch.value + 32 }
+                if c.Ch.value >= 97 { total = total + c.Ch.value }
+            }
+            emit *Vein.Console.Io.@Print { text: "lowered letter values sum to " + total }
+        }
+    }
+
+    shard Digits {
+        var value: int
+
+        hear @Scanned as s {
+            value = 0
+            target $Ch #Digit as c {
+                value = value * 10 + (c.Ch.value - 48)
+            }
+            emit *Vein.Console.Io.@Print { text: "digits read as the number " + value }
+        }
+    }
+
+    shard Others {
+        hear @Scanned as s {
+            target $Ch #Other as c {
+                emit *Vein.Console.Io.@Print { text: "  not alphanumeric: '" + c.Ch.text + "' = " + c.Ch.value }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "chr(code(\"V\")) = " + chr(code("V")) }
+            emit *Vein.Console.Io.@Print { text: "upper/lower = " + upper("vein") + " " + lower("VEIN") }
+            emit *Vein.Console.Io.@Print { text: "len(\"Vein\") = " + len("Vein") + ", \"Vein\"[0] = " + "Vein"[0] }
+        }
+    }
+}

@@ -1,0 +1,33 @@
+bundle EntitiesBringOrder by you {
+
+    shape $Row { title: string, rank: int }
+    mark #Row
+
+    builder Row { $Row   mark #Row }
+
+    shard Seed {
+        run once {
+            ordered by &Row.$Row.rank {
+                bring Row("delta",   4)
+                bring Row("alpha",   1)
+                bring Row("Zeta",   -2)
+                bring Row("charlie", 3)
+                bring Row("bravo",   1)
+            }
+        }
+    }
+
+    shard Show {
+        settled {
+            emit *Vein.Console.Io.@Print { text: "-- spawn order, which is now rank order --" }
+            target $Row #Row as r {
+                emit *Vein.Console.Io.@Print { text: "   e" + Entity + "  " + r.Row.rank + "  " + r.Row.title }
+            }
+
+            emit *Vein.Console.Io.@Print { text: "-- ties keep the written order --" }
+            target $Row #Row as r {
+                if r.Row.rank == 1 { emit *Vein.Console.Io.@Print { text: "   " + r.Row.title } }
+            }
+        }
+    }
+}

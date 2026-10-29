@@ -1,0 +1,94 @@
+bundle DbSupabase by you {
+
+    fn tablePath() return string { return "/rest/v1/tasks" }
+
+    fn selectPath() return string { return tablePath() + "?select=id,title,rank,done&order=rank.asc" }
+
+    shape $Task { id: int, title: string, rank: int, done: bool }
+    mark #Task
+
+    builder Task { $Task   mark #Task }
+
+    shape $Draft { title: string, rank: int, done: bool }
+    mark #Draft
+
+    builder Draft { $Draft   mark #Draft }
+
+    event @Loaded { count: int, *Vein.Rest.Db.$Connection }
+
+    shard Boot {
+        run once {
+            bring *Vein.Rest.Db.&Connection("https://YOUR-PROJECT.supabase.co", "PASTE-YOUR-ANON-KEY")
+            bring *Vein.Rest.Db.&Connect("https://YOUR-PROJECT.supabase.co", "PASTE-YOUR-ANON-KEY")
+        }
+    }
+
+    shard Compose {
+        run once { bring Draft("write the docs", 9, false) }
+    }
+
+    shard Load {
+        hear *Vein.Rest.Db.@Connect as c {
+            emit *Vein.Console.Io.@Print { text: "GET " + c.base + selectPath() }
+            do *Vein.Rest.Db.get(c.base, c.key, selectPath())
+        }
+    }
+
+    shard Replies {
+        hear *Vein.Net.Http.@Fetched as f {
+
+            if not *Vein.Rest.Status.ok(f.status) {
+                emit *Vein.Console.Io.@Print { text: "-- " + f.status + " --" }
+                emit *Vein.Console.Io.@Print { text: "   " + f.body }
+                if *Vein.Rest.Status.clientError(f.status) {
+                    emit *Vein.Console.Io.@Print {
+                        text: "   a 401 here almost always means the Connection in shard Boot is still"
+                    }
+                    emit *Vein.Console.Io.@Print {
+                        text: "   the placeholder, and a 404 means the table is not named `tasks`."
+                    }
+                }
+            } else {
+                target $Connection #Connection as c {
+                    if f.url == c.Connection.base + selectPath() {
+                        let rows = fromJson(f.body)
+                        emit *Vein.Console.Io.@Print { text: "read " + len(rows) + " rows" }
+
+                        target rows as row: $Task {
+                            bring Task(row.id, row.title, row.rank, row.done)
+                        }
+
+                        emit @Loaded { count: len(rows), base: c.Connection.base, key: c.Connection.key }
+                    } else {
+                        emit *Vein.Console.Io.@Print { text: "wrote: " + f.body }
+                    }
+                }
+            }
+        }
+
+        hear *Vein.Net.Http.@Failed as f {
+            emit *Vein.Console.Io.@Print { text: "no answer from " + f.url + ": " + f.reason }
+        }
+    }
+
+    shard Listing {
+        hear @Loaded as l {
+            emit *Vein.Console.Io.@Print { text: "-- " + l.count + " tasks, by rank --" }
+            target $Task #Task by Task.rank as t {
+                emit *Vein.Console.Io.@Print {
+                    text: "   " + t.Task.rank + "  " + t.Task.title + "  done=" + t.Task.done
+                }
+            }
+        }
+    }
+
+    shard Write {
+        hear @Loaded as l {
+            target $Draft #Draft as d {
+                let payload = "[" + toJson(d.Draft) + "]"
+                emit *Vein.Console.Io.@Print { text: "POST " + l.base + tablePath() + " " + payload }
+                do *Vein.Rest.Db.post(l.base, l.key, tablePath(), payload)
+            }
+        }
+    }
+}

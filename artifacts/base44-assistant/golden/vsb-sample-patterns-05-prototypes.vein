@@ -1,0 +1,42 @@
+bundle Prototypes by patterns {
+    shape $Unit { hp: int = 10, speed: float = 1.0, name: string = "grunt" }
+    mark #Unit
+    mark #Elite
+
+    builder Grunt { $Unit   mark #Unit }
+    builder Runner from Grunt { speed = 3.0, name = "runner" }
+    builder Champion from Runner { hp = 50, name = "champion" }
+
+    SF check(name: string, good: bool) {
+        if good { emit *Vein.Console.Io.@Print { text: "ok   " + name } } else { emit *Vein.Console.Io.@Print { text: "FAIL " + name } }
+    }
+
+    shard Spawn {
+        run once {
+            bring 3 Grunt(base, base, base)
+            bring 2 Runner()
+            bring Champion() as c
+            mark c #Elite
+        }
+    }
+
+    shard Count {
+        var checked: int = 0
+        settled {
+            checked += 1
+            if checked == 1 {
+                var units = 0
+                var fast = 0
+                var elites = 0
+                target $Unit #Unit as u {
+                    units += 1
+                    if u.Unit.speed > 2.0 { fast += 1 }
+                }
+                target $Unit #Elite as e { if e.Unit.hp == 50 and e.Unit.speed == 3.0 { elites += 1 } }
+                do check("six units from three prefabs", units == 6)
+                do check("a variant keeps what it fixed: three are fast", fast == 3)
+                do check("variants stack: the champion is a fast runner with 50 hp", elites == 1)
+            }
+        }
+    }
+}

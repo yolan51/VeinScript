@@ -1,0 +1,110 @@
+bundle Movement by game {
+    need "Vein.Transform"
+    need "Vein.UI"
+    need "Vein.Math"
+    need "Vein.Graphics"
+    need "Vein.Input"
+
+    publicator Characters {
+        shared("Walks with the move_* actions or the left stick, relative to the camera, facing where it goes; `player`: whose actions move it.")
+        shape $Walker { speed: float = 5.0, left: int = 0, right: int = 0, forward: int = 0, back: int = 0, sx: float = 0.0, sz: float = 0.0, moving: int = 0, airborne: int = 0, player: int = 0 }
+
+        shared("Jumps with the `jump` action and falls back under gravity to the ground (y = 0).")
+        shape $Jumper { strength: float = 7.0, gravity: float = 20.0, vy: float = 0.0 }
+
+        shared("Carried by the shards that move the player; mute it to freeze the player (a free camera does).")
+        mark #Walking
+    }
+
+    mark #Gameplay
+
+    shard Controls {
+        hear *Vein.Input.Actions.@ActionPressed as a {
+            target $Walker as w { if w.Walker.player == a.player {
+                if a.action == "move_left" { w.Walker.left = 1 }
+                if a.action == "move_right" { w.Walker.right = 1 }
+                if a.action == "move_forward" { w.Walker.forward = 1 }
+                if a.action == "move_back" { w.Walker.back = 1 }
+            } }
+        }
+        hear *Vein.Input.Actions.@ActionReleased as a {
+            target $Walker as w { if w.Walker.player == a.player {
+                if a.action == "move_left" { w.Walker.left = 0 }
+                if a.action == "move_right" { w.Walker.right = 0 }
+                if a.action == "move_forward" { w.Walker.forward = 0 }
+                if a.action == "move_back" { w.Walker.back = 0 }
+            } }
+        }
+        hear *Vein.Input.Gamepad.@AxisMoved as m {
+            target $Walker as w { if w.Walker.player == 0 {
+                if m.axis == "LeftX" { w.Walker.sx = m.value }
+                if m.axis == "LeftY" { w.Walker.sz = m.value }
+            } }
+        }
+    }
+
+    shard Walk #Walking #Gameplay {
+        var view: float = 0.0           // the camera's yaw: walking is relative to where it looks from
+        each tick as t {
+            target $Rotation $Camera as c { view = c.Rotation.y }
+            target $Position $Rotation $Walker as w {
+                var dx = w.Walker.right - w.Walker.left + w.Walker.sx
+                var dz = w.Walker.back - w.Walker.forward + w.Walker.sz
+                let len = sqrt(dx * dx + dz * dz)
+                if len > 1.0 {
+                    dx = dx / len
+                    dz = dz / len
+                }
+                let wx = dx * cos(view) + dz * sin(view)
+                let wz = dz * cos(view) - dx * sin(view)
+                w.Position.x = w.Position.x + wx * w.Walker.speed * t.delta
+                w.Position.z = w.Position.z + wz * w.Walker.speed * t.delta
+                if len > 0.1 { w.Rotation.y = atan2(wx, wz) }
+                if len > 0.1 { w.Walker.moving = 1 } else { w.Walker.moving = 0 }
+            }
+        }
+    }
+
+    shard Jump #Walking #Gameplay {
+        hear *Vein.Input.Actions.@ActionPressed as a {
+            if a.action == "jump" {
+                target $Jumper $Walker as j {
+                    if j.Walker.airborne == 0 and j.Walker.player == a.player {
+                        j.Jumper.vy = j.Jumper.strength
+                        j.Walker.airborne = 1
+                    }
+                }
+            }
+        }
+        each tick as t {
+            target $Position $Jumper $Walker as j {
+                if j.Walker.airborne == 1 {
+                    j.Jumper.vy = j.Jumper.vy - j.Jumper.gravity * t.delta
+                    j.Position.y = j.Position.y + j.Jumper.vy * t.delta
+                    if j.Position.y <= 0.0 {
+                        j.Position.y = 0.0
+                        j.Jumper.vy = 0.0
+                        j.Walker.airborne = 0
+                    }
+                }
+            }
+        }
+    }
+
+    shard Clips #Walking {
+        hear *Vein.Graphics.Animations.@AnimationEnded as e {
+            if e.name == "jump" {
+                target $Walker $Animation on e.entity as c { if c.Walker.airborne == 1 { c.Animation.name = "fall" } }
+            }
+        }
+        settled {
+            target $Walker $Animation as c {
+                if c.Walker.airborne == 0 {
+                    if c.Walker.moving == 1 { c.Animation.name = "walk" } else { c.Animation.name = "idle" }
+                } else if c.Animation.name == "idle" or c.Animation.name == "walk" {
+                    c.Animation.name = "jump"
+                }
+            }
+        }
+    }
+}

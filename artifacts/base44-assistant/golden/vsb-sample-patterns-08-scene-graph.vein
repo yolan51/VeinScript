@@ -1,0 +1,41 @@
+bundle SceneGraph by patterns {
+    need "Vein.Transform"
+    need "Vein.Core"
+    mark #Ship
+    mark #Barrel
+
+    SF check(name: string, good: bool) {
+        if good { emit *Vein.Console.Io.@Print { text: "ok   " + name } } else { emit *Vein.Console.Io.@Print { text: "FAIL " + name } }
+    }
+
+    shard Build {
+        run once {
+            let ship = spawn()
+            attach $Position to ship { x: 100.0, y: 50.0, z: 0.0 }
+            mark ship #Ship
+            let turret = spawn()
+            attach $Position to turret { x: 10.0, y: 0.0, z: 0.0 }      // 10 right of the ship
+            attach $Parent to turret { of: ship }
+            let barrel = spawn()
+            attach $Position to barrel { x: 0.0, y: -4.0, z: 0.0 }      // 4 above the turret
+            attach $Parent to barrel { of: turret }
+            mark barrel #Barrel
+        }
+    }
+
+    shard Sail { each tick { target $Position #Ship as s { s.Position.x = s.Position.x + 5.0 } } }
+
+    shard Look {
+        var frame: int = 0
+        settled {
+            frame += 1
+            if frame == 2 {
+                target $World #Barrel as b {
+                    do check("the barrel's world place is the sum of the chain", b.World.y == 46.0)
+                    do check("and it moved with the ship", b.World.x == 120.0)
+                }
+                target $Position #Barrel as b { do check("its own position stayed local", b.Position.x == 0.0) }
+            }
+        }
+    }
+}

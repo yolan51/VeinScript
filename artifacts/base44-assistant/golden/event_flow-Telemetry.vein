@@ -1,0 +1,17 @@
+bundle Telemetry by you {
+
+    publicator Records {
+        shared("One line for the record.")
+        event @Logged { entry: string }
+    }
+
+    shard Recorder {
+        hear *you.Combat.Fight.@Damaged as d {
+            emit @Logged { entry: "damage " + d.amount + " to " + d.target }
+        }
+
+        hear *you.Combat.Fight.@Died as d {
+            emit @Logged { entry: "death of " + d.who }
+        }
+    }
+}

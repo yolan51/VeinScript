@@ -1,0 +1,10 @@
+bundle Courier by zenith {
+
+    publicator Post {
+        shared("Deliver a line to one recipient, urgently or not.")
+        event @Dispatch { to: Mark, text: string, urgent: bool }
+
+        shared("A recipient's postbox.")
+        shape $Postbox { unread: int }
+    }
+}

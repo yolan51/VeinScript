@@ -1,0 +1,306 @@
+bundle BehaviorTree by advanced {
+    shape $BtNode {
+        tree: string
+        name: string
+        kind: string             // selector | sequence | inverter | condition | action
+        task: string = ""        // which test or deed, for a leaf
+        ticks: int = 1           // how many ticks an action takes before it succeeds
+        up: string = ""
+        parent: Entity
+        order: int = 0
+    }
+
+    shape $Brain {
+        enum Status { Success, Failure, Running }
+        who: string
+        tree: string
+        hp: int = 100
+        bleed: int = 0           // lost every tick, so an agent can become hurt in the middle of something
+        enemyNear: bool = false
+        armed: bool = true
+        busy: Entity             // the action left RUNNING last tick, or 0
+        progress: int = 0        // how many ticks it has had
+        result: Status
+        doing: string = ""
+        path: string = ""        // the nodes visited this tick, in order: the evaluation, made visible
+        starts: int = 0
+        kills: int = 0
+        fled: int = 0
+        interrupted: int = 0
+    }
+
+    event @Loaded { }
+
+    SF check(name: string, good: bool) {
+        if good { emit *Vein.Console.Io.@Print { text: "ok   " + name } } else { emit *Vein.Console.Io.@Print { text: "FAIL " + name } }
+    }
+
+    fn trees() return string {
+        return "guard,root,selector,-,,0;" +
+            "guard,flee,sequence,root,,0;" +
+            "guard,hurt,condition,flee,hurt,0;" +
+            "guard,escape,action,flee,escape,1;" +
+            "guard,fight,sequence,root,,0;" +
+            "guard,enemy,condition,fight,enemy,0;" +
+            "guard,armed,condition,fight,armed,0;" +
+            "guard,attack,action,fight,attack,3;" +
+            "guard,calm,sequence,root,,0;" +
+            "guard,quiet,inverter,calm,,0;" +
+            "guard,sees,condition,quiet,enemy,0;" +
+            "guard,patrol,action,calm,patrol,1;" +
+            "guard,hide,action,root,hide,1;" +
+            "coward,root,selector,-,,0;" +
+            "coward,wary,sequence,root,,0;" +
+            "coward,sees,condition,wary,enemy,0;" +
+            "coward,hide,action,wary,hide,1;" +
+            "coward,patrol,action,root,patrol,1"
+    }
+
+    fn none() return Entity { return 0 }
+
+    fn firstChild(p: Entity) return Entity {
+        var found = none()
+        target $BtNode by BtNode.order as c {
+            if found == 0 and c.BtNode.parent == p { found = c }
+        }
+        return found
+    }
+
+    fn nextSibling(me: Entity) return Entity {
+        var found = none()
+        target $BtNode on me as m {
+            target $BtNode by BtNode.order as s {
+                if found == 0 and s.BtNode.parent == m.BtNode.parent and s.BtNode.order > m.BtNode.order { found = s }
+            }
+        }
+        return found
+    }
+
+    fn test(task: string, hp: int, enemy: bool, armed: bool) return bool {
+        var yes = false
+        match task {
+            when hurt { yes = hp < 30 }
+            when enemy { yes = enemy }
+            when armed { yes = armed }
+        }
+        return yes
+    }
+
+    shard Load {
+        run once {
+            target split(trees(), ";") as row {
+                let f = split(row, ",")
+                let n = spawn()
+                attach $BtNode to n { tree: f[0], name: f[1], kind: f[2], up: f[3], task: f[4], ticks: int(f[5]), order: Index }
+            }
+            let a = spawn()
+            attach $Brain to a { who: "hurt", tree: "guard", hp: 20, enemyNear: true }
+            let b = spawn()
+            attach $Brain to b { who: "fighter", tree: "guard", enemyNear: true }
+            let c = spawn()
+            attach $Brain to c { who: "idle", tree: "guard" }
+            let d = spawn()
+            attach $Brain to d { who: "unarmed", tree: "guard", enemyNear: true, armed: false }
+            let e = spawn()
+            attach $Brain to e { who: "bleeder", tree: "guard", hp: 34, bleed: 3, enemyNear: true }
+            let s = spawn()
+            attach $Brain to s { who: "scout", tree: "coward", enemyNear: true }
+            emit @Loaded { }
+        }
+        hear @Loaded as l {
+            target $BtNode as c {
+                target $BtNode as p {
+                    if p.BtNode.tree == c.BtNode.tree and p.BtNode.name == c.BtNode.up { c.BtNode.parent = p }
+                }
+            }
+        }
+    }
+
+    shard Think {
+        each tick {
+            target $Brain as a {
+                var hp = a.Brain.hp - a.Brain.bleed
+                var enemy = a.Brain.enemyNear
+                var busy = a.Brain.busy
+                var progress = a.Brain.progress
+                var starts = a.Brain.starts
+                var kills = a.Brain.kills
+                var fled = a.Brain.fled
+                var interrupted = a.Brain.interrupted
+                let wasBusy = a.Brain.busy
+                var resumed = false
+                var doing = ""
+                var path = ""
+
+                var node = none()
+                target $BtNode as n {
+                    if node == 0 and n.BtNode.tree == a.Brain.tree and n.BtNode.parent == 0 { node = n }
+                }
+                var up = false
+                var child = none()
+                var st = Status.Failure
+                var steps = 0
+                while not (node == 0) and steps < 100 {
+                    steps += 1
+                    target $BtNode on node as n {
+                        if not up {
+                            path = path + ">" + n.BtNode.name
+                            match n.BtNode.kind {
+                                when condition {
+                                    if test(n.BtNode.task, hp, enemy, a.Brain.armed) { st = Status.Success } else { st = Status.Failure }
+                                    up = true
+                                }
+                                when action {
+                                    var p = 1
+                                    if busy == n {
+                                        p = progress + 1
+                                        resumed = true
+                                    }
+                                    doing = n.BtNode.task
+                                    if p >= n.BtNode.ticks {
+                                        st = Status.Success
+                                        busy = 0
+                                        progress = 0
+                                        match n.BtNode.task {
+                                            when escape {
+                                                hp += 40
+                                                fled += 1
+                                            }
+                                            when attack {
+                                                kills += 1
+                                                enemy = false
+                                            }
+                                        }
+                                    } else {
+                                        st = Status.Running
+                                        busy = n
+                                        progress = p
+                                        if p == 1 { starts += 1 }
+                                    }
+                                    up = true
+                                }
+                                else {
+                                    let c = firstChild(n)
+                                    if c == 0 {
+                                        if n.BtNode.kind == "sequence" { st = Status.Success } else { st = Status.Failure }
+                                        up = true
+                                    } else {
+                                        node = c
+                                    }
+                                }
+                            }
+                            if up {
+                                child = n
+                                node = n.BtNode.parent
+                            }
+                        } else {
+                            var done = true
+                            match n.BtNode.kind {
+                                when selector {
+                                    if st == Status.Failure {
+                                        let s = nextSibling(child)
+                                        if not (s == 0) {
+                                            node = s
+                                            up = false
+                                            done = false
+                                        }
+                                    }
+                                }
+                                when sequence {
+                                    if st == Status.Success {
+                                        let s = nextSibling(child)
+                                        if not (s == 0) {
+                                            node = s
+                                            up = false
+                                            done = false
+                                        }
+                                    }
+                                }
+                                when inverter {
+                                    if st == Status.Success { st = Status.Failure } else if st == Status.Failure { st = Status.Success }
+                                }
+                            }
+                            if done {
+                                child = n
+                                node = n.BtNode.parent
+                            }
+                        }
+                    }
+                }
+                if not (wasBusy == 0) and not resumed {
+                    interrupted += 1
+                    if busy == wasBusy {
+                        busy = 0
+                        progress = 0
+                    }
+                }
+                a.Brain.hp = hp
+                a.Brain.enemyNear = enemy
+                a.Brain.busy = busy
+                a.Brain.progress = progress
+                a.Brain.starts = starts
+                a.Brain.kills = kills
+                a.Brain.fled = fled
+                a.Brain.interrupted = interrupted
+                a.Brain.result = st
+                a.Brain.doing = doing
+                a.Brain.path = path
+            }
+        }
+    }
+
+    shard Script {
+        var frame = 0
+        each tick as t { frame = t.frame }
+        settled {
+            if frame == 1 {
+                var nodes = 0
+                var linked = 0
+                target $BtNode as n {
+                    nodes += 1
+                    if not (n.BtNode.parent == 0) { linked += 1 }
+                }
+                do check("18 nodes from text, every one but the two roots linked to its parent", nodes == 18 and linked == 16)
+                var kids = ""
+                target $BtNode as r {
+                    if r.BtNode.tree == "guard" and r.BtNode.name == "root" {
+                        target $BtNode by BtNode.order as c {
+                            if c.BtNode.parent == r { kids = kids + c.BtNode.name + " " }
+                        }
+                    }
+                }
+                do check("the root's children, in order, are flee fight calm hide", kids == "flee fight calm hide ")
+            }
+            target $Brain as a {
+                if frame == 1 {
+                    match a.Brain.who {
+                        when hurt { do check("a hurt agent flees", a.Brain.doing == "escape" and a.Brain.fled == 1 and a.Brain.hp == 60) }
+                        when fighter {
+                            do check("a healthy agent with an enemy near attacks, and the attack is RUNNING", a.Brain.doing == "attack" and a.Brain.result == Status.Running)
+                            do check("the selector stopped at the branch that ran: calm and hide were never visited", a.Brain.path == ">root>flee>hurt>fight>enemy>armed>attack")
+                        }
+                        when idle { do check("an agent with nothing to do patrols (the inverter turned 'no enemy' into success)", a.Brain.doing == "patrol" and a.Brain.result == Status.Success) }
+                        when unarmed { do check("an inverter inverts: an unarmed agent who sees an enemy does not patrol, it hides", a.Brain.doing == "hide" and contains(a.Brain.path, ">quiet>sees>hide")) }
+                        when scout { do check("another tree from the same text: the scout hides at once", a.Brain.doing == "hide" and a.Brain.path == ">root>wary>sees>hide") }
+                    }
+                }
+                if frame == 2 {
+                    match a.Brain.who {
+                        when fighter { do check("a RUNNING action resumes next tick instead of starting over", a.Brain.progress == 2 and a.Brain.starts == 1 and a.Brain.kills == 0) }
+                        when bleeder { do check("a higher-priority branch pre-empts a RUNNING action", a.Brain.doing == "escape" and a.Brain.interrupted == 1 and a.Brain.kills == 0 and a.Brain.busy == 0) }
+                    }
+                }
+                if frame == 3 {
+                    match a.Brain.who {
+                        when fighter { do check("the attack succeeds on its third tick", a.Brain.kills == 1 and a.Brain.starts == 1 and a.Brain.result == Status.Success and not a.Brain.enemyNear) }
+                    }
+                }
+                if frame == 4 {
+                    match a.Brain.who {
+                        when fighter { do check("with the enemy gone, the same tree makes the fighter patrol", a.Brain.doing == "patrol") }
+                    }
+                }
+            }
+        }
+    }
+}

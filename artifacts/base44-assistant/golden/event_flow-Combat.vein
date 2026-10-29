@@ -1,0 +1,34 @@
+bundle Combat by you {
+
+    publicator Fight {
+        shared("Someone swung at someone.")
+        event @Attacked { attacker: string, target: string, amount: int }
+
+        shared("A hit landed; `left` is what the target has left.")
+        event @Damaged { target: string, amount: int, left: int }
+
+        shared("Something died, and who did it.")
+        event @Died { who: string, by: string }
+
+        shared("Someone was healed.")
+        event @Healed { who: string, amount: int }
+    }
+
+    shard Arena {
+        hear *you.Game.Turns.@Moved as m {
+            emit @Attacked { attacker: m.who, target: "Grub", amount: 4 }
+        }
+    }
+
+    shard Resolver {
+        var hp = 10
+
+        hear @Attacked as a {
+            hp -= a.amount
+            emit @Damaged { target: a.target, amount: a.amount, left: hp }
+            if hp <= 0 {
+                emit @Died { who: a.target, by: a.attacker }
+            }
+        }
+    }
+}

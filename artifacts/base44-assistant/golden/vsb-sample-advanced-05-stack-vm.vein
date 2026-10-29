@@ -1,0 +1,372 @@
+bundle StackVm by advanced {
+    shape $Slot {
+        enum Kind { Num, Op, Open, Close }
+        kind: Kind
+        pos: int = 0
+        text: string = ""
+        num: float = 0.0
+    }
+    mark #Input
+    mark #Ops
+    mark #Output
+    mark #Values
+
+    shape $Case {
+        n: int = 0
+        what: string = ""
+        src: string = ""
+        want: float = 0.0
+        err: string = ""
+        wantRpn: string = ""
+        got: float = 0.0
+        reason: string = ""
+        rpn: string = ""
+        done: bool = false
+    }
+    mark #Pending
+
+    builder Tok { $Slot   mark #Input }
+    builder Test { $Case   mark #Pending }
+
+    event @Next { }
+    event @Eval { job: Entity, src: string }
+    event @Shunt { job: Entity, step: int }
+    event @Parsed { job: Entity, rpn: string }
+    event @Exec { job: Entity, step: int }
+    event @Answered { job: Entity, value: float }
+    event @Failed { job: Entity, reason: string }
+    event @Finished { }
+
+    SF check(name: string, good: bool) {
+        if good { emit *Vein.Console.Io.@Print { text: "ok   " + name } } else { emit *Vein.Console.Io.@Print { text: "FAIL " + name } }
+    }
+
+    fn nobody() return Entity { return 0 }
+
+    fn isDigit(c: string) return bool { return c >= "0" and c <= "9" }
+    fn at(s: string, i: int) return string { return substring(s, i, 1) }
+
+    fn prec(op: string) return int {
+        if op == "+" or op == "-" { return 1 }
+        if op == "*" or op == "/" or op == "%" { return 2 }
+        if op == "neg" { return 3 }
+        if op == "^" { return 4 }
+        return 0
+    }
+    fn rightAssoc(op: string) return bool { return op == "^" or op == "neg" }
+    fn outranks(top: string, incoming: string) return bool {
+        if prec(top) > prec(incoming) { return true }
+        return prec(top) == prec(incoming) and not rightAssoc(incoming)
+    }
+
+    fn power(b: float, e: int) return float {
+        if e < 0 { return 1.0 / power(b, 0 - e) }
+        if e == 0 { return 1.0 }
+        return b * power(b, e - 1)
+    }
+    fn apply(op: string, a: float, b: float) return float {
+        if op == "+" { return a + b }
+        if op == "-" { return a - b }
+        if op == "*" { return a * b }
+        if op == "/" { return a / b }
+        if op == "%" { return a - b * int(a / b) }
+        return power(a, int(b))
+    }
+    fn near(a: float, b: float) return bool { return a - b < 0.000000001 and b - a < 0.000000001 }
+    fn thenWord(acc: string, word: string) return string {
+        if acc == "" { return word }
+        return acc + " " + word
+    }
+
+    SF toOps(e: Entity, at: int) {
+        unmark e #Input
+        mark e #Ops
+        target $Slot on e as x { x.Slot.pos = at }
+    }
+    SF toOutput(e: Entity, at: int) {
+        unmark e #Input
+        unmark e #Ops
+        mark e #Output
+        target $Slot on e as x { x.Slot.pos = at }
+    }
+    SF toValues(e: Entity, at: int) {
+        unmark e #Output
+        mark e #Values
+        target $Slot on e as x { x.Slot.pos = at }
+    }
+
+    fn frontOfInput() return Entity {
+        var front = nobody()
+        target $Slot #Input by Slot.pos as i { if front == 0 { front = i } }
+        return front
+    }
+    fn topOfOps() return Entity {
+        var top = nobody()
+        target $Slot #Ops by Slot.pos as o { top = o }
+        return top
+    }
+    fn frontOfOutput() return Entity {
+        var front = nobody()
+        target $Slot #Output by Slot.pos as o { if front == 0 { front = o } }
+        return front
+    }
+
+    shard Runner {
+        run once {
+            bring Test(1, "precedence: * before +", "2 + 3 * 4", 14.0, "", "2 3 4 * +")
+            bring Test(2, "parentheses override precedence", "(2 + 3) * 4", 20.0, "", "2 3 + 4 *")
+            bring Test(3, "- is left-associative", "10 - 4 - 3", 3.0, "", "10 4 - 3 -")
+            bring Test(4, "/ is left-associative", "100 / 10 / 5", 2.0, "", "")
+            bring Test(5, "^ is right-associative", "2 ^ 3 ^ 2", 512.0, "", "2 3 2 ^ ^")
+            bring Test(6, "parentheses make ^ left", "(2 ^ 3) ^ 2", 64.0, "", "")
+            bring Test(7, "unary minus binds looser than ^", "-2 ^ 2", -4.0, "", "2 2 ^ neg")
+            bring Test(8, "unary minus after an operator", "2 * -3 + 1", -5.0, "", "")
+            bring Test(9, "a negative power", "2 ^ -1", 0.5, "", "")
+            bring Test(10, "% and decimals", "7 % 4 + 0.5", 3.5, "", "")
+            bring Test(11, "the brief's example", "2 + 3 * (4 - 1) ^ 2", 29.0, "", "")
+            bring Test(12, "Wikipedia's shunting-yard example", "3 + 4 * 2 / (1 - 5) ^ 2 ^ 3", 3.0001220703125, "", "3 4 2 * 1 5 - 2 3 ^ ^ / +")
+            bring Test(13, "nested parentheses", "((((1))))", 1.0, "", "")
+            bring Test(14, "error: a ( never closed", "(1 + 2", 0.0, "unmatched (", "")
+            bring Test(15, "error: a ) never opened", "1 + 2)", 0.0, "unmatched )", "")
+            bring Test(16, "error: an operator with nothing to work on", "2 + * 3", 0.0, "missing operand", "")
+            bring Test(17, "error: a character that is no token", "4 $ 2", 0.0, "unexpected '$'", "")
+            bring Test(18, "error: division by zero, found while running", "1 / (3 - 3)", 0.0, "division by zero", "")
+            bring Test(19, "error: two numbers and no operator", "2 3", 0.0, "missing operator", "")
+            bring Test(20, "error: nothing at all", "   ", 0.0, "empty expression", "")
+            bring Test(21, "error: a number with two points", "3.2.1", 0.0, "bad number", "")
+            bring Test(22, "error: a fractional power", "4 ^ 0.5", 0.0, "whole powers only", "")
+            emit @Next { }
+        }
+
+        hear @Next as x {
+            var job: Entity = nobody()
+            var src = ""
+            target $Case #Pending by Case.n as c {
+                if job == 0 {
+                    job = c
+                    src = c.Case.src
+                }
+            }
+            if job == 0 { emit @Finished { } } else { emit @Eval { job: job, src: src } }
+        }
+        hear @Parsed as p { target $Case on p.job as c { c.Case.rpn = p.rpn } }
+        hear @Answered as a {
+            target $Case on a.job as c {
+                c.Case.got = a.value
+                c.Case.done = true
+            }
+            unmark a.job #Pending
+            emit @Next { }
+        }
+        hear @Failed as f {
+            target $Case on f.job as c {
+                c.Case.reason = f.reason
+                c.Case.done = true
+            }
+            unmark f.job #Pending
+            emit @Next { }
+        }
+    }
+
+    shard Lexer {
+        hear @Eval as e {
+            let src = e.src
+            var i = 0
+            var n = 0
+            var bad = ""
+            var afterValue = false
+            while i < len(src) and bad == "" {
+                let c = at(src, i)
+                if c == " " {
+                    i += 1
+                } else if isDigit(c) or c == "." {
+                    var j = i
+                    var dots = 0
+                    while isDigit(at(src, j)) or at(src, j) == "." {
+                        if at(src, j) == "." { dots += 1 }
+                        j += 1
+                    }
+                    let word = substring(src, i, j - i)
+                    if dots > 1 or word == "." {
+                        bad = "bad number " + word
+                    } else {
+                        n += 1
+                        bring Tok(Kind.Num, n, word, float(word))
+                    }
+                    afterValue = true
+                    i = j
+                } else {
+                    n += 1
+                    if c == "(" {
+                        bring Tok(Kind.Open, n, c, 0.0)
+                        afterValue = false
+                    } else if c == ")" {
+                        bring Tok(Kind.Close, n, c, 0.0)
+                        afterValue = true
+                    } else if c == "-" and not afterValue {
+                        bring Tok(Kind.Op, n, "neg", 0.0)
+                    } else if prec(c) > 0 {
+                        bring Tok(Kind.Op, n, c, 0.0)
+                        afterValue = false
+                    } else {
+                        bad = "unexpected '" + c + "' at " + i
+                    }
+                    i += 1
+                }
+            }
+            if bad == "" { emit @Shunt { job: e.job, step: n + 1 } } else { emit @Failed { job: e.job, reason: bad } }
+        }
+    }
+
+    shard Parser {
+        var rpn: string = ""
+        hear @Eval as e { rpn = "" }
+        hear @Shunt as s {
+            let front = frontOfInput()
+            let top = topOfOps()
+            var topText = ""
+            target $Slot on top as o { topText = o.Slot.text }
+            var why = ""
+            var done = false
+            if front == 0 {
+                if top == 0 {
+                    done = true
+                } else {
+                    if topText == "(" {
+                        why = "unmatched ("
+                    } else {
+                        do toOutput(top, s.step)
+                        rpn = thenWord(rpn, topText)
+                    }
+                }
+            } else {
+                target $Slot on front as t {
+                    match t.Slot.kind {
+                        when Num {
+                            do toOutput(t, s.step)
+                            rpn = thenWord(rpn, t.Slot.text)
+                        }
+                        when Open { do toOps(t, s.step) }
+                        when Close {
+                            if top == 0 {
+                                why = "unmatched )"
+                            } else {
+                                if topText == "(" {
+                                    destroy top
+                                    destroy t
+                                } else {
+                                    do toOutput(top, s.step)
+                                    rpn = thenWord(rpn, topText)
+                                }
+                            }
+                        }
+                        when Op {
+                            if not (t.Slot.text == "neg") and not (top == 0) and not (topText == "(") and outranks(topText, t.Slot.text) {
+                                do toOutput(top, s.step)
+                                rpn = thenWord(rpn, topText)
+                            } else {
+                                do toOps(t, s.step)
+                            }
+                        }
+                    }
+                }
+            }
+            if not (why == "") {
+                emit @Failed { job: s.job, reason: why }
+            } else {
+                if done {
+                    emit @Parsed { job: s.job, rpn: rpn }
+                    emit @Exec { job: s.job, step: s.step + 1 }
+                } else {
+                    emit @Shunt { job: s.job, step: s.step + 1 }
+                }
+            }
+        }
+    }
+
+    shard Vm {
+        hear @Exec as x {
+            let front = frontOfOutput()
+            var b: Entity = nobody()
+            var bv = 0.0
+            var a: Entity = nobody()
+            var av = 0.0
+            var depth = 0
+            target $Slot #Values by Slot.pos as v {
+                a = b
+                av = bv
+                b = v
+                bv = v.Slot.num
+                depth += 1
+            }
+            var why = ""
+            if front == 0 {
+                if depth == 1 {
+                    emit @Answered { job: x.job, value: bv }
+                } else {
+                    if depth == 0 { why = "empty expression" } else { why = "missing operator" }
+                }
+            } else {
+                target $Slot on front as t {
+                    match t.Slot.kind {
+                        when Num { do toValues(t, x.step) }
+                        else {
+                            let op = t.Slot.text
+                            if op == "neg" {
+                                if depth < 1 {
+                                    why = "missing operand"
+                                } else {
+                                    target $Slot on b as r { r.Slot.num = 0.0 - bv }
+                                    destroy t
+                                }
+                            } else {
+                                if depth < 2 {
+                                    why = "missing operand"
+                                } else {
+                                    if (op == "/" or op == "%") and bv == 0.0 { why = "division by zero" }
+                                    if op == "^" and not (bv == float(int(bv))) { why = "whole powers only" }
+                                    if why == "" {
+                                        target $Slot on a as r { r.Slot.num = apply(op, av, bv) }
+                                        destroy b
+                                        destroy t
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if why == "" { emit @Exec { job: x.job, step: x.step + 1 } }
+            }
+            if not (why == "") { emit @Failed { job: x.job, reason: why } }
+        }
+
+        hear @Answered as a { target $Slot as s { destroy s } }
+        hear @Failed as f { target $Slot as s { destroy s } }
+    }
+
+    shard Report {
+        hear @Finished as f {
+            var cases = 0
+            var answered = 0
+            target $Case by Case.n as c {
+                cases += 1
+                if c.Case.done { answered += 1 }
+                let name = c.Case.what + "   [" + c.Case.src + "]"
+                if c.Case.err == "" {
+                    do check(name, c.Case.reason == "" and near(c.Case.got, c.Case.want))
+                } else {
+                    do check(name, startsWith(c.Case.reason, c.Case.err))
+                }
+            }
+            target $Case by Case.n as c {
+                if not (c.Case.wantRpn == "") {
+                    do check("postfix of " + c.Case.src + " is " + c.Case.wantRpn, c.Case.rpn == c.Case.wantRpn)
+                }
+            }
+            do check("every case ran to an answer or a reason", cases == 22 and answered == 22)
+            var left = 0
+            target $Slot as s { left += 1 }
+            do check("no token is left behind in any stack", left == 0)
+        }
+    }
+}

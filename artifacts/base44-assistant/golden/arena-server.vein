@@ -1,0 +1,107 @@
+bundle ArenaServer by you {
+
+    shape $Player { addr: string, x: int, y: int }
+
+    event @Step { who: string, dx: int, dy: int }
+
+    event @Changed { }
+
+    fn Width()  return int { return 20 }
+    fn Height() return int { return 10 }
+
+    fn clamp(v: int, lo: int, hi: int) return int {
+        if v < lo { return lo }
+        if v > hi { return hi }
+        return v
+    }
+
+    shard Boot {
+        run once {
+            emit *Vein.Net.Peer.@Listen { as: #Arena, at: 9701, key: "arena-secret" }
+            emit *Vein.Console.Io.@Print { text: "arena listening on 9701 — waiting for players" }
+        }
+    }
+
+    shard Lobby {
+        hear *Vein.Net.Peer.@Message as m {
+            var known = false
+            var seats = 0
+            target $Player as p {
+                seats += 1
+                if p.Player.addr == m.from { known = true }
+            }
+            if not known {
+                let e = spawn()
+                attach $Player to e { addr: m.from, x: (seats * 5) % Width(), y: 0 }
+                emit *Vein.Console.Io.@Print { text: "* " + m.from + " joined" }
+                emit @Changed { }
+            }
+        }
+
+        hear *Vein.Net.Peer.@Undelivered as u {
+            target $Player as p {
+                if p.Player.addr == u.to {
+                    destroy p
+                    emit *Vein.Console.Io.@Print { text: "* " + u.to + " left" }
+                    emit @Changed { }
+                }
+            }
+        }
+    }
+
+    shard Input {
+        hear *Vein.Net.Peer.@Message as m {
+            let ws = words(lower(m.text))
+            if len(ws) > 1 {
+                if ws[0] == "move" {
+                    target chars(ws[1]) as c {
+                        if c == "w" { emit @Step { who: m.from, dx: 0,  dy: -1 } }
+                        if c == "s" { emit @Step { who: m.from, dx: 0,  dy: 1 } }
+                        if c == "a" { emit @Step { who: m.from, dx: -1, dy: 0 } }
+                        if c == "d" { emit @Step { who: m.from, dx: 1,  dy: 0 } }
+                    }
+                }
+            }
+        }
+    }
+
+    shard Rules {
+        hear @Step as s audience !Input {
+            target $Player as p {
+                if p.Player.addr == s.who {
+                    p.Player.x = clamp(p.Player.x + s.dx, 0, Width() - 1)
+                    p.Player.y = clamp(p.Player.y + s.dy, 0, Height() - 1)
+                }
+            }
+            emit @Changed { }
+        }
+    }
+
+    shard Broadcast {
+        hear @Changed as c {
+            var board = ""
+            repeat Height() as y {
+                var row = ""
+                repeat Width() as x {
+                    var cell = "."
+                    target $Player as p {
+                        if p.Player.x == x and p.Player.y == y {
+                            if cell == "." { cell = upper(substring(p.Player.addr, 0, 1)) }
+                        }
+                    }
+                    row = row + cell
+                }
+                board = board + row + "\n"
+            }
+
+            var legend = ""
+            target $Player as p {
+                legend = legend + "  " + upper(substring(p.Player.addr, 0, 1)) + " = " + p.Player.addr
+            }
+
+            target $Player as p {
+                emit *Vein.Net.Peer.@Send { to: p.Player.addr, text: "\n" + board + legend }
+            }
+        }
+    }
+}

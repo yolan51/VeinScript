@@ -1,0 +1,49 @@
+bundle Demo {
+    need "Vein.Core"
+
+    publicator DemoCore {
+        shared("Hit points and mana for any living identity.")
+        shape $Health {
+            hp: int folds sum      // many shards may drain hp in one tick; sum the deltas
+            mp: int
+        }
+
+        shared("Damage applied after mitigation.")
+        event @Damaged {
+            amount: int
+            victim: Entity
+            $Health.hp = 0             // pull one field off $Health (defaulted, so optional at emit)
+            var note: string = "hit"   // a `var` member — same `=`/required rule as a field
+        }
+    }
+
+    SF hurt(victim: Entity, amount: int) {
+        emit @Damaged {
+            amount: amount
+            victim: victim
+        }
+    }
+
+    shard Drain {
+        each tick {
+            target $Health #Enemy as self {
+                self.Health.hp -= 1
+
+                chance 30% {
+                    emit @Damaged {
+                        amount: 5
+                        victim: self
+                    }
+                }
+            }
+        }
+
+        settled {
+            target $Health #Enemy as self {
+                if self.Health.hp <= 0 {
+                    mark self #Dead
+                }
+            }
+        }
+    }
+}

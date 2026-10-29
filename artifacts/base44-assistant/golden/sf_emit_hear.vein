@@ -1,0 +1,46 @@
+bundle SfEmitHear by you {
+
+    start @Boot { }
+    event @Boot { }
+    event @Hit { who: string, amount: int }
+    event @Healed { who: string, amount: int }
+
+    fn doubled(n: int) return int { return n * 2 }
+
+    SF strike(who: string, amount: int) {
+        emit @Hit { who: who, amount: amount }
+    }
+
+    SF combo(who: string) {
+        do strike(who, 3)
+        do strike(who, doubled(3))
+    }
+
+    SF heal(who: string, amount: int) {
+        emit @Healed { who: who, amount: amount }
+    }
+
+    shard Fight {
+        hear @Boot as b {
+            do *Vein.Console.Io.print("1. before the SF")
+            do strike("slime", 5)
+            do *Vein.Console.Io.print("2. after the SF")
+            do combo("goblin")
+        }
+    }
+
+    shard Log {
+        hear @Hit as h {
+            do *Vein.Console.Io.print("   Log heard @Hit: " + h.who + " takes " + h.amount)
+        }
+        hear @Healed as h {
+            do *Vein.Console.Io.print("   Log heard @Healed: " + h.who + " +" + h.amount)
+        }
+    }
+
+    shard Medic {
+        hear @Hit as h {
+            if h.amount >= 6 { do heal(h.who, 2) }
+        }
+    }
+}

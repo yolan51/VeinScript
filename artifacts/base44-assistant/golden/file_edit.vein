@@ -1,0 +1,102 @@
+bundle FileEdit by you {
+
+    shape $Problem { n: int, text: string }
+    mark #Fatal
+    builder Problem { $Problem   mark #Problem }
+    mark #Problem
+
+    event @Seeded { }
+    event @Scanned { count: int }
+
+    shard Seed {
+        run once {
+            emit *Vein.Files.Io.@WriteFile {
+                path: "config.txt",
+                append: false,
+                text: "# demo config\n" +
+                      "fullscreen = false\n" +
+                      "vsync = true\n" +
+                      "volume = 80\n"
+            }
+
+            emit *Vein.Files.Io.@WriteFile {
+                path: "server.log",
+                append: false,
+                text: "INFO  started\n" +
+                      "ERROR disk full\n" +
+                      "INFO  retrying\n" +
+                      "FATAL out of memory\n" +
+                      "DEBUG ERROR appears in this test line\n"
+            }
+        }
+    }
+
+    shard Config {
+        hear *Vein.Files.Io.@FileLoaded as f {
+            if f.path == "config.txt" {
+                let updated = replace(f.text, "fullscreen = false", "fullscreen = true")
+
+                if not (updated == f.text) {
+                    emit *Vein.Console.Io.@Print { text: "config: fullscreen switched on" }
+
+                    emit *Vein.Files.Io.@WriteFile { path: f.path, text: updated, append: false }
+                }
+            }
+        }
+    }
+
+    shard Scan {
+        var seen: int
+
+        var scanned: bool
+
+        hear *Vein.Files.Io.@FileLoaded as f {
+            if f.path == "server.log" and not scanned {
+                scanned = true
+                seen = 0
+
+                target lines(f.text) as l {
+                    if contains(l, "ERROR") and not contains(l, "test") {
+                        seen = seen + 1
+                        bring Problem(Index + 1, l) as e
+
+                        if startsWith(l, "FATAL") { mark e #Fatal }
+                    }
+
+                    if startsWith(l, "FATAL") {
+                        seen = seen + 1
+                        bring Problem(Index + 1, l) as fatal
+                        mark fatal #Fatal
+                    }
+                }
+
+                emit @Scanned { count: seen }
+            }
+        }
+    }
+
+    shard Report {
+        hear @Scanned as s {
+            emit *Vein.Console.Io.@Print { text: "log: " + s.count + " line(s) worth keeping" }
+
+            target $Problem #Problem as p {
+                emit *Vein.Console.Io.@Print { text: "  line " + p.Problem.n + ": " + p.Problem.text }
+            }
+
+            target $Problem #Fatal as p {
+                emit *Vein.Console.Io.@Print { text: "  FATAL at line " + p.Problem.n }
+            }
+        }
+    }
+
+    shard Verify {
+        hear *Vein.Files.Io.@FileWritten as w {
+            if w.path == "config.txt" { emit *Vein.Files.Io.@ReadFile { path: w.path } }
+            if w.path == "server.log" { emit *Vein.Files.Io.@ReadFile { path: w.path } }
+        }
+
+        hear *Vein.Files.Io.@FileMissing as m {
+            emit *Vein.Console.Io.@Print { text: "could not use " + m.path + ": " + m.reason }
+        }
+    }
+}

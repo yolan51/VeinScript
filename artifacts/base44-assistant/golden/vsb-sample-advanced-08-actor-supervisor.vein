@@ -1,0 +1,168 @@
+bundle Actors by advanced {
+    need "Vein.Math"
+
+    shape $Worker { name: string, perTick: int = 2, handled: int = 0, peak: int = 0, last: int = 0, inOrder: bool = true, log: string = "", restarts: int = 0, wakeAt: int = 0 }
+    shape $Mail { to: Entity = 0, seq: int = 0, payload: string = "" }
+    mark #Crashed
+    mark #GivenUp
+
+    event @Post { to: Entity, payload: string }
+    event @Crashed { who: Entity }
+    event @Restarted { who: Entity, attempt: int }
+    event @Escalated { who: Entity }
+
+    SF check(name: string, good: bool) {
+        if good { emit *Vein.Console.Io.@Print { text: "ok   " + name } } else { emit *Vein.Console.Io.@Print { text: "FAIL " + name } }
+    }
+
+    fn pow2(n: int) return int {
+        if n <= 0 { return 1 }
+        return 2 * pow2(n - 1)
+    }
+
+    shard Post {
+        var nextSeq: int = 0
+        hear @Post as s {
+            nextSeq += 1
+            let m = spawn()
+            attach $Mail to m { to: s.to, seq: nextSeq, payload: s.payload }
+        }
+    }
+
+    shard Run {
+        each tick as t {
+            target $Worker as w {
+                if not (w carries #Crashed) and not (w carries #GivenUp) {
+                    var handledNow = 0
+                    var down = false
+                    var last = w.Worker.last
+                    var inOrder = w.Worker.inOrder
+                    var log = w.Worker.log
+                    target $Mail by Mail.seq as m {
+                        if m.Mail.to == w and handledNow < w.Worker.perTick and not down {
+                            handledNow += 1
+                            if m.Mail.payload == "poison" {
+                                down = true
+                                mark w #Crashed
+                                emit @Crashed { who: w }
+                            } else {
+                                if m.Mail.seq < last { inOrder = false }
+                                last = m.Mail.seq
+                                log = log + m.Mail.payload
+                            }
+                            destroy m
+                        }
+                    }
+                    if handledNow > 0 {
+                        w.Worker.handled = w.Worker.handled + handledNow
+                        w.Worker.peak = max(w.Worker.peak, handledNow)
+                        w.Worker.last = last
+                        w.Worker.inOrder = inOrder
+                        w.Worker.log = log
+                    }
+                }
+            }
+        }
+    }
+
+    shard Supervisor {
+        tune("Restarts allowed before the supervisor gives up and escalates.")
+        var maxRestarts: int = 2
+        tune("Ticks to wait before the first restart; each further restart waits twice as long.")
+        var delay: int = 3
+
+        each tick as t {
+            target $Worker #Crashed as w {
+                if not (w carries #GivenUp) {
+                    if w.Worker.wakeAt == 0 {
+                        if w.Worker.restarts >= maxRestarts {
+                            mark w #GivenUp
+                            emit @Escalated { who: w }
+                        } else {
+                            w.Worker.wakeAt = t.frame + delay * pow2(w.Worker.restarts)
+                        }
+                    } else if t.frame >= w.Worker.wakeAt {
+                        unmark w #Crashed
+                        w.Worker.restarts = w.Worker.restarts + 1
+                        w.Worker.wakeAt = 0
+                        emit @Restarted { who: w, attempt: w.Worker.restarts + 1 }
+                    }
+                }
+            }
+        }
+    }
+
+    shard Seed {
+        run once {
+            let alpha = spawn()
+            attach $Worker to alpha { name: "alpha", perTick: 2 }
+            let gamma = spawn()
+            attach $Worker to gamma { name: "gamma", perTick: 3 }
+            let delta = spawn()
+            attach $Worker to delta { name: "delta", perTick: 1 }
+        }
+    }
+
+    shard Script {
+        var now: int = 0
+        var gammaCrash: int = 0
+        var gammaBack: int = 0
+        var deltaCrashes: string = ""
+        var deltaBacks: string = ""
+        var escalated: int = 0
+
+        hear @Crashed as c {
+            target $Worker on c.who as w {
+                if w.Worker.name == "gamma" { gammaCrash = now }
+                if w.Worker.name == "delta" { deltaCrashes = deltaCrashes + now + " " }
+            }
+        }
+        hear @Restarted as r {
+            target $Worker on r.who as w {
+                if w.Worker.name == "gamma" { gammaBack = now }
+                if w.Worker.name == "delta" { deltaBacks = deltaBacks + now + " " }
+            }
+        }
+        hear @Escalated as e { escalated += 1 }
+
+        each tick as t {
+            now = t.frame
+            if t.frame == 2 {
+                target $Worker as w {
+                    if w.Worker.name == "alpha" {
+                        repeat 7 { emit @Post { to: w, payload: "m" + (Index + 1) } }
+                    }
+                    if w.Worker.name == "gamma" {
+                        emit @Post { to: w, payload: "x1" }
+                        emit @Post { to: w, payload: "poison" }
+                        emit @Post { to: w, payload: "x2" }
+                        emit @Post { to: w, payload: "x3" }
+                    }
+                    if w.Worker.name == "delta" {
+                        repeat 4 { emit @Post { to: w, payload: "poison" } }
+                    }
+                }
+            }
+            if t.frame == 60 {
+                target $Worker as w {
+                    if w.Worker.name == "alpha" {
+                        do check("each worker handles its mail in order", w.Worker.log == "m1m2m3m4m5m6m7" and w.Worker.inOrder)
+                        do check("no more than perTick messages in one tick", w.Worker.peak == 2 and w.Worker.handled == 7)
+                    }
+                    if w.Worker.name == "gamma" {
+                        do check("a poison message crashes the worker", gammaCrash > 0 and w.Worker.restarts == 1)
+                        do check("the supervisor restarts it after the backoff", gammaBack - gammaCrash == 4)
+                        do check("its waiting mail is kept and handled after the restart", w.Worker.log == "x1x2x3" and not (w carries #Crashed))
+                    }
+                    if w.Worker.name == "delta" {
+                        do check("each restart waits twice as long as the one before", deltaCrashes == "3 8 16 " and deltaBacks == "7 15 ")
+                        do check("after too many crashes the supervisor escalates, and stops restarting", escalated == 1 and (w carries #GivenUp) and w.Worker.restarts == 2)
+                    }
+                }
+                var left = 0
+                target $Mail as m { left += 1 }
+                do check("nothing is lost: only the escalated worker's last message is still waiting", left == 1)
+            }
+        }
+    }
+}

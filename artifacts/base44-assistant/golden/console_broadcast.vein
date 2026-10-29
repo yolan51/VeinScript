@@ -1,0 +1,36 @@
+bundle Broadcast by you {
+
+    shard Launcher {
+        run once {
+            emit *Vein.Console.Io.@Print   { text: "main — opening three consoles, broadcasting every 2s." }
+            emit *Vein.Console.Io.@Console { name: #Alpha, firsttext: "Alpha ready — waiting for messages." }
+            emit *Vein.Console.Io.@Console { name: #Beta,  firsttext: "Beta ready — waiting for messages." }
+            emit *Vein.Console.Io.@Console { name: #Gamma, firsttext: "Gamma ready — waiting for messages." }
+        }
+    }
+
+    shard Broadcaster {
+        var n: int                      // shard-private state: which round we are on
+
+        every 2 {
+            if here() == #Main {
+                n += 1
+                let consoles = [#Alpha, #Beta, #Gamma]
+
+                emit *Vein.Console.Io.@Send { to: #Alpha, text: "round " + n + " — for Alpha only" }
+
+                emit *Vein.Console.Io.@Send { to: pick(consoles), text: "round " + n + " — you were picked" }
+
+                target consoles as c {
+                    emit *Vein.Console.Io.@Send { to: c, text: "round " + n + " — broadcast to everyone" }
+                }
+            }
+        }
+    }
+
+    shard Inbox {
+        hear *Vein.Console.Io.@Message as m {
+            emit *Vein.Console.Io.@Print { text: m.from + ": " + m.text }
+        }
+    }
+}

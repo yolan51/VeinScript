@@ -1,0 +1,13 @@
+// publicators/Builders.vein — TEMPLATES that make identities. This file becomes `publicator Builders`.
+//
+// `bring Unit(10, 10)` is the whole of `spawn` + `attach $Gauge` + `mark #Active`. Arguments bind
+// positionally across the includes, in declaration order, so this one takes (current, max).
+//
+// THE `mark` MEMBER IS WHAT MAKES IT AN IDENTITY TEMPLATE. With only an include it builds a FRAGMENT —
+// the include expands fields and attaches nothing — and `bring Unit(…) as e` would be VS0221.
+//
+// Ask rather than counting: `veinc scaffold <bundle>.vein '&Unit'` prints every slot with the shape it
+// came from.
+
+shared("An identity with a pool, in play.")
+builder Unit { $Gauge   mark #Active }

@@ -1,0 +1,13 @@
+bundle Banjo by bob {
+
+    publicator Api {
+        shared("A banjo course was strummed, or rolled.")
+        event @Strum { course: int, roll: bool }
+    }
+
+    shard Player {
+        hear @Strum as s {
+            emit *Vein.Console.Io.@Print { text: "[banjo]  heard its own Strum: course " + s.course + ", roll=" + s.roll }
+        }
+    }
+}

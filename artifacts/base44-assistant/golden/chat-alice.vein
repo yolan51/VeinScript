@@ -1,0 +1,32 @@
+bundle ChatAlice by you {
+
+    shard Boot {
+        run once {
+            emit *Vein.Net.Peer.@Listen { as: #Alice, at: 9701, key: "chat-secret" }
+
+            emit *Vein.Net.Peer.@Link { name: #Server, at: "127.0.0.1:9700", key: "chat-secret" }
+
+            emit *Vein.Console.Io.@Print { text: "Alice connected — type a line and press Enter" }
+
+            emit *Vein.Net.Peer.@Send { to: #Server, text: "joined" }
+        }
+    }
+
+    shard Typing {
+        hear *Vein.Console.Io.@Input as i {
+            emit *Vein.Net.Peer.@Send { to: #Server, text: i.text }
+        }
+    }
+
+    shard Incoming {
+        hear *Vein.Net.Peer.@Message as m audience #Server {
+            emit *Vein.Console.Io.@Print { text: m.text }
+        }
+    }
+
+    shard Reachability {
+        hear *Vein.Net.Peer.@Undelivered as u {
+            emit *Vein.Console.Io.@Print { text: "  (server is not running — start samples/chat/server.vein)" }
+        }
+    }
+}

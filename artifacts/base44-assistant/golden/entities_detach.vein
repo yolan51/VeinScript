@@ -1,0 +1,53 @@
+bundle EntitiesDetach by you {
+
+    shape $Health { hp: int folds sum }
+    shape $Shield { sp: int folds sum }
+
+    shard Seed {
+        run once {
+            repeat 3 {
+                let e = spawn()
+                attach $Health to e { hp: 9 }
+                attach $Shield to e
+                mark e #Mob
+            }
+        }
+    }
+
+    shard Boost {
+        each tick {
+            target $Health $Shield #Mob as self { self.Shield.sp += 2 }
+        }
+    }
+
+    shard Wear {
+        each tick {
+            target $Health $Shield #Mob as self {
+                self.Health.hp -= 1
+                self.Shield.sp -= 3
+            }
+        }
+    }
+
+    shard Shatter {
+        settled {
+            target $Health $Shield #Mob as self {
+                if self.Shield.sp <= 0 {
+                    emit *Vein.Console.Io.@Print { text: "shatter e" + Entity + " sp=" + self.Shield.sp }
+                    unattach $Shield from self
+                }
+            }
+        }
+    }
+
+    shard Report {
+        settled {
+            target $Shield #Mob as self {
+                emit *Vein.Console.Io.@Print { text: "  shielded e" + Entity + " sp=" + self.Shield.sp }
+            }
+            target $Health #Mob as self {
+                emit *Vein.Console.Io.@Print { text: "  alive    e" + Entity + " hp=" + self.Health.hp }
+            }
+        }
+    }
+}

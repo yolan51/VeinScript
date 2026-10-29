@@ -1,0 +1,61 @@
+bundle UiWidgets by you {
+
+    need "Vein.UI"
+
+    mark #Widget
+    mark #Focused
+
+    shard Build {
+        run once {
+            let save = spawn()
+            attach $Button to save { label: "Save" }
+            mark save #Widget
+
+            let cancel = spawn()
+            attach $Button to cancel { label: "Cancel", id: "btn-cancel", class: "muted", onclick: "dismiss" }
+            mark cancel #Widget
+
+            let name = spawn()
+            attach $Field to name { value: "", placeholder: "your name" }
+            mark name #Widget
+            mark name #Focused
+
+            let title = spawn()
+            attach $Text to title { content: "Preferences" }
+            mark title #Widget
+        }
+    }
+
+    shard Type {
+        each tick {
+            target $Field #Focused as f {
+                if f.Field.value == "" { f.Field.value = "Ada" }
+            }
+        }
+    }
+
+    shard Render {
+        settled {
+            target $Text #Widget as t {
+                emit *Vein.Console.Io.@Print { text: "text    " + t.Text.content }
+            }
+
+            target $Button #Widget as b {
+                if b.Button.id == "" {
+                    emit *Vein.Console.Io.@Print { text: "button  " + b.Button.label + "  (no id)" }
+                } else {
+                    emit *Vein.Console.Io.@Print {
+                        text: "button  " + b.Button.label + "  id=" + b.Button.id +
+                              " class=" + b.Button.class + " onclick=" + b.Button.onclick
+                    }
+                }
+            }
+
+            target $Field #Widget as f {
+                emit *Vein.Console.Io.@Print {
+                    text: "field   [" + f.Field.value + "]  placeholder=" + f.Field.placeholder
+                }
+            }
+        }
+    }
+}

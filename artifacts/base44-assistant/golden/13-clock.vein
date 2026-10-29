@@ -1,0 +1,31 @@
+bundle ClockTicked by you {
+
+    need "Vein.Time"
+
+    shape $Odometer { frames: int, seconds: float }
+    mark #Odometer
+
+    builder Odometer { $Odometer   mark #Odometer }
+
+    shard Boot { run once { bring Odometer(0, 0.0)
+} }
+
+    shard Advance {
+        hear *Vein.Time.Clock.@Ticked as t {
+            target $Odometer #Odometer as o {
+                o.Odometer.frames = t.frame
+                o.Odometer.seconds = o.Odometer.seconds + t.delta
+            }
+        }
+    }
+
+    shard Report {
+        settled {
+            target $Odometer #Odometer as o {
+                emit *Vein.Console.Io.@Print {
+                    text: "frame " + o.Odometer.frames + " at " + *Vein.Math.Round.roundTo(o.Odometer.seconds, 4) + "s"
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,59 @@
+bundle Arcade by you {
+    event @Chat { text: string }
+
+    shard Menu {
+        var t: int = 0
+        each tick {
+            t += 1
+            if t == 2 {
+                emit *Vein.Console.Io.@Print { text: "menu opens" }
+                mute #Gameplay
+            }
+            if t == 4 {
+                emit *Vein.Console.Io.@Print { text: "menu closes" }
+                unmute #Gameplay
+            }
+        }
+    }
+
+    shard Physics #Gameplay {
+        var n: int = 0
+        each tick {
+            n += 1
+            emit *Vein.Console.Io.@Print { text: "physics " + n }
+        }
+    }
+
+    shard Enemies #Gameplay {
+        var n: int = 0
+        each tick {
+            n += 1
+            emit *Vein.Console.Io.@Print { text: "enemies " + n }
+        }
+    }
+
+    shard Spammer {
+        each tick { emit @Chat { text: "buy now" } }
+    }
+
+    shard Friend #Trusted {
+        run once { emit @Chat { text: "hello" } }
+    }
+
+    shard Moderator {
+        hear @Chat as c audience !Spammer {
+            mark !Spammer #Banned
+        }
+    }
+
+    shard Chat {
+        hear @Chat as c audience not #Banned {
+            if c.from carries #Trusted {
+                emit *Vein.Console.Io.@Print { text: "chat (friend): " + c.text }
+            }
+            if not (c.from carries #Trusted) {
+                emit *Vein.Console.Io.@Print { text: "chat: " + c.text }
+            }
+        }
+    }
+}

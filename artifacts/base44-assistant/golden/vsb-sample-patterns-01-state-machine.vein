@@ -1,0 +1,76 @@
+bundle StateMachine by patterns {
+    shape $Guard {
+        enum Mode { Patrol, Chase, Attack, Flee }
+        mode: Mode
+        hp: int = 10
+        dist: float = 30.0       // how far the player is; the test lets it come closer
+        changes: int = 0
+    }
+    mark #Guard
+
+    SF check(name: string, good: bool) {
+        if good { emit *Vein.Console.Io.@Print { text: "ok   " + name } } else { emit *Vein.Console.Io.@Print { text: "FAIL " + name } }
+    }
+
+    shard Spawn {
+        run once {
+            let g = spawn()
+            attach $Guard to g { mode: Mode.Patrol }
+            mark g #Guard
+        }
+    }
+
+    shard Brain {
+        each tick {
+            target $Guard #Guard as g {
+                var next = g.Guard.mode
+                if g.Guard.hp <= 3 {
+                    next = Mode.Flee
+                } else if g.Guard.dist < 2.0 {
+                    next = Mode.Attack
+                } else if g.Guard.dist < 12.0 {
+                    next = Mode.Chase
+                } else {
+                    next = Mode.Patrol
+                }
+                if not (next == g.Guard.mode) {
+                    g.Guard.mode = next
+                    g.Guard.changes += 1
+                }
+            }
+        }
+    }
+
+    shard Act {
+        settled {
+            target $Guard #Guard as g {
+                match g.Guard.mode {
+                    when Patrol { g.Guard.dist = g.Guard.dist - 0.25 }
+                    when Chase { g.Guard.dist = g.Guard.dist - 0.5 }
+                    when Attack { g.Guard.hp = g.Guard.hp - 1 }
+                    when Flee { g.Guard.dist = g.Guard.dist + 1.0 }
+                }
+            }
+        }
+    }
+
+    shard Script {
+        var saw: string = ""
+        settled {
+            target $Guard as g {
+                let name = "" + g.Guard.mode
+                if not (endsWith(saw, name)) { saw = saw + ">" + name }
+            }
+        }
+        hear *Vein.Time.Clock.@Ticked as t {
+            if t.frame == 199 {
+                target $Guard as g {
+                    do check("the guard went patrol, chase, attack, flee", contains(saw, "Patrol>Chase>Attack>Flee"))
+                    do check("it fled once its hp was low", g.Guard.hp <= 3)
+                    do check("and keeps away", g.Guard.dist > 12.0)
+                    do check("three transitions, each counted where it happened", g.Guard.changes == 3)
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,21 @@
+bundle World by studio {
+    event @Boot     { seed: int, mode: string = "play" }   // the shared entry shape
+    event @Response { status: int, body: string }
+
+    start @Boot { seed: 42 }                                // mode defaults to "play"
+
+    shard Sim {
+        hear @Boot as b { emit @Response { status: 200, body: "world seed=" + b.seed + " mode=" + b.mode } }
+    }
+}
+
+bundle Ui by studio {
+    event @Boot     { seed: int, mode: string = "play" }   // same entry shape as World
+    event @Response { status: int, body: string }
+
+    start @Boot { seed: 42, mode: "menu" }                 // same shape, different payload
+
+    shard Screen {
+        hear @Boot as b { emit @Response { status: 200, body: "ui mode=" + b.mode } }
+    }
+}

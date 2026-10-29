@@ -1,0 +1,17 @@
+bundle BenchFolds by you {
+
+    shape $Health { hp: int folds sum }
+
+    shard Spawn {
+        run once {
+            repeat 1000 {
+                let e = spawn()
+                attach $Health to e { hp: 1000000 }
+                mark e #Mob
+            }
+        }
+    }
+
+    shard Drain { each tick { target $Health #Mob as self { self.Health.hp -= 1 } } }
+    shard Rot   { each tick { target $Health #Mob as self { self.Health.hp -= 2 } } }
+}

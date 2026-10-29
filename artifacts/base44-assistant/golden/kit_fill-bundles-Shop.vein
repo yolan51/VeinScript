@@ -1,0 +1,22 @@
+bundle Shop by kit {
+
+    publicator Api {
+        shared("A price: how much, and in what.")
+        shape $Price { amount: int, currency: string = "EUR" }
+
+        shared("How many are in it.")
+        shape $Stock { count: int = 1 }
+
+        shared("A sale at the till.")
+        event @Sold { $Price, item: string }
+
+        shared("Worn by every crate.")
+        mark #Crate
+
+        shared("A crate on the shelf: a price, a stock count, and the #Crate mark.")
+        builder Crate { $Price $Stock   mark #Crate }
+
+        shared("A printed receipt line.")
+        builder Receipt { $Price, item: string   line = "receipt: " + item + " " + amount + " " + currency }
+    }
+}

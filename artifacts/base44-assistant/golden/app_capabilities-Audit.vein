@@ -1,0 +1,10 @@
+bundle Audit by you {
+    shard Ledger {
+        hear *you.Store.Orders.@Ordered as o {
+            emit *Vein.Console.Io.@Print { text: "[Audit] saw order of " + o.item }
+        }
+        hear *you.Billing.Invoices.@Invoiced as i {
+            emit *Vein.Console.Io.@Print { text: "[Audit] saw invoice " + i.amount + " for " + i.item }
+        }
+    }
+}

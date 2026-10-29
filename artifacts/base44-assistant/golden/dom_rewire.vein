@@ -1,0 +1,47 @@
+bundle DomRewire by you {
+
+    shape $Element { tag: string, text: string }
+    shape $Handler { body: string }
+
+    mark #Button
+
+    fn fnName(e: Entity) return string { return "h" + e }
+
+    builder Btn { $Element $Handler   mark #Button }
+
+    shard Seed {
+        run once {
+            bring Btn("button", "one",   "console.log('one')")
+            bring Btn("button", "two",   "console.log('two')")
+            bring Btn("button", "three", "console.log('three')")
+        }
+    }
+
+    shard Before {
+        each tick {
+            target $Element $Handler #Button as b {
+                emit *Vein.Console.Io.@Print {
+                    text: "  before  " + fnName(Entity) + "  " + b.Handler.body
+                }
+            }
+        }
+    }
+
+    shard Rewire {
+        each tick {
+            target $Element #Button as b {
+                attach $Handler to b { body: "alert('" + b.Element.text + " was rewired')" }
+            }
+        }
+    }
+
+    shard Show {
+        settled {
+            target $Element $Handler #Button as b {
+                emit *Vein.Console.Io.@Print {
+                    text: "  after   " + fnName(Entity) + "  " + b.Handler.body
+                }
+            }
+        }
+    }
+}

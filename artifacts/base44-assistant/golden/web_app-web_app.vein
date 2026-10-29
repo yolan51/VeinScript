@@ -1,0 +1,215 @@
+bundle WebApp by you {
+
+    need "Vein.Web"
+    need "Vein.WebTheme"
+
+    shape $Card   { title: string, body: string }
+    shape $Hero   { title: string, sub: string }
+    shape $Footer { note: string }
+
+    shape $Element { tag: string, cls: string, text: string }
+
+    shape $Handler { body: string }
+
+    mark #Screen    // an element that belongs to the counter page, rendered in spawn order
+    mark #Button
+
+    mark #Featured  // a card the home grid shows
+    mark #Doc       // a /docs section (used by shards/Reference.vein, which merges into this bundle)
+    mark #Nav       // one link in the site nav
+
+    fn domId(e: Entity) return string { return "e" + e }
+    fn fnName(e: Entity) return string { return "h" + e }
+
+    shape $Section { title: string, ord: int }
+
+    shape $NavItem { href: string, label: string }
+
+    builder NavItem { $NavItem   mark #Nav }
+
+    SF navBar(path: string) {
+        bring Open("nav")
+        target $NavItem #Nav as i {
+            if path == i.NavItem.href {
+                bring Raw("<b>" + i.NavItem.label + "</b>")
+            } else {
+                bring Link(i.NavItem.href, i.NavItem.label)
+            }
+        }
+        bring Raw("<span class='clock' id='clk' style='margin-left:auto'></span>")
+        bring Raw("<button onclick='theme()'>theme</button>")
+        bring Close("nav")
+    }
+
+    builder Card    { $Card     markup = "<div class='card'><h3>" + title + "</h3><p>" + body + "</p></div>" }
+    builder Hero    { $Hero     markup = "<header class='hero'><h1>" + title + "</h1><p>" + sub + "</p></header>" }
+    builder Footer  { $Footer   markup = "<footer>" + note + "</footer>" }
+
+    builder Featured { $Card   mark #Featured }
+
+    builder Btn { $Element $Handler   mark #Screen #Button }
+
+    builder Readout { $Element   mark #Screen }
+
+    shard Styles {
+        hear @Request as r {
+            bring Slate()
+            bring Reset()
+
+            bring NavBar()
+            bring HeroArea()
+            bring Cards()
+            bring Controls()
+            bring Prose()
+            bring Layout()
+
+            bring Article()
+            bring Code()
+            bring Callout()
+
+            bring Motion()
+
+            bring Rule(".count", "font-size:4rem;font-weight:800;letter-spacing:-.04em;color:var(--brand);margin:1.5rem 0;font-variant-numeric:tabular-nums")
+        }
+    }
+
+    shard Behaviour {
+        hear @Request as r {
+            bring ThemeToggle()
+            bring Clock("clk")
+        }
+    }
+
+    shard Catalog {
+        run once {
+            bring NavItem("/",        "home")
+            bring NavItem("/docs",    "docs")
+            bring NavItem("/counter", "counter")
+            bring NavItem("/greet",   "greet")
+
+            bring Featured("Shapes",   "Data lives in $Shape — identity components with folds.")
+            bring Featured("Shards",   "Behaviour reacts: hear an event, emit more.")
+            bring Featured("Builders", "A builder's output field picks its channel: markup, css or code.")
+            bring Featured("One page", "These four cards are four separate @Html fragments.")
+            bring Featured("where are we ", "LOST IN THE FRAGMENt OF THE WORLD")
+        }
+    }
+
+    shard Home {
+        hear @Request as r {
+            if r.path == "/" {
+                do navBar(r.path)
+                bring Hero("VeinScript", "A website assembled entirely from events.")
+                bring Open("main")
+                    bring OpenAs("div", "grid")
+                        target $Card #Featured as self {
+                            bring Card(self.Card.title, self.Card.body)
+                        }
+                    bring Close("div")
+                bring Close("main")
+                bring Footer("Served by veinc serve")
+            }
+        }
+    }
+
+    shard CounterSeed {
+        run once {
+            bring Readout("div", "count", "0") as out
+
+            bring Btn("button", "", "+1",    addNumber(domId(out),  2))
+            bring Btn("button", "", "-1",    addNumber(domId(out), -2))
+            bring Btn("button", "", "reset", text(domId(out), "0"))
+        }
+    }
+
+    shard CounterPage {
+        hear @Request as r {
+            if r.path == "/counter" {
+                do navBar(r.path)
+                bring Hero("Counter", "The page reacts in the browser, not on the server.")
+                bring Open("main")
+                    target $Element #Screen as e {
+                        if e.Element.tag == "div" {
+                            bring Raw("<div class='" + e.Element.cls + "' id='" + domId(Entity) + "'>" +
+                                      e.Element.text + "</div>")
+                        }
+                    }
+
+                    bring OpenAs("div", "row")
+                        target $Element $Handler #Button as b {
+                            bring Raw("<button id='" + domId(Entity) + "' onclick='" +
+                                      fnName(Entity) + "()'>" + b.Element.text + "</button>")
+                        }
+                    bring Close("div")
+
+                    bring 2 JumpLine()
+                    bring Link("/", "back home")
+                bring Close("main")
+
+                target $Handler as h { bring Define(fnName(Entity), h.Handler.body) }
+
+                bring Footer("Three functions, three @Script fragments")
+            }
+        }
+    }
+
+    shard Tint {
+        hear @Request as r {
+            if r.path == "/counter" {
+                bring Js(raw("var tint=['#e2504a','#3fb27f','#4a7fe2','#e0a33c'];"))
+
+                target $Element #Screen as e {
+                    bring Js(everyMs(2000,
+                             setStyleExpr(domId(Entity), "color",
+                                          "tint[((Date.now()/2000|0)+" + Entity + ")%tint.length]")))
+                }
+            }
+        }
+    }
+
+    shard Greet {
+        hear @Request as r {
+            if r.path == "/greet" {
+                do navBar(r.path)
+
+                if r.method == "GET" {
+                    bring Hero("Greet", "A form, posted back to the same path.")
+                    bring Open("main")
+                        bring Form("/greet", "who", "send")
+                    bring Close("main")
+                }
+
+                if r.method == "POST" {
+                    bring Hero("Hello " + r.who, "Received by POST.")
+                    bring Open("main")
+                        bring Card("method", r.method)
+                        bring Card("raw body", r.body)
+                        bring Link("/greet", "again")
+                    bring Close("main")
+                }
+
+                bring Footer("method and body arrive on @Request")
+            }
+        }
+    }
+
+    shard Kernel {
+        hear @Request as r { emit @Render { path: r.path } }
+    }
+
+    ShardView Page {
+        var html: string
+        var css: string
+        var js: string
+
+        hear @Html as f   { html += f.markup }
+        hear @Style as s  { css += s.css }
+        hear @Script as c { js += c.code }
+
+        hear @Render as v {
+            if not (html == "") {
+                emit @Response { status: 200, body: "<!doctype html><html><head><meta charset=\"utf-8\"><title>VeinScript</title><style>" + css + "</style></head><body>" + html + "<script>" + js + "</script></body></html>" }
+            }
+        }
+    }
+}

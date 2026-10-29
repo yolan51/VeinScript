@@ -1,0 +1,31 @@
+bundle Pause by game {
+    need "Vein.Graphics"
+    need "Vein.Input"
+
+    publicator Pausing {
+        shared("Pause if running, resume if paused — from the `pause` action, or a HUD button.")
+        event @TogglePause { }
+
+        shared("The game was paused (1) or resumed (0) — for a HUD.")
+        event @Paused { paused: int }
+    }
+
+    mark #Gameplay
+
+    shard Pauser {
+        var paused: int = 0
+        hear *Vein.Input.Actions.@ActionPressed as a { if a.action == "pause" { emit @TogglePause { } } }
+        hear @TogglePause as t {
+            if paused == 0 {
+                paused = 1
+                mute #Gameplay
+                target $Animation as c { c.Animation.speed = 0.0 }
+            } else {
+                paused = 0
+                unmute #Gameplay
+                target $Animation as c { c.Animation.speed = 1.0 }
+            }
+            emit @Paused { paused: paused }
+        }
+    }
+}

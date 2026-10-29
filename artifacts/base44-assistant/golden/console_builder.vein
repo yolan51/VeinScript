@@ -1,0 +1,12 @@
+bundle ConsoleBuilderDemo by you {
+
+    start @Boot { }
+    event @Boot { }
+
+    shard Launcher {
+        hear @Boot as b {
+            bring *Vein.Console.Io.&Console(#Server,  "Server ready.")
+            bring *Vein.Console.Io.&Console(#Client1, "Client 1 ready.")
+        }
+    }
+}

@@ -1,0 +1,39 @@
+bundle Game by you {
+
+    publicator Turns {
+        shared("The run begins, with the hero's name.")
+        event @Begin { hero: string }
+
+        shared("A new turn starts.")
+        event @TurnStarted { hero: string, turn: int }
+
+        shared("The hero entered a room.")
+        event @Moved { who: string, room: string, turn: int }
+    }
+
+    start @Begin { hero: "Ayla" }
+
+    shard Director {
+        var hero = ""
+        var turn = 0
+
+        hear @Begin as b {
+            hero = b.hero
+            turn = 1
+            emit @TurnStarted { hero: hero, turn: turn }
+        }
+
+        hear *you.Combat.Fight.@Damaged as d {
+            if d.left > 0 {
+                turn += 1
+                emit @TurnStarted { hero: hero, turn: turn }
+            }
+        }
+    }
+
+    shard Walker {
+        hear @TurnStarted as t {
+            emit @Moved { who: t.hero, room: "hall " + t.turn, turn: t.turn }
+        }
+    }
+}

@@ -1,0 +1,47 @@
+bundle EntitiesMarks by you {
+
+    mark #Enemy
+    mark #Awake
+    mark #Spent
+
+    shape $Enemy { hp: int folds sum }
+
+    shard Seed {
+        run once {
+            repeat 3 {
+                let e = spawn()
+                attach $Enemy to e { hp: 3 }
+                mark e #Enemy          // the MARK — same name as the shape, different thing
+                mark e #Awake
+            }
+        }
+    }
+
+    shard Drain {
+        each tick {
+            target $Enemy #Enemy #Awake as self { self.Enemy.hp -= 1 }
+        }
+    }
+
+    shard Reaper {
+        settled {
+            target $Enemy #Enemy as self {
+                emit *Vein.Console.Io.@Print { text: "enemy e" + Entity + " hp=" + self.Enemy.hp }
+                if self.Enemy.hp <= 0 {
+                    mark self #Spent
+                    unmark self #Awake
+                    unmark self #Enemy
+                    emit *Vein.Console.Io.@Print { text: "  e" + Entity + " spent" }
+                }
+            }
+        }
+    }
+
+    shard Ledger {
+        settled {
+            target $Enemy #Spent as self {
+                emit *Vein.Console.Io.@Print { text: "  ledger: e" + Entity + " is spent" }
+            }
+        }
+    }
+}
