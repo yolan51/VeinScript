@@ -7,8 +7,13 @@ namespace Vein.Hosting;
 /// The compiler finds `stdlib/` by walking up from the program, the working directory and the app's base
 /// directory (BundleIndex.LocateNamed). Inside an engine none of those leads anywhere useful — Godot's
 /// working directory is the editor's — so the files ship as embedded resources and land in
-/// `%LOCALAPPDATA%/VeinHosting/<version>/stdlib`, once per version. `Root` is that folder's PARENT,
-/// which is what a `BundleSearch.Scope` seed has to be.
+/// `%LOCALAPPDATA%/VeinHosting/<version>/<build>/stdlib`, one folder per build of this assembly. `Root` is
+/// that folder's PARENT, which is what a `BundleSearch.Scope` seed has to be.
+///
+/// Per BUILD (the module's MVID, as LibraryPackage keys a library), not per version: every local build is
+/// 0.1.0.0. Two builds that shared the folder fought over it — a newer one left its copy read-only, and an
+/// engine still on an older package could no longer write its own: every check failed with "Access to the
+/// path …/stdlib/Core.vein is denied".
 internal static class StdlibCache
 {
     private static readonly object Gate = new();
@@ -26,8 +31,9 @@ internal static class StdlibCache
     {
         var asm = typeof(StdlibCache).Assembly;
         string version = asm.GetName().Version?.ToString() ?? "0";
+        string build = asm.ManifestModule.ModuleVersionId.ToString("N");
         string root = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VeinHosting", version);
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VeinHosting", version, build);
         string stdlib = Path.Combine(root, "stdlib");
 
         foreach (string name in asm.GetManifestResourceNames().Where(n => n.StartsWith("stdlib/", StringComparison.Ordinal)))
