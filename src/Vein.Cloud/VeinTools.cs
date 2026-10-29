@@ -113,12 +113,17 @@ public static class VeinTools
     /// One question to the node's gateway (POST /rpc) — `status`, `account`, `rewards`, `versions` — or null
     /// when no node answers. A client per question, held by nothing after it: these are a person's clicks, and
     /// a host that unloads this assembly (Godot's editor) must find no pool still alive.
-    public static async Task<JsonElement?> ChainRpc(string http, object question)
+    public static async Task<JsonElement?> ChainRpc(string http, string method, string? key = null, string? package = null)
     {
         try
         {
+            // Built by hand, not JsonSerializer.Serialize(new { … }): the default options would cache the
+            // anonymous type in System.Text.Json, and a host that unloads this assembly then could not.
+            var question = new System.Text.Json.Nodes.JsonObject { ["method"] = method };
+            if (key is not null) question["key"] = key;
+            if (package is not null) question["package"] = package;
             using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-            using var response = await client.PostAsync(http + "/rpc", new StringContent(JsonSerializer.Serialize(question), Encoding.UTF8, "application/json")).ConfigureAwait(false);
+            using var response = await client.PostAsync(http + "/rpc", new StringContent(question.ToJsonString(), Encoding.UTF8, "application/json")).ConfigureAwait(false);
             return JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(false)).RootElement;
         }
         catch { return null; }

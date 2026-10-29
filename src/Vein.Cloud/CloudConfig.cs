@@ -44,9 +44,15 @@ public sealed class CloudConfig
 
         try
         {
-            if (File.Exists(Path0) &&
-                JsonSerializer.Deserialize<CloudConfig>(File.ReadAllText(Path0)) is { } stored)
-                config = stored;
+            // Read by hand, not JsonSerializer.Deserialize<CloudConfig>: the default options cache this type in
+            // System.Text.Json, which never unloads, and a host that unloads THIS assembly (Godot's editor, at
+            // every C# rebuild) then cannot. Same property names, so the file is the one it always was.
+            if (File.Exists(Path0))
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(Path0));
+                if (doc.RootElement.TryGetProperty(nameof(BaseUrl), out var b) && b.GetString() is { } baseUrl) config.BaseUrl = baseUrl;
+                if (doc.RootElement.TryGetProperty(nameof(SignupUrl), out var su) && su.GetString() is { } signup) config.SignupUrl = signup;
+            }
         }
         catch { /* unreadable or from a newer version — the defaults are a fine answer */ }
 

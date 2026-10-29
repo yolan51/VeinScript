@@ -100,7 +100,7 @@ internal sealed class ChainPanel : UserControl
 
     // ---- reading ----------------------------------------------------------------------------------------
 
-    private Task<JsonElement?> Rpc(object question) => global::Vein.Cloud.VeinTools.ChainRpc(Chain.Http, question);
+    private Task<JsonElement?> Rpc(string method, string? key = null, string? package = null) => global::Vein.Cloud.VeinTools.ChainRpc(Chain.Http, method, key, package);
 
     private string? KeyOf(string? who) => _net is null ? null : global::Vein.Cloud.VeinTools.ChainKey(_net, who);
 
@@ -112,7 +112,7 @@ internal sealed class ChainPanel : UserControl
         if (_net is null) return;
         int request = ++_request;
         string? who = _account.SelectedItem as string, key = KeyOf(who);
-        var status = await Rpc(new { method = "status" });
+        var status = await Rpc("status");
         if (request != _request) return;
         _left.Children.Clear();
         _right.Children.Clear();
@@ -124,8 +124,8 @@ internal sealed class ChainPanel : UserControl
         }
         _status.Text = $"{_http} · {Path.GetFileName(_net)} · height {(status.Value.TryGetProperty("height", out var h) ? h.ToString() : "?")}";
 
-        var account = key is null ? null : await Rpc(new { method = "account", key });
-        var rewards = await Rpc(new { method = "rewards" });
+        var account = key is null ? null : await Rpc("account", key: key);
+        var rewards = await Rpc("rewards");
         if (request != _request) return;
 
         Head(_left, who is null ? "No account" : $"Account {who}");
@@ -164,7 +164,7 @@ internal sealed class ChainPanel : UserControl
 
     private async void RenderActionsVersions(string package)
     {
-        var v = await Rpc(new { method = "versions", package });
+        var v = await Rpc("versions", package: package);
         if (v is null || !v.Value.TryGetProperty("versions", out var list)) return;
         foreach (var x in list.EnumerateArray())
             Line(_right, $"verified {x.GetProperty("version").GetString()} at #{x.GetProperty("height")}   {x.GetProperty("result").GetString()![..Math.Min(22, x.GetProperty("result").GetString()!.Length)]}…", Good, mono: true, at: 2);

@@ -74,10 +74,18 @@ public static class CredentialStore
             bool wrapped = OperatingSystem.IsWindows();
             string token = wrapped ? Protect(session.Token) : session.Token;
 
-            File.WriteAllText(Path0, JsonSerializer.Serialize(
-                new Stored(token, session.UserId, session.Email, session.FullName, session.Role,
-                           wrapped, session.Handle),
-                new JsonSerializerOptions { WriteIndented = true }));
+            // Written and read by hand (see Load): the same names and shape the serializer gave `Stored`.
+            var stored = new System.Text.Json.Nodes.JsonObject
+            {
+                [nameof(Stored.Token)] = token,
+                [nameof(Stored.UserId)] = session.UserId,
+                [nameof(Stored.Email)] = session.Email,
+                [nameof(Stored.FullName)] = session.FullName,
+                [nameof(Stored.Role)] = session.Role,
+                [nameof(Stored.Protected)] = wrapped,
+                [nameof(Stored.Handle)] = session.Handle,
+            };
+            File.WriteAllText(Path0, stored.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
 
             Restrict(Path0);
         }
@@ -95,7 +103,15 @@ public static class CredentialStore
         {
             if (!File.Exists(Path0)) return null;
 
-            if (JsonSerializer.Deserialize<Stored>(File.ReadAllText(Path0)) is not { } stored) return null;
+            // By hand, not JsonSerializer.Deserialize<Stored>: the default options cache `Stored` in
+            // System.Text.Json, which never unloads — and Godot's editor, which unloads this assembly at every
+            // C# rebuild, then could not ("Failed to unload assemblies") once a sign-in was saved.
+            using var doc = JsonDocument.Parse(File.ReadAllText(Path0));
+            var root = doc.RootElement;
+            string Text(string name) => root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString()! : "";
+            var stored = new Stored(Text(nameof(Stored.Token)), Text(nameof(Stored.UserId)), Text(nameof(Stored.Email)),
+                Text(nameof(Stored.FullName)), Text(nameof(Stored.Role)),
+                root.TryGetProperty(nameof(Stored.Protected), out var p) && p.ValueKind == JsonValueKind.True, Text(nameof(Stored.Handle)));
             if (stored.Token.Length == 0) return null;
 
             string token = stored.Protected ? Unprotect(stored.Token) : stored.Token;
