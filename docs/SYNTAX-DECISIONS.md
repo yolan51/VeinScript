@@ -1165,6 +1165,19 @@ manage.
 
 *Used:* `samples/text_interpolation.vein` (also in tools/check-backend.sh).
 
+## D30 — The event queue stays first-in-first-out; no `emit next` {#queue-order}
+
+**REFUSED (the user, 2026-10-30).** Vein Cards' rules resolve depth-first: a trigger inside a trigger finishes
+before the next ability starts. With the queue first-in-first-out (RULES 21), a handler that emits two
+`@Resolve`s runs the second before the first one's follow-ups. Asked for: `emit next @X { … }`, to jump the
+queue, or a depth-first queue for every program.
+
+Neither. A `hear` emits the next step and the queue carries on as it always has. The order a program needs
+is the program's to say, in the IOP way: work still to do is IDENTITIES IN A STATE, marked (`#Pending`),
+and one step at a time takes the next of them (`target $Ability #Pending ordered by …`). A nested trigger
+marks its own work ahead of what is waiting, in that order. No second queue discipline, and no existing
+program changes order.
+
 ## Reserved-word disposition
 
 Every keyword currently in [Lexer.cs](../src/Vein.Compiler/Lexing/Lexer.cs) `Keywords`, classified.
