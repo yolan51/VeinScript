@@ -94,17 +94,17 @@ public class CompiledAppTests : IDisposable
     [Fact]
     public void A_host_event_is_still_refused_with_its_note()
     {
-        // The half of the old comment that was right, and it has to stay right: `@Fetch` reaches a
+        // The half of the old comment that was right, and it has to stay right: `@Console` reaches a
         // transport this runtime does not have, so emitting a class and a dispatch for it would produce
-        // a program that compiles, runs, and silently never fetches.
+        // a program that compiles, runs, and silently never opens the window.
         var r = new VeinCompilerService().Compile(new CompileRequest("t.vein",
-            "bundle T by me {\n  need \"Vein.Net\"\n" +
-            "  shard S { run once { emit *Vein.Net.Http.@Fetch { url: \"https://x.test\", method: \"GET\", body: \"\", tag: #T } } }\n" +
+            "bundle T by me {\n  need \"Vein.Console\"\n" +
+            "  shard S { run once { emit *Vein.Console.Io.@Console { name: #T, firsttext: \"\" } } }\n" +
             "  mark #T\n}"));
 
         var emitted = new CSharpBackend().Emit(r.Modules[0]);
 
-        Assert.Contains(emitted.Notes, n => n.Contains("Fetch"));
+        Assert.Contains(emitted.Notes, n => n.Contains("Console"));
     }
 
     // ---- Q: a local the interpreter creates, the backend must declare ------------------------------
@@ -123,7 +123,7 @@ public class CompiledAppTests : IDisposable
 
         var emitted = new CSharpBackend().Emit(r.Modules[0]);
 
-        Assert.Contains("var i = 0;", emitted.Files[0].Contents);
+        Assert.Contains("long i = 0;", emitted.Files[0].Contents);   // declared with its type, as CsOf reads it back
         Assert.DoesNotContain("\n        i = 0;", emitted.Files[0].Contents);
     }
 

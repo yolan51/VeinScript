@@ -62,6 +62,20 @@ public sealed partial class VeinGame
     }
     private string? _filesRoot;
 
+    /// The program's command-line arguments — what `args()` answers, as `veinc run f.vein -- a b` gives them.
+    /// Applies now and to every reload, on either runtime.
+    public IReadOnlyList<string> Args
+    {
+        get => _args;
+        set
+        {
+            _args = value;
+            if (_runtime is not null) _runtime.Args = value;
+            if (_pending is not null) _pending.Args = value;
+        }
+    }
+    private IReadOnlyList<string> _args = Array.Empty<string>();
+
     /// What the last load or reload reported, warnings included. A failed `Reload` leaves the previous
     /// program running and puts its errors here.
     public IReadOnlyList<Diagnostic> Diagnostics { get; private set; } = Array.Empty<Diagnostic>();
@@ -690,6 +704,7 @@ public sealed partial class VeinGame
     private T Reading<T>(T runtime) where T : IGameRuntime
     {
         runtime.ReadFallback = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(Path));
+        runtime.Args = _args;
         return runtime;
     }
 

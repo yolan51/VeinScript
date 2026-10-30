@@ -240,12 +240,30 @@ public class CSharpBackendTests
     {
         // The boundary that remains, and the reason it is not silent: there is no payload type here to
         // construct and no handler this module owns — a stdlib event reaches a transport the
-        // interpreter provides and this runtime does not.
+        // interpreter provides and this runtime does not. (`@Fetch` was the example until the compiled
+        // world learned to fetch; opening a console window is one it still cannot.)
         var (_, notes) = Emit(
-            "  shape $H { hp: int }\n" +
-            "  shard S { run once { emit *Vein.Net.Http.@Fetch { url: \"x\", method: \"GET\", body: \"\" } } }");
+            "  shape $H { hp: int }\n  mark #W\n" +
+            "  shard S { run once { emit *Vein.Console.Io.@Console { name: #W, firsttext: \"\" } } }");
 
-        Assert.Contains(notes, n => n.Contains("@Fetch"));
+        Assert.Contains(notes, n => n.Contains("@Console"));
+    }
+
+    [Fact]
+    public void Fetch_is_a_request_the_compiled_world_makes_and_answers()
+    {
+        // `@Fetch` runs on a worker by the interpreter's own NetHttp, and its answer is queued back as
+        // @Fetched / @Failed — so a game that calls a web service (Vein Cards' Steam login) compiles.
+        var (code, notes) = Emit("""
+            shard S {
+                run once { emit *Vein.Net.Http.@Fetch { url: "https://x.test", method: "GET", body: "", headers: "" } }
+                hear *Vein.Net.Http.@Fetched as f { emit *Vein.Console.Io.@Print { text: f.body } }
+            }
+            """);
+
+        Assert.DoesNotContain(notes, n => n.Contains("Fetch"));
+        Assert.Contains("World.Fetch(", code);
+        Assert.Contains("world.Fetched = (url, status, body) => world.Emit(\"Fetched\"", code);
     }
 
     [Fact]
@@ -300,7 +318,7 @@ public class CSharpBackendTests
         var (code, _) = Emit("  shape $H { hp: int }\n" +
                              "  shard S { run once { repeat 3 as i { let n = i } } }");
 
-        Assert.Matches(@"for \(long __i\d+ = 0;", code);
+        Assert.Matches(@"for \(long __i\d+ = 0[,;]", code);   // the count is read once, as Interp reads it
         Assert.Matches(@"var i = __i\d+;", code);       // the binding, which is what went missing
     }
 
@@ -388,11 +406,12 @@ public class CSharpBackendTests
     public void A_transport_event_is_still_refused_with_its_note()
     {
         var (code, notes) = Emit("""
-            shard S { run once { emit *Vein.Net.Http.@Fetch { url: "https://example.com" } } }
+            mark #W
+            shard S { run once { emit *Vein.Console.Io.@Console { name: #W, firsttext: "" } } }
             """);
 
-        Assert.Contains(notes, n => n.Contains("@Fetch") && n.Contains("transport lives on the interpreter"));
-        Assert.DoesNotContain("class Fetch", code);
+        Assert.Contains(notes, n => n.Contains("@Console") && n.Contains("transport lives on the interpreter"));
+        Assert.DoesNotContain("class Console", code);
     }
 
     [Fact]

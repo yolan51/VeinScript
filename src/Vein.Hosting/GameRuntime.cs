@@ -25,6 +25,8 @@ internal interface IGameRuntime
     string? FilesRoot { set; }
     /// Where a relative READ looks when it finds nothing under FilesRoot: the program's own folder (VeinGame sets it).
     string? ReadFallback { set; }
+    /// The program's command-line arguments, what `args()` answers (VeinGame.Args).
+    IReadOnlyList<string> Args { set; }
     bool Running { get; }
     int Tick { get; }
     IReadOnlyList<string> MutedMarks { get; }

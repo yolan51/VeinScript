@@ -48,8 +48,10 @@ public sealed class CSharpBackend : IVeinBackend
     private readonly HashSet<string> _functions = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IrFunction> _functionDecls = new(StringComparer.Ordinal);
 
-    /// Shard vars and locals made from a list literal of one element type — indexed as that type.
-    private readonly HashSet<string> _arrayVars = new(StringComparer.Ordinal);
+    /// The C# type of each shard var and of each local, by C# name — what CsOf answers for a name. A value
+    /// with no static type (a `fromJson` record, a list element, a `dictionary` parameter) is `object`.
+    private readonly Dictionary<string, string> _fieldCs = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _localCs = new(StringComparer.Ordinal);
 
     /// Names already declared in the method body being emitted. An assignment to a name NOT in here is
     /// the first mention of a local, and the interpreter treats that as a declaration — so the backend
@@ -71,6 +73,14 @@ public sealed class CSharpBackend : IVeinBackend
         _localNames.Clear();
         _localNames.Add(new(StringComparer.Ordinal));
         _usedLocals.Clear();
+        _localCs.Clear();
+    }
+
+    /// A function's parameters, as C# declares them — and as CsOf reads them back.
+    private string Params(IrFunction f)
+    {
+        foreach (var p in f.Params) _localCs[Ident(p.Name)] = Cs(p.Type);
+        return string.Join(", ", f.Params.Select(p => $"{Decl(Cs(p.Type))} {Ident(p.Name)}"));
     }
 
     /// The C# name for a local being declared here.
@@ -151,6 +161,10 @@ public sealed class CSharpBackend : IVeinBackend
         _entityVar = "__e";
         _functionDecls.Clear();
         foreach (var f in module.Functions) { _functions.Add(f.Name); _functionDecls[f.Name] = f; }
+        // A shard's own `fn`s (`Shard__name`), so a call to one converts its arguments and CsOf knows what it returns.
+        foreach (var s in module.Shards)
+            foreach (var m in s.Methods.Where(m => m.Attrs.All(a => a.Name is not ("schedule" or "hear"))))
+                _functionDecls.TryAdd(m.Name, m);
         foreach (var t in module.Types)
             if (t.Kind == IrTypeKind.Component) { _components.Add(t.Name); _componentTypes[t.Name] = t; }
             // AN IMPORTED EVENT IS EMITTED UNLESS ITS MEANING IS TRANSPORT.
@@ -659,8 +673,7 @@ public sealed class CSharpBackend : IVeinBackend
             _bound.Clear();
             ResetLocals();
             foreach (var p in f.Params) _bound.Add(p.Name);
-            string ps = string.Join(", ", f.Params.Select(p => $"{Cs(p.Type)} {Ident(p.Name)}"));
-            sb.AppendLine($"    public static {Cs(f.Return)} {Ident(f.Name)}({ps})");
+            sb.AppendLine($"    public static {Decl(Cs(f.Return))} {Ident(f.Name)}({Params(f)})");
             _currentReturn = f.Return;
             EmitBlock(sb, f.Body, 1);
             _currentReturn = null;
@@ -696,11 +709,7 @@ public sealed class CSharpBackend : IVeinBackend
     private string StateCs(IrField f)
     {
         var t = StateType(f);
-        if (t.Name == "infer" && f.Default is IrList list)
-        {
-            string literal = ListLiteral(list);
-            return literal.Substring(4, literal.IndexOf('{') - 5);   // "new long[] { … }" → "long[]"
-        }
+        if (t.Name == "infer" && f.Default is IrList) return ListCs;
         return Cs(t);
     }
 
@@ -711,8 +720,8 @@ public sealed class CSharpBackend : IVeinBackend
         sb.AppendLine("{");
         _fields.Clear();
         foreach (var f in shard.State) _fields.Add(f.Name);
-        _arrayVars.Clear();
-        foreach (var f in shard.State) if (StateCs(f) is { } cs && cs.EndsWith("[]") && cs != "object[]") _arrayVars.Add(f.Name);
+        _fieldCs.Clear();
+        foreach (var f in shard.State) _fieldCs[f.Name] = StateCs(f);
         foreach (var f in shard.State)
             sb.AppendLine(f.Default is { } init
                 ? $"    public {StateCs(f)} {Ident(f.Name)} = {Expr(init)};"
@@ -804,6 +813,7 @@ public sealed class CSharpBackend : IVeinBackend
                 _bound.Clear();
                 ResetLocals();
                 _bound.Add(p?.Name ?? "e");
+                _localCs[Ident(p?.Name ?? "e")] = EventType(ev);   // a payload is its event's class, not a record
                 string unit = Unit(sb, shard, m, "hear @" + Interp.EventName(ev));
                 sb.AppendLine($"    private void {handlerNames[m]}({EventType(ev)} {Ident(p?.Name ?? "e")})");
                 sb.AppendLine("    {");
@@ -824,9 +834,10 @@ public sealed class CSharpBackend : IVeinBackend
                 _bound.Clear();
                 ResetLocals();
                 foreach (var p in m.Params) _bound.Add(p.Name);
-                string ps = string.Join(", ", m.Params.Select(p => $"{Cs(p.Type)} {Ident(p.Name)}"));
-                sb.AppendLine($"    private {Cs(m.Return)} {Ident(m.Name)}({ps})");
+                sb.AppendLine($"    private {Decl(Cs(m.Return))} {Ident(m.Name)}({Params(m)})");
+                _currentReturn = m.Return;
                 EmitBlock(sb, m.Body, 1);
+                _currentReturn = null;
                 continue;
             }
 
@@ -927,40 +938,20 @@ public sealed class CSharpBackend : IVeinBackend
             case IrBlock b: EmitBlock(sb, b, depth); break;
 
             case IrLet l:
+            {
                 _bound.Add(l.Name);
-                // A VeinScript int is a C# LONG, but `var n = 0` lets C# pick int from the literal — and the
-                // first `n = e.Shape.count` (a long field) failed to compile (CS0266), sending the whole
-                // program to the interpreter. An integer literal therefore declares a long.
-                bool intLiteral = l.Init is IrLiteral { Kind: IrLiteralKind.Int } or IrUnary { Operand: IrLiteral { Kind: IrLiteralKind.Int } };
-                string init = Expr(l.Init);   // before declaring: `let x = x + 1` reads the outer x
                 // A DECLARED type is the local's C# type: `var found: Entity = 0` is an `int`, as every Entity is
-                // here — it was a `long` from the literal, and passing it on as an identity did not compile
-                // (CS1503/CS0266). The value is converted, as the interpreter takes whatever it is given.
-                string? declared = l.Type?.Name switch
-                {
-                    "int" => "long",
-                    "Entity" => "int",
-                    "float" => "double",
-                    "bool" => "bool",
-                    "string" => "string",
-                    _ => null
-                };
-                if (declared is not null && l.Init is not null)
-                {
-                    string value = declared switch
-                    {
-                        "string" => $"System.Convert.ToString({init}, System.Globalization.CultureInfo.InvariantCulture) ?? \"\"",
-                        "bool" => init,
-                        _ => $"({declared})({init})"
-                    };
-                    sb.AppendLine($"{pad}{declared} {DeclareLocal(l.Name)} = {value};");
-                }
-                else
-                {
-                    if (l.Init is IrList li && li.Items.Count > 0 && !ListLiteral(li).StartsWith("new object[]")) _arrayVars.Add(l.Name);
-                    sb.AppendLine($"{pad}{(intLiteral ? "long" : "var")} {DeclareLocal(l.Name)} = {init};");
-                }
+                // here. Otherwise the starting value's — an integer literal a `long`, a `fromJson` record an
+                // `object` — said outright rather than left to `var`, so CsOf knows what every later read is.
+                string from = l.Init is null ? "object" : CsOf(l.Init);
+                string cs = l.Type is { } declared ? FromResolved(declared) : from == "void" ? "object" : from;
+                string init = l.Init is null ? (l.Type is { } zt ? ZeroOf(zt) : "null")
+                                             : Convert(Expr(l.Init), from, cs);   // before declaring: `let x = x + 1` reads the outer x
+                string name = DeclareLocal(l.Name);
+                _localCs[name] = cs;
+                sb.AppendLine($"{pad}{Decl(cs)} {name} = {init};");
                 break;
+            }
 
             // ASSIGNMENT TO A NAME NOTHING DECLARED IS A DECLARATION, because that is what the
             // interpreter does: `EntityStore`/`Interp` create the local on first write, so `i = 0`
@@ -972,27 +963,35 @@ public sealed class CSharpBackend : IVeinBackend
             // REQUIRE `let` is a separate decision, and making it an error would reject programs that
             // run correctly today. A bare `x` as a whole statement is a different matter and is VS0241.
             case IrAssign a:
-                // Lists here are fixed-size typed arrays, so growing or setting one has no honest emission
-                // yet. Said, not approximated: the program stays on `veinc run` (RULES 28h).
-                if (a.Target is IrIndex)
+                // `xs[i] = v` / `m["k"] = v`: in place, by the interpreter's own ListOps.Set.
+                if (a.Target is IrIndex ti)
                 {
-                    _notes.Add("setting a list element (`xs[i] = …`) is interpreter-only — not emitted; keep this program on `veinc run`.");
-                    sb.AppendLine($"{pad}// not emitted: list element assignment (interpreter-only)");
+                    sb.AppendLine($"{pad}{Values}.Set({Expr(ti.Receiver)}, {Expr(ti.Index)}, {Expr(a.Value)});");
                     break;
                 }
-                if (a.Value is IrBinary { Op: IrBinOp.Add, Left: var grown } && grown.ResolvedType?.Name == "list")
-                    _notes.Add("growing a list with `+` / `+=` is interpreter-only — this file will not compile; keep this program on `veinc run`.");
+                // `d.field = v` on a record.
+                if (a.Target is IrFieldAccess tf && DynamicReceiver(tf))
+                {
+                    sb.AppendLine($"{pad}{Values}.SetField({Expr(tf.Receiver)}, \"{Escape(tf.Field)}\", {Expr(a.Value)});");
+                    break;
+                }
                 if (a.Target is IrLocalRef bare && !_fields.Contains(bare.Name) && _bound.Add(bare.Name))
                 {
+                    string from = CsOf(a.Value);
+                    string cs = from == "void" ? "object" : from;
                     string value = Expr(a.Value);
-                    sb.AppendLine($"{pad}var {DeclareLocal(bare.Name)} = {value};");
+                    string name = DeclareLocal(bare.Name);
+                    _localCs[name] = cs;
+                    sb.AppendLine($"{pad}{Decl(cs)} {name} = {value};");
                 }
+                else if (a.Target is IrLocalRef or IrSelfRef)
+                    sb.AppendLine($"{pad}{Expr(a.Target)} = {Convert(Expr(a.Value), CsOf(a.Value), CsOf(a.Target))};");
                 else
                     sb.AppendLine($"{pad}{Expr(a.Target)} = {FieldValue(a.Target, a.Value)};");
                 break;
 
             case IrIf i:
-                sb.AppendLine($"{pad}if ({Expr(i.Cond)})");
+                sb.AppendLine($"{pad}if ({Cond(i.Cond)})");
                 EmitBlock(sb, i.Then, depth);
                 if (i.Else is { } e) { sb.AppendLine($"{pad}else"); EmitBlock(sb, e, depth); }
                 break;
@@ -1003,9 +1002,9 @@ public sealed class CSharpBackend : IVeinBackend
                 // agree. Unique per depth for the same CS0136 reason as the query loop.
                 string prevR = _indexVar;
                 _indexVar = "__i" + _loopDepth++;
-                sb.AppendLine($"{pad}for (long {_indexVar} = 0; {_indexVar} < {Expr(r.Count)}; {_indexVar}++)");
+                sb.AppendLine($"{pad}for (long {_indexVar} = 0, __n{_indexVar} = {Convert(Expr(r.Count), CsOf(r.Count), "long")}; {_indexVar} < __n{_indexVar}; {_indexVar}++)");
                 sb.AppendLine(pad + "{");
-                if (r.Var is not null) { _bound.Add(r.Var); sb.AppendLine($"{pad}    var {Ident(r.Var)} = {_indexVar};"); }
+                if (r.Var is not null) { _bound.Add(r.Var); _localCs[Ident(r.Var)] = "long"; sb.AppendLine($"{pad}    var {Ident(r.Var)} = {_indexVar};"); }
                 foreach (var s in r.Body.Statements) EmitStmt(sb, s, depth + 1);
                 sb.AppendLine(pad + "}");
                 _indexVar = prevR;
@@ -1016,8 +1015,8 @@ public sealed class CSharpBackend : IVeinBackend
                 // The condition is asked again after every turn, at the `while`'s own line — not the line of
                 // the body's last statement — as Interp.ExecLoop asks it.
                 sb.AppendLine(_inUnit && w.At is { } whileAt
-                    ? $"{pad}while (World.Here({whileAt.Line}) && ({Expr(w.Cond)}))"
-                    : $"{pad}while ({Expr(w.Cond)})");
+                    ? $"{pad}while (World.Here({whileAt.Line}) && ({Cond(w.Cond)}))"
+                    : $"{pad}while ({Cond(w.Cond)})");
                 EmitBlock(sb, w.Body, depth);
                 break;
 
@@ -1085,13 +1084,9 @@ public sealed class CSharpBackend : IVeinBackend
                 }
 
             case IrReturn r2:
-                sb.AppendLine(pad + (r2.Value switch
-                {
-                    null => "return;",
-                    // Coerce's rule: what already has its C# type is left alone.
-                    IrLiteral or IrBinary or IrUnary => $"return {Expr(r2.Value)};",
-                    _ => $"return {Fit(_currentReturn, Expr(r2.Value))};",
-                }));
+                sb.AppendLine(pad + (r2.Value is null
+                    ? "return;"
+                    : $"return {Convert(Expr(r2.Value), CsOf(r2.Value), _currentReturn is null ? "object" : Cs(_currentReturn))};"));
                 break;
 
             case IrBreak: sb.AppendLine($"{pad}break;"); break;
@@ -1234,7 +1229,8 @@ public sealed class CSharpBackend : IVeinBackend
                 // resolves to the enclosing loop rather than to this element.
                 _selfVars[loop.Var ?? "__x"] = elemVar;
                 sb.AppendLine($"{pad}long {_indexVar} = -1;");
-                sb.AppendLine($"{pad}foreach (var {elemVar} in {Expr(loop.Source)})");
+                _localCs[elemVar] = "object";
+                sb.AppendLine($"{pad}foreach (var {elemVar} in {Values}.Items({Expr(loop.Source)}))");
                 sb.AppendLine(pad + "{");
                 sb.AppendLine($"{pad}    {_indexVar}++;");
                 foreach (var s in loop.Body.Statements) EmitStmt(sb, s, depth + 1);
@@ -1387,21 +1383,102 @@ public sealed class CSharpBackend : IVeinBackend
     /// A mixed or computed list still emits `object[]`, which is honest: nothing here knows what a call
     /// or a field access will return, and guessing would produce a cast that fails at runtime rather
     /// than a compile error that says so.
-    private string ListLiteral(IrList l)
+    ///
+    /// A LIST IS A List<object?>, as it is in the interpreter. It was a typed array (`new long[] { … }`), which
+    /// can neither grow nor be set — so `xs += item` and `xs[i] = v` had no emission at all, and Vein Cards met
+    /// them 1,266 times. Its elements are read through VeinValues.Index and converted to whatever Resolve
+    /// says they are, so a `list<int>`'s element still reads as a long.
+    private string ListLiteral(IrList l) =>
+        l.Items.Count == 0 ? $"new {ListCs}()" : $"new {ListCs} {{ {string.Join(", ", l.Items.Select(Expr))} }}";
+
+    private const string ListCs = "System.Collections.Generic.List<object?>";
+    private const string Values = "Vein.Compiler.Ir.VeinValues";
+
+    // ---- the C# type of what Expr emits ------------------------------------------------------------
+    //
+    // A VeinScript value need not have a type the compiler can know — a `fromJson` record, a `dictionary`
+    // parameter, a list element — and the interpreter decides `+`, `<` and `==` by looking at the values.
+    // So the backend has to know, for every expression it emits, whether C# knows its type: when both sides
+    // of an operator are known numbers it is plain C#, and otherwise the interpreter's own rule decides
+    // (VeinValues). The answer here must describe the text Expr writes, so the two are kept side by side.
+
+    private static bool IsNum(string cs) => cs is "long" or "int" or "double";
+
+    /// Resolve's type as the C# type an expression of it is emitted as; `object` when it is not known.
+    private string FromResolved(IrTypeRef? t) => t?.Name switch
     {
-        string items = string.Join(", ", l.Items.Select(Expr));
-        if (l.Items.Count == 0) return $"new object[] {{ {items} }}";
+        null or "json" or "dictionary" or "infer" => "object",
+        "void" => "void",
+        _ => _events.Contains(t.Name) && !_components.Contains(t.Name) && !_structs.Contains(t.Name) ? EventType(t.Name) : Cs(t),
+    };
 
-        bool allInt = l.Items.All(i => i is IrLiteral { Kind: IrLiteralKind.Int }
-                                    || i is IrUnary { Op: IrUnOp.Neg, Operand: IrLiteral { Kind: IrLiteralKind.Int } });
-        if (allInt) return $"new long[] {{ {items} }}";
+    private string CsOf(IrExpr? e) => e switch
+    {
+        null => "void",
+        IrLiteral l => l.Kind switch
+        {
+            IrLiteralKind.Int => "long",
+            IrLiteralKind.Float or IrLiteralKind.Percent => "double",
+            IrLiteralKind.Bool => "bool",
+            _ => "string",
+        },
+        IrLocalRef r => _localCs.TryGetValue(LocalName(r.Name), out var lt) ? lt
+                      : _fieldCs.TryGetValue(r.Name, out var ft) ? ft
+                      : FromResolved(r.ResolvedType),
+        IrSelfRef sr => _selfVars.TryGetValue(sr.Bind, out var sv) && _localCs.TryGetValue(sv, out var st) ? st : FromResolved(sr.ResolvedType),
+        IrEntityRef => "int",
+        IrLoopIndexRef => "long",
+        IrBinary b => BinaryCs(b),
+        IrUnary u => u.Op == IrUnOp.Not ? "bool" : IsNum(CsOf(u.Operand)) ? CsOf(u.Operand) : "object",
+        IrList => ListCs,
+        IrTypeNameExpr or IrToText => "string",
+        IrStructInit si => _events.Contains(si.TypeName) ? EventType(si.TypeName) : Ident(si.TypeName),
+        IrRuntimeCall { Name: "CollHas" or "Carries" } => "bool",
+        IrRuntimeCall { Name: "ShardSetting" } rc => SettingCs(rc.Args[^1]),
+        IrCall { Callee: IrLocalRef fn } when _functionDecls.TryGetValue(fn.Name, out var decl) => Cs(decl.Return),
+        _ => FromResolved(e.ResolvedType),
+    };
 
-        if (l.Items.All(i => i is IrLiteral { Kind: IrLiteralKind.Float })) return $"new double[] {{ {items} }}";
-        if (l.Items.All(i => i is IrLiteral { Kind: IrLiteralKind.String })) return $"new string[] {{ {items} }}";
-        if (l.Items.All(i => i is IrLiteral { Kind: IrLiteralKind.Bool })) return $"new bool[] {{ {items} }}";
-
-        return $"new object[] {{ {items} }}";
+    private string BinaryCs(IrBinary b)
+    {
+        if (b.Op is IrBinOp.And or IrBinOp.Or or IrBinOp.Eq or IrBinOp.Ne or IrBinOp.Lt or IrBinOp.Gt or IrBinOp.Le or IrBinOp.Ge)
+            return "bool";
+        string l = CsOf(b.Left), r = CsOf(b.Right);
+        if (b.Op == IrBinOp.Add)
+        {
+            if (l == ListCs) return ListCs;            // a list on the left grows (ListOps.Plus)
+            if (l == "object") return "object";        // the value decides: a list, text or a number
+            if (l == "string" || r == "string") return "string";
+        }
+        if (IsNum(l) && IsNum(r)) return l == "double" || r == "double" ? "double" : "long";
+        return "object";
     }
+
+    /// `code`, whose C# type is `from`, as a `to` — by the rule the interpreter uses wherever a value turns
+    /// into a number, text or truth (`int(x)`, `string(x)`, `if x`). Nothing is wrapped that already fits.
+    private static string Convert(string code, string from, string to)
+    {
+        if (from == to || to is "object" or "void" or "var") return code;
+        return to switch
+        {
+            "long" => from is "int" ? code : from == "double" ? $"(long)({code})" : $"{Values}.Int({code})",
+            "int" => from is "long" or "double" ? $"(int)({code})" : $"(int){Values}.Int({code})",
+            "double" => from is "long" or "int" ? code : $"{Values}.Float({code})",
+            "string" => $"{Values}.Str({code})",
+            "bool" => $"{Values}.Truthy({code})",
+            _ => $"(({to})({code}))",
+        };
+    }
+
+    /// A condition — `if`, `while`, `and`, `not` — is a C# bool, and any value has a truth (Interp.Truthy).
+    private string Cond(IrExpr e) => Convert(Expr(e), CsOf(e), "bool");
+
+    /// An identity argument — `destroy e`, `attach $S to e` — is a C# int, wherever the id was kept: a list
+    /// element or a record field is an `object` (CS1503, nine times in Vein Cards).
+    private string Ent(IrExpr e) => Convert(Expr(e), CsOf(e), "int");
+
+    /// How a local is declared for a C# type: `object` may hold null, as a VeinScript value may.
+    private static string Decl(string cs) => cs == "object" ? "object?" : cs;
 
     // ---- expressions -----------------------------------------------------
 
@@ -1420,37 +1497,13 @@ public sealed class CSharpBackend : IVeinBackend
         // interpreter twice over: `bool.ToString()` is "True", and a double formats in the CURRENT
         // culture, so the same program printed "True" here and "true" there, and would have printed
         // "3,5" on a machine in France. Both runtimes now format through the same rules.
-        IrBinary b when b.Op == IrBinOp.Add && IsConcat(b) => Concat(b),
+        IrBinary b => Binary(b),
 
-        // ORDERING GOES THROUGH THE HELPER, for the same reason concatenation does: C# would compare two
-        // strings with `<` as a compile error and two objects by reference, while the interpreter
-        // compares strings ORDINALLY and everything else numerically. `c >= "a" and c <= "z"` has to mean
-        // the same thing in both runtimes or character code cannot be compiled at all.
-        IrBinary b when b.Op is IrBinOp.Lt or IrBinOp.Gt or IrBinOp.Le or IrBinOp.Ge
-            => $"(__VeinText.Cmp({Expr(b.Left)}, {Expr(b.Right)}) {Op(b.Op)} 0)",
-
-        // AND SO DOES EQUALITY, for the very reason the comment above gives and which was applied only
-        // to ordering. C# `==` on two `object`s is REFERENCE equality, and plenty of VeinScript values
-        // arrive as object — an element of `target split(s, ",") as p`, a `chars()` element, an `s[i]`.
-        // So `p == "skip"` compared two references, found them different because Split had built a
-        // fresh string, and quietly answered false: the interpreter skipped the row and the compiled
-        // program did not. Found by samples/loops.vein, which is the first sample to compare a
-        // collection binding against a literal.
-        IrBinary b when b.Op is IrBinOp.Eq or IrBinOp.Ne
-            => b.Op == IrBinOp.Eq
-                ? $"__VeinText.Eq({Expr(b.Left)}, {Expr(b.Right)})"
-                : $"(!__VeinText.Eq({Expr(b.Left)}, {Expr(b.Right)}))",
-
-        IrBinary b => $"({Expr(b.Left)} {Op(b.Op)} {Expr(b.Right)})",
-
-        // `s[i]` — a character out of a string, or an entry out of a list. Was unemitted, which made
-        // every program that reads text a character at a time interpreter-only.
-        // A list whose element type is known (a list literal in a shard var or a `let`) indexes as that type:
-        // `log[1] * 2` was `object * long` through At, which does not compile (CS0019).
-        IrIndex ix when ix.Receiver is IrLocalRef { Name: var arr } && _arrayVars.Contains(arr)
-            => $"__VeinText.Item({Expr(ix.Receiver)}, {Expr(ix.Index)})",
-        IrIndex ix => $"__VeinText.At({Expr(ix.Receiver)}, {Expr(ix.Index)})",
-        IrUnary u => u.Op == IrUnOp.Neg ? $"(-{Expr(u.Operand)})" : $"(!{Expr(u.Operand)})",
+        // `s[i]` — a character out of a string, an element out of a list, a key out of a record — by the
+        // interpreter's own rule, then as whatever Resolve says the element is (a `list<int>`'s is a long).
+        IrIndex ix => Convert($"{Values}.Index({Expr(ix.Receiver)}, {Expr(ix.Index)})", "object", FromResolved(ix.ResolvedType)),
+        IrUnary u => u.Op == IrUnOp.Not ? $"(!{Cond(u.Operand)})"
+                   : IsNum(CsOf(u.Operand)) ? $"(-{Expr(u.Operand)})" : $"{Values}.Neg({Expr(u.Operand)})",
         IrRuntimeCall rc => RuntimeCall(rc),
         IrStructInit si => StructInit(si),
         // A prebuilt like `spawn()` lowers to an ordinary call on a bare name, not to an IrRuntimeCall —
@@ -1468,12 +1521,53 @@ public sealed class CSharpBackend : IVeinBackend
         // A module function is qualified; anything else is emitted as written.
         IrCall { Callee: IrLocalRef fnRef } fc when _functions.Contains(fnRef.Name)
             => $"Fns.{Ident(fnRef.Name)}({string.Join(", ", fc.Args.Select((a, i) => Argument(fnRef.Name, i, a)))})",
+        IrCall { Callee: IrLocalRef own } oc when _functionDecls.ContainsKey(own.Name)
+            => $"{Expr(oc.Callee)}({string.Join(", ", oc.Args.Select((a, i) => Argument(own.Name, i, a)))})",
         IrCall c => $"{Expr(c.Callee)}({string.Join(", ", c.Args.Select(Expr))})",
         IrList l => ListLiteral(l),
         // D23's way out writes through the weave reader's formats, which only the interpreter has — said, like `weave`.
         IrToText tt => InterpreterOnly($"`toText<{tt.Format.Name}>({tt.Loom})`"),
         _ => Unsupported(e)
     };
+
+    /// An operator. Plain C# when both sides are numbers C# knows, or both texts; the interpreter's rule
+    /// (VeinValues) when either side is a value only the running program can see — a record field, a list
+    /// element. BinaryCs says which type the result has, and the two agree by construction.
+    ///
+    /// The comparisons and `==` used to go through `__VeinText` always, for good reasons: C# compares two
+    /// `object`s by reference, and two strings with `<` not at all, while the interpreter compares text
+    /// ORDINALLY and the rest numerically. Those reasons hold only where C# does not know the types; where
+    /// it does, the plain operator gives the same answer without a call.
+    private string Binary(IrBinary b)
+    {
+        if (b.Op is IrBinOp.And or IrBinOp.Or) return $"({Cond(b.Left)} {Op(b.Op)} {Cond(b.Right)})";
+
+        string l = CsOf(b.Left), r = CsOf(b.Right);
+        string le = Expr(b.Left), re = Expr(b.Right);
+        bool nums = IsNum(l) && IsNum(r), texts = l == "string" && r == "string";
+        switch (b.Op)
+        {
+            case IrBinOp.Eq: return nums || l == "bool" && r == "bool" ? $"({le} == {re})" : texts ? $"string.Equals({le}, {re})" : $"{Values}.Eq({le}, {re})";
+            case IrBinOp.Ne: return nums || l == "bool" && r == "bool" ? $"({le} != {re})" : texts ? $"(!string.Equals({le}, {re}))" : $"(!{Values}.Eq({le}, {re}))";
+            case IrBinOp.Lt or IrBinOp.Gt or IrBinOp.Le or IrBinOp.Ge:
+                if (nums) return $"({le} {Op(b.Op)} {re})";
+                if (texts) return $"(string.CompareOrdinal({le}, {re}) {Op(b.Op)} 0)";
+                return $"{Values}.{b.Op}({le}, {re})";
+            case IrBinOp.Add when l == ListCs:
+                return $"Vein.Compiler.Ir.ListOps.Plus({le}, {re})";
+            case IrBinOp.Add when l != "object" && (l == "string" || r == "string"):
+                return $"(__VeinText.S({le}) + __VeinText.S({re}))";
+        }
+        return nums ? $"({le} {Op(b.Op)} {re})" : $"{Values}.{b.Op}({le}, {re})";
+    }
+
+    /// Whether `x.f` reads a record — a value whose fields are keys — rather than a shape, a payload or a
+    /// struct C# declares. A record's field is a lookup (VeinValues.Field), and a C# member access on an
+    /// `object` does not compile (CS1061 — 249 times in Vein Cards).
+    private bool DynamicReceiver(IrFieldAccess f) =>
+        !(f.Receiver is IrSelfRef && _components.Contains(f.Field))
+        && !(f.Receiver is IrFieldAccess { Receiver: IrSelfRef } inner && _components.Contains(inner.Field))
+        && CsOf(f.Receiver) is "object" or ListCs or "string";
 
     private string InterpreterOnly(string what)
     {
@@ -1487,17 +1581,8 @@ public sealed class CSharpBackend : IVeinBackend
     private string Argument(string function, int index, IrExpr arg)
     {
         string emitted = Expr(arg);
-        if (arg is not IrIndex) return emitted;
         if (!_functionDecls.TryGetValue(function, out var decl) || index >= decl.Params.Count) return emitted;
-        return decl.Params[index].Type.Name switch
-        {
-            "string" => $"__VeinText.S({emitted})",
-            "int" => $"__VeinText.I({emitted})",
-            "Entity" => $"(int)__VeinText.I({emitted})",
-            "float" => $"__VeinText.D({emitted})",
-            "bool" => $"__VeinText.B({emitted})",
-            _ => emitted
-        };
+        return Convert(emitted, CsOf(arg), Cs(decl.Params[index].Type));
     }
 
     private string Unsupported(IrExpr e)
@@ -1510,6 +1595,19 @@ public sealed class CSharpBackend : IVeinBackend
     /// the local the activation is working on, so it collapses to `self_Health.hp`.
     private string FieldAccess(IrFieldAccess f)
     {
+        // `def.categories` on a record: a key, read by the interpreter's rule, as whatever Resolve knows it is.
+        if (DynamicReceiver(f))
+            return Convert($"{Values}.Field({Expr(f.Receiver)}, \"{Escape(f.Field)}\")", "object", FromResolved(f.ResolvedType));
+
+        // `e.Hit.action` with `e` an identity held anywhere — a parameter, a field, a list element — not a
+        // `target` binding: the shape is read off the world, and a missing shape reads as its field's zero.
+        if (f.Receiver is IrFieldAccess { Receiver: var held and not IrSelfRef, Field: var comp } && _componentTypes.TryGetValue(comp, out var shape)
+            && CsOf(held) is "int" or "long" or "object" && shape.Fields.FirstOrDefault(x => x.Name == f.Field) is { } read)
+        {
+            string id = Ent(held);
+            return $"(World.Has<{Ident(comp)}>({id}) ? World.Get<{Ident(comp)}>({id}).{Ident(f.Field)} : {ZeroOf(read.Type)})";
+        }
+
         // `d.Deck` — the component named off a binding. Which BINDING is what decides the local now, so
         // an outer one read inside a nested loop reaches the outer loop's copy.
         if (f.Receiver is IrSelfRef s0 && _components.Contains(f.Field)) return SelfLocal(s0.Bind, f.Field);
@@ -1531,6 +1629,16 @@ public sealed class CSharpBackend : IVeinBackend
     /// leaving a bare CS0103 for someone to work out.
     private string UnimplementedPrebuilt(string name, IrCall call)
     {
+        // The pure ones are the interpreter's own arms (VeinValues.Call → Interp.PureBuiltin); the two that
+        // read the host's world read it from VeinWorld, which the host fills as it fills Interp.
+        if (name is "fromJson" or "toJson" or "sort" or "slice" or "remove")
+        {
+            string args = string.Concat(call.Args.Select(a => ", " + Expr(a)));
+            return Convert($"{Values}.Call(\"{name}\"{args})", "object", FromResolved(call.ResolvedType));
+        }
+        if (name == "args") return $"new {ListCs}(World.Args)";
+        if (name == "now") return "World.Now()";
+
         _notes.Add($"built-in {name}() has no C# emission — it stays on the interpreter, so this file " +
                    "will not compile. Move that work into a shard the backend covers, or keep the " +
                    "program on `veinc run`.");
@@ -1624,23 +1732,23 @@ public sealed class CSharpBackend : IVeinBackend
                 {
                     // Its defaults, when it declares any: an empty initialiser, which StructInit completes.
                     if (_componentTypes.TryGetValue(at.Name, out var decl) && decl.Fields.Any(f => f.Default is not null))
-                        return $"World.Attach({Expr(c.Args[0])}, {StructInit(new IrStructInit(at.Name, Array.Empty<(string, IrExpr)>()), preferEvent: false)})";
-                    return $"World.Attach({Expr(c.Args[0])}, default({Ident(at.Name)}))";
+                        return $"World.Attach({Ent(c.Args[0])}, {StructInit(new IrStructInit(at.Name, Array.Empty<(string, IrExpr)>()), preferEvent: false)})";
+                    return $"World.Attach({Ent(c.Args[0])}, default({Ident(at.Name)}))";
                 }
                 // A COMPONENT, said outright. `attach` names a shape, so when a name is both a shape
                 // and an event this must take the shape — going through `Expr` let the event win and
                 // handed `World.Attach` a payload object.
                 if (c.Args.Count > 1 && c.Args[1] is IrStructInit csi)
-                    return $"World.Attach({Expr(c.Args[0])}, {StructInit(csi, preferEvent: false)})";
+                    return $"World.Attach({Ent(c.Args[0])}, {StructInit(csi, preferEvent: false)})";
 
-                return $"World.Attach({Expr(c.Args[0])}, {Expr(c.Args[1])})";
+                return $"World.Attach({Ent(c.Args[0])}, {Expr(c.Args[1])})";
 
             // `unattach $C from e`. The shape arrives as a TYPE NAME, not a value, so it becomes the
             // generic argument — running it through Expr would emit the name as a string literal and
             // bind T to string.
             case "RemoveComponent":
                 if (c.Args.Count > 1 && c.Args[1] is IrTypeNameExpr rt)
-                    return $"World.Detach<{Ident(rt.Name)}>({Expr(c.Args[0])})";
+                    return $"World.Detach<{Ident(rt.Name)}>({Ent(c.Args[0])})";
                 _notes.Add("`unattach` with no shape name not emitted.");
                 return "";
 
@@ -1649,12 +1757,12 @@ public sealed class CSharpBackend : IVeinBackend
             // The mark arrives as a TYPE NAME, so it becomes the generic argument — `Expr` would emit it
             // as a string literal, which is what these used to be.
             case "AddTag" when c.Args.Count > 1 && c.Args[1] is IrTypeNameExpr addTag:
-                return $"World.Defer(() => World.MarkAs<Marks.{Ident(addTag.Name)}>({Expr(c.Args[0])}))";
+                return $"World.Defer(() => World.MarkAs<Marks.{Ident(addTag.Name)}>({Ent(c.Args[0])}))";
             case "RemoveTag" when c.Args.Count > 1 && c.Args[1] is IrTypeNameExpr remTag:
-                return $"World.Defer(() => World.UnmarkAs<Marks.{Ident(remTag.Name)}>({Expr(c.Args[0])}))";
+                return $"World.Defer(() => World.UnmarkAs<Marks.{Ident(remTag.Name)}>({Ent(c.Args[0])}))";
 
             case "DestroyEntity":
-                return $"World.Destroy({Expr(c.Args[0])})";
+                return $"World.Destroy({Ent(c.Args[0])})";
 
             // D24: `.add`/`.remove`/`.clear`/`.put`/`.has` on a `~` collection. A compiled collection needs VeinWorld to replace a
             // component inside a commit and to sweep destroyed ids out of every `~` field — not there yet.
@@ -1744,6 +1852,12 @@ public sealed class CSharpBackend : IVeinBackend
                            $"{Str(sd.Fields.FirstOrDefault(f => f.Field == "text").Value)}, " +
                            $"{(fast is null ? "false" : $"(bool)({Expr(fast)})")})";
                 }
+                // An HTTP request (Vein.Net.Http): run off the frame, answered by @Fetched / @Failed (wired in Main).
+                if (c.Args.Count > 0 && c.Args[0] is IrStructInit { TypeName: "Fetch" } fe)
+                    return $"World.Fetch({Str(fe.Fields.FirstOrDefault(f => f.Field == "url").Value)}, " +
+                           $"{Str(fe.Fields.FirstOrDefault(f => f.Field == "method").Value)}, " +
+                           $"{Str(fe.Fields.FirstOrDefault(f => f.Field == "body").Value)}, " +
+                           $"{Str(fe.Fields.FirstOrDefault(f => f.Field == "headers").Value)})";
                 if (c.Args.Count > 0 && c.Args[0] is IrStructInit { TypeName: "Listen" } ls)
                 {
                     var port = ls.Fields.FirstOrDefault(f => f.Field == "at").Value;
@@ -1999,7 +2113,7 @@ public sealed class CSharpBackend : IVeinBackend
         IrLiteralKind.String => "\"" + Escape(l.Value?.ToString() ?? "") + "\"",
         IrLiteralKind.Bool => (l.Value is true) ? "true" : "false",
         IrLiteralKind.Int => l.Value?.ToString() ?? "0",
-        IrLiteralKind.Float or IrLiteralKind.Percent => FloatLiteral(Convert.ToDouble(l.Value ?? 0)),
+        IrLiteralKind.Float or IrLiteralKind.Percent => FloatLiteral(System.Convert.ToDouble(l.Value ?? 0)),
         _ => "default"
     };
 
@@ -2035,6 +2149,7 @@ public sealed class CSharpBackend : IVeinBackend
         "Entity" => "0",
         "string" or "Mark" => "\"\"",
         "list" => "new System.Collections.Generic.List<object?>()",
+        "json" or "dictionary" or "infer" => "null",   // Interp.Default: nothing, until something is put there
         // A payload's `from` is a Provenance OBJECT, and `default` would be null — so a program
         // reading `d.from.kind` would throw where the interpreter reads a value. Named types get a
         // fresh instance for the same reason strings get "" rather than null.
@@ -2066,6 +2181,9 @@ public sealed class CSharpBackend : IVeinBackend
         // as a type named `list`, and every program with such a helper (net.Mesh, net.Coop) stayed on the
         // interpreter.
         "list" => "System.Collections.Generic.List<object?>",
+        // A parsed record, or a value whose type nothing states: the interpreter's own values, decided at
+        // run time through VeinValues. They were emitted as types named `dictionary` and `infer` (CS0246).
+        "json" or "dictionary" or "infer" => "object",
         _ => Ident(t.Name)
     };
 
@@ -2211,6 +2329,10 @@ public sealed class CSharpBackend : IVeinBackend
             sb.AppendLine("        world.Message = (from, text) => world.Emit(\"Message\", new Events.Message { from = from, text = text });");
         if (_events.Contains("Undelivered"))
             sb.AppendLine("        world.Undelivered = (to, text) => world.Emit(\"Undelivered\", new Events.Undelivered { to = to, text = text });");
+        if (_events.Contains("Fetched"))
+            sb.AppendLine("        world.Fetched = (url, status, body) => world.Emit(\"Fetched\", new Events.Fetched { url = url, status = status, body = body });");
+        if (_events.Contains("Failed"))
+            sb.AppendLine("        world.Failed = (url, why) => world.Emit(\"Failed\", new Events.Failed { url = url, reason = why });");
 
         foreach (var s in module.Shards)
             sb.AppendLine($"        world.Register(new {ShardIdent(s)}(), \"{Escape(ShardKey(s))}\"{CarriedMarksArgs(s)});");

@@ -24,6 +24,17 @@ public sealed class VeinWorld
 {
     private readonly Secs _secs = new();
 
+    /// The program's command-line arguments — what `args()` answers, as Interp.Args does. The host sets it.
+    public IReadOnlyList<string> Args { get; set; } = Array.Empty<string>();
+
+    /// `now()` pinned for a test, as Interp.FixedNow is; then `VEIN_NOW`; then the local clock to the second.
+    public string? FixedNow { get; set; }
+
+    public string Now() =>
+        FixedNow is { Length: > 0 } pinned ? pinned
+        : Environment.GetEnvironmentVariable("VEIN_NOW") is { Length: > 0 } fixedNow ? fixedNow
+        : DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+
     /// Live entities, ascending. SECS's Query returns store order; a VeinScript run must be reproducible,
     /// so iteration is always by id — the same reason EntityStore uses SortedSet throughout.
     private readonly SortedSet<int> _alive = new();
@@ -474,6 +485,7 @@ public sealed class VeinWorld
 
     public void Frame()
     {
+        if (TakeAnswers()) Drain();   // a request answered since the last frame is heard before this one
         Tick++;
         foreach (var s in _systems) if (!IsMuted(s)) s.Tick();
         Commit();
@@ -583,6 +595,34 @@ public sealed class VeinWorld
     {
         if (Sending is null) { Err.WriteLine("(@Send failed: no network here — run this program in a host)"); return; }
         Sending(to, text, fast);
+    }
+
+    /// `@Fetch { url, method, body, headers }`: the request runs on a worker, by the interpreter's own NetHttp,
+    /// and its answer — `@Fetched { url, status, body }`, or `@Failed { url, reason }` when the service never
+    /// replied — waits here until the next frame takes it in, as Interp.DoFetch posts it to its inbox. A
+    /// frame never waits on the network. `Fetched`/`Failed` are set by the program when it hears them.
+    public Action<string, long, string>? Fetched;
+    public Action<string, string>? Failed;
+    private readonly System.Collections.Concurrent.ConcurrentQueue<Action> _answers = new();
+
+    public void Fetch(string url, string method, string body, string headers) =>
+        new Thread(() =>
+        {
+            var r = Vein.Compiler.Ir.NetHttp.Fetch(url, method, body, headers);
+            _answers.Enqueue(() =>
+            {
+                if (r.Error is { } why) Failed?.Invoke(url, why);
+                else Fetched?.Invoke(url, r.Status, r.Body);
+            });
+        })
+        { IsBackground = true, Name = "vein-fetch" }.Start();
+
+    /// The answers that arrived since the last frame, turned into queued events. True when there were any.
+    private bool TakeAnswers()
+    {
+        bool any = false;
+        while (_answers.TryDequeue(out var answer)) { answer(); any = true; }
+        return any;
     }
 
     /// `@Message { from, text }` and `@Undelivered { to, text }`, set by the program when it hears them.
