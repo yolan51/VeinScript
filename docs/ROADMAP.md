@@ -170,10 +170,10 @@ and writing `$View`, that draws `$World` positions.
   handler just created.
 - **`veinc build` of an app manifest.** The exe now carries fragments and `bundles/`, but a manifest is
   still refused, with a pointer to `veinc emit`.
-- **String building without `+` chains.** Either option needs its own D-decision:
-  - interpolation spelled `\(expr)`, since `\` already escapes and a `{…}` form would collide with the
-    CSS and HTML in web strings;
-  - a multi-line literal for markup (RULES 1 and 3).
+- **String building without `+` chains.**
+  - ✅ 2026-10-30: interpolation, `"HP: \(hp)"` ([D29](SYNTAX-DECISIONS.md#interpolation)). The lexer
+    rewrites it to the `+` chain, so both runtimes already agree (`samples/text_interpolation.vein`).
+  - Still open: a multi-line literal for markup (RULES 1 and 3). Needs its own D-decision.
 - **A qualified `$Shape`/`#Mark` at a use site** (detail below).
 
 ### Tier 4 — outside bundles, end to end (M; builds on vein.lock)

@@ -41,6 +41,12 @@ arm may sit on its own line — `ParseMatch` reads `else` explicitly — which i
 **3. A string literal is one line.** `\n \t \r \\ \"` are the escapes; a literal newline inside quotes is
 VS0003. To emit a multi-line string, use `\n` and wrap the source with trailing `+` per rule 1.
 
+**3b. Write a value into text with `\( )`, not with `+`.** `"HP: \(hp) of \(max)"` is
+`"HP: " + hp + " of " + max`, and prints the same ([D29](SYNTAX-DECISIONS.md#interpolation)). It holds
+any expression: a field, a call, arithmetic, a string. `"\(a)\(b)"` puts two numbers side by side, and
+`"\(a + b)"` adds them. A literal backslash before a parenthesis is `\\(`. An empty `\( )` is VS0398. A
+`\(` whose `)` is missing before the line ends is VS0399.
+
 **4. All 67 lexer keywords are reserved as EXPRESSIONS; most are still legal as field and member names.** `target` is a keyword,
 so `builder Clock { target: string }` is a parse error — it was renamed to `id`. Check the map before
 choosing a name; do not count entries by line, because the table holds two per line.

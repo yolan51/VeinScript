@@ -1,0 +1,39 @@
+// text_interpolation.vein — values written into text: "HP: \(hp)".
+//
+//   veinc run samples/text_interpolation.vein --ticks 2
+//
+// In tools/check-backend.sh, so the interpreter and the C# backend are diffed on it.
+//
+// `\( … )` inside a string holds any expression — a variable, a field, a call, arithmetic, even another
+// string. It reads as the `+` chain it replaces: "HP: \(hp)" is "HP: " + hp, so a value prints exactly as
+// joining it would. The text before the first `\(` counts even when empty, so "\(a)\(b)" puts two numbers
+// side by side instead of adding them. A backslash in front of a parenthesis is written `\\(`.
+
+bundle TextInterpolation by you {
+    need "Vein.Console"
+
+    shape $Hero { name: string, hp: int, max: int }
+    event @Hit { by: string, damage: int }
+
+    shard Fight {
+        run once {
+            let hero = spawn()
+            attach $Hero to hero { name: "Ada", hp: 30, max: 40 }
+
+            let gold = 12
+            let price = 4.5
+            do print("gold: \(gold), price: \(price), after buying two: \(gold - price * 2.0)")
+            do print("side by side: \(1)\(2), added: \(1 + 2)")
+            do print("<li class=\"row\">\(len("ten items")) letters</li>")
+            do print("a literal \\(gold) stays text")
+
+            emit @Hit { by: "a goblin", damage: 7 }
+        }
+
+        hear @Hit as h {
+            target $Hero as x {
+                do print("\(x.Hero.name) is hit by \(h.by) for \(h.damage): \(x.Hero.hp - h.damage) of \(x.Hero.max) left")
+            }
+        }
+    }
+}

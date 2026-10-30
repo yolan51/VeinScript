@@ -49,9 +49,9 @@ from net.Chat's (VS0220).
 
 | # | pattern | count | where it piles up | what would remove it |
 | --- | --- | --- | --- | --- |
-| 1 | a quoted piece joined with `+` | **3,210** | everywhere: 1 line in 13 | string interpolation (ROADMAP Tier 3: `\(expr)`), needs a D-decision |
-| 2 | a line ending in `+`, continuing text | **1,354** | samples 1,144 | the same, plus a multi-line literal for markup |
-| 3 | a line nested 7 or more levels deep | **3,080** | showdown 14% of lines, samples 10%, bundle 9%; cards 0.6% | `return` in an SF and a `hear` (VEIN_REPORT #10). Cards is flat because it puts logic in `fn`s, which can return early (249 one-line `if … { return … }`). |
+| 1 | a quoted piece joined with `+` | **3,210** | everywhere: 1 line in 13 | ✅ string interpolation, `"HP: \(hp)"` (D29, 2026-10-30) |
+| 2 | a line ending in `+`, continuing text | **1,354** | samples 1,144 | interpolation, plus a multi-line literal for markup (still open) |
+| 3 | a line nested 7 or more levels deep | **3,080** | showdown 14% of lines, samples 10%, bundle 9%; cards 0.6% | **By design: no `return` in an SF or a `hear`.** The step that would follow an early exit goes in its own `hear`, reached by `emit @NextStep` (the user, 2026-10-30). Cards is flat because its logic sits in `fn`s. |
 | 4 | a fully qualified `*Vein.X.Y.` reference | **1,337** | samples 744, bundle 284 | mostly #5; the rest a `need` the author did not add |
 | 5 | the long print, `emit *Vein.Console.Io.@Print { text: … }` | **542** (short `do print(` 219) | samples 444 | rewrite the samples (they teach the long form); a quick fix offering `do print` |
 | 6 | `x = x + …` where `+=` exists | **429** (`+=` used 1,225 times) | bundle 130, cards 119, showdown 90 | a hint; low priority |
@@ -83,10 +83,11 @@ reads empty, recursion past 256 returns null, a `let` reassigned) still stand.
 
 1. **The silent wrong answers above,** then the rest of ROADMAP Tier 1.
 2. **`stdlib/Vein.app.vein` linking,** and settings checked per folder rather than per program (VS0357).
-3. **String interpolation,** the biggest count by far. Needs its D-decision first.
-4. **`return` in SF and `hear`.** Today's rule is "an SF acts by emitting" (VS0105). Guard clauses
-   with no value would not break that. Needs a decision.
+3. ✅ **String interpolation** (D29), the biggest count by far.
+4. ~~`return` in SF and `hear`~~ — **refused** (2026-10-30). An SF and a `hear` act by emitting; the next
+   step is its own `hear` of an emitted event.
 5. **A map/record literal, `keys(d)`, `kind(v)`.** These are cards' 300+ workarounds.
-6. **Samples rewritten to `do print`.** This is the teaching fix and costs no language change.
+6. **Samples rewritten to `do print` and to interpolation.** This is the teaching fix and costs no
+   language change.
 
 After each fix, rewrite the corpus to the new form, so the old workaround stops being copied.

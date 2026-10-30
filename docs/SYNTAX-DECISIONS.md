@@ -1084,6 +1084,45 @@ the program may change, so `!Name.setting` is the sigil doing its job. D12 is un
 *Used:* `samples/shard_settings.vein`; the planner (`!Boards.hideDone` replaces the `$TaskBoardLooks` shape a
 program had to attach, and `tune maxRecents = 10`).
 
+## D29 — String interpolation, `"HP: \(hp)"` {#interpolation}
+
+> **Reported as `VS0398`** (an empty `\( )`) and **`VS0399`** (a `\(` with no `)` before the string's line ends).
+
+**DECIDED** (2026-10-30). Inside a string, `\( … )` holds an expression, and its value is written into the
+text:
+
+```
+do print("HP: \(hp) of \(max)")
+markup = "<li class=\"row\">\(t.Task.title) (\(len(t.Task.title)) letters)</li>"
+do print("\(x.Hero.name) is hit by \(h.by): \(x.Hero.hp - h.damage) left")
+```
+
+- **It is the `+` chain it replaces.** The lexer turns `"HP: \(hp) of \(max)"` into the tokens of
+  `("HP: " + (hp) + " of " + (max) + "")`. Nothing after the lexer changes: Resolve, the interpreter and the
+  C# backend see the `+` they already handle, so a value prints exactly as `"" + value` prints it.
+- **The text before the first `\(` counts, even when it is empty.** So `"\(a)\(b)"` puts two numbers side by
+  side; `"\(a + b)"` adds them first.
+- **Any expression:** a field, a call, arithmetic, nested parentheses, and a string inside, which may
+  interpolate again. It stays on the string's line. A comment cannot sit inside one, since it would swallow
+  the string's closing quote.
+- **A backslash before a parenthesis is written `\\(`.** `\(` used to be an unknown escape meaning `(`; no
+  string in the corpus used it.
+- **Where a string is a NAME, not a value** (`need "…"`, `load "…"`, `shared("…")`, `tune("…")`), the
+  parser expects a plain string, so an interpolation there is a parse error.
+- **Editors:** the pieces are string tokens with their own spans and the expression's tokens are ordinary
+  tokens, so every lexer-based painter (VeinSyntax for Godot, SemanticPaint) colours the expression as code.
+  The VS Code grammar and the Workbench theme have matching rules.
+
+*Why `\( )`.* `\` already starts an escape inside a string. A `{…}` form would collide with the CSS, JSON
+and HTML that web strings carry (`"a { color: red }"`); `${…}` would collide with the `$Shape` sigil in
+text about shapes. And building text was the most repeated thing in all our code: 3,210 `+` joins and
+1,354 lines ending in `+` across the corpus (docs/CORPUS.md), the `+` chains that rules 1 and 3 exist to
+manage.
+
+*Not yet:* a multi-line literal for markup (ROADMAP Tier 3).
+
+*Used:* `samples/text_interpolation.vein` (also in tools/check-backend.sh).
+
 ## Reserved-word disposition
 
 Every keyword currently in [Lexer.cs](../src/Vein.Compiler/Lexing/Lexer.cs) `Keywords`, classified.

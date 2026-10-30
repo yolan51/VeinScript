@@ -56,6 +56,7 @@ an **event**, and behaviour lives in **shards** that react to events or run ever
 | 11 | `xs.push(v)`, `xs.map(…)` | `xs += v`; no methods on values — use built-ins (`len(xs)`, `upper(s)`) |
 | 12 | `'a'`, `char` | a character is a one-character string `"a"` |
 | 13 | multi-line string literal | one line only; use `"\n"` and trailing `+` |
+| 13b | `$"HP: {hp}"`, `` `HP: ${hp}` ``, `"HP: " + hp + "/" + max` | `"HP: \(hp)/\(max)"` — interpolation is `\( )` (D29); `{ }` and `${ }` are plain text |
 | 14 | `attach $X to e` then `target $X` in the SAME event, expecting to see it | deferred: seen from the next event / tick / `settled`. Seed worlds in `run once` |
 | 15 | `attach $Price to p { amount: 9 }` to change one field | re-attach REPLACES the whole component (others reset to defaults): write `p.Price.amount = 9` |
 | 16 | `self.hp` | `self.Health.hp` — fields are reached through their shape name |
@@ -145,7 +146,9 @@ Run it: `veinc run arena.vein --ticks 8` — prints "three enemies", "half" thre
   identifier, `)`, `}`, `]`, a sigil name, `true`/`false`/`return`/`break`/`continue`). To continue an
   expression, end the line with an operator or `,`. A line STARTING with `+` is a new statement.
 - **Strings**: double quotes, single line, escapes `\n \t \r \\ \"`. `+` concatenates and stringifies
-  (`"hp " + 5`).
+  (`"hp " + 5`). **Interpolation** writes a value into the text: `"HP: \(hp) of \(max)"`, with any
+  expression inside `\( )` (a field, a call, arithmetic, a string). It prints exactly as the `+` chain
+  would. `"\(a)\(b)"` puts two numbers side by side. A literal backslash before `(` is `\\(` (D29).
 - **Numbers**: `3` (int), `3.0` (float — write the `.0` for floats), `30%` (percent literal, one token).
 - **Sigils**: `$Shape`, `@Event`, `#Mark`, `&Builder`, `!Shard`, `*qualified.path`.
 - **Operators**: `+ - * / %`, unary `-`; `== < > <= >=` (no `!=`); `and or not`; `= += -= *= /=`.

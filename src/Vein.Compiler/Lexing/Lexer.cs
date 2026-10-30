@@ -102,42 +102,46 @@ public sealed class Lexer
 
     public IReadOnlyList<Token> Tokenize()
     {
-        while (!AtEnd)
-        {
-            char c = Current;
-
-            if (c == ' ' || c == '\t' || c == '\r') { Advance(); continue; }
-
-            if (c == '\n')
-            {
-                // Virtual terminator: only when the previous token can end a statement.
-                // This is what replaces `end` as a statement separator (grammar 3.3).
-                if (CanEndStatement())
-                {
-                    _tokens.Add(new Token(TokenKind.Term, "\\n", null,
-                        new SourceSpan(_file, _line, _col, 1)));
-                }
-                Advance();
-                continue;
-            }
-
-            if (c == '/' && Peek() == '/') { SkipLineComment(); continue; }
-            if (c == '/' && Peek() == '*') { SkipBlockComment(); continue; }
-
-            int startPos = _pos, startLine = _line, startCol = _col;
-
-            if (c == '$' || c == '@' || c == '#' || c == '&') { ScanSigilRef(startPos, startLine, startCol); continue; }
-            // `!Name` names a shard (D19). A `!` NOT followed by a name is still VS0006 below: `!=`, `! x`.
-            if (c == '!' && (char.IsLetter(Peek()) || Peek() == '_')) { ScanSigilRef(startPos, startLine, startCol); continue; }
-            if (char.IsDigit(c)) { ScanNumber(startPos, startLine, startCol); continue; }
-            if (c == '"') { ScanString(startPos, startLine, startCol); continue; }
-            if (char.IsLetter(c) || c == '_') { ScanIdentifier(startPos, startLine, startCol); continue; }
-
-            ScanOperator(startPos, startLine, startCol);
-        }
+        while (!AtEnd) ScanNext();
 
         _tokens.Add(new Token(TokenKind.EndOfFile, "", null, new SourceSpan(_file, _line, _col, 0)));
         return _tokens;
+    }
+
+    /// One token, or the whitespace/comment before one. Its own method because an interpolation inside a
+    /// string (`"HP: \(hp)"`) scans ordinary tokens until its `)` — the same scanning, entered from ScanString.
+    private void ScanNext()
+    {
+        char c = Current;
+
+        if (c == ' ' || c == '\t' || c == '\r') { Advance(); return; }
+
+        if (c == '\n')
+        {
+            // Virtual terminator: only when the previous token can end a statement.
+            // This is what replaces `end` as a statement separator (grammar 3.3).
+            if (CanEndStatement())
+            {
+                _tokens.Add(new Token(TokenKind.Term, "\\n", null,
+                    new SourceSpan(_file, _line, _col, 1)));
+            }
+            Advance();
+            return;
+        }
+
+        if (c == '/' && Peek() == '/') { SkipLineComment(); return; }
+        if (c == '/' && Peek() == '*') { SkipBlockComment(); return; }
+
+        int startPos = _pos, startLine = _line, startCol = _col;
+
+        if (c == '$' || c == '@' || c == '#' || c == '&') { ScanSigilRef(startPos, startLine, startCol); return; }
+        // `!Name` names a shard (D19). A `!` NOT followed by a name is still VS0006 below: `!=`, `! x`.
+        if (c == '!' && (char.IsLetter(Peek()) || Peek() == '_')) { ScanSigilRef(startPos, startLine, startCol); return; }
+        if (char.IsDigit(c)) { ScanNumber(startPos, startLine, startCol); return; }
+        if (c == '"') { ScanString(startPos, startLine, startCol); return; }
+        if (char.IsLetter(c) || c == '_') { ScanIdentifier(startPos, startLine, startCol); return; }
+
+        ScanOperator(startPos, startLine, startCol);
     }
 
     // ---- newline rule ----------------------------------------------------
@@ -243,18 +247,77 @@ public sealed class Lexer
         }
     }
 
+    // INTERPOLATION (SYNTAX-DECISIONS D29): `"HP: \(hp) of \(max)"` lexes as the tokens of
+    // `("HP: " + (hp) + " of " + (max) + "")`. Building text with `+` was the most repeated thing in all our
+    // code — 3,210 joins and 1,354 lines ending in `+` across the corpus (docs/CORPUS.md) — and doing it HERE
+    // means the parser, Resolve, the interpreter and the C# backend all see the `+` they already handle, with
+    // the same conversions: an interpolated value prints exactly as `"" + value` does. The first piece is
+    // always a string (even "") so `"\(a)\(b)"` joins two numbers as text instead of adding them.
+    //
+    // Spans: each literal piece spans its own source (the quotes included), the expression's tokens are
+    // ordinary tokens, `\(` and `)` are the group's parentheses, and the `+`s and the outer parentheses are
+    // zero-length — so an editor painting tokens colours the pieces as strings and the expression as code.
+    //
+    // `\(` used to be an unknown escape that meant `(`; no string in the corpus used it. A backslash before a
+    // parenthesis is now written `\\(`.
     private void ScanString(int startPos, int startLine, int startCol)
     {
         Advance();                                  // opening quote
         var sb = new StringBuilder();
+        int piecePos = startPos, pieceLine = startLine, pieceCol = startCol;
+        bool interpolated = false, reported = false;
 
-        while (!AtEnd && Current != '"')
+        void Piece()
         {
-            if (Current == '\n')
+            _tokens.Add(new Token(TokenKind.String, sb.ToString(), sb.ToString(), SpanFrom(piecePos, pieceLine, pieceCol)));
+            sb.Clear();
+        }
+        Token Joint(TokenKind kind, string text) => new(kind, text, null, new SourceSpan(_file, _line, _col, 0));
+
+        while (!AtEnd && Current != '"' && Current != '\n')
+        {
+            if (Current == '\\' && Peek() == '(')
             {
-                _diagnostics.Error("VS0003", "Unterminated string literal.",
-                    SpanFrom(startPos, startLine, startCol));
-                return;
+                if (!interpolated) _tokens.Add(new Token(TokenKind.LParen, "(", null, new SourceSpan(_file, startLine, startCol, 0)));
+                interpolated = true;
+                Piece();
+                _tokens.Add(Joint(TokenKind.Plus, "+"));
+
+                int open = _pos, openLine = _line, openCol = _col;
+                int close = ClosingParen(_pos + 2);
+                Advance(); Advance();               // `\(`
+                _tokens.Add(new Token(TokenKind.LParen, "(", null, SpanFrom(open, openLine, openCol)));
+
+                if (close < 0)
+                {
+                    // No `)` before the line ends. The line's last quote is most likely this string's own end, so
+                    // skip to it and carry on: one error, and the statement around the string still parses.
+                    _diagnostics.Error("VS0399", "`\\(` in a string needs its `)` on the same line, before the string ends: \"HP: \\(hp)\".",
+                        SpanFrom(open, openLine, openCol));
+                    reported = true;
+                    int last = LastQuoteOnLine(_pos);
+                    while (!AtEnd && Current != '\n' && (last < 0 || _pos < last)) Advance();
+                    _tokens.Add(Joint(TokenKind.String, ""));
+                    _tokens.Add(Joint(TokenKind.RParen, ")"));
+                }
+                else
+                {
+                    int before = _tokens.Count;
+                    while (_pos < close) ScanNext();
+                    if (_tokens.Count == before)
+                    {
+                        _diagnostics.Error("VS0398", "Empty `\\( )` in a string: put the value to show inside, as in \"HP: \\(hp)\".",
+                            SpanFrom(open, openLine, openCol));
+                        _tokens.Add(Joint(TokenKind.String, ""));   // keeps `( )` an expression
+                    }
+                    int end = _pos, endLine = _line, endCol = _col;
+                    Advance();                      // `)`
+                    _tokens.Add(new Token(TokenKind.RParen, ")", null, SpanFrom(end, endLine, endCol)));
+                }
+
+                _tokens.Add(Joint(TokenKind.Plus, "+"));
+                piecePos = _pos; pieceLine = _line; pieceCol = _col;
+                continue;
             }
             if (Current == '\\')
             {
@@ -271,16 +334,63 @@ public sealed class Lexer
             sb.Append(Advance());
         }
 
-        if (AtEnd)
+        if (AtEnd || Current == '\n')
         {
-            _diagnostics.Error("VS0003", "Unterminated string literal.",
-                SpanFrom(startPos, startLine, startCol));
+            if (!reported)
+                _diagnostics.Error("VS0003", "Unterminated string literal.",
+                    SpanFrom(startPos, startLine, startCol));
+            if (interpolated) _tokens.Add(Joint(TokenKind.RParen, ")"));
             return;
         }
 
         Advance();                                  // closing quote
-        _tokens.Add(new Token(TokenKind.String, sb.ToString(), sb.ToString(),
-            SpanFrom(startPos, startLine, startCol)));
+        Piece();
+        if (interpolated) _tokens.Add(Joint(TokenKind.RParen, ")"));
+    }
+
+    /// The index of the `)` closing an interpolation whose expression starts at <paramref name="from"/>, on
+    /// the same line, or -1. Parentheses nest, and a string inside — with interpolations of its own — is
+    /// skipped whole. A comment cannot sit inside one: it would swallow the string's closing quote.
+    private int ClosingParen(int from)
+    {
+        int depth = 0;
+        for (int i = from; i < _src.Length; i++)
+        {
+            char c = _src[i];
+            if (c == '\n') return -1;
+            if (c == '/' && i + 1 < _src.Length && _src[i + 1] is '/' or '*') return -1;
+            if (c == '"') { i = StringEnd(i); if (i < 0) return -1; continue; }
+            if (c == '(') depth++;
+            else if (c == ')') { if (depth == 0) return i; depth--; }
+        }
+        return -1;
+    }
+
+    /// The index of the quote closing the string that opens at <paramref name="quote"/>, or -1.
+    private int StringEnd(int quote)
+    {
+        for (int i = quote + 1; i < _src.Length; i++)
+        {
+            char c = _src[i];
+            if (c == '\n') return -1;
+            if (c == '"') return i;
+            if (c != '\\' || i + 1 >= _src.Length) continue;
+            if (_src[i + 1] == '(') { i = ClosingParen(i + 2); if (i < 0) return -1; }
+            else i++;                               // the escaped character
+        }
+        return -1;
+    }
+
+    /// The last unescaped quote at or after <paramref name="from"/> on this line, or -1.
+    private int LastQuoteOnLine(int from)
+    {
+        int last = -1;
+        for (int i = from; i < _src.Length && _src[i] != '\n'; i++)
+        {
+            if (_src[i] == '\\') { i++; continue; }
+            if (_src[i] == '"') last = i;
+        }
+        return last;
     }
 
     private void ScanIdentifier(int startPos, int startLine, int startCol)

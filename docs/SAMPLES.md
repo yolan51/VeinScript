@@ -43,7 +43,7 @@ with the number of frames to run it for.
   `entities_bring_order`, `entities_bring_rows`, `entities_chance`
 - **scheduling and folds** — `bench_folds`, `rows_in_order`, `builder_defaults`
 - **events** — `events`, `payload`, `dom_rewire`
-- **text and values** — `entities_chars`, `entities_convert`, `text_search`, `text_split_join`
+- **text and values** — `entities_chars`, `entities_convert`, `text_search`, `text_split_join`, `text_interpolation`
 - **control flow** — `loops`
 - **removal** — `entities_destroy`
 - **chance** — `random_draw`

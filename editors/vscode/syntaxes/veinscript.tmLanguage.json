@@ -23,7 +23,25 @@
       "name": "string.quoted.double.veinscript",
       "begin": "\"",
       "end": "\"",
-      "patterns": [{ "name": "constant.character.escape.veinscript", "match": "\\\\." }]
+      "patterns": [
+        { "include": "#interpolation" },
+        { "name": "constant.character.escape.veinscript", "match": "\\\\." }
+      ]
+    },
+    "interpolation": {
+      "comment": "D29: \"HP: \\(hp)\" — the expression is code, painted as the rest of the file is. Nested parentheses are matched by #parens so `\\((1 + 2) * 3)` ends at its own `)`.",
+      "name": "meta.interpolation.veinscript",
+      "begin": "\\\\\\(",
+      "end": "\\)",
+      "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.veinscript" } },
+      "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.veinscript" } },
+      "contentName": "source.veinscript.embedded",
+      "patterns": [{ "include": "#parens" }, { "include": "$self" }]
+    },
+    "parens": {
+      "begin": "\\(",
+      "end": "\\)",
+      "patterns": [{ "include": "#parens" }, { "include": "$self" }]
     },
     "collections": {
       "patterns": [

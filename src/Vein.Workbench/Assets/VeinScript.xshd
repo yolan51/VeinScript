@@ -5,6 +5,7 @@
   <Color name="Comment" foreground="#6A9955" />
   <Color name="String"  foreground="#CE9178" />
   <Color name="Number"  foreground="#B5CEA8" />
+  <Color name="Interpolation" foreground="#D4D4D4" />        <!-- the code inside "…\( … )…" (D29) -->
   <Color name="Keyword" foreground="#569CD6" fontWeight="bold" />
 
   <!-- A COLOUR PER SIGIL. The four are different kinds of thing — data, tag, message, template — and
@@ -33,12 +34,9 @@
     <Span color="Comment" begin="//" />
     <Span color="Comment" multiline="true" begin="/\*" end="\*/" />
 
-    <Span color="String">
+    <Span color="String" ruleSet="StringBody">
       <Begin>"</Begin>
       <End>"</End>
-      <RuleSet>
-        <Span begin="\\" end="." />
-      </RuleSet>
     </Span>
 
     <!-- One rule each, so the four read apart at a glance. `&Builder` had no rule at all before and
@@ -86,6 +84,21 @@
       <Word>Index</Word>   <Word>do</Word>
     </Keywords>
 
+    <Rule color="Number">\b\d+(\.\d+)?%?\b</Rule>
+  </RuleSet>
+
+  <!-- Inside a string. `\(` opens an interpolation (D29) and is listed BEFORE the escape rule, which
+       would otherwise take the backslash: "HP: \(hp)" paints `hp` as code, not as text. -->
+  <RuleSet name="StringBody">
+    <Span color="Interpolation" ruleSet="Interpolation" begin="\\\(" end="\)" />
+    <Span begin="\\" end="." />
+  </RuleSet>
+
+  <!-- Inside `\( … )`: parentheses nest, so `\((1 + 2) * 3)` ends at its own `)`, and a string inside
+       may interpolate again. -->
+  <RuleSet name="Interpolation">
+    <Span ruleSet="Interpolation" begin="\(" end="\)" />
+    <Span color="String" ruleSet="StringBody" begin="&quot;" end="&quot;" />
     <Rule color="Number">\b\d+(\.\d+)?%?\b</Rule>
   </RuleSet>
 </SyntaxDefinition>
