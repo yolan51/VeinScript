@@ -1735,18 +1735,44 @@ public partial class MainWindow : Window
     /// A file opened from outside the project the explorer shows takes the explorer to ITS bundle — the
     /// folder of its main file, so `shards/` and `publicators/` are right there. The explorer stayed on the
     /// last session's folder, and Vein Cards opened with none of its eleven shard files in view.
+    ///
+    /// THE PROJECT, NOT ONLY THE BUNDLE: the explorer goes up to the folder the project lives in — where a
+    /// `project.godot`, a `.sln`, `.git` or `.config/dotnet-tools.json` is — so a game's `tools/` bundles show
+    /// beside its `game/`, as an editor shows them. With none of those above it, the bundle's own folder.
     private void ShowItsFolder(string path)
     {
         string full = Path.GetFullPath(path);
-        if (_rootFolder is { } root && full.StartsWith(Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar,
-                                                       StringComparison.OrdinalIgnoreCase))
-            return;
         string? folder = Path.GetDirectoryName(full);
         if (folder is null) return;
         if (BundleLoader.IsFragment(full) && Path.GetDirectoryName(folder) is { } bundle) folder = bundle;
+        folder = ProjectFolder(folder) ?? folder;
+
+        // Already shown, or inside what is shown: leave the explorer where it is.
+        static string Dir(string p) => Path.GetFullPath(p).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (_rootFolder is { } root && Dir(folder).StartsWith(Dir(root), StringComparison.OrdinalIgnoreCase)) return;
         _rootFolder = folder;
         _settings.Remember(folder);
         PopulateProjectTree(folder);
+    }
+
+    /// The nearest folder at or above `start` that holds a project: a Godot project, a solution, a repository
+    /// or a .NET tool manifest. Null when there is none within a few levels.
+    private static string? ProjectFolder(string start)
+    {
+        var dir = new DirectoryInfo(start);
+        for (int i = 0; dir is not null && i < 6; i++, dir = dir.Parent)
+        {
+            try
+            {
+                if (File.Exists(Path.Combine(dir.FullName, "project.godot")) || dir.EnumerateFiles("*.sln").Any()
+                    || Directory.Exists(Path.Combine(dir.FullName, ".git"))
+                    || File.Exists(Path.Combine(dir.FullName, ".config", "dotnet-tools.json")))
+                    return dir.FullName;
+            }
+            catch (IOException) { return null; }
+            catch (UnauthorizedAccessException) { return null; }
+        }
+        return null;
     }
 
     private async Task OpenPathAsync(string path)
@@ -2269,7 +2295,7 @@ public partial class MainWindow : Window
             foreach (var sub in dir.GetDirectories().OrderBy(d => d.Name))
                 if (ShowFolder(sub)) item.Items.Add(FolderNode(sub));
             foreach (var f in dir.GetFiles().Where(IsProjectFile).OrderBy(f => f.Name))
-                item.Items.Add(new TreeViewItem { Header = Decorate(f.Name), Tag = f.FullName });
+                item.Items.Add(new TreeViewItem { Header = Decorate(f.Name) + BundleOf(f), Tag = f.FullName });
         };
         return item;
     }
@@ -2310,6 +2336,25 @@ public partial class MainWindow : Window
     /// the tree shows a folder's real contents, the glyph separates the two questions a reader has:
     /// which of these is a program, and which of these is a file I happen to keep here.
     /// </remarks>
+    /// "   · ReferenceCombat by veincards" for a `.vein` file that declares a bundle or an app: a project's
+    /// tools are bundles of their own, and their file names do not say so. Read from the file's first lines
+    /// only; a fragment (shards/, publicators/) declares none and shows none.
+    private static string BundleOf(FileInfo f)
+    {
+        if (!f.Name.EndsWith(".vein", StringComparison.OrdinalIgnoreCase) || f.Length > 4_000_000) return "";
+        try
+        {
+            foreach (string line in File.ReadLines(f.FullName).Take(80))
+            {
+                var m = System.Text.RegularExpressions.Regex.Match(line, @"^\s*(bundle|app)\s+([A-Za-z_][\w.]*)(?:\s+by\s+([A-Za-z_][\w.]*))?");
+                if (m.Success) return $"   · {m.Groups[2].Value}{(m.Groups[3].Success ? " by " + m.Groups[3].Value : "")}";
+            }
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        return "";
+    }
+
     private static string Decorate(string name) =>
         name.EndsWith(".vein", StringComparison.OrdinalIgnoreCase) ? name
         : name.EndsWith(".veinproj", StringComparison.OrdinalIgnoreCase)
