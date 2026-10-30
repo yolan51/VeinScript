@@ -332,6 +332,7 @@ public partial class MainWindow : Window
         {
             if (!File.Exists(path)) { SetStatus($"Cannot open {path} — no such file."); return; }
 
+            ShowItsFolder(path);
             await OpenPathAsync(Path.GetFullPath(path));
             if (line is { } n) GoToLine(n);
             // `--tab flow` — the panel the caller asked for (VS Code's "Open in Workbench: Flow").
@@ -1727,7 +1728,25 @@ public partial class MainWindow : Window
             FileTypeFilter = new[] { new FilePickerFileType("VeinScript") { Patterns = new[] { "*.vein" } } }
         });
         if (files.Count == 0) return;
+        ShowItsFolder(files[0].Path.LocalPath);
         await OpenPathAsync(files[0].Path.LocalPath);
+    }
+
+    /// A file opened from outside the project the explorer shows takes the explorer to ITS bundle — the
+    /// folder of its main file, so `shards/` and `publicators/` are right there. The explorer stayed on the
+    /// last session's folder, and Vein Cards opened with none of its eleven shard files in view.
+    private void ShowItsFolder(string path)
+    {
+        string full = Path.GetFullPath(path);
+        if (_rootFolder is { } root && full.StartsWith(Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar,
+                                                       StringComparison.OrdinalIgnoreCase))
+            return;
+        string? folder = Path.GetDirectoryName(full);
+        if (folder is null) return;
+        if (BundleLoader.IsFragment(full) && Path.GetDirectoryName(folder) is { } bundle) folder = bundle;
+        _rootFolder = folder;
+        _settings.Remember(folder);
+        PopulateProjectTree(folder);
     }
 
     private async Task OpenPathAsync(string path)
@@ -2233,15 +2252,25 @@ public partial class MainWindow : Window
     /// `Tag: string`, keeps ignoring folders exactly as it did.
     private sealed record FolderRef(string Path);
 
+    /// A folder's contents are read the first time it is opened, from a placeholder that only shows the
+    /// expander. Every folder was read up front, every file a tree item: a game folder beside its art —
+    /// Vein Cards' `game/` holds 2,784 images — built thousands of items before the tree could show.
     private static TreeViewItem FolderNode(DirectoryInfo dir)
     {
         var item = new TreeViewItem { Header = dir.Name, Tag = new FolderRef(dir.FullName) };
-        // Show ALL project folders (including empty skeleton folders like shapes/ events/), except the
-        // build/VCS blocklist — so a freshly scaffolded bundle/app shows its full structure.
-        foreach (var sub in dir.GetDirectories().OrderBy(d => d.Name))
-            if (ShowFolder(sub)) item.Items.Add(FolderNode(sub));
-        foreach (var f in dir.GetFiles().Where(IsProjectFile).OrderBy(f => f.Name))
-            item.Items.Add(new TreeViewItem { Header = Decorate(f.Name), Tag = f.FullName });
+        item.Items.Add(new TreeViewItem { Header = "…" });
+        item.PropertyChanged += (_, e) =>
+        {
+            if (e.Property != TreeViewItem.IsExpandedProperty || !item.IsExpanded) return;
+            if (item.Items.Count != 1 || item.Items[0] is not TreeViewItem { Tag: null }) return;   // read already
+            item.Items.Clear();
+            // Show ALL project folders (including empty skeleton folders like shapes/ events/), except the
+            // build/VCS blocklist — so a freshly scaffolded bundle/app shows its full structure.
+            foreach (var sub in dir.GetDirectories().OrderBy(d => d.Name))
+                if (ShowFolder(sub)) item.Items.Add(FolderNode(sub));
+            foreach (var f in dir.GetFiles().Where(IsProjectFile).OrderBy(f => f.Name))
+                item.Items.Add(new TreeViewItem { Header = Decorate(f.Name), Tag = f.FullName });
+        };
         return item;
     }
 
