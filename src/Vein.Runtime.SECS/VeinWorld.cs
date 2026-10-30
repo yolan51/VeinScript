@@ -172,6 +172,7 @@ public sealed class VeinWorld
     private void Unmake(int entity)
     {
         _alive.Remove(entity);
+        foreach (var b in _buckets.Values) b.Forget(entity);
         // Marks go with the entity: they are components now, so DestroyEntity takes them too.
         _secs.DestroyEntity(entity);
 
@@ -238,7 +239,7 @@ public sealed class VeinWorld
 
     // ---- the fold rule ---------------------------------------------------
 
-    private interface IBucket { void Commit(VeinWorld world); }
+    private interface IBucket { void Commit(VeinWorld world); void Forget(int entity); }
 
     /// Contributions to one component type this phase. Fully typed: the tuples hold `T`, not an
     /// interface, so nothing boxes between an activation and the fold.
@@ -247,8 +248,19 @@ public sealed class VeinWorld
         private readonly List<(int Entity, T Snapshot, T Current)> _items = new();
         private readonly Dictionary<int, List<(T Snapshot, T Current)>> _byEntity = new();
 
+        /// The entities contributed to THIS phase — the only ones a commit visits.
+        private readonly List<int> _dirty = new();
+
         public void Touch(int entity) { if (!_byEntity.ContainsKey(entity)) _byEntity[entity] = new(); }
         public void Add(int entity, T snapshot, T current) => _items.Add((entity, snapshot, current));
+
+        /// A destroyed entity's list goes with it.
+        ///
+        /// IT STAYED, AND EVERY COMMIT WALKED IT: `_byEntity` kept a list for every entity this component was
+        /// ever touched on, and the fold pass ran over all of them. A game that spawns a fading number and
+        /// destroys it ten frames later — Vein Cards does it all the time — made every frame a little slower
+        /// than the last, for the whole session (0.2 ms → 5 ms in 12,000 frames; the interpreter stayed flat).
+        public void Forget(int entity) => _byEntity.Remove(entity);
 
         public void Commit(VeinWorld world)
         {
@@ -256,9 +268,11 @@ public sealed class VeinWorld
 
             // ONE grouping pass. Scanning the contribution list once per entity instead is quadratic in
             // the entity count — precisely the axis a compiled backend exists to make large.
+            _dirty.Clear();
             foreach (var (entity, snap, cur) in _items)
             {
                 if (!_byEntity.TryGetValue(entity, out var list)) _byEntity[entity] = list = new();
+                if (list.Count == 0) _dirty.Add(entity);
                 list.Add((snap, cur));
             }
 
@@ -276,9 +290,10 @@ public sealed class VeinWorld
             //
             // Attach/Detach deliberately stay on the tracked `Secs` path. They are structural, rare, and
             // outside the frame loop, and keeping them there leaves an engine-side listener working.
-            foreach (var (entity, list) in _byEntity)
+            foreach (int entity in _dirty)
             {
-                if (list.Count > 0 && world._secs.Store.TryGet<T>(entity, out var committed))
+                var list = _byEntity[entity];
+                if (world._secs.Store.TryGet<T>(entity, out var committed))
                     // Static abstract dispatch: no boxing, no virtual call through an instance.
                     world._secs.Store.Add(entity, T.Fold(committed!, list));
                 list.Clear();
