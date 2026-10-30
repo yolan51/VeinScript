@@ -560,7 +560,7 @@ public sealed class CSharpBackend : IVeinBackend
             // event field, so check-backend never saw it (found by Vein.Hosting's runtime parity tests).
             // An `emit` that names the field still overrides it, in the object initialiser.
             foreach (var f in e.Fields)
-                sb.AppendLine($"        public {Cs(f.Type)} {Ident(f.Name)} = {(f.Default is { } d ? Expr(d) : ZeroOf(f.Type))};");
+                sb.AppendLine($"        public {Cs(f.Type)} {Ident(f.Name)} = {(f.Default is { } d ? Convert(Expr(d), CsOf(d), Cs(f.Type)) : ZeroOf(f.Type))};");
             sb.AppendLine("    }");
         }
         sb.AppendLine("}");
@@ -685,6 +685,7 @@ public sealed class CSharpBackend : IVeinBackend
 
     /// The shard being emitted, so an `emit` inside it can tag the payload with who sent it.
     private string? _currentShard;
+    private IrShard? _currentShardIr;
 
     /// The declared return type of the fn being emitted. `return found` from `var found = 0` is a C# `long`
     /// where an `Entity` fn returns `int`, and a list element is an `object?` where a `string` fn returns one
@@ -716,6 +717,7 @@ public sealed class CSharpBackend : IVeinBackend
     private void EmitShard(StringBuilder sb, IrShard shard)
     {
         _currentShard = shard.Name;
+        _currentShardIr = shard;
         sb.AppendLine($"public sealed class {ShardIdent(shard)} : VeinSystem");
         sb.AppendLine("{");
         _fields.Clear();
@@ -724,7 +726,7 @@ public sealed class CSharpBackend : IVeinBackend
         foreach (var f in shard.State) _fieldCs[f.Name] = StateCs(f);
         foreach (var f in shard.State)
             sb.AppendLine(f.Default is { } init
-                ? $"    public {StateCs(f)} {Ident(f.Name)} = {Expr(init)};"
+                ? $"    public {StateCs(f)} {Ident(f.Name)} = {Convert(Expr(init), CsOf(init), StateCs(f))};"
                 : $"    public {StateCs(f)} {Ident(f.Name)};");
         if (shard.State.Count > 0) sb.AppendLine();
 
@@ -2013,15 +2015,9 @@ public sealed class CSharpBackend : IVeinBackend
     private string FieldValue(IrExpr target, IrExpr value)
     {
         string emitted = Expr(value);
-        if (value is IrLiteral) return emitted;
         if (target is not IrFieldAccess { Receiver: IrFieldAccess { Field: var comp }, Field: var field }) return emitted;
         if (!_componentTypes.TryGetValue(comp, out var decl)) return emitted;
-        return decl.Fields.FirstOrDefault(x => x.Name == field)?.Type.Name switch
-        {
-            "int" => $"(long)({emitted})",
-            "Entity" => $"(int)({emitted})",
-            _ => emitted
-        };
+        return decl.Fields.FirstOrDefault(x => x.Name == field) is { } f ? Convert(emitted, CsOf(value), Cs(f.Type)) : emitted;
     }
 
     /// Convert a value to the field's DECLARED type when C# would not do it implicitly.
@@ -2031,40 +2027,22 @@ public sealed class CSharpBackend : IVeinBackend
     /// and no error at all in the interpreter, which is exactly the kind of divergence the backend
     /// contract exists to prevent: the generated file simply would not build.
     ///
-    /// Only the untyped cases are wrapped. A field already holding a `string` expression stays as it was,
-    /// so nothing that compiled before changes shape.
+    /// Only what does not already fit is wrapped (Convert): a field given a `string` expression stays as it
+    /// was. A payload field too: `emit @ActionPressed { action: parts[3] }` puts a list element — an
+    /// `object?` — into a `string` field, and `attach $CardView { cost: 0 }` a long literal into an Entity's
+    /// C# int.
     private string Coerce(string typeName, string field, IrExpr value)
     {
         string emitted = Expr(value);
-
-        // Only what is UNTYPED at runtime gets wrapped. A literal, an arithmetic expression or a
-        // concatenation already has a C# type the field accepts, and wrapping those would put a call
-        // around every field in every emitted struct — noise, and a needless indirection in the hot
-        // path the backend exists to make fast.
-        //
-        // `Resolve` would answer this properly, but nothing runs it before emit (`IrExpr.ResolvedType`
-        // is null here), so the test is on the expression's FORM.
-        if (value is IrLiteral or IrBinary or IrUnary or IrStructInit or IrList) return emitted;
-
-        // A payload field too: `emit @ActionPressed { action: parts[3] }` puts a list element — an `object?` —
-        // into a `string` field, and the file stopped compiling.
         if (!_componentTypes.TryGetValue(typeName, out var decl) && !_eventTypes.TryGetValue(typeName, out decl)) return emitted;
-        var f = decl.Fields.FirstOrDefault(x => x.Name == field);
-        return Fit(f?.Type, emitted);
+        if (decl.Fields.FirstOrDefault(x => x.Name == field) is not { } f) return emitted;
+        // A record into a field declared as text or a number: the interpreter carries the record, and a C#
+        // field cannot. Said (VS0400 says it to the author too), so the program stays on the interpreter.
+        if (Lower.CertainRecord(value, _currentShardIr) && Lower.Scalar(f.Type))
+            _notes.Add($"`{Interp.EventName(typeName)}.{field}` is declared `{f.Type.Name}` and given a record — compiled code " +
+                       "would turn it into text or a number; keep this program on `veinc run` until the field is declared `json` (VS0400).");
+        return Convert(emitted, CsOf(value), Cs(f.Type));
     }
-
-    /// `emitted` converted to `type` (a field's or a function's), by the helpers that read any runtime value.
-    private static string Fit(IrTypeRef? type, string emitted) =>
-        type?.Name switch
-        {
-            "string" => $"__VeinText.S({emitted})",
-            "int" => $"__VeinText.I({emitted})",
-            // `Entity` is a C# `int` here, not the 64-bit `int` VeinScript means by the word.
-            "Entity" => $"(int)__VeinText.I({emitted})",
-            "float" or "percent" => $"__VeinText.D({emitted})",
-            "bool" => $"__VeinText.B({emitted})",
-            _ => emitted
-        };
 
     /// A VeinScript string as a C# string literal.
     ///
@@ -2112,7 +2090,11 @@ public sealed class CSharpBackend : IVeinBackend
     {
         IrLiteralKind.String => "\"" + Escape(l.Value?.ToString() ?? "") + "\"",
         IrLiteralKind.Bool => (l.Value is true) ? "true" : "false",
-        IrLiteralKind.Int => l.Value?.ToString() ?? "0",
+        // A LONG, said with its suffix, as every VeinScript int is. Bare, C# types `12345` as int and
+        // `2147483648` as UINT — harmless while both sides were C# numbers, wrong once a literal is handed
+        // to VeinValues as an `object`: the interpreter's rules know long and int, so a boxed uint read as
+        // zero and Vein Cards' `seed % 2147483648` was NaN, which dealt every compiled match differently.
+        IrLiteralKind.Int => (l.Value?.ToString() ?? "0") + "L",
         IrLiteralKind.Float or IrLiteralKind.Percent => FloatLiteral(System.Convert.ToDouble(l.Value ?? 0)),
         _ => "default"
     };
@@ -2481,7 +2463,7 @@ public sealed class CSharpBackend : IVeinBackend
                     sb.AppendLine($"            e.from = new {Ident(Lower.ProvenanceType)} {{ name = sender, kind = \"Runtime\" }};");
                     continue;
                 }
-                string fallback = f.Default is { } d ? Expr(d) : ZeroOf(f.Type);
+                string fallback = f.Default is { } d ? Convert(Expr(d), CsOf(d), Cs(f.Type)) : ZeroOf(f.Type);
                 sb.AppendLine($"            e.{Ident(f.Name)} = fields.TryGetValue({Q(f.Name)}, out var __{Ident(f.Name)}) ? {Conv(f.Type, "__" + Ident(f.Name))} : {fallback};");
             }
             sb.AppendLine($"            w.Emit({Q(e.Name)}, e);");
@@ -2505,7 +2487,7 @@ public sealed class CSharpBackend : IVeinBackend
             // A shape attached HERE starts from its declared defaults, as the interpreter's AddComponent
             // does — not a zeroed struct. A host's `$View`, and a field an edit added to a shape a carried
             // identity already wore (VeinGame's state-keeping reload), read 0 instead of their defaults.
-            string inits = string.Join(", ", c.Fields.Where(f => f.Default is not null).Select(f => $"{Ident(f.Name)} = {Expr(f.Default!)}"));
+            string inits = string.Join(", ", c.Fields.Where(f => f.Default is not null).Select(f => $"{Ident(f.Name)} = {Convert(Expr(f.Default!), CsOf(f.Default!), Cs(f.Type))}"));
             sb.AppendLine($"                var c = w.Has<{type}>(id) ? w.Get<{type}>(id) : new {type} {{ {inits} }};");
             sb.AppendLine("                switch (field)");
             sb.AppendLine("                {");

@@ -407,7 +407,99 @@ public sealed partial class Lower
         var module = Semantics.Resolve.Run(new IrModule(bundle.Name, types, funcs, shards) { Start = start }, out var unknown);
         ReportUnknownFields(unknown, start?.Event);
         CheckEnumArms();
+        CheckRecordsInTypedFields(module);
         return module;
+    }
+
+    /// The field types a record cannot honestly go into: it is not text, a number, a truth or an identity.
+    internal static bool Scalar(IrTypeRef t) => t.Name is "string" or "int" or "float" or "bool" or "Entity" or "percent";
+
+    /// VS0400: a record — a `fromJson` value, typed `json` — given to a shape or event field declared as text,
+    /// a number, a truth or an identity.
+    ///
+    /// THE INTERPRETER NEVER LOOKS AT A FIELD'S TYPE, so `emit @Ready { db: db }` with `@Ready { db: string }`
+    /// carried the whole game record and every handler read it as one. Compiled code has a real `string`
+    /// there and turned the record into text, so the compiled game broke where the interpreted one worked
+    /// (Vein Cards, 2026-10-30). The declaration is what is wrong; the backend refuses such a program (it stays
+    /// on the interpreter), and this says which line to change.
+    ///
+    /// ONLY A CERTAIN RECORD: `fromJson("{…}")` or `fromJson("[…]")` itself, or a shard var that starts as one
+    /// (Vein Cards' `db`). A `json`-typed value in general is any parsed value — `get(m, "id", "")` is text —
+    /// so the type alone would accuse lines that are right.
+    private void CheckRecordsInTypedFields(IrModule module)
+    {
+        var declared = module.Types.Where(t => t.Kind is IrTypeKind.Message or IrTypeKind.Component)
+                                   .GroupBy(t => t.Name).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        foreach (var (si, at, owner) in StructInits(module))
+        {
+            if (!declared.TryGetValue(si.TypeName, out var type)) continue;
+            foreach (var (field, value) in si.Fields)
+            {
+                if (!CertainRecord(value, owner)) continue;
+                if (type.Fields.FirstOrDefault(f => f.Name == field) is not { } f || !Scalar(f.Type)) continue;
+                string sigil = type.Kind == IrTypeKind.Message ? "@" : "$";
+                _diag.Warning("VS0400",
+                    $"`{sigil}{Interp.EventName(type.Name)}.{field}` is declared `{f.Type.Name}`, and is given a record (a `fromJson` " +
+                    $"value). The interpreter passes the record through; compiled code would turn it into {(f.Type.Name == "string" ? "text" : "a " + f.Type.Name)}, " +
+                    $"so this program stays on the interpreter. Declare the field `json`.",
+                    at is null ? new Lexing.SourceSpan(module.Name, 1, 1, 0) : new Lexing.SourceSpan(at.File, (int)at.Line, 1, 0));
+            }
+        }
+    }
+
+    /// A value that is a parsed object or list for certain — see CheckRecordsInTypedFields.
+    internal static bool CertainRecord(IrExpr value, IrShard? owner) => value switch
+    {
+        IrCall { Callee: IrLocalRef { Name: "fromJson" }, Args: [IrLiteral { Value: string text }] } => text.TrimStart() is ['{' or '[', ..],
+        IrLocalRef r => owner?.State.FirstOrDefault(s => s.Name == r.Name) is { Default: { } start } && CertainRecord(start, null),
+        _ => false,
+    };
+
+    /// Every shape or payload literal in the module, with the line of the statement it is written in and the
+    /// shard whose code it is (null in a module `fn`).
+    private static IEnumerable<(IrStructInit Init, IrLine? At, IrShard? Owner)> StructInits(IrModule module)
+    {
+        var found = new List<(IrStructInit, IrLine?, IrShard?)>();
+        IrShard? owner = null;
+        void Expr(IrExpr? e, IrLine? at)
+        {
+            switch (e)
+            {
+                case IrStructInit si: found.Add((si, at, owner)); foreach (var (_, v) in si.Fields) Expr(v, at); break;
+                case IrBinary b: Expr(b.Left, at); Expr(b.Right, at); break;
+                case IrUnary u: Expr(u.Operand, at); break;
+                case IrFieldAccess fa: Expr(fa.Receiver, at); break;
+                case IrIndex ix: Expr(ix.Receiver, at); Expr(ix.Index, at); break;
+                case IrCall c: Expr(c.Callee, at); foreach (var a in c.Args) Expr(a, at); break;
+                case IrRuntimeCall rc: foreach (var a in rc.Args) Expr(a, at); break;
+                case IrList l: foreach (var i in l.Items) Expr(i, at); break;
+            }
+        }
+        void Stmt(IrStmt? s, IrLine? outer)
+        {
+            var at = s?.At ?? outer;
+            switch (s)
+            {
+                case IrBlock b: foreach (var x in b.Statements) Stmt(x, at); break;
+                case IrLet l: Expr(l.Init, at); break;
+                case IrAssign a: Expr(a.Target, at); Expr(a.Value, at); break;
+                case IrIf i: Expr(i.Cond, at); Stmt(i.Then, at); Stmt(i.Else, at); break;
+                case IrLoop lp: Expr(lp.Cond, at); Expr(lp.Count, at); Expr(lp.Source, at); Stmt(lp.Body, at); break;
+                case IrExprStmt es: Expr(es.Expr, at); break;
+                case IrReturn r: Expr(r.Value, at); break;
+                case IrOrdered o: Stmt(o.Collect, at); break;
+                case IrOrderedBring ob: Expr(ob.Key, at); Stmt(ob.Body, at); break;
+                case IrMatch m: Expr(m.Subject, at); foreach (var arm in m.Arms) Stmt(arm.Body, at); Stmt(m.Else, at); break;
+                case IrWeave w: Expr(w.Source, at); Stmt(w.Record, at); break;
+            }
+        }
+        foreach (var f in module.Functions) Stmt(f.Body, null);
+        foreach (var s in module.Shards)
+        {
+            owner = s;
+            foreach (var m in s.Methods) Stmt(m.Body, null);
+        }
+        return found;
     }
 
     /// Every `match` this bundle lowered, with the statement it came from — kept until Resolve has typed the

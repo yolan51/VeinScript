@@ -123,7 +123,7 @@ public class CompiledAppTests : IDisposable
 
         var emitted = new CSharpBackend().Emit(r.Modules[0]);
 
-        Assert.Contains("long i = 0;", emitted.Files[0].Contents);   // declared with its type, as CsOf reads it back
+        Assert.Contains("long i = 0L;", emitted.Files[0].Contents);   // declared with its type, as CsOf reads it back
         Assert.DoesNotContain("\n        i = 0;", emitted.Files[0].Contents);
     }
 
@@ -135,8 +135,8 @@ public class CompiledAppTests : IDisposable
 
         var cs = new CSharpBackend().Emit(r.Modules[0]).Files[0].Contents;
 
-        Assert.Contains("long i = 0;", cs);                // an int literal declares a long (VeinScript int)
-        Assert.Contains("i = (i + 1);", cs);
+        Assert.Contains("long i = 0L;", cs);                // an int literal declares a long (VeinScript int)
+        Assert.Contains("i = (i + 1L);", cs);
         Assert.DoesNotContain("var i = (i + 1);", cs);   // the second one is an assignment, not a decl
         Assert.DoesNotContain("long i = (i + 1);", cs);
     }

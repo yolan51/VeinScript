@@ -150,7 +150,7 @@ public class CSharpBackendTests
             "  shard S { run once { let e = spawn()\n    attach $H to e { hp: 5 } } }");
 
         Assert.Contains("World.Spawn()", code);
-        Assert.Contains("World.Attach(e, new H { hp = 5 })", code);
+        Assert.Contains("World.Attach(e, new H { hp = 5L })", code);
     }
 
     [Fact]
