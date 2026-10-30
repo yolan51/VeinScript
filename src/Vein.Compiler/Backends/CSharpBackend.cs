@@ -1017,8 +1017,8 @@ public sealed class CSharpBackend : IVeinBackend
                 // The condition is asked again after every turn, at the `while`'s own line — not the line of
                 // the body's last statement — as Interp.ExecLoop asks it.
                 sb.AppendLine(_inUnit && w.At is { } whileAt
-                    ? $"{pad}while (World.Here({whileAt.Line}) && ({Cond(w.Cond)}))"
-                    : $"{pad}while ({Cond(w.Cond)})");
+                    ? $"{pad}while (World.Here({whileAt.Line}) && ({Cond(w.Cond!)}))"
+                    : $"{pad}while ({Cond(w.Cond!)})");
                 EmitBlock(sb, w.Body, depth);
                 break;
 
