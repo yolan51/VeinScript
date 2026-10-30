@@ -408,6 +408,7 @@ public sealed partial class Lower
         ReportUnknownFields(unknown, start?.Event);
         CheckEnumArms();
         CheckRecordsInTypedFields(module);
+        CheckStatesAsText(module);
         return module;
     }
 
@@ -460,12 +461,22 @@ public sealed partial class Lower
     private static IEnumerable<(IrStructInit Init, IrLine? At, IrShard? Owner)> StructInits(IrModule module)
     {
         var found = new List<(IrStructInit, IrLine?, IrShard?)>();
+        Walk(module, (e, at, owner) => { if (e is IrStructInit si) found.Add((si, at, owner)); });
+        return found;
+    }
+
+    /// Every statement and every expression in the module's code, each with the line of the statement it is in
+    /// and the shard whose code it is (null in a module `fn`).
+    private static void Walk(IrModule module, Action<IrExpr, IrLine?, IrShard?> onExpr, Action<IrStmt, IrLine?>? onStmt = null)
+    {
         IrShard? owner = null;
         void Expr(IrExpr? e, IrLine? at)
         {
+            if (e is null) return;
+            onExpr(e, at, owner);
             switch (e)
             {
-                case IrStructInit si: found.Add((si, at, owner)); foreach (var (_, v) in si.Fields) Expr(v, at); break;
+                case IrStructInit si: foreach (var (_, v) in si.Fields) Expr(v, at); break;
                 case IrBinary b: Expr(b.Left, at); Expr(b.Right, at); break;
                 case IrUnary u: Expr(u.Operand, at); break;
                 case IrFieldAccess fa: Expr(fa.Receiver, at); break;
@@ -478,6 +489,7 @@ public sealed partial class Lower
         void Stmt(IrStmt? s, IrLine? outer)
         {
             var at = s?.At ?? outer;
+            if (s is not null) onStmt?.Invoke(s, at);
             switch (s)
             {
                 case IrBlock b: foreach (var x in b.Statements) Stmt(x, at); break;
@@ -499,7 +511,84 @@ public sealed partial class Lower
             owner = s;
             foreach (var m in s.Methods) Stmt(m.Body, null);
         }
-        return found;
+    }
+
+    /// VS0401, a hint: a STATE kept as text or a yes/no, where a mark says it (RULES-OF-THUMB 5).
+    ///
+    /// Vein Cards kept every state that way — `c["attacked"] = true`, a zone as a list of ids — and so did not
+    /// have a single `unmark`: every query walked lists and tested text, where `target $Unit #OnBoard not
+    /// #Attacked` asks for exactly what it means. Three shapes of it, each said once, at its first write:
+    ///
+    ///   * a yes/no field of this bundle's own shape, set to `true`/`false` by the code;
+    ///   * a text field of this bundle's own shape that only ever gets literals, and is tested against one —
+    ///     the test is what makes it a state rather than a label the code fills in;
+    ///   * a yes/no key of a record (`c["attacked"] = true`), which cannot carry a mark until the record is an
+    ///     identity — so the hint says to weave it first.
+    ///
+    /// A hint, never a warning: the program is right, and `veinc check` still says ok. Only this bundle's own
+    /// shapes are looked at — a stdlib shape's `visible` is not the author's to change.
+    private void CheckStatesAsText(IrModule module)
+    {
+        var flags = new Dictionary<string, IrLine?>(StringComparer.Ordinal);                        // `$S.f` set to a bool
+        var texts = new Dictionary<string, (SortedSet<string> Values, IrLine? At)>(StringComparer.Ordinal);
+        var computed = new HashSet<string>(StringComparer.Ordinal);                                 // `$S.f` given a non-literal
+        var tested = new HashSet<string>(StringComparer.Ordinal);                                   // `$S.f == "…"` somewhere
+        var recordFlags = new Dictionary<string, IrLine?>(StringComparer.Ordinal);                  // `r["k"] = true`
+
+        string? OwnField(IrExpr e, string type) =>
+            e is IrFieldAccess { Receiver: IrFieldAccess { Field: var shape }, Field: var field }
+            && _shapeFields.TryGetValue(shape, out var fields) && _shapeDecls.ContainsKey(shape)
+            && fields.FirstOrDefault(f => f.Name == field)?.Type?.Name == type
+                ? shape + "." + field : null;
+
+        Walk(module,
+            (e, at, _) =>
+            {
+                if (e is IrBinary { Op: IrBinOp.Eq or IrBinOp.Ne } b)
+                    foreach (var (side, other) in new[] { (b.Left, b.Right), (b.Right, b.Left) })
+                        if (other is IrLiteral { Kind: IrLiteralKind.String } && OwnField(side, "string") is { } key) tested.Add(key);
+            },
+            (s, at) =>
+            {
+                if (s is not IrAssign a) return;
+                if (OwnField(a.Target, "bool") is { } flag && a.Value is IrLiteral { Kind: IrLiteralKind.Bool }) flags.TryAdd(flag, at);
+                else if (OwnField(a.Target, "string") is { } text)
+                {
+                    if (a.Value is not IrLiteral { Kind: IrLiteralKind.String, Value: string v }) { computed.Add(text); return; }
+                    if (!texts.TryGetValue(text, out var seen)) texts[text] = seen = (new SortedSet<string>(StringComparer.Ordinal), at);
+                    seen.Values.Add(v);
+                }
+                else if (a.Target is IrIndex { Index: IrLiteral { Kind: IrLiteralKind.String, Value: string k } } && a.Value is IrLiteral { Kind: IrLiteralKind.Bool })
+                    recordFlags.TryAdd(k, at);
+            });
+
+        static string Mark(string word) =>
+            "#" + string.Concat(word.Split('_', '-', ' ').Where(p => p.Length > 0).Select(p => char.ToUpperInvariant(p[0]) + p[1..]));
+        Lexing.SourceSpan Span(IrLine? at) => at is null ? new Lexing.SourceSpan(module.Name, 1, 1, 0) : new Lexing.SourceSpan(at.File, (int)at.Line, 1, 0);
+
+        foreach (var (key, at) in flags)
+        {
+            string shape = key[..key.IndexOf('.')], field = key[(key.IndexOf('.') + 1)..], m = Mark(field);
+            _diag.Info("VS0401",
+                $"`${shape}.{field}` is a yes/no the code turns on and off — a state, which a mark says: `mark x {m}` / " +
+                $"`unmark x {m}`, then `target ${shape} {m}` or `not {m}` (RULES-OF-THUMB 5).", Span(at));
+        }
+        foreach (var (key, (values, at)) in texts)
+        {
+            if (computed.Contains(key) || !tested.Contains(key)) continue;
+            string shape = key[..key.IndexOf('.')], field = key[(key.IndexOf('.') + 1)..];
+            string marks = string.Join(", ", values.Select(Mark));
+            _diag.Info("VS0401",
+                $"`${shape}.{field}` only ever holds {string.Join(", ", values.Select(v => "\"" + v + "\""))}, and is tested against them — " +
+                $"states, which marks say: {marks}. `unmark` the old, `mark` the new, and `target` by the mark (RULES-OF-THUMB 5).", Span(at));
+        }
+        foreach (var (key, at) in recordFlags)
+        {
+            string m = Mark(key);
+            _diag.Info("VS0401",
+                $"`{key}` is a yes/no kept in a record and set by the code — a state. A mark says it, on an identity: " +
+                $"weave the record through a loom, then `mark x {m}` / `unmark x {m}` (RULES-OF-THUMB 5 and 10).", Span(at));
+        }
     }
 
     /// Every `match` this bundle lowered, with the statement it came from — kept until Resolve has typed the

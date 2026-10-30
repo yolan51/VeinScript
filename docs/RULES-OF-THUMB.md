@@ -93,6 +93,10 @@ a few named stages, a membership.
 Only an identity carries a mark, so a record from `fromJson` has to become one first: weave it through a loom
 (rule 10).
 
+`veinc check` says it too: **VS0401** is a hint (it never fails a check) at the first write of a yes/no your code
+sets on its own shape, of a text field that only holds literals it is tested against, or of a yes/no key in a
+record.
+
 ## 6. Say what you leave out in the query
 
 `target $Group #Shown not #Hidden as g` (D25), rather than `target $Group #Shown as g { if not (g carries #Hidden) { … } }`.
