@@ -25,6 +25,7 @@ bundle GameCollision by you {
 
     need "Vein.Game"
     need "Vein.Transform"
+    need "Vein.Console"
 
     mark #Collidable
 
@@ -86,10 +87,8 @@ bundle GameCollision by you {
 
                         if dx < a.Collider.width + b.Collider.width {
                             if dy < a.Collider.height + b.Collider.height {
-                                emit *Vein.Console.Io.@Print {
-                                    text: "overlap: box at " + a.Position.x + " and box at " + b.Position.x +
-                                          "  (gap " + dx + ")"
-                                }
+                                do print("overlap: box at " + a.Position.x + " and box at " + b.Position.x +
+                                          "  (gap " + dx + ")")
                             }
                         }
                     }
@@ -103,10 +102,8 @@ bundle GameCollision by you {
     shard Bodies {
         settled {
             target $Position $Body #Collidable as e {
-                emit *Vein.Console.Io.@Print {
-                    text: "  body at " + e.Position.x + "  mass " + e.Body.mass +
-                          "  bounce " + e.Body.restitution
-                }
+                do print("  body at " + e.Position.x + "  mass " + e.Body.mass +
+                          "  bounce " + e.Body.restitution)
             }
         }
     }

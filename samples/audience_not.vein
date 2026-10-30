@@ -25,6 +25,7 @@
 //   unbanned: hi from Kiosk
 
 bundle Lobby by you {
+    need "Vein.Console"
     event @Chat { text: string }
 
     shard Ledger          { run once { emit @Chat { text: "hi from Ledger" } } }
@@ -34,19 +35,19 @@ bundle Lobby by you {
 
     shard AllBut {
         hear @Chat as c audience not !Ledger not !Spammer {
-            emit *Vein.Console.Io.@Print { text: "all-but: " + c.text }
+            do print("all-but: \(c.text)")
         }
     }
 
     shard OnlyLedger {
         hear @Chat as c audience !Ledger {
-            emit *Vein.Console.Io.@Print { text: "only-ledger: " + c.text }
+            do print("only-ledger: \(c.text)")
         }
     }
 
     shard Unbanned {
         hear @Chat as c audience not #Banned {
-            emit *Vein.Console.Io.@Print { text: "unbanned: " + c.text }
+            do print("unbanned: \(c.text)")
         }
     }
 }

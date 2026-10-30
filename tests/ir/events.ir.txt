@@ -25,4 +25,5 @@ Bundle Demo
                     |--- Str " from "
                     |--- Path d.from.kind
                     |--- Str "."
-                    `--- Path d.from.name
+                    |--- Path d.from.name
+                    `--- Str ""

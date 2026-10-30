@@ -15,7 +15,7 @@ bundle Quests by you {
 
     shard Log {
         hear *you.Combat.Fight.@Died as d {
-            emit @QuestAdvanced { quest: "Slay " + d.who, step: 1 }
+            emit @QuestAdvanced { quest: "Slay \(d.who)", step: 1 }
         }
 
         hear *you.Inventory.Bag.@InventoryChanged as c {

@@ -33,6 +33,7 @@ bundle TransformHierarchy by you {
 
     need "Vein.Transform"
     need "Vein.Core"
+    need "Vein.Console"
 
     mark #Thing
     mark #Platform
@@ -68,14 +69,14 @@ bundle TransformHierarchy by you {
     // not because anything writes to them.
     shard Drive {
         each tick {
-            target $Position #Platform as p { p.Position.x = p.Position.x + 5.0 }
+            target $Position #Platform as p { p.Position.x += 5.0 }
         }
     }
 
     shard Show {
         settled {
             target $Position $World #Thing as t {
-                emit *Vein.Console.Io.@Print { text: "local " + t.Position.x + "  world " + t.World.x }
+                do print("local \(t.Position.x)  world \(t.World.x)")
             }
         }
     }

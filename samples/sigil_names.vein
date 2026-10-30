@@ -33,6 +33,7 @@
 // gone by then, desugared into spawn/attach/mark.
 
 bundle SigilNames by you {
+    need "Vein.Console"
 
     shape $Switch { on: int }
     mark  #Switch
@@ -61,7 +62,7 @@ bundle SigilNames by you {
 
     shard Listen {
         hear @Switch as e {
-            emit *Vein.Console.Io.@Print { text: "@Switch says n=" + e.n }
+            do print("@Switch says n=\(e.n)")
         }
     }
 
@@ -70,8 +71,8 @@ bundle SigilNames by you {
     shard Report {
         settled {
             var switches = 0
-            target $Switch #Switch as s { switches = switches + 1 }
-            emit *Vein.Console.Io.@Print { text: "$Switch #Switch matched " + switches }
+            target $Switch #Switch as s { switches += 1 }
+            do print("$Switch #Switch matched \(switches)")
         }
     }
 }

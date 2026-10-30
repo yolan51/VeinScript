@@ -20,7 +20,7 @@ bundle Demo {
 
     shard Report {
         hear @SyncedHit as s {
-            emit @Response { status: 200, body: "amount " + s.amount + " from " + s.from.kind + "." + s.from.name }
+            emit @Response { status: 200, body: "amount \(s.amount) from \(s.from.kind).\(s.from.name)" }
         }
     }
 }

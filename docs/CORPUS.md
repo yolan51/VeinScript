@@ -93,7 +93,9 @@ reads empty, recursion past 256 returns null, a `let` reassigned) still stand.
 4. ~~`return` in SF and `hear`~~ — **refused** (2026-10-30). An SF and a `hear` act by emitting; the next
    step is its own `hear` of an emitted event.
 5. **A map/record literal, `keys(d)`, `kind(v)`.** These are cards' 300+ workarounds.
-6. **Samples rewritten to `do print` and to interpolation.** This is the teaching fix and costs no
+6. ✅ **Samples rewritten to `do print` and to interpolation** (2026-10-30, by `veinc uwu samples --write`:
+   745 rewrites in 116 files, each program's output unchanged). Four samples that teach the full path say
+   `// uwu: off`. This is the teaching fix and costs no
    language change.
 
 After each fix, rewrite the corpus to the new form, so the old workaround stops being copied.

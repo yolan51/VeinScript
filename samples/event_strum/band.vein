@@ -32,6 +32,7 @@ bundle Band by you {
     // ONE ALIASED NEED (RULES 18b): Harp is reached as `*H.…` and adds NO bare name, so it is never
     // part of the ambiguity at all.
     need "carol.Harp" as H
+    need "Vein.Console"
 
     shard Lead {
         run once {
@@ -64,7 +65,7 @@ bundle Band by you {
 
         // HEAR EXACTLY ONE OF THEM. The Guitar's and the Harp's Strums never land here.
         hear *bob.Banjo.Api.@Strum as s {
-            emit *Vein.Console.Io.@Print { text: "[band]   heard bob's Strum: course " + s.course + ", roll=" + s.roll }
+            do print("[band]   heard bob's Strum: course \(s.course), roll=\(s.roll)")
         }
     }
 }

@@ -251,7 +251,7 @@ bundle Todo by you {
         do ownedBy(bar, g)
         bring Divider(g, 1.0)
         bring Row(g, 8.0) as entry
-        bring Input(entry, "", "Add a task to " + name) as box
+        bring Input(entry, "", "Add a task to \(name)") as box
         mark box #Box
         do ownedBy(box, g)
         bring Dropdown(entry, levels(), 0) as pick

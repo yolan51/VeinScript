@@ -7,6 +7,7 @@
 // the bundle do: this one is `bob.Banjo.Strum`.
 
 bundle Banjo by bob {
+    need "Vein.Console"
 
     publicator Api {
         shared("A banjo course was strummed, or rolled.")
@@ -15,7 +16,7 @@ bundle Banjo by bob {
 
     shard Player {
         hear @Strum as s {
-            emit *Vein.Console.Io.@Print { text: "[banjo]  heard its own Strum: course " + s.course + ", roll=" + s.roll }
+            do print("[banjo]  heard its own Strum: course \(s.course), roll=\(s.roll)")
         }
     }
 }

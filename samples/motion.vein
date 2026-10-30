@@ -32,6 +32,7 @@
 // output depends on wall-clock time fails at random, and a test that fails at random gets deleted.
 
 bundle Motion by you {
+    need "Vein.Console"
 
     mark #Moving
 
@@ -104,15 +105,13 @@ bundle Motion by you {
     shard Report {
         settled {
             target $Clock #Clock as c {
-                emit *Vein.Console.Io.@Print { text: "t = " + *Vein.Math.Round.roundTo(c.Clock.now, 2) }
+                do print("t = \(*Vein.Math.Round.roundTo(c.Clock.now, 2))")
             }
             target $Position $Velocity #Moving as m {
-                emit *Vein.Console.Io.@Print {
-                    text: "  at " + *Vein.Math.Round.roundTo(m.Position.x, 2) +
+                do print("  at " + *Vein.Math.Round.roundTo(m.Position.x, 2) +
                           ", " + *Vein.Math.Round.roundTo(m.Position.y, 2) +
                           "   v " + *Vein.Math.Round.roundTo(m.Velocity.x, 2) +
-                          ", " + *Vein.Math.Round.roundTo(m.Velocity.y, 2)
-                }
+                          ", " + *Vein.Math.Round.roundTo(m.Velocity.y, 2))
             }
         }
     }

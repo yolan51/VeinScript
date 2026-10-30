@@ -23,6 +23,7 @@
 // character is the one to reach for when it is a range.
 
 bundle EntitiesChars by you {
+    need "Vein.Console"
 
     // One character of the input, with its ASCII value alongside. `n` is its 1-based position, so the
     // query reads back in the order the text was written without anything sorting it.
@@ -50,7 +51,7 @@ bundle EntitiesChars by you {
             // `chars` hands back a list and `target` walks it — the same statement that walks a query.
             target chars("Vein 42!") as c {
                 let position = Index + 1
-                seen = seen + 1
+                seen += 1
 
                 bring Ch(position, c, code(c)) as e
 
@@ -74,12 +75,10 @@ bundle EntitiesChars by you {
 
     shard Report {
         hear @Scanned as s {
-            emit *Vein.Console.Io.@Print { text: "scanned " + s.count + " characters" }
+            do print("scanned \(s.count) characters")
 
             target $Ch #Scanned as c {
-                emit *Vein.Console.Io.@Print {
-                    text: "  " + c.Ch.n + " '" + c.Ch.text + "' = " + c.Ch.value
-                }
+                do print("  \(c.Ch.n) '\(c.Ch.text)' = \(c.Ch.value)")
             }
         }
     }
@@ -94,9 +93,9 @@ bundle EntitiesChars by you {
             total = 0
             target $Ch #Letter as c {
                 if c.Ch.value >= 65 and c.Ch.value <= 90 { total = total + c.Ch.value + 32 }
-                if c.Ch.value >= 97 { total = total + c.Ch.value }
+                if c.Ch.value >= 97 { total += c.Ch.value }
             }
-            emit *Vein.Console.Io.@Print { text: "lowered letter values sum to " + total }
+            do print("lowered letter values sum to \(total)")
         }
     }
 
@@ -110,20 +109,20 @@ bundle EntitiesChars by you {
             target $Ch #Digit as c {
                 value = value * 10 + (c.Ch.value - 48)
             }
-            emit *Vein.Console.Io.@Print { text: "digits read as the number " + value }
+            do print("digits read as the number \(value)")
         }
     }
 
     shard Others {
         hear @Scanned as s {
             target $Ch #Other as c {
-                emit *Vein.Console.Io.@Print { text: "  not alphanumeric: '" + c.Ch.text + "' = " + c.Ch.value }
+                do print("  not alphanumeric: '\(c.Ch.text)' = \(c.Ch.value)")
             }
 
             // Round trip, and case folding — both emitted, so both runtimes agree on them.
-            emit *Vein.Console.Io.@Print { text: "chr(code(\"V\")) = " + chr(code("V")) }
-            emit *Vein.Console.Io.@Print { text: "upper/lower = " + upper("vein") + " " + lower("VEIN") }
-            emit *Vein.Console.Io.@Print { text: "len(\"Vein\") = " + len("Vein") + ", \"Vein\"[0] = " + "Vein"[0] }
+            do print("chr(code(\"V\")) = \(chr(code("V")))")
+            do print("upper/lower = \(upper("vein")) \(lower("VEIN"))")
+            do print("len(\"Vein\") = \(len("Vein")), \"Vein\"[0] = \("Vein"[0])")
         }
     }
 }

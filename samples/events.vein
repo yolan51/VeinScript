@@ -24,7 +24,7 @@ bundle Demo {
 
     shard Auditor {
         hear @Damage as d audience $Session #Trusted {
-            emit @Response { status: 200, body: "audited trusted damage " + d.amount + " from " + d.from.kind + "." + d.from.name }
+            emit @Response { status: 200, body: "audited trusted damage \(d.amount) from \(d.from.kind).\(d.from.name)" }
         }
     }
 }

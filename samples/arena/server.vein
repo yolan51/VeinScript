@@ -23,6 +23,7 @@
 // @Step of its own (SYNTAX-DECISIONS D19).
 
 bundle ArenaServer by you {
+    need "Vein.Console"
 
     // One row of the roster, and one piece on the board. `addr` is the client's network identity, and
     // the name they typed — so it is also where the letter drawn for them comes from.
@@ -47,7 +48,7 @@ bundle ArenaServer by you {
     shard Boot {
         run once {
             emit *Vein.Net.Peer.@Listen { as: #Arena, at: 9701, key: "arena-secret" }
-            emit *Vein.Console.Io.@Print { text: "arena listening on 9701 — waiting for players" }
+            do print("arena listening on 9701 — waiting for players")
         }
     }
 
@@ -65,7 +66,7 @@ bundle ArenaServer by you {
                 // Spread the starting squares along the top row so two players never start stacked.
                 let e = spawn()
                 attach $Player to e { addr: m.from, x: (seats * 5) % Width(), y: 0 }
-                emit *Vein.Console.Io.@Print { text: "* " + m.from + " joined" }
+                do print("* \(m.from) joined")
                 emit @Changed { }
             }
         }
@@ -74,7 +75,7 @@ bundle ArenaServer by you {
             target $Player as p {
                 if p.Player.addr == u.to {
                     destroy p
-                    emit *Vein.Console.Io.@Print { text: "* " + u.to + " left" }
+                    do print("* \(u.to) left")
                     emit @Changed { }
                 }
             }
@@ -126,18 +127,18 @@ bundle ArenaServer by you {
                             if cell == "." { cell = upper(substring(p.Player.addr, 0, 1)) }
                         }
                     }
-                    row = row + cell
+                    row += cell
                 }
                 board = board + row + "\n"
             }
 
             var legend = ""
             target $Player as p {
-                legend = legend + "  " + upper(substring(p.Player.addr, 0, 1)) + " = " + p.Player.addr
+                legend += "  \(upper(substring(p.Player.addr, 0, 1))) = \(p.Player.addr)"
             }
 
             target $Player as p {
-                emit *Vein.Net.Peer.@Send { to: p.Player.addr, text: "\n" + board + legend }
+                emit *Vein.Net.Peer.@Send { to: p.Player.addr, text: "\n\(board)\(legend)" }
             }
         }
     }

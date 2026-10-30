@@ -82,7 +82,7 @@ bundle Widgets by you {
             // A long list in a column that scrolls past 160 pixels.
             bring Label(w, "Thirty rows, in a scrolling column:")
             bring Scroll(w, 160.0, 4.0) as list
-            repeat 30 as i { bring Label(list, "Row " + string(i + 1)) }
+            repeat 30 as i { bring Label(list, "Row \(string(i + 1))") }
         }
     }
 
@@ -99,7 +99,7 @@ bundle Widgets by you {
 
         hear @Submitted as s {
             target $Field #Notes on s.target as n {
-                target $Text #Notes as t { t.Text.content = "Sent: " + s.value }
+                target $Text #Notes as t { t.Text.content = "Sent: \(s.value)" }
             }
         }
 
@@ -124,7 +124,7 @@ bundle Widgets by you {
             if c.Choice.picked == 2 { words = "Large" }
         }
         target $Toggle #Dark as d {
-            if d.Toggle.checked { words = words + ", dark" } else { words = words + ", light" }
+            if d.Toggle.checked { words += ", dark" } else { words += ", light" }
         }
         target $Text #Said as t { t.Text.content = words }
     }

@@ -93,38 +93,38 @@ bundle WeaveTopology by you {
         }
 
         hear @Unwoven as u {
-            do print("! " + u.loom + ": " + u.why)
+            do print("! \(u.loom): \(u.why)")
         }
 
         // The mesh is queryable now. Each server and its peers, then the program's own rules.
         hear @Woven as w {
             if w.loom == "Server" {
                 target $Server #Listed as s {
-                    var line = s.Server.name + " :" + s.Server.port
-                    if not (s.Server.host == "") { line = s.Server.name + " " + s.Server.host + ":" + s.Server.port }
-                    line = line + "  -> "
-                    target s.Server.~peers as p { line = line + " " + p.Server.name }    // a peer's data, read directly
+                    var line = "\(s.Server.name) :\(s.Server.port)"
+                    if not (s.Server.host == "") { line = "\(s.Server.name) \(s.Server.host):\(s.Server.port)" }
+                    line += "  -> "
+                    target s.Server.~peers as p { line += " \(p.Server.name)" }    // a peer's data, read directly
                     do print(line)
                 }
 
                 // The program's rules. A peer listed twice never got this far — `peers` is a ~<set>, so the
                 // weave said so above. What is left: a server that lists itself, and a link one way only.
                 target $Server #Listed as s {
-                    if s.Server.~peers has s { do print("rule: " + s.Server.name + " lists itself") }
+                    if s.Server.~peers has s { do print("rule: \(s.Server.name) lists itself") }
                 }
                 target $Server.~peers #Listed as s, p {                                 // every (server, peer) — one loop
-                    if not (p.Server.~peers has s) { do print("rule: " + s.Server.name + " -> " + p.Server.name + " is one way") }
+                    if not (p.Server.~peers has s) { do print("rule: \(s.Server.name) -> \(p.Server.name) is one way") }
                 }
 
                 // The way out: the same loom, written back — in its own format, then in another.
-                do print("as MeshList: " + toText(Server))
-                do print("as KeyValue: " + trim(toText<KeyValue>(Server)))     // a line per record, and a last newline
+                do print("as MeshList: \(toText(Server))")
+                do print("as KeyValue: \(trim(toText<KeyValue>(Server)))")     // a line per record, and a last newline
 
                 // The NPCs, now that the mesh is done.
                 weave Npc("Goblin 30 4 2; Orc hp=50 x=9; \"Cave Troll\" 80; Imp lots")
             }
             if w.loom == "Npc" {
-                target $Npc #Npc as n { do print(n.Npc.name + " hp " + n.Npc.hp + " at " + n.Npc.x + "," + n.Npc.y) }
+                target $Npc #Npc as n { do print("\(n.Npc.name) hp \(n.Npc.hp) at \(n.Npc.x),\(n.Npc.y)") }
             }
         }
     }

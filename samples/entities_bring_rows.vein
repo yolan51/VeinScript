@@ -18,6 +18,7 @@
 // replayed sorted once the loop has finished.
 
 bundle EntitiesBringRows by you {
+    need "Vein.Console"
 
     shape $Row { title: string, rank: int }
     mark #Row
@@ -40,7 +41,7 @@ bundle EntitiesBringRows by you {
                     // and it survives the deferral — the body runs after the loop has finished, so the
                     // counter has to be captured per row rather than read later.
                     if r > -2 {
-                        bring Row("src" + Index, r)
+                        bring Row("src\(Index)", r)
                     }
                 }
             }
@@ -52,24 +53,24 @@ bundle EntitiesBringRows by you {
             // A PLAIN query — no `by` — so this is spawn order. It comes out sorted because the brings
             // were sorted, which is the whole point: the order is baked in at creation and every later
             // reader gets it for nothing.
-            emit *Vein.Console.Io.@Print { text: "-- spawn order, which is now rank order --" }
+            do print("-- spawn order, which is now rank order --")
             target $Row #Row as r {
-                emit *Vein.Console.Io.@Print { text: "   e" + Entity + "  rank " + r.Row.rank + "  " + r.Row.title }
+                do print("   e\(Entity)  rank \(r.Row.rank)  \(r.Row.title)")
             }
 
             // src1 and src4 both have rank 1 and keep their source positions, in that order: the sort is
             // stable, so a tie falls back to the order the loop reached them rather than to whichever
             // the comparer happened to see first. Rows tie constantly — any rank column with a repeat —
             // so an unstable sort here would shuffle a page on every run for no visible reason.
-            emit *Vein.Console.Io.@Print { text: "-- ties keep the order the rows arrived in --" }
+            do print("-- ties keep the order the rows arrived in --")
             target $Row #Row as r {
-                if r.Row.rank == 1 { emit *Vein.Console.Io.@Print { text: "   " + r.Row.title } }
+                if r.Row.rank == 1 { do print("   \(r.Row.title)") }
             }
 
             // -2 was filtered out before it ever became a bring, so there are 5 ranks and 4 rows.
-            emit *Vein.Console.Io.@Print { text: "-- the filtered row never arrived --" }
+            do print("-- the filtered row never arrived --")
             target $Row #Row as r {
-                if r.Row.rank < 0 { emit *Vein.Console.Io.@Print { text: "   should not appear: " + r.Row.title } }
+                if r.Row.rank < 0 { do print("   should not appear: \(r.Row.title)") }
             }
         }
     }

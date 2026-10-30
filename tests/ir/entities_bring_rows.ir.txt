@@ -1,5 +1,6 @@
 VeinIR v1  file=samples/entities_bring_rows.vein
 Bundle EntitiesBringRows  author=you
+|--- Need Vein.Console
 |--- Shape $Row
 |    |--- Field title: string
 |    `--- Field rank: int
@@ -30,42 +31,46 @@ Bundle EntitiesBringRows  author=you
 |                             `--- Bring Row
 |                                  |--- Arg = Concat
 |                                  |    |--- Str "src"
-|                                  |    `--- Ref Index
+|                                  |    |--- Ref Index
+|                                  |    `--- Str ""
 |                                  `--- Arg = Ref r
 `--- Shard Show
      `--- Settled
-          |--- Emit *Vein.Console.Io.@Print
-          |    `--- Arg text = Str "-- spawn order, which is now rank order --"
+          |--- Call print
+          |    `--- Str "-- spawn order, which is now rank order --"
           |--- Target $Row #Row as r
-          |    `--- Emit *Vein.Console.Io.@Print
-          |         `--- Arg text = Concat
+          |    `--- Call print
+          |         `--- Concat
           |              |--- Str "   e"
           |              |--- Ref Entity
           |              |--- Str "  rank "
           |              |--- Path r.Row.rank
           |              |--- Str "  "
-          |              `--- Path r.Row.title
-          |--- Emit *Vein.Console.Io.@Print
-          |    `--- Arg text = Str "-- ties keep the order the rows arrived in --"
+          |              |--- Path r.Row.title
+          |              `--- Str ""
+          |--- Call print
+          |    `--- Str "-- ties keep the order the rows arrived in --"
           |--- Target $Row #Row as r
           |    `--- If
           |         |--- Cond = Binary ==
           |         |    |--- Path r.Row.rank
           |         |    `--- Int 1
           |         `--- Then
-          |              `--- Emit *Vein.Console.Io.@Print
-          |                   `--- Arg text = Concat
+          |              `--- Call print
+          |                   `--- Concat
           |                        |--- Str "   "
-          |                        `--- Path r.Row.title
-          |--- Emit *Vein.Console.Io.@Print
-          |    `--- Arg text = Str "-- the filtered row never arrived --"
+          |                        |--- Path r.Row.title
+          |                        `--- Str ""
+          |--- Call print
+          |    `--- Str "-- the filtered row never arrived --"
           `--- Target $Row #Row as r
                `--- If
                     |--- Cond = Binary <
                     |    |--- Path r.Row.rank
                     |    `--- Int 0
                     `--- Then
-                         `--- Emit *Vein.Console.Io.@Print
-                              `--- Arg text = Concat
+                         `--- Call print
+                              `--- Concat
                                    |--- Str "   should not appear: "
-                                   `--- Path r.Row.title
+                                   |--- Path r.Row.title
+                                   `--- Str ""

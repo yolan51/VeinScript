@@ -6,6 +6,7 @@
 // as H`), so its references are `*H.Api.@Strum`: shorter, and still exactly this event.
 
 bundle Harp by carol {
+    need "Vein.Console"
 
     publicator Api {
         shared("A harp string was plucked.")
@@ -14,7 +15,7 @@ bundle Harp by carol {
 
     shard Player {
         hear @Strum as s {
-            emit *Vein.Console.Io.@Print { text: "[harp]   heard its own Strum: " + s.pluck + " in octave " + s.octave }
+            do print("[harp]   heard its own Strum: \(s.pluck) in octave \(s.octave)")
         }
     }
 }

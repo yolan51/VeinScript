@@ -113,19 +113,19 @@ bundle WeaveFormats by you {
             weave Setting("# greeting shown at login\nGREETING=\"hello there\"\nPORT=9811")
         }
 
-        hear @Unwoven as u { do print("! " + u.loom + ": " + u.why) }
+        hear @Unwoven as u { do print("! \(u.loom): \(u.why)") }
 
         // Each weave's records are queryable once its @Woven arrives.
         hear @Woven as w {
-            if w.loom == "JsonItem" { target $Item #FromJson as i { do print("Json: " + i.Item.name + " x" + i.Item.qty + " at " + i.Item.price) } }
-            if w.loom == "CsvItem" { target $Item #FromCsv as i { do print("Csv: " + i.Item.name + " x" + i.Item.qty + " at " + i.Item.price) } }
-            if w.loom == "IniItem" { target $Item #FromIni as i { do print("Ini: " + i.Item.name + " x" + i.Item.qty + " at " + i.Item.price) } }
-            if w.loom == "KeyValueItem" { target $Item #FromKeyValue as i { do print("KeyValue: " + i.Item.name + " x" + i.Item.qty + " at " + i.Item.price) } }
-            if w.loom == "SemiCsvItem" { target $Item #FromSemi as i { do print("SemiCsv: " + i.Item.name + " x" + i.Item.qty + " at " + i.Item.price) } }
-            if w.loom == "Node" { target $Node as n { do print(n.Node.name + " port " + n.Node.port + " near " + join(n.Node.~near, " ")) } }
-            if w.loom == "Kick" { target $Kick as k { do print("kick " + k.Kick.who + " by " + k.Kick.by + " for " + k.Kick.minutes + " min: " + k.Kick.why) } }
-            if w.loom == "Mob" { target $Mob as m { do print(m.Mob.name + " hp " + m.Mob.hp + " at " + m.Mob.x + "," + m.Mob.y) } }
-            if w.loom == "Setting" { target $Setting as s { do print(s.Setting.key + " = " + s.Setting.value) } }
+            if w.loom == "JsonItem" { target $Item #FromJson as i { do print("Json: \(i.Item.name) x\(i.Item.qty) at \(i.Item.price)") } }
+            if w.loom == "CsvItem" { target $Item #FromCsv as i { do print("Csv: \(i.Item.name) x\(i.Item.qty) at \(i.Item.price)") } }
+            if w.loom == "IniItem" { target $Item #FromIni as i { do print("Ini: \(i.Item.name) x\(i.Item.qty) at \(i.Item.price)") } }
+            if w.loom == "KeyValueItem" { target $Item #FromKeyValue as i { do print("KeyValue: \(i.Item.name) x\(i.Item.qty) at \(i.Item.price)") } }
+            if w.loom == "SemiCsvItem" { target $Item #FromSemi as i { do print("SemiCsv: \(i.Item.name) x\(i.Item.qty) at \(i.Item.price)") } }
+            if w.loom == "Node" { target $Node as n { do print("\(n.Node.name) port \(n.Node.port) near \(join(n.Node.~near, " "))") } }
+            if w.loom == "Kick" { target $Kick as k { do print("kick \(k.Kick.who) by \(k.Kick.by) for \(k.Kick.minutes) min: \(k.Kick.why)") } }
+            if w.loom == "Mob" { target $Mob as m { do print("\(m.Mob.name) hp \(m.Mob.hp) at \(m.Mob.x),\(m.Mob.y)") } }
+            if w.loom == "Setting" { target $Setting as s { do print("\(s.Setting.key) = \(s.Setting.value)") } }
         }
     }
 }

@@ -46,13 +46,13 @@ bundle EventShapes by you {
 
         // 4 — the same values, now passed POSITIONALLY: x and y come first because `$Vec2` is first.
         hear @Placed as p {
-            bring Ping(p.x, p.y, p.label + " seed=" + p.seed + " players=" + p.players)
+            bring Ping(p.x, p.y, "\(p.label) seed=\(p.seed) players=\(p.players)")
         }
 
         // The last link answers the request. Each event carried forward what the next one needed — there
         // is no shared variable to stash it in, and that is the point of a payload.
         hear @Ping as k {
-            emit @Response { status: 200, body: k.note + " at " + k.x + "," + k.y }
+            emit @Response { status: 200, body: "\(k.note) at \(k.x),\(k.y)" }
         }
     }
 }

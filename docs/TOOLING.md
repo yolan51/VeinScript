@@ -203,6 +203,50 @@ FAIL  done-missing
   folder, else its only main `.vein`.
 - **Exit code:** 0 when every case passes, 1 otherwise, 2 when there is nothing to test.
 
+## `veinc uwu <file-or-folder> [--write]` — make it read like VeinScript
+
+Code written from C# habit is the most common VeinScript there is, and an LLM in a fresh session writes it
+every time. `uwu` reads a file (or every `.vein` under a folder) and prints what it would change; `--write`
+saves it. Three kinds of thing:
+
+| | before | after |
+|---|---|---|
+| **C# spellings** | `x = 1;` · `a != b && !ok` · `int n = 0` · `n++` | `x = 1` · `not (a == b) and not ok` · `var n: int = 0` · `n += 1` |
+| | `$"HP: {hp}"` · `` `HP: ${hp}` `` · `Console.WriteLine(x)` | `"HP: \(hp)"` · `do print(x)` |
+| | `}` newline `else {` · a line starting with `+` | `} else {` · the `+` at the end of the line before |
+| | `fn f() -> int` · `say("x")` on an SF | `fn f() return int` · `do say("x")` (the compiler's own Quick Fixes) |
+| **long forms** | `emit *Vein.Console.Io.@Print { text: x }` | `do print(x)`, and `need "Vein.Console"` added |
+| | `x = x + n` · `"HP: " + hp + "/" + max` | `x += n` · `"HP: \(hp)/\(max)"` |
+| **hints** | shard `var`s named `heroHp`, `heroGold`, `slimeHp` | "one hero's facts: `shape $Hero { hp, gold }`"; "hero and slime both have `hp`" |
+| | `var found = false` set inside a `target` | "a search with a flag: an `fn`" (RULES-OF-THUMB 12) |
+| | a third nested `target`; `if not (x carries #M)` as a query's whole body | RULES-OF-THUMB 2; `target … not #M` (D25) |
+| | `class`, `for`, `switch`, `void`, `new`, `.Add(…)` | what VeinScript says instead (VEINSCRIPT-FOR-LLMS §2) |
+
+```
+$ veinc uwu samples/mute.vein
+samples/mute.vein — 5 rewrites, 0 hints
+     25  do print
+         - bundle Pausing by you {
+         + bundle Pausing by you {
+         +     need "Vein.Console"
+     33  do print
+         - emit *Vein.Console.Io.@Print { text: "menu opens" }
+         + do print("menu opens")
+     ...
+```
+
+- **A rewrite is made only when it means exactly what the line did.** `s = s + 1 + 2` is "s12" and
+  `s += 1 + 2` would be "s3", so it stays. `xs + " left"` appends to a list where `"\(xs) left"` writes it
+  out, so a bare name in front of the first string stays (a field, `h.Hp.hp + " left"`, is taken).
+  `"a" + n * 2`, a chain broken over lines, and a join of only strings stay too.
+- **Every pass is compiled, and dropped if it leaves the file worse:** more errors of some code, or for a
+  file that does not parse, more parse errors. It is then named under `skipped`, and the next pass runs.
+- **A bundle with its own `SF print` keeps the long form** (its body usually IS that emit, and the short
+  form would call itself); a hint says `Vein.Console` already has it.
+- **`// uwu: off`** on a line of its own keeps the file as it is — for a sample whose point is the long form.
+- Line numbers are the file's as it was given; a hint's are the rewritten file's with `--write`.
+- Comments, strings, and `!Shard` references are never touched. A second run finds nothing.
+
 ## `veinc lock <app-or-file>` — accept what `bundles/` looks like now
 
 `vein.lock` (RULES 20a) records, for every member a project uses from `bundles/`, the order its arguments

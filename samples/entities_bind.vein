@@ -19,6 +19,7 @@
 //   bash tools/check-backend.sh          (the same program, emitted to C# and diffed against the above)
 
 bundle EntitiesBind by you {
+    need "Vein.Console"
 
     shape $Node { name: string }
     shape $Edge { to: Entity, weight: int folds sum }
@@ -47,7 +48,7 @@ bundle EntitiesBind by you {
     shard Report {
         settled {
             target $Edge #Edge as e {
-                emit *Vein.Console.Io.@Print { text: "edge e" + Entity + " → e" + e.Edge.to + " w=" + e.Edge.weight }
+                do print("edge e\(Entity) → e\(e.Edge.to) w=\(e.Edge.weight)")
             }
         }
     }
@@ -56,7 +57,7 @@ bundle EntitiesBind by you {
     shard Nodes {
         settled {
             target $Node #Node as n {
-                emit *Vein.Console.Io.@Print { text: "node e" + Entity + " " + n.Node.name }
+                do print("node e\(Entity) \(n.Node.name)")
             }
         }
     }

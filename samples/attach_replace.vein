@@ -17,6 +17,7 @@
 // VS0348, because "fields go back to their defaults" is the part that surprises.
 
 bundle AttachReplace by you {
+    need "Vein.Console"
 
     shape $Price { amount: int, currency: string = "EUR" }
     mark #Item
@@ -44,7 +45,7 @@ bundle AttachReplace by you {
     shard Report {
         settled {
             target $Price #Item as p {
-                emit *Vein.Console.Io.@Print { text: "e" + Entity + " " + p.Price.amount + " " + p.Price.currency }
+                do print("e\(Entity) \(p.Price.amount) \(p.Price.currency)")
             }
         }
     }

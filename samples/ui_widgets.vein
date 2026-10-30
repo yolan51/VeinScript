@@ -25,6 +25,7 @@
 bundle UiWidgets by you {
 
     need "Vein.UI"
+    need "Vein.Console"
 
     mark #Widget
     mark #Focused
@@ -73,25 +74,21 @@ bundle UiWidgets by you {
     shard Render {
         settled {
             target $Text #Widget as t {
-                emit *Vein.Console.Io.@Print { text: "text    " + t.Text.content }
+                do print("text    \(t.Text.content)")
             }
 
             target $Button #Widget as b {
                 // An empty id is the default doing its job, and worth showing rather than hiding.
                 if b.Button.id == "" {
-                    emit *Vein.Console.Io.@Print { text: "button  " + b.Button.label + "  (no id)" }
+                    do print("button  \(b.Button.label)  (no id)")
                 } else {
-                    emit *Vein.Console.Io.@Print {
-                        text: "button  " + b.Button.label + "  id=" + b.Button.id +
-                              " class=" + b.Button.class + " onclick=" + b.Button.onclick
-                    }
+                    do print("button  " + b.Button.label + "  id=" + b.Button.id +
+                              " class=" + b.Button.class + " onclick=" + b.Button.onclick)
                 }
             }
 
             target $Field #Widget as f {
-                emit *Vein.Console.Io.@Print {
-                    text: "field   [" + f.Field.value + "]  placeholder=" + f.Field.placeholder
-                }
+                do print("field   [\(f.Field.value)]  placeholder=\(f.Field.placeholder)")
             }
         }
     }

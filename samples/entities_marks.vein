@@ -22,6 +22,7 @@
 //   bash tools/check-backend.sh          (the same program, emitted to C# and diffed against the above)
 
 bundle EntitiesMarks by you {
+    need "Vein.Console"
 
     // Declared, so this bundle opts in to having its mark names checked: a `#Enmey` anywhere below
     // would now be VS0218 rather than a new mark that silently matches nothing. A bundle that declares
@@ -56,12 +57,12 @@ bundle EntitiesMarks by you {
     shard Reaper {
         settled {
             target $Enemy #Enemy as self {
-                emit *Vein.Console.Io.@Print { text: "enemy e" + Entity + " hp=" + self.Enemy.hp }
+                do print("enemy e\(Entity) hp=\(self.Enemy.hp)")
                 if self.Enemy.hp <= 0 {
                     mark self #Spent
                     unmark self #Awake
                     unmark self #Enemy
-                    emit *Vein.Console.Io.@Print { text: "  e" + Entity + " spent" }
+                    do print("  e\(Entity) spent")
                 }
             }
         }
@@ -72,7 +73,7 @@ bundle EntitiesMarks by you {
     shard Ledger {
         settled {
             target $Enemy #Spent as self {
-                emit *Vein.Console.Io.@Print { text: "  ledger: e" + Entity + " is spent" }
+                do print("  ledger: e\(Entity) is spent")
             }
         }
     }

@@ -31,6 +31,7 @@
 // samples/diagnostics.vein belongs to nobody: a rule about the whole program should be written once.
 
 bundle DiagnosticsGuard by you {
+    need "Vein.Console"
 
     shape $Row { title: string, rank: int }
     mark #Row
@@ -45,9 +46,9 @@ bundle DiagnosticsGuard by you {
 
     shard Collector {
         hear *Vein.Diagnostics.Report.@DiagnosticRaised as d {
-            if d.severity == 0 { emit *Vein.Console.Io.@Print { text: "   note  | " + d.message } }
-            if d.severity == 1 { emit *Vein.Console.Io.@Print { text: "   WARN  | " + d.message } }
-            if d.severity == 2 { emit *Vein.Console.Io.@Print { text: "   ERROR | " + d.message } }
+            if d.severity == 0 { do print("   note  | \(d.message)") }
+            if d.severity == 1 { do print("   WARN  | \(d.message)") }
+            if d.severity == 2 { do print("   ERROR | \(d.message)") }
         }
     }
 
@@ -55,7 +56,7 @@ bundle DiagnosticsGuard by you {
 
     shard Source {
         run once {
-            emit *Vein.Console.Io.@Print { text: "-- four rows arrive --" }
+            do print("-- four rows arrive --")
 
             emit @RowArrived { title: "write the docs", rank: 2 }   // fine
             emit @RowArrived { title: "ship it", rank: 0 }          // odd: rank 0 is not a rank
@@ -127,9 +128,7 @@ bundle DiagnosticsGuard by you {
             do *Vein.Diagnostics.Report.info("4 rows arrived, and these are the ones that were kept")
 
             target $Row #Row by Row.rank as r {
-                emit *Vein.Console.Io.@Print {
-                    text: "   kept: rank " + r.Row.rank + "  " + r.Row.title
-                }
+                do print("   kept: rank \(r.Row.rank)  \(r.Row.title)")
             }
         }
     }

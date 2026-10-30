@@ -30,6 +30,7 @@
 // the `target` simply matches nothing and you get an empty report with no error.
 
 bundle FileWords by you {
+    need "Vein.Console"
 
     // ---- the document, as identities ----------------------------------------------------------
     //
@@ -77,7 +78,7 @@ bundle FileWords by you {
 
     shard Seed {
         run once {
-            emit *Vein.Console.Io.@Print { text: "writing sample-doc.txt…" }
+            do print("writing sample-doc.txt…")
 
             // `\n` is a real escape in a VeinScript string literal, so a whole document is one literal.
             // The trailing `+` continuation is the rule: the operator ends the line, never starts it.
@@ -103,7 +104,7 @@ bundle FileWords by you {
             // Only the document. The report is written later by this same program, and hearing our own
             // write would read it back and parse the report as if it were the source.
             if w.path == "sample-doc.txt" {
-                emit *Vein.Console.Io.@Print { text: "wrote " + w.bytes + " bytes; reading it back…" }
+                do print("wrote \(w.bytes) bytes; reading it back…")
                 emit *Vein.Files.Io.@ReadFile { path: w.path }
             }
         }
@@ -111,7 +112,7 @@ bundle FileWords by you {
         // The failure is a MESSAGE, like @Undelivered for a send or @Failed for a request. There is no
         // block to encircle and no `catch` to write — this is what VeinScript has instead.
         hear *Vein.Files.Io.@FileMissing as m {
-            emit *Vein.Console.Io.@Print { text: "could not use " + m.path + ": " + m.reason }
+            do print("could not use \(m.path): \(m.reason)")
         }
     }
 
@@ -132,7 +133,7 @@ bundle FileWords by you {
                 // `Index` is the nearest loop's 0-based counter, so this is the line number. Captured
                 // into a `let` because the nested loop below rebinds `Index` to its own position.
                 let number = Index + 1
-                seen = seen + 1
+                seen += 1
 
                 // `as e` binds what the template built (rule 7b), which is what lets the marks below
                 // refer to it. Without `as` the identity lives in a local the program never sees, and
@@ -178,16 +179,16 @@ bundle FileWords by you {
         var longestLen: int
 
         hear @Parsed as p {
-            emit *Vein.Console.Io.@Print { text: "parsed " + p.lines + " line(s) of " + p.path }
+            do print("parsed \(p.lines) line(s) of \(p.path)")
 
             body = "report for " + p.path + "\n" +
                    "lines: " + p.lines + "\n"
 
             // Headings. The mark was decided once while parsing; this query does not repeat the test.
-            body = body + "\nheadings:\n"
+            body += "\nheadings:\n"
             target $Line #Heading as l {
-                body = body + "  line " + l.Line.n + ": " + l.Line.text + "\n"
-                emit *Vein.Console.Io.@Print { text: "  heading at line " + l.Line.n + ": " + l.Line.text }
+                body += "  line \(l.Line.n): \(l.Line.text)\n"
+                do print("  heading at line \(l.Line.n): \(l.Line.text)")
             }
 
             // The identities themselves. `Entity` is the nearest entity's id, and the ids are in BRING
@@ -200,10 +201,10 @@ bundle FileWords by you {
             // hands out ids across every template, so the sequence records the order things were MADE —
             // a line, then its words, then the next line. Sorting is still by id and still correct;
             // nothing here needs the numbers to be dense.
-            body = body + "\nline identities, in bring order:\n"
+            body += "\nline identities, in bring order:\n"
             target $Line #Line as l {
                 if l.Line.n < 4 {
-                    body = body + "  e" + Entity + "  line " + l.Line.n + ": " + l.Line.text + "\n"
+                    body += "  e\(Entity)  line \(l.Line.n): \(l.Line.text)\n"
                 }
             }
 
@@ -211,8 +212,8 @@ bundle FileWords by you {
             // answerable because a blank line is still an entity.
             var blanks: int
             blanks = 0
-            target $Line #Blank as b { blanks = blanks + 1 }
-            body = body + "\nblank lines: " + blanks + "\n"
+            target $Line #Blank as b { blanks += 1 }
+            body += "\nblank lines: \(blanks)\n"
 
             // Every word, for the totals. One entity per word is a lot of entities and it is what makes
             // "the longest word" a query rather than a parsing pass.
@@ -220,7 +221,7 @@ bundle FileWords by you {
             longest = ""
             longestLen = 0
             target $Word as w {
-                wordCount = wordCount + 1
+                wordCount += 1
                 if len(w.Word.text) > longestLen {
                     longestLen = len(w.Word.text)
                     longest = w.Word.text
@@ -230,7 +231,7 @@ bundle FileWords by you {
             body = body + "words: " + wordCount + "\n" +
                           "longest word: " + longest + " (" + longestLen + ")\n"
 
-            emit *Vein.Console.Io.@Print { text: "  " + wordCount + " words; longest is '" + longest + "'" }
+            do print("  \(wordCount) words; longest is '\(longest)'")
             emit @Reported { text: body }
         }
     }
@@ -244,7 +245,7 @@ bundle FileWords by you {
 
         hear *Vein.Files.Io.@FileWritten as w {
             if w.path == "sample-doc.report.txt" {
-                emit *Vein.Console.Io.@Print { text: "report written to " + w.path + " (" + w.bytes + " bytes)" }
+                do print("report written to \(w.path) (\(w.bytes) bytes)")
             }
         }
     }

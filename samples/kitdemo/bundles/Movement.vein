@@ -40,8 +40,8 @@ bundle Movement by kit {
             // not even parse here (RULES 17b). This is the rule the Workbench's completion encodes, and
             // writing this sample is how it was confirmed rather than assumed.
             target $Position $Mover #Moving as m {
-                m.Position.x = m.Position.x + m.Mover.dx
-                m.Position.y = m.Position.y + m.Mover.dy
+                m.Position.x += m.Mover.dx
+                m.Position.y += m.Mover.dy
             }
         }
     }

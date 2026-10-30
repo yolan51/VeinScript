@@ -34,6 +34,7 @@
 // through NetHttp.Hook and asserts the exact paths this file asks for.
 
 bundle DbQuery by you {
+    need "Vein.Console"
 
     fn site() return string { return "https://YOUR-PROJECT.supabase.co" }
     fn key() return string { return "PASTE-YOUR-ANON-KEY" }
@@ -120,22 +121,20 @@ bundle DbQuery by you {
             // comes back as a message naming the column, so printing the body is worth more than
             // printing the status.
             if not *Vein.Rest.Status.ok(f.status) {
-                emit *Vein.Console.Io.@Print { text: "" }
-                emit *Vein.Console.Io.@Print { text: f.status + " on " + f.url }
-                emit *Vein.Console.Io.@Print { text: "   " + f.body }
+                do print("")
+                do print("\(f.status) on \(f.url)")
+                do print("   \(f.body)")
             } else {
                 // The embedded query has nested rows and gets its own reader below. `f.url` is how one
                 // handler tells six requests apart — the reply names the question, because several are
                 // outstanding and they do not come back in the order they were sent.
                 if not (f.url == embedUrl()) {
                     let rows = fromJson(f.body)
-                    emit *Vein.Console.Io.@Print { text: "" }
-                    emit *Vein.Console.Io.@Print { text: f.url }
-                    emit *Vein.Console.Io.@Print { text: "   " + len(rows) + " rows" }
+                    do print("")
+                    do print(f.url)
+                    do print("   \(len(rows)) rows")
                     target rows as row {
-                        emit *Vein.Console.Io.@Print {
-                            text: "     " + row.id + "  rank " + row.rank + "  " + row.title
-                        }
+                        do print("     \(row.id)  rank \(row.rank)  \(row.title)")
                     }
                 }
             }
@@ -149,15 +148,15 @@ bundle DbQuery by you {
             if f.url == embedUrl() {
                 if *Vein.Rest.Status.ok(f.status) {
                     let rows = fromJson(f.body)
-                    emit *Vein.Console.Io.@Print { text: "" }
-                    emit *Vein.Console.Io.@Print { text: "-- tasks with their comments --" }
+                    do print("")
+                    do print("-- tasks with their comments --")
                     target rows as row {
-                        emit *Vein.Console.Io.@Print { text: "   " + row.id + "  " + row.title }
+                        do print("   \(row.id)  \(row.title)")
                         // `comments` is a list on the parent row, nested by the service. A task with
                         // none gets an empty array rather than a missing field, so this loop simply
                         // runs zero times — no null check to write.
                         target row.comments as cm {
-                            emit *Vein.Console.Io.@Print { text: "        " + cm.id + ": " + cm.body }
+                            do print("        \(cm.id): \(cm.body)")
                         }
                     }
                 }
@@ -171,7 +170,7 @@ bundle DbQuery by you {
         hear *Vein.Net.Http.@Failed as f {
             // A different thing from a 4xx: nothing replied. Bad host, refused connection, timeout.
             // There is no body to read and no status to branch on — retrying is the only response.
-            emit *Vein.Console.Io.@Print { text: "no answer from " + f.url + ": " + f.reason }
+            do print("no answer from \(f.url): \(f.reason)")
         }
     }
 }

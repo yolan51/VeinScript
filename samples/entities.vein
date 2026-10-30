@@ -9,6 +9,7 @@
 
 bundle Entities {
     need "Vein.Core"
+    need "Vein.Console"
 
     shape $Health {
         hp: int folds sum      // many shards may drain hp in one tick; sum the deltas
@@ -42,11 +43,11 @@ bundle Entities {
         // correct, because during the tick another shard may still be subtracting.
         settled {
             target $Health #Enemy as self {
-                emit *Vein.Console.Io.@Print { text: "enemy " + Entity + " hp " + self.Health.hp }
+                do print("enemy \(Entity) hp \(self.Health.hp)")
                 if self.Health.hp <= 0 {
                     mark self #Dead
                     unmark self #Enemy
-                    emit *Vein.Console.Io.@Print { text: "enemy " + Entity + " died" }
+                    do print("enemy \(Entity) died")
                 }
             }
         }

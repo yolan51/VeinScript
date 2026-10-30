@@ -11,6 +11,6 @@ shard Boot {
     }
 
     hear @Drained as d {
-        emit *Vein.Console.Io.@Print { text: "drained by " + d.amount }
+        do print("drained by \(d.amount)")
     }
 }

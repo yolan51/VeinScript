@@ -80,8 +80,8 @@ shard Game {
     SF showMenu() {
         
         do print("")
-        do print("Hero HP " + heroHp + " | Slime HP " + slimeHp)
-        do print("1) Attack   2) Potion (" + potions + " left)   3) Stats   4) Run")
+        do print("Hero HP \(heroHp) | Slime HP \(slimeHp)")
+        do print("1) Attack   2) Potion (\(potions) left)   3) Stats   4) Run")
     }
  
     // An fn computes and returns a value: a random whole number from lo to hi.
@@ -89,17 +89,17 @@ shard Game {
     fn roll(lo: int, hi: int) return int {
         var total = lo
         repeat hi - lo {
-            chance 50% { total = total + 1 }
+            chance 50% { total += 1 }
         }
         return total
     }
  
     SF attack() {
         let dmg = roll(3, 8)
-        slimeHp = slimeHp - dmg
-        do print("You swing your sword for " + dmg + " damage!")
+        slimeHp -= dmg
+        do print("You swing your sword for \(dmg) damage!")
         if slimeHp <= 0 {
-            gold = gold + 15
+            gold += 15
             over = true
             do print("The Slime melts away. You win 15 gold!")
         } else {
@@ -111,15 +111,15 @@ shard Game {
         if potions <= 0 {
             do print("Your bag is empty!")
         } else {
-            potions = potions - 1
-            heroHp = heroHp + 12
+            potions -= 1
+            heroHp += 12
             do print("Glug glug. You heal 12 HP.")
             do slimeBites()
         }
     }
  
     SF showStats() {
-        do print("HP " + heroHp + " | Potions " + potions + " | Gold " + gold)
+        do print("HP \(heroHp) | Potions \(potions) | Gold \(gold)")
     }
  
     SF runAway() {
@@ -136,8 +136,8 @@ shard Game {
  
     SF slimeBites() {
         let bite = roll(2, 6)
-        heroHp = heroHp - bite
-        do print("The Slime bites you for " + bite + ".")
+        heroHp -= bite
+        do print("The Slime bites you for \(bite).")
         if heroHp <= 0 {
             over = true
             do print("You collapse... GAME OVER.")

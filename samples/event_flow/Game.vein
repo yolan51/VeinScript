@@ -40,7 +40,7 @@ bundle Game by you {
 
     shard Walker {
         hear @TurnStarted as t {
-            emit @Moved { who: t.hero, room: "hall " + t.turn, turn: t.turn }
+            emit @Moved { who: t.hero, room: "hall \(t.turn)", turn: t.turn }
         }
     }
 }

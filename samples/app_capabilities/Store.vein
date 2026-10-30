@@ -4,6 +4,7 @@
 // everything else in the app reacts to what it emits. This is the only bundle that begins anything.
 
 bundle Store by you {
+    need "Vein.Console"
 
     publicator Orders {
         shared("A customer placed an order.")
@@ -18,7 +19,7 @@ bundle Store by you {
 
     shard Fulfilment {
         hear @Ordered as o {
-            emit *Vein.Console.Io.@Print { text: "[Store] order: " + o.qty + " x " + o.item }
+            do print("[Store] order: \(o.qty) x \(o.item)")
             emit @Shipped { item: o.item }
         }
     }

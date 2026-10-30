@@ -5,13 +5,14 @@
 // and Gate.vein is identical either way.
 
 bundle Wire by you {
+    need "Vein.Console"
 
     shard Listener {
         // `as` is who the WHOLE APP is on the network — there is one `_self` per runtime, not one per
         // bundle, so a capability naming it names it for everyone.
         hear *you.Gate.Doors.@Opened as o {
             emit *Vein.Net.Peer.@Listen { as: #Hub, at: o.at, key: "shared-secret" }
-            emit *Vein.Console.Io.@Print { text: "[Wire] listening as #Hub on " + o.at }
+            do print("[Wire] listening as #Hub on \(o.at)")
         }
     }
 
@@ -19,14 +20,14 @@ bundle Wire by you {
     // bundle rather than a principal — one queue means a `hear` is a `hear`.
     shard Inbox {
         hear *Vein.Net.Peer.@Message as m {
-            emit *Vein.Console.Io.@Print { text: "[Wire] " + m.from + ": " + m.text }
-            emit *Vein.Net.Peer.@Send { to: m.from, text: "ack " + m.text }
+            do print("[Wire] \(m.from): \(m.text)")
+            emit *Vein.Net.Peer.@Send { to: m.from, text: "ack \(m.text)" }
         }
     }
 
     shard Reachability {
         hear *Vein.Net.Peer.@Undelivered as u {
-            emit *Vein.Console.Io.@Print { text: "  (" + u.to + " unreachable)" }
+            do print("  (\(u.to) unreachable)")
         }
     }
 }

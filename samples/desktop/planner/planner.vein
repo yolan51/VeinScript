@@ -21,6 +21,7 @@ bundle Planner by you {
     need "Vein.UI"
     need "Vein.Core"
     need "Vein.Graphics"
+    need "Vein.Console"
 
     // ---- the data: the planner's own; boards, lanes, cards and tabs are the stdlib's ------------------------
 
@@ -179,10 +180,10 @@ bundle Planner by you {
             if not (trim(f.Field.value) == "") {
                 let n = nextNumber()
                 let name = trim(f.Field.value)
-                bring TaskLane("l" + n, "To do", []) as todo
-                bring TaskLane("l" + (n + 1), "Doing", []) as doing
-                bring TaskLane("l" + (n + 2), "Done", []) as done
-                bring Project("p" + (n + 3), name, [todo, doing, done], name) as p
+                bring TaskLane("l\(n)", "To do", []) as todo
+                bring TaskLane("l\(n + 1)", "Doing", []) as doing
+                bring TaskLane("l\(n + 2)", "Done", []) as done
+                bring Project("p\(n + 3)", name, [todo, doing, done], name) as p
                 target $Plan as plan {
                     plan.Plan.~projects.add(p)
                     do openTab(plan, p)
@@ -242,14 +243,14 @@ bundle Planner by you {
         }
 
         // A file from before plans had a record of their own has no usable "plan" list: that is not a problem.
-        hear @Unwoven as u { if not (u.loom == "SavedPlan") { emit *Vein.Console.Io.@Print { text: "! " + u.why } } }
+        hear @Unwoven as u { if not (u.loom == "SavedPlan") { do print("! \(u.why)") } }
 
         hear @Fresh as x {
             let n = nextNumber()
-            bring TaskLane("l" + n, "To do", []) as todo
-            bring TaskLane("l" + (n + 1), "Doing", []) as doing
-            bring TaskLane("l" + (n + 2), "Done", []) as done
-            bring Project("p" + (n + 3), "My project", [todo, doing, done], "My project") as p
+            bring TaskLane("l\(n)", "To do", []) as todo
+            bring TaskLane("l\(n + 1)", "Doing", []) as doing
+            bring TaskLane("l\(n + 2)", "Done", []) as done
+            bring Project("p\(n + 3)", "My project", [todo, doing, done], "My project") as p
             bring Plan("plan", [p], 0, [p]) as plan
             target $Planner as a { a.Planner.~plans.add(plan) }
         }

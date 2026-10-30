@@ -4,12 +4,13 @@
 // names the events it cares about, and linking puts them all on one queue.
 
 bundle Audit by you {
+    need "Vein.Console"
     shard Ledger {
         hear *you.Store.Orders.@Ordered as o {
-            emit *Vein.Console.Io.@Print { text: "[Audit] saw order of " + o.item }
+            do print("[Audit] saw order of \(o.item)")
         }
         hear *you.Billing.Invoices.@Invoiced as i {
-            emit *Vein.Console.Io.@Print { text: "[Audit] saw invoice " + i.amount + " for " + i.item }
+            do print("[Audit] saw invoice \(i.amount) for \(i.item)")
         }
     }
 }

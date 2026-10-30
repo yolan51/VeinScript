@@ -40,6 +40,7 @@
 // comment.
 
 bundle MatchOrders by you {
+    need "Vein.Console"
 
     shape $Order { status: string, item: string }
     mark #Order
@@ -94,10 +95,10 @@ bundle MatchOrders by you {
         settled {
             target $Order #Order as o {
                 match o.Order.status {
-                    when Pending { emit *Vein.Console.Io.@Print { text: o.Order.item + ": waiting for payment" } }
-                    when Paid    { emit *Vein.Console.Io.@Print { text: o.Order.item + ": payment received" } }
-                    when Shipped { emit *Vein.Console.Io.@Print { text: o.Order.item + ": on the way" } }
-                    else         { emit *Vein.Console.Io.@Print { text: o.Order.item + ": status " + o.Order.status } }
+                    when Pending { do print("\(o.Order.item): waiting for payment") }
+                    when Paid    { do print("\(o.Order.item): payment received") }
+                    when Shipped { do print("\(o.Order.item): on the way") }
+                    else         { do print("\(o.Order.item): status \(o.Order.status)") }
                 }
             }
         }
@@ -113,8 +114,8 @@ bundle MatchOrders by you {
         settled {
             target $Order #Order as o {
                 match o.Order.status {
-                    when Paid    { emit *Vein.Console.Io.@Print { text: "  [ops] pack " + o.Order.item } }
-                    when Shipped { emit *Vein.Console.Io.@Print { text: "  [ops] manifest " + o.Order.item } }
+                    when Paid    { do print("  [ops] pack \(o.Order.item)") }
+                    when Shipped { do print("  [ops] manifest \(o.Order.item)") }
                 }
             }
         }

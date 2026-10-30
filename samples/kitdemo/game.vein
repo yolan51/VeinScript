@@ -21,6 +21,7 @@ bundle KitDemo by you {
 
     need "Vein.Transform"
     need "kit.Movement"
+    need "Vein.Console"
 
     // This bundle's OWN shape. Unshared, and completion still offers it here — everything in your own
     // bundle is yours whatever its visibility. It is only the boundary that `shared` guards.
@@ -36,7 +37,7 @@ bundle KitDemo by you {
     }
 
     shard Boot { run once { 
-        do *Vein.Console.Io.print("TEST")
+        do print("TEST")
         bring Player(0.0, 0.0, 0.0,   1.0, 0.5,   0) 
     } }
 
@@ -47,12 +48,10 @@ bundle KitDemo by you {
         settled {
               
             target $Position $Score #Player as p {
-                p.Score.points = p.Score.points + 1 
+                p.Score.points += 1 
              
                 
-                emit *Vein.Console.Io.@Print {
-                    text: "at " + p.Position.x + "," + p.Position.y + " after " + p.Score.points
-                }
+                do print("at \(p.Position.x),\(p.Position.y) after \(p.Score.points)")
             }
         }
     }

@@ -12,6 +12,7 @@
 //   bash tools/check-backend.sh          (the same program, emitted to C# and diffed against the above)
 
 bundle EntitiesMulti by you {
+    need "Vein.Console"
 
     shape $Health { hp: int folds sum }
     shape $Shield { sp: int folds sum }
@@ -50,14 +51,14 @@ bundle EntitiesMulti by you {
         settled {
             // The AND: one line per tick, for the one identity carrying both.
             target $Health $Shield as self {
-                emit *Vein.Console.Io.@Print { text: "both     e" + Entity + " hp=" + self.Health.hp + " sp=" + self.Shield.sp }
+                do print("both     e\(Entity) hp=\(self.Health.hp) sp=\(self.Shield.sp)")
             }
 
             // The control: a single-component query still sees every identity carrying $Health, so the
             // one that lost only its shield is still here. Without this, "the AND works" and "the query
             // matches nothing" would look the same.
             target $Health as self {
-                emit *Vein.Console.Io.@Print { text: "health   e" + Entity + " hp=" + self.Health.hp }
+                do print("health   e\(Entity) hp=\(self.Health.hp)")
             }
         }
     }

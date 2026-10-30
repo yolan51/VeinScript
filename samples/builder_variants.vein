@@ -24,6 +24,7 @@
 // all — it consumes no argument, so the remaining slots still bind positionally and in order.
 
 bundle BuilderVariants by you {
+    need "Vein.Console"
 
     shape $Position { x: float, y: float, z: float }
     shape $Prize { value: int, sound: string }
@@ -56,9 +57,7 @@ bundle BuilderVariants by you {
     shard Show {
         settled {
             target $Position $Prize #Coin as c {
-                emit *Vein.Console.Io.@Print {
-                    text: "coin at x=" + c.Position.x + " worth " + c.Prize.value + " goes " + c.Prize.sound
-                }
+                do print("coin at x=\(c.Position.x) worth \(c.Prize.value) goes \(c.Prize.sound)")
             }
         }
     }
@@ -67,8 +66,8 @@ bundle BuilderVariants by you {
     shard Shine {
         settled {
             var shiny = 0
-            target $Prize #Shiny as s { shiny = shiny + 1 }
-            emit *Vein.Console.Io.@Print { text: "shiny coins: " + shiny }
+            target $Prize #Shiny as s { shiny += 1 }
+            do print("shiny coins: \(shiny)")
         }
     }
 }

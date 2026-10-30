@@ -12,6 +12,7 @@
 //   bash tools/check-backend.sh          (the same program, emitted to C# and diffed against the above)
 
 bundle EntitiesChance by you {
+    need "Vein.Console"
 
     shape $Health { hp: int folds sum }
 
@@ -39,7 +40,7 @@ bundle EntitiesChance by you {
     shard Report {
         settled {
             target $Health #Mob as self {
-                emit *Vein.Console.Io.@Print { text: "mob e" + Entity + " hp=" + self.Health.hp }
+                do print("mob e\(Entity) hp=\(self.Health.hp)")
             }
         }
     }

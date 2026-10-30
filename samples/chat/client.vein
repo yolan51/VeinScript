@@ -24,6 +24,7 @@
 // its sender listens on — so the server learns each client's route and never links anybody.
 
 bundle ChatClient by you {
+    need "Vein.Console"
 
     // The one place the address lives. A `fn` because the language has no constant — and one place
     // beats two, since the address appears both where we connect and where we report failing to.
@@ -33,7 +34,7 @@ bundle ChatClient by you {
         var joined: bool
 
         run once {
-            emit *Vein.Console.Io.@Print { text: "your name:" }
+            do print("your name:")
         }
 
         hear *Vein.Console.Io.@Input as i {
@@ -55,7 +56,7 @@ bundle ChatClient by you {
 
                 // Saying hello is what puts us on the roster and teaches the server our route.
                 emit *Vein.Net.Peer.@Send { to: #Server, text: "is here" }
-                emit *Vein.Console.Io.@Print { text: "joined as " + i.text + " — type away" }
+                do print("joined as \(i.text) — type away")
             }
 
             if not first {
@@ -64,7 +65,7 @@ bundle ChatClient by you {
         }
 
         hear *Vein.Net.Peer.@Undelivered as u {
-            emit *Vein.Console.Io.@Print { text: "  (cannot reach " + ServerAddress() + " — is the server running?)" }
+            do print("  (cannot reach \(ServerAddress()) — is the server running?)")
         }
     }
 
@@ -72,7 +73,7 @@ bundle ChatClient by you {
     // guarantee rather than a convention another peer could simply ignore.
     shard Incoming {
         hear *Vein.Net.Peer.@Message as m audience #Server {
-            emit *Vein.Console.Io.@Print { text: m.text }
+            do print(m.text)
         }
     }
 
