@@ -496,6 +496,13 @@ package (below): it runs as the principal of an implicit `app Game { load "game.
 `need "game.Cameras"` brings the camera library's shards, not only its shapes. (Before 2026-10-14 it only
 imported declarations, and a kit's behaviour silently stayed behind.)
 
+**A project's own bundles outside `bundles/` are listed in `.veinproj`.** A game kept in `game/` cannot be
+needed by its own tests, because walking up finds only folders NAMED `stdlib` and `bundles`, so the `need` is
+VS0340. Write `"Bundles": [ "game" ]` in `.veinproj`. Then `tests/rules.vein` can say `need "sd.Showdown"`,
+and that need links the game's shards the way an installed bundle's are linked. These bundles are never
+recorded in `vein.lock`, because they are the project rather than something it installed. A file inside a
+listed folder does not search that folder, since that folder holds the bundle being compiled.
+
 **Libraries** are bundles shipped as packages — an assembly carrying `.vein` files as `vein/…` resources
 (VeinScriptBundle's Vein.Bundles.*). A host unpacks them outside the project and searches them after the stdlib and `bundles/`
 (a `bundles/` copy of one wins, VS0310), and writes their folders to `.vein/libraries` so `veinc` and the

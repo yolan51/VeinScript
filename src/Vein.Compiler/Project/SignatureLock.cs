@@ -170,7 +170,7 @@ public sealed class SignatureLock
         // arise, and a library root taken for "the folder holding bundles/" silently disabled the lock.
         if (index.InstalledRoot is null)
         {
-            if (index.Installed.Count == 0) return null;
+            if (index.Installed.Count == index.Own.Count) return null;
             try { return System.IO.Path.Combine(System.IO.Path.GetFullPath(projectDir), FileName); }
             catch (Exception) { return null; }
         }

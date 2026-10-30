@@ -513,6 +513,36 @@ public class HostingTests : IDisposable
     }
 
     [Fact]
+    public void A_project_s_own_bundle_folder_lets_its_tests_need_the_game_and_is_never_locked()
+    {
+        // VeinShowdown keeps its rules in game/ and its tests in tests/: `need "sd.Game"` was VS0340, since
+        // walking up finds only folders named stdlib/ and bundles/. `.veinproj` "Bundles" lists game/.
+        string root = Path.Combine(_dir, "own-project");
+        Directory.CreateDirectory(Path.Combine(root, "game", "publicators"));
+        Directory.CreateDirectory(Path.Combine(root, "tests"));
+        File.WriteAllText(Path.Combine(root, ".veinproj"), "{ \"Principal\": \"game/game.vein\", \"Bundles\": [ \"game\" ] }");
+        File.WriteAllText(Path.Combine(root, "game", "game.vein"),
+            "bundle Game by sd {\n    shard Tick { each tick { emit *Vein.Console.Io.@Print { text: \"game ticks\" } } }\n}\n");
+        File.WriteAllText(Path.Combine(root, "game", "publicators", "Rules.vein"),
+            "shared(\"A mode.\")\nshape $Mode { name: string }\n");
+        string test = Path.Combine(root, "tests", "rules.vein");
+        File.WriteAllText(test, "bundle RulesTest by test {\n    need \"sd.Game\"\n}\n");
+
+        var index = Vein.Compiler.Project.BundleIndex.For(Path.Combine(root, "tests"));
+        Assert.Contains("sd.Game", index.Owners.Keys);
+        Assert.Contains(index.Shapes.Keys, k => k.StartsWith("sd.Game.Rules."));                       // fragments too
+        Assert.Contains("sd.Game", index.Own);
+        Assert.Null(index.InstalledRoot);
+        Assert.Null(Vein.Compiler.Project.SignatureLock.PathFor(index, Path.Combine(root, "tests")));   // nothing to lock
+
+        var linked = Vein.Compiler.Ir.AppLinker.LinkNeeds(test, File.ReadAllText(test), new Vein.Compiler.Diagnostics.DiagnosticBag());
+        Assert.Equal(new[] { "RulesTest", "Game" }, linked!.Bundles);                                     // its shards run
+
+        // The game's own compile does not find itself.
+        Assert.DoesNotContain("sd.Game", Vein.Compiler.Project.BundleIndex.For(Path.Combine(root, "game")).Owners.Keys);
+    }
+
+    [Fact]
     public void A_project_using_only_libraries_keeps_its_lock_beside_the_program()
     {
         // A library root is installed (locked) but is not the project's bundles/ — the lock must not follow

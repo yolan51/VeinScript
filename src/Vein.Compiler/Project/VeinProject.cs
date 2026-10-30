@@ -30,7 +30,9 @@ public sealed record CloudLink(string Id, string Slug, string? OwnerHandle = nul
 //   * which file is the entry point, when a folder has several that could be;
 //   * run configurations you EDITED — `--ticks 40` is a choice about this session, not about the file,
 //     which is exactly why it does not belong in the header;
-//   * where the stdlib is, when it is not the one beside the compiler.
+//   * where the stdlib is, when it is not the one beside the compiler;
+//   * which folders hold the project's OWN bundles when they are not in `bundles/` — a game kept in
+//     `game/` whose tests `need` it.
 //
 // Absent is the normal case. A folder with no .veinproj works exactly as it did.
 public sealed class VeinProject
@@ -59,6 +61,12 @@ public sealed class VeinProject
     /// "0.1.0-*"`). `veinc add` writes it, `veinc restore` (and the Workbench, on open) unpacks each into
     /// `.vein/libraries` — what a project with no build of its own has instead of a csproj's references.
     public Dictionary<string, string>? Packages { get; set; }
+
+    /// Folders of this project's OWN bundles, relative to it (`"Bundles": [ "game" ]`). Searched after
+    /// `bundles/`, so another file of the project — a test — can `need` the game, and links its shards.
+    /// Never recorded in `vein.lock`: they are the project, not something it installed. A file inside one
+    /// of these folders does not search that folder, since it is that bundle's own compile.
+    public List<string>? Bundles { get; set; }
 
     [JsonIgnore]
     public string? Folder { get; private set; }

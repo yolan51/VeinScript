@@ -88,6 +88,10 @@ public sealed class BundleIndex
     /// The first root that is not the standard library — a project's `bundles/`. Null when there is none.
     public string? InstalledRoot { get; init; }
 
+    /// The part of `Installed` found in the project's own bundle folders (`.veinproj` "Bundles"): linked like
+    /// an installed bundle, never locked.
+    public IReadOnlySet<string> Own { get; init; } = new HashSet<string>();
+
     /// The standard library is found by its folder NAME (`SearchRoots` asks `LocateNamed(…, "stdlib")`),
     /// so that is how it is recognised here too — including the copy `veinc build` unpacks beside an exe.
     public static bool IsStdlibRoot(string root) =>
@@ -119,6 +123,7 @@ public sealed class BundleIndex
         var duplicates = new List<(string, string, string)>();
         var installed = new HashSet<string>(StringComparer.Ordinal);
         var unshared = new HashSet<string>(StringComparer.Ordinal);
+        var own = new HashSet<string>(StringComparer.Ordinal);
         string? installedRoot = null;
 
         foreach (var root in roots)
@@ -142,9 +147,10 @@ public sealed class BundleIndex
             unshared.UnionWith(folder.Unshared);
 
             bool stdlib = IsStdlibRoot(root);
+            bool ownRoot = IsOwnRoot(root);
             // A LIBRARY is installed (linked, locked) but is not the project's own `bundles/`: the lock never
-            // lives beside it — see SignatureLock.PathFor.
-            if (!stdlib && !IsLibraryRoot(root)) installedRoot ??= root;
+            // lives beside it — see SignatureLock.PathFor. Nor beside one of the project's own bundle folders.
+            if (!stdlib && !ownRoot && !IsLibraryRoot(root)) installedRoot ??= root;
             foreach (var (bundle, file) in folder.Owners)
                 if (owners.TryGetValue(bundle, out var first))
                 {
@@ -154,6 +160,7 @@ public sealed class BundleIndex
                 {
                     owners[bundle] = file;
                     if (!stdlib) installed.Add(bundle);
+                    if (ownRoot) own.Add(bundle);
                 }
         }
 
@@ -161,7 +168,7 @@ public sealed class BundleIndex
         {
             Roots = roots, Symbols = symbols, Builders = builders, Formats = formats, Shapes = shapes, Marks = marks, Events = events, Functions = functions,
             Owners = owners, Shadowed = shadowed, Duplicates = duplicates,
-            Installed = installed, InstalledRoot = installedRoot, UnsharedEvents = unshared,
+            Installed = installed, InstalledRoot = installedRoot, UnsharedEvents = unshared, Own = own,
         };
         _composites[key] = index;
         return index;
@@ -203,6 +210,9 @@ public sealed class BundleIndex
         if (LocateNamed(seed, "stdlib") is { } std) roots.Add(std);
         if (LocateNamed(seed, "bundles") is { } bundles && !roots.Contains(bundles, StringComparer.OrdinalIgnoreCase))
             roots.Add(bundles);
+        foreach (string folder in OwnFolders(seed))
+            if (!roots.Contains(folder, StringComparer.OrdinalIgnoreCase))
+                roots.Add(folder);
 
         // LIBRARIES — reusable bundles shipped as packages and unpacked OUTSIDE the project, so a game's
         // folder holds only its own code. Last, so neither the stdlib nor a project's own `bundles/` can be
@@ -214,6 +224,48 @@ public sealed class BundleIndex
                 roots.Add(library);
 
         return roots;
+    }
+
+    /// The own bundle folders (`.veinproj` "Bundles") of the nearest project above the seed, less the one the
+    /// seed is inside. Without them a game kept in `game/` could not be needed by its own tests (VS0340):
+    /// walking up finds only folders NAMED `stdlib` and `bundles`.
+    private static IEnumerable<string> OwnFolders(string? seed)
+    {
+        if (string.IsNullOrEmpty(seed)) yield break;
+        string full;
+        try { full = Path.GetFullPath(seed).TrimEnd('\\', '/'); } catch { yield break; }
+        for (var d = new DirectoryInfo(full); d is not null; d = d.Parent)
+        {
+            if (!File.Exists(Path.Combine(d.FullName, VeinProject.FileName))) continue;
+            foreach (string root in OwnFoldersOf(d.FullName))
+            {
+                bool inside = full.Equals(root, StringComparison.OrdinalIgnoreCase)
+                           || full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+                if (!inside && Directory.Exists(root)) yield return root;
+            }
+            yield break;
+        }
+    }
+
+    /// Whether a root is one of its project's own bundle folders: the nearest `.veinproj` above it lists it.
+    public static bool IsOwnRoot(string root)
+    {
+        string full;
+        try { full = Path.GetFullPath(root).TrimEnd('\\', '/'); } catch { return false; }
+        for (var d = new DirectoryInfo(full).Parent; d is not null; d = d.Parent)
+            if (File.Exists(Path.Combine(d.FullName, VeinProject.FileName)))
+                return OwnFoldersOf(d.FullName).Contains(full, StringComparer.OrdinalIgnoreCase);
+        return false;
+    }
+
+    private static IEnumerable<string> OwnFoldersOf(string project)
+    {
+        foreach (string folder in VeinProject.Load(project)?.Bundles ?? new List<string>())
+        {
+            string root;
+            try { root = Path.GetFullPath(Path.Combine(project, folder)).TrimEnd('\\', '/'); } catch { continue; }
+            yield return root;
+        }
     }
 
     /// The project file listing library roots, one folder per line: `.vein/libraries`, the nearest one

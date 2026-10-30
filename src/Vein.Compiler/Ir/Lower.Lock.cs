@@ -54,14 +54,14 @@ public sealed partial class Lower
     /// project installed nothing, and not when this bundle is ITSELF on the search path — a kit linked
     /// into an app gets its own Lower, and its calls into another kit are the kit's business.
     private bool Recording =>
-        _importDepth == 0 && Index.Installed.Count > 0 && !Index.Owners.ContainsKey(_ownerKey);
+        _importDepth == 0 && Index.Installed.Count > Index.Own.Count && !Index.Owners.ContainsKey(_ownerKey);
 
     /// `kit.Geo.Calc.clamp` → is `kit.Geo` an installed bundle?
     private bool IsOutside(string key)
     {
         int first = key.IndexOf('.');
         int second = first < 0 ? -1 : key.IndexOf('.', first + 1);
-        return second > 0 && Index.Installed.Contains(key[..second]);
+        return second > 0 && Index.Installed.Contains(key[..second]) && !Index.Own.Contains(key[..second]);
     }
 
     // ---- fn / SF -----------------------------------------------------------------------------------------
