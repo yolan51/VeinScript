@@ -19,13 +19,15 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="${1:-0.1.0-dev.$(date +%Y%m%d%H%M%S)}"
 FEED="${VEIN_FEED:-$HOME/VeinFeed}"
+BUILD="${TMPDIR:-${TEMP:-/tmp}}/vein-pack"
 mkdir -p "$FEED"
 
 for project in ShardECS.Contracts/Contracts ShardECS.SECS/SECS Vein.Compiler/Vein.Compiler Vein.Runtime.SECS/Vein.Runtime.SECS Vein.Jit/Vein.Jit Vein.Hosting/Vein.Hosting Vein.Cloud/Vein.Cloud Vein.Cli/Vein.Cli; do
   echo "packing $project $VERSION…"
-  # The output is kept for a failure: a running veinc locks Vein.Cli's bin, and a pack that dies quietly
-  # leaves the feed one package short with only a missing "ok" line to say so.
-  if ! out="$(dotnet pack "$REPO/src/$project.csproj" -c Release -p:Version="$VERSION" -o "$FEED" --nologo -v quiet 2>&1)"; then
+  # Built outside the repo's bin: VS Code's `veinc lsp` runs from src/Vein.Cli/bin/Release and holds its
+  # dlls for as long as the editor is open. The output is kept for a failure, because a pack that dies
+  # quietly leaves the feed one package short with only a missing "ok" line to say so.
+  if ! out="$(dotnet pack "$REPO/src/$project.csproj" -c Release -p:Version="$VERSION" -p:OutputPath="$BUILD/$project/" -o "$FEED" --nologo -v quiet 2>&1)"; then
     echo "FAILED: $project" >&2
     echo "$out" | grep -E "error|locked by" | sort -u | head -5 >&2
     exit 1
