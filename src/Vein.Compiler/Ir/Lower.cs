@@ -379,6 +379,9 @@ public sealed partial class Lower
         foreach (var t in _importedShapes.Values)
             if (!types.Any(x => x.Name == t.Name && x.Kind == IrTypeKind.Component)) types.Add(t);
 
+        // …and `$World`, when `$Parent` and `$Position` mean a hierarchy here, whether or not it is named.
+        if (ImpliedWorld(types) is { } world) types.Add(world);
+
         // The provenance type, once, if anything here declares or hears an event.
         if (types.Any(t => t.Kind == IrTypeKind.Message) || _importedEvents.Count > 0)
             types.Add(ProvenanceDecl());
@@ -622,6 +625,37 @@ public sealed partial class Lower
     /// component of that name (Interp.IsComponent), and an include EXPANDS FIELDS rather than importing
     /// a type. No diagnostic fired anywhere along that path.
     private readonly Dictionary<string, IrType> _importedShapes = new(StringComparer.Ordinal);
+
+    /// `$World`, for a program whose `$Parent` and `$Position` make a hierarchy and which never named `$World`
+    /// itself; null when it does not need one. RULES 13c: a parented `$Position` is LOCAL, and the runtime
+    /// publishes where the identity actually is as `$World`.
+    ///
+    /// THE RUNTIMES COMPOSE ONLY WHAT THE PROGRAM DECLARES — `Interp.ComposeWorld` returns unless `World` is a
+    /// declared shape, and the C# backend emits `__Compose` only for one — and a shape was declared only by a
+    /// program that mentioned it. So a game that parented a crate and never read `$World` (it had no reason
+    /// to: a host draws from it) had its children drawn at their offsets from the ORIGIN, on both runtimes,
+    /// until someone wrote `run once { target $World as w { } }` to make the name appear (VeinCards #7).
+    /// What `$Parent` means cannot depend on whether a word is spelled somewhere else in the program.
+    ///
+    /// Only the hierarchy's own shapes: a `$Parent` linking an `Entity` by `of`, and a `$Position` with
+    /// x, y and z, which is what composition reads. A program's own 2D `$Position`, or a `$Parent` that is some
+    /// other relation, gets nothing it did not ask for. Static, because the app linker applies the same rule
+    /// to a program whose halves come from two bundles.
+    internal static IrType? ImpliedWorld(IReadOnlyList<IrType> types)
+    {
+        IrType? Component(string name) => types.FirstOrDefault(t => t.Kind == IrTypeKind.Component && t.Name == name);
+        if (Component("World") is not null || Component("Position") is not { } position || Component("Parent") is not { } parent)
+            return null;
+        if (!parent.Fields.Any(f => f.Name == "of" && f.Type.Name == "Entity")) return null;
+
+        var axes = new[] { "x", "y", "z" }.Select(a => position.Fields.FirstOrDefault(f => f.Name == a)).ToList();
+        if (axes.Any(f => f is null || f.Type.Name is not ("float" or "int"))) return null;
+
+        // The same fields `Vein.Transform.Spatial.$World` declares, typed as the position they compose from.
+        return new IrType("World", IrTypeKind.Component,
+            axes.Select(f => new IrField(f!.Name, IrTypeRef.Of("float"), null)).ToList(),
+            Array.Empty<IrEnumCase>(), null, new[] { IrAttr.Of("component") });
+    }
 
     /// Record a non-local shape that something here attaches, so the module carries its type. A local
     /// declaration always wins — this only fills a gap, and never shadows a shape the bundle owns.

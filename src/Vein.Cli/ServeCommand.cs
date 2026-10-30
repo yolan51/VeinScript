@@ -111,7 +111,9 @@ internal static class ServeCommand
                 foreach (var (key, value) in ParseForm(Str(inputs["body"])))
                     inputs[key] = value;
 
-            var result = new Interp { BaseDirectory = baseDir }.Render(module, requestPath, inputs);
+            // CONFINED: the program runs once per REQUEST, so a path it is handed is the client's. Its files stay
+            // inside the project folder, and a refusal it does not hear is printed here (Interp.Serving).
+            var result = Interp.Serving(baseDir, Console.Error).Render(module, requestPath, inputs);
 
             // No @Response is a 404, not a crash: the program simply had nothing to say about this path,
             // which is what an unrouted URL IS.

@@ -172,6 +172,23 @@ public static class AppLinker
                                    .Where(g => g.Count() > 1).Select(g => g.Key)
                                    .ToHashSet(StringComparer.Ordinal);
 
+        // A FUNCTION IS ITS BUNDLE'S OWN, as a shard is. Only `shared` crosses a bundle boundary (RULES 17),
+        // and another bundle reaches a shared function through a copy it imported under a collision-proof
+        // name (`Vein_Console_Io_print`), never by the bare one — so a bare name two bundles both declare is
+        // two functions. The table below was keyed by that name and kept the first: with a `fn twice` in each
+        // of two bundles, the second bundle's `twice(3)` ran the first's body, and VS0333 told the author to
+        // rename; with a `shard Boot { fn label() … }` in each (both lowered `Boot__label`) the first bundle's
+        // shard printed the SECOND's label, and nothing was reported at all. A repeated name is qualified
+        // per bundle, as a repeated shard name is, and each bundle's calls are rewritten to its own.
+        var repeatedFns = modules.SelectMany(m => OwnCallables(m.Module))
+                                 .GroupBy(n => n, StringComparer.Ordinal)
+                                 .Where(g => g.Count() > 1).Select(g => g.Key)
+                                 .ToHashSet(StringComparer.Ordinal);
+        modules = modules.Select(m => (m.Name, CallRename.Apply(m.Module,
+                              OwnCallables(m.Module).Where(repeatedFns.Contains)
+                                                    .ToDictionary(n => n, n => m.Name + "." + n, StringComparer.Ordinal),
+                              f => ImportOrigin(f) is null, IsCallable), m.Load)).ToList();
+
         foreach (var (name, module, _) in modules)
         {
             foreach (var t in module.Types)
@@ -188,6 +205,28 @@ public static class AppLinker
 
                     if (seenImported && !nowImported) types[(t.Name, t.Kind)] = (t, name);   // real replaces stand-in
                     if (seenImported || nowImported) continue;                               // never a clash
+
+                    // AN EVENT IS MATCHED BY FIELD NAME, not position (RULES 20a: an event gaining a field is
+                    // something no call can feel), and two declarations of one reach the link only when the
+                    // runtime knows it by its bare name — the standard library's, and the runtime's own. There
+                    // is one such event however many bundles declare it: Console's `@Send { to, text }` and
+                    // Net's `@Send { to, text, fast = false }` are the same `@Send` `Interp.Drain` routes, and
+                    // demanding identical field lists refused the standard library's own manifest (VS0332).
+                    // So they unify into one carrying every field either declares — when the fields both
+                    // have agree in type AND default, and every field only one has carries a default, which
+                    // is what the other side's emits, leaving it out, will carry.
+                    if (t.Kind == IrTypeKind.Message)
+                    {
+                        if (UnifyEvent(seen.Type, seen.Owner, t, name, out var union) is { } why)
+                            diag.Error("VS0332",
+                                $"event '@{t.Name}' is declared differently in bundles '{seen.Owner}' and '{name}': {why}. " +
+                                "Both name ONE event in this app, so they must agree on every field they share, and a " +
+                                "field only one of them declares needs a default — the other bundle's emits leave it " +
+                                "out. Make the fields agree, or give the extra field a default.",
+                                span);
+                        else types[(t.Name, t.Kind)] = (union, seen.Owner);
+                        continue;
+                    }
 
                     // Unifying is deliberate — it is how a capability bundle hears the principal's
                     // events. Unifying two DIFFERENT declarations is not; that is a name clash wearing
@@ -216,9 +255,11 @@ public static class AppLinker
                 {
                     // The same EXTERNAL declaration, imported by two bundles — `use Console` in both,
                     // and each carries its own `Vein_Console_Io_print`. One thing, not two; keep the
-                    // first and say nothing. Only two real declarations of one name are a clash.
+                    // first and say nothing.
                     if (ImportOrigin(f) is { } origin && ImportOrigin(seen.Fn) == origin) continue;
 
+                    // Two real declarations of one name were qualified per bundle above, so nothing reaches
+                    // here but an imported copy and a declaration that happen to share a spelling.
                     diag.Warning("VS0333",
                         $"function '{f.Name}' is declared in both '{seen.Owner}' and '{name}'; " +
                         $"the app links '{seen.Owner}'s. Qualify the call or rename one.", span);
@@ -258,24 +299,77 @@ public static class AppLinker
 
         var principalModule = modules.First(m => string.Equals(m.Name, principal, StringComparison.Ordinal)).Module;
 
+        // THE HIERARCHY, WHEN ITS HALVES COME FROM TWO BUNDLES (RULES 13c). A game positions, a kit parents:
+        // each bundle alone has one of `$Position` and `$Parent`, so neither lowering implied `$World`, and the
+        // linked program — which has both — composed nothing. The same rule Lower applies to one bundle.
+        var linkedTypes = typeOrder.Select(n => types[n].Type).ToList();
+        if (Lower.ImpliedWorld(linkedTypes) is { } world) linkedTypes.Add(world);
+
         return new IrModule(
             appName,
-            typeOrder.Select(n => types[n].Type).ToList(),
+            linkedTypes,
             funcOrder.Select(n => funcs[n].Fn).ToList(),
             shards)
         { Start = principalModule.Start };
     }
 
-    /// Two declarations of one name are interchangeable when they carry the same fields in the same
+    /// The names a bundle declares that a call reaches by bare name: its own `fn`s and `SF`s — not the copies
+    /// it imported, which are another bundle's under a collision-proof name — and its shard-local ones
+    /// (`Boot__label`), which the runtime keeps in the same flat table (`Interp.Setup`).
+    private static IEnumerable<string> OwnCallables(IrModule module) =>
+        module.Functions.Where(f => ImportOrigin(f) is null).Select(f => f.Name)
+              .Concat(module.Shards.SelectMany(s => s.Methods).Where(IsCallable).Select(m => m.Name))
+              .Distinct(StringComparer.Ordinal);
+
+    /// `Interp.Setup`'s rule for a shard method that is a function rather than a `hear` or a schedule block.
+    private static bool IsCallable(IrFunction method) =>
+        method.Attrs.Any(a => a.Name == "sf") || method.Return.Name != "void";
+
+    /// Two declarations of one event as ONE: every field of the first, then each field only the second has.
+    /// Null when they are one event; otherwise the reason they are not — a field both declare with another
+    /// type or another default (the union has ONE default, so one side's emits would silently carry the
+    /// other's), or a field only one declares with no default (the other's emits leave it out, and a handler
+    /// reading it would get whatever the emitter happened to have in scope by that name).
+    private static string? UnifyEvent(IrType seen, string seenOwner, IrType now, string nowOwner, out IrType union)
+    {
+        union = seen;
+        var fields = seen.Fields.ToList();
+        foreach (var f in now.Fields)
+        {
+            int at = fields.FindIndex(x => string.Equals(x.Name, f.Name, StringComparison.Ordinal));
+            if (at < 0)
+            {
+                if (f.Default is null) return $"`{f.Name}` is only in {nowOwner}'s, and has no default";
+                fields.Add(f);
+                continue;
+            }
+            var mine = fields[at];
+            if (!string.Equals(mine.Type.ToString(), f.Type.ToString(), StringComparison.Ordinal))
+                return $"`{f.Name}` is {mine.Type} in {seenOwner}'s and {f.Type} in {nowOwner}'s";
+            string? a = mine.Default is null ? null : IrPrinter.Expr(mine.Default);
+            string? b = f.Default is null ? null : IrPrinter.Expr(f.Default);
+            if (!string.Equals(a, b, StringComparison.Ordinal))
+                return $"`{f.Name}` defaults to {a ?? "nothing"} in {seenOwner}'s and to {b ?? "nothing"} in {nowOwner}'s";
+        }
+        foreach (var f in seen.Fields)
+            if (f.Default is null && !now.Fields.Any(x => string.Equals(x.Name, f.Name, StringComparison.Ordinal)))
+                return $"`{f.Name}` is only in {seenOwner}'s, and has no default";
+
+        union = seen with { Fields = fields };
+        return null;
+    }
+
     /// A stand-in payload type `Lower` emitted so a `hear` could be typed against another bundle's
     /// shared event — not a declaration this bundle wrote. `Lower.ImportedEvent` tags these.
     private static bool IsImportedCopy(IrType t) => t.Attrs.Any(a => a.Name == "imported");
 
-    /// order with the same types — the only thing a handler binding actually depends on.
     /// The qualified key an imported function was lowered from; null for one the bundle declared.
     private static string? ImportOrigin(IrFunction f) =>
         f.Attrs.FirstOrDefault(a => a.Name == "imported")?.Args.FirstOrDefault() as string;
 
+    /// Two declarations of one shape (or mark) are interchangeable when they carry the same fields in the
+    /// same order with the same types — the only thing a component read actually depends on. Events are
+    /// matched by field name instead (UnifyEvent).
     private static bool SameShape(IrType a, IrType b)
     {
         if (a.Fields.Count != b.Fields.Count) return false;

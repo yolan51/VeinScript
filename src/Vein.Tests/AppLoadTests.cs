@@ -89,21 +89,23 @@ public class AppLoadTests : IDisposable
     }
 
     [Fact]
-    public void Two_real_declarations_of_one_function_still_warn()
+    public void Two_real_declarations_of_one_function_are_two_functions()
     {
-        // The other side of the import rule. Nothing pinned VS0333 before — the only thing that
-        // exercised it was the false positive — so this is what stops the import exemption from quietly
-        // widening into "never warn".
+        // The other side of the import rule. This used to pin VS0333 — "the app links Alpha's" — and Beta's
+        // `twice(3)` did run Alpha's body. A function is its bundle's own, so the linker now qualifies a
+        // repeated name per bundle and each runs its own (SilentLinkingTests has the whole account).
         Write("A.vein", "bundle Alpha by me {\n  fn twice(n: int) return int { return n * 2 }\n" +
                         "  need \"Vein.Console\"\n  shard Boot { run once { print(twice(2)) } }\n}");
-        Write("B.vein", "bundle Beta by me {\n  fn twice(n: int) return int { return n + n }\n" +
+        Write("B.vein", "bundle Beta by me {\n  fn twice(n: int) return int { return n + 100 }\n" +
                         "  need \"Vein.Console\"\n  shard Boot { run once { print(twice(3)) } }\n}");
         var app = Write("Clash.app.vein", "app Clash { load \"A.vein\"   load \"B.vein\" }");
 
-        var (_, diag) = Link(app);
+        var (linked, diag) = Link(app);
 
-        var d = Assert.Single(diag.Items, x => x.Code == "VS0333");
-        Assert.Contains("'twice'", d.Message);
+        Assert.DoesNotContain(diag.Items, x => x.Code == "VS0333");
+        var outp = RunOut(linked!);
+        Assert.Contains("4", outp);
+        Assert.Contains("103", outp);
     }
 
     [Fact]

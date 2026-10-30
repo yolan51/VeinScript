@@ -40,6 +40,7 @@ public static class SettingsIndex
         var settings = new List<Setting>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var queue = new Queue<string>();
+        var linked = new HashSet<string>(StringComparer.Ordinal);   // every `Author.Bundle` this program links
 
         // The program: a bundle, or an app manifest's loads.
         var bag = new DiagnosticBag();
@@ -59,7 +60,8 @@ public static class SettingsIndex
             bool library = index.Roots.Any(r => BundleIndex.IsLibraryRoot(r) && IsUnder(path, r));
             foreach (var written in unit.Bundles)
             {
-                string section = (written.Author is null ? "" : written.Author + ".") + written.Name;
+                string section = Section(written);
+                linked.Add(section);
                 foreach (var need in written.Members.OfType<NeedDecl>())
                     if (index.Owners.TryGetValue(need.Key, out var owner)) queue.Enqueue(Path.GetFullPath(owner));
                 // A template's copy (`shard Files from *…!DocumentFiles { tune maxRecents = 10 }`, D28) has the
@@ -86,14 +88,31 @@ public static class SettingsIndex
         foreach (var (line, text) in file.Malformed)
             problems.Error("VS0358", $"`{text.Trim()}` in {SettingsFile.FileName} is not `Shard.var = value` under a `[Author.Bundle]` section.",
                 new SourceSpan(file.Path, line, 1, text.Length));
+        // ONE FILE, SEVERAL PROGRAMS. `vein.settings` belongs to the folder (or the project) and every program
+        // in it reads the same one — VeinScriptBundle's tests/core holds four tests and one file, whose
+        // `[core.Save] Store.folder` is for save.vein alone. Checked as though the file were this program's
+        // own, every line for a bundle it does not link "named no setting of this program": inventory, loot
+        // and timers each warned about a line that is right, and a warning that is wrong three times in four
+        // teaches people to stop reading it. So a line is this program's to judge only when it links the
+        // section's bundle; a section another program here can link (a bundle on the search path, or one a
+        // program beside the file declares) is that program's, and its check reports what is wrong with it.
+        // What stays loud is a section that no program can link at all — a misspelt `[Author.Bundle]`.
+        HashSet<string>? beside = null;
         foreach (var entry in file.Entries)
         {
             var span = new SourceSpan(file.Path, entry.Line, 1, entry.Name.Length);
             var setting = settings.FirstOrDefault(s => s.Section == entry.Section && s.Name == entry.Name);
             if (setting is null)
-                problems.Warning("VS0357",
-                    $"`{entry.Key}` in {SettingsFile.FileName} names no setting of this program — no `tune` var `{entry.Name}` in bundle {entry.Section}. " +
-                    "It is ignored; remove it, or check the spelling against `veinc settings`.", span);
+            {
+                if (linked.Contains(entry.Section))
+                    problems.Warning("VS0357",
+                        $"`{entry.Key}` in {SettingsFile.FileName} names no setting of this program — no `tune` var `{entry.Name}` in bundle {entry.Section}. " +
+                        "It is ignored; remove it, or check the spelling against `veinc settings`.", span);
+                else if (!Exists(entry.Section, index) && !(beside ??= BundlesBeside(file.Path)).Contains(entry.Section))
+                    problems.Warning("VS0357",
+                        $"`[{entry.Section}]` in {SettingsFile.FileName} names a bundle that is on no search path and that no program beside the file declares, " +
+                        $"so `{entry.Name}` sets nothing anywhere. Check the section's spelling — `veinc settings` lists the bundles a program can tune.", span);
+            }
             else if (SettingsFile.ParseValue(entry.Value, KindOf(setting.Type), span) is null)
                 problems.Error("VS0358",
                     $"`{entry.Key} = {entry.Value}` in {SettingsFile.FileName}: '{setting.Var}' is a {setting.Type} setting, and that value is not one. " +
@@ -147,4 +166,52 @@ public static class SettingsIndex
 
     private static bool IsUnder(string path, string root) =>
         Path.GetFullPath(path).StartsWith(Path.GetFullPath(root).TrimEnd('\\', '/') + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+
+    /// A bundle's `vein.settings` section: `[Author.Bundle]`, or `[Bundle]` for one written without an author.
+    private static string Section(BundleDecl bundle) => (bundle.Author is null ? "" : bundle.Author + ".") + bundle.Name;
+
+    /// Whether some program could link the bundle a section names: it is on the search path. The index keys an
+    /// author-less bundle `local.Name`, where its section is plain `Name`.
+    private static bool Exists(string section, BundleIndex index) =>
+        index.Owners.ContainsKey(section) || (!section.Contains('.') && index.Owners.ContainsKey("local." + section));
+
+    /// Folders that hold no program of the project's own: build output, tool caches, an engine's copies.
+    private static readonly HashSet<string> NotPrograms = new(StringComparer.OrdinalIgnoreCase)
+        { "bin", "obj", "out", "build", "artifacts", "node_modules", "addons", ".git", ".vs", ".vscode", ".idea", ".godot", ".vein" };
+
+    /// The sections of the bundles the programs SHARING this settings file declare — a program's own bundle is
+    /// on no search path, but a line for it is that program's. Which programs share a file is where
+    /// `SettingsFile.Locate` would find it from: the folder it sits in, and everything below that folder when
+    /// it is a project's (beside a `.veinproj`). Read only when a line names a section that nothing else
+    /// explains, which is rare, so a project is walked at most once per check and usually never.
+    private static HashSet<string> BundlesBeside(string settingsPath)
+    {
+        var found = new HashSet<string>(StringComparer.Ordinal);
+        string? dir = Path.GetDirectoryName(Path.GetFullPath(settingsPath));
+        if (dir is null || !Directory.Exists(dir)) return found;
+        bool project = File.Exists(Path.Combine(dir, VeinProject.FileName));
+
+        var folders = new Stack<string>();
+        folders.Push(dir);
+        while (folders.Count > 0)
+        {
+            string folder = folders.Pop();
+            try
+            {
+                foreach (string file in Directory.EnumerateFiles(folder, "*.vein"))
+                {
+                    if (BundleLoader.IsFragment(file) || file.EndsWith(".app.vein", StringComparison.OrdinalIgnoreCase)) continue;
+                    foreach (var bundle in SafeLoad(file, new DiagnosticBag())?.Bundles ?? new List<BundleDecl>())
+                        found.Add(Section(bundle));
+                }
+                if (!project) continue;
+                // A link is not followed: it leads somewhere that is not this project, or back into it.
+                foreach (var sub in new DirectoryInfo(folder).EnumerateDirectories())
+                    if (!NotPrograms.Contains(sub.Name) && !sub.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                        folders.Push(sub.FullName);
+            }
+            catch (Exception) { /* an unreadable folder holds nothing this check can use */ }
+        }
+        return found;
+    }
 }

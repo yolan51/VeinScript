@@ -791,9 +791,10 @@ public sealed class Interp
     // nothing while making the order of two reads unpredictable. The answer is queued rather than
     // delivered inline, so it is heard in the same drain as any other event.
     //
-    // NO SANDBOX. A path is a path, and the program runs with the permissions you started it with. This
-    // is the same trust `veinc run` already implies, but it is worth naming: nothing here stops a
-    // program reading outside its folder.
+    // NO SANDBOX FOR A PROGRAM YOU RUN. A path is a path, and the program runs with the permissions you
+    // started it with — the same trust `veinc run` already implies. Under `veinc serve` that trust is not
+    // yours to give: the program runs once per REQUEST, and a request names whatever path it likes. So a
+    // served program's files are confined to its project folder (`ConfineFiles`, below).
 
     /// Where a RELATIVE path in `@ReadFile` / `@WriteFile` is anchored. Null keeps .NET's behaviour —
     /// the process's current directory — which is what every embedded caller got before this existed.
@@ -810,6 +811,24 @@ public sealed class Interp
     /// writes `"art/hero.png"` and `"saves/auto.save"` in one file has written two strings that look
     /// identical and mean different folders.
     public string? BaseDirectory { get; set; }
+
+    /// Every file this program reads, writes or lists must be INSIDE `BaseDirectory`; anything else is refused
+    /// with @FileMissing and a @DiagnosticRaised, and never touched.
+    ///
+    /// For `veinc serve` (ROADMAP Tier 1), where the program runs once per HTTP request and a request is not
+    /// the author: `emit @ReadFile { path: r.body }` answered `../../secret.txt`, `C:\Users\…` or `\\host\share`
+    /// with the file, and `@WriteFile` created folders anywhere on the way. A path is refused when it is
+    /// absolute in any spelling (a drive, `\\?\`, a share, a leading slash), climbs out (`..`, `a/../../x`),
+    /// passes through a link that leads out, names a device (`CON`, `COM1` — reading the console would hang
+    /// the server) or a stream (`a.txt:x`). Off by default: `veinc run` keeps the trust it documents.
+    public bool ConfineFiles { get; set; }
+
+    /// The interpreter `veinc serve` answers ONE request with: a fresh world (RULES 22), its files confined to
+    /// the project folder, and what it has to say that nothing hears — a refused path, a fault — written to
+    /// `errors`, the server's console. Here rather than in the CLI so the server's configuration is the one
+    /// the tests exercise.
+    public static Interp Serving(string projectDir, TextWriter? errors = null) =>
+        new() { BaseDirectory = projectDir, ConfineFiles = true, ErrorOutput = errors };
 
     /// The program's command-line arguments, as `args()` answers them. Empty unless a host passes some:
     /// `veinc run f.vein -- a b c`, or whatever a built exe was started with.
@@ -867,9 +886,116 @@ public sealed class Interp
     private string ResolveRead(string path)
     {
         string resolved = ResolvePath(path);
-        if (File.Exists(resolved) || ReadFallback is not { Length: > 0 } fallback || Path.IsPathRooted(path)) return resolved;
+        // Confined, a read is answered from the project folder alone: a fallback is a second root a request
+        // could reach, and `Refusal` vouched for the first one only.
+        if (ConfineFiles || File.Exists(resolved) || ReadFallback is not { Length: > 0 } fallback || Path.IsPathRooted(path)) return resolved;
         string beside = Path.GetFullPath(Path.Combine(fallback, path));
         return File.Exists(beside) ? beside : resolved;
+    }
+
+    // ---- confinement (`ConfineFiles`, under `veinc serve`) ----------------------------------------------
+
+    /// Why a confined program may not touch `path`; null when it may, or when nothing is confined. Decided on
+    /// the path as WRITTEN and on where it LEADS, before anything is opened, created or listed.
+    private string? Refusal(string path)
+    {
+        if (!ConfineFiles) return null;
+        if (BaseDirectory is not { Length: > 0 } baseDir) return "no project folder is set, so nothing is inside one";
+        if (path.Contains('\0')) return "it contains a NUL character";
+
+        // Absolute in every spelling: a drive (`C:\…`, and drive-relative `C:x`), a device or long path
+        // (`\\?\`, `\\.\`), a share (`\\host\share`), and a leading slash — the root of the current drive on
+        // Windows, where .NET does not call `/etc` rooted on every platform it runs on.
+        if (Path.IsPathRooted(path) || path.StartsWith('/') || path.StartsWith('\\'))
+            return "it is absolute, and a served program names its files relative to its project folder";
+
+        bool windows = OperatingSystem.IsWindows();
+        // A colon anywhere else names a drive or a hidden stream of a file (`a.txt:x`), never a plain file.
+        if (windows && path.Contains(':')) return "a `:` in it names a drive or a file stream";
+        if (windows && path.Split('/', '\\').FirstOrDefault(IsDeviceName) is { } device)
+            return $"`{device}` is a device in every folder, not a file";
+
+        var cmp = windows || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(baseDir));
+        string full = Path.GetFullPath(Path.Combine(root, path));
+        if (!Inside(full, root, cmp)) return "it leads outside the project folder";
+
+        try { return LinkOut(root, full, cmp) is { } link ? $"`{link}` is a link that leads outside the project folder" : null; }
+        catch (Exception ex) { return $"where it leads could not be checked ({ex.Message})"; }
+    }
+
+    /// `full` is `root` or below it — by whole folder names, so `site-private` is not inside `site`.
+    private static bool Inside(string full, string root, StringComparison cmp)
+    {
+        string path = Path.TrimEndingDirectorySeparator(full);
+        if (string.Equals(path, root, cmp)) return true;
+        return path.StartsWith(Path.EndsInDirectorySeparator(root) ? root : root + Path.DirectorySeparatorChar, cmp);
+    }
+
+    /// The first link (a symlink or a junction) on the way from `root` down to `full` whose target is outside
+    /// the project, as the path spells it — or null. A path that is inside by its letters is outside by where it
+    /// leads when a link below the root points away, and the filesystem goes where it leads.
+    private static string? LinkOut(string root, string full, StringComparison cmp)
+    {
+        string real = RealPath(root);
+        string at = root;
+        foreach (string part in Path.GetRelativePath(root, full).Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (part == ".") continue;
+            at = Path.Combine(at, part);
+            FileSystemInfo info = Directory.Exists(at) ? new DirectoryInfo(at) : new FileInfo(at);
+            if (!info.Exists || info.LinkTarget is null) continue;
+            string? target = info.ResolveLinkTarget(returnFinalTarget: true)?.FullName;
+            if (target is null || !(Inside(target, root, cmp) || Inside(target, real, cmp))) return Path.GetRelativePath(root, at);
+        }
+        return null;
+    }
+
+    /// `path` with every link along it followed — where the project folder itself really is, so a link inside it
+    /// that points to another of its own folders is still inside when the project is reached through a link.
+    private static string RealPath(string path)
+    {
+        if (Path.GetPathRoot(path) is not { Length: > 0 } drive) return path;
+        string at = drive;
+        foreach (string part in path[drive.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+        {
+            at = Path.Combine(at, part);
+            var info = new DirectoryInfo(at);
+            if (info.Exists && info.LinkTarget is not null && info.ResolveLinkTarget(returnFinalTarget: true) is { } target)
+                at = Path.TrimEndingDirectorySeparator(target.FullName);
+        }
+        return at;
+    }
+
+    /// A name Windows answers with a DEVICE in any folder — `CON`, `NUL`, `COM1` and the rest — with or without
+    /// an extension, and whatever trailing dots or spaces it would drop. Reading `CON` reads the console.
+    private static bool IsDeviceName(string segment)
+    {
+        string name = segment.TrimEnd(' ', '.');
+        int dot = name.IndexOf('.');
+        string stem = (dot < 0 ? name : name[..dot]).TrimEnd(' ').ToUpperInvariant();
+        return stem is "CON" or "PRN" or "AUX" or "NUL" or "CONIN$" or "CONOUT$"
+            || (stem.Length == 4 && (stem[..3] is "COM" or "LPT") && (char.IsAsciiDigit(stem[3]) || stem[3] is '¹' or '²' or '³'));
+    }
+
+    /// A confined program asked for a path it may not have. Answered the way every file failure is —
+    /// @FileMissing, carrying the request's tag, so the program's own error path runs and nothing waits for an
+    /// answer that will not come — and raised as a @DiagnosticRaised warning: a request probing for `../` is
+    /// worth knowing about, so a guard shard hears it, and unheard it is printed where the operator sees it.
+    /// The reason names the path as written and never the project's own location.
+    private void Refuse(string verb, string path, string tag, string why)
+    {
+        string reason = $"refused: {verb} '{path}' — {why}. A served program reads and writes only inside its project folder.";
+        Emit("FileMissing", new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["path"] = path, ["reason"] = reason, ["tag"] = tag,
+        });
+        Emit("DiagnosticRaised", new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["severity"] = 1L, ["message"] = reason,
+            ["shard"] = "", ["phase"] = "", ["file"] = "", ["line"] = 0L,
+            ["origin"] = null, ["bundle"] = _bundle,
+        });
     }
 
     private void DoReadFile(Dictionary<string, object?> payload)
@@ -879,6 +1005,8 @@ public sealed class Interp
         // The tag rides the REQUEST through to the ANSWER untouched, so a program with many files routes
         // on what the read was FOR rather than on where it lived. The runtime never reads it.
         string tag = Str(payload.GetValueOrDefault("tag"));
+
+        if (Refusal(path) is { } refused) { Refuse("reading", path, tag, refused); return; }
 
         try
         {
@@ -916,6 +1044,7 @@ public sealed class Interp
     {
         string path = Str(payload.GetValueOrDefault("path"));
         string tag = Str(payload.GetValueOrDefault("tag"));
+        if (Refusal(path.Length == 0 ? "." : path) is { } refused) { Refuse("listing", path, tag, refused); return; }
         try
         {
             string full = Path.GetFullPath(ResolvePath(path.Length == 0 ? "." : path));
@@ -964,6 +1093,9 @@ public sealed class Interp
 
         // The tag rides along untouched, so a write can be routed by the same `match` as a read.
         string tag = Str(payload.GetValueOrDefault("tag"));
+
+        // Before the folder is created on the way: a refused write leaves nothing behind, not even a folder.
+        if (Refusal(path) is { } refused) { Refuse("writing", path, tag, refused); return; }
 
         try
         {
