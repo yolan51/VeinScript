@@ -39,7 +39,7 @@ an **event**, and behaviour lives in **shards** that react to events or run ever
 
 ---
 
-## 2. The 20 mistakes you WILL make unless you read this
+## 2. The 21 mistakes you WILL make unless you read this
 
 | # | Wrong (C instinct) | Right (VeinScript) |
 |---|---|---|
@@ -61,9 +61,10 @@ an **event**, and behaviour lives in **shards** that react to events or run ever
 | 15 | `attach $Price to p { amount: 9 }` to change one field | re-attach REPLACES the whole component (others reset to defaults): write `p.Price.amount = 9` |
 | 16 | `self.hp` | `self.Health.hp` — fields are reached through their shape name |
 | 17 | `target *Vein.Transform.Spatial.$Position as p` | `need "Vein.Transform"` then `target $Position as p` — qualified `$`/`#` are for includes/emit/hear/calls only |
-| 18 | `target $Enemy not #Dead as e` | no exclusion in `target`: `target $Enemy as e { if not (e carries #Dead) { … } }` |
+| 18 | `target $Enemy as e { if not (e carries #Dead) { … } }` | `target $Enemy not #Dead as e { … }`: say what the query leaves out in the query (D25) |
 | 19 | naming things `on`, `count`, `map`, `sync`, `transform`, `target`, `from`, `code`, `markup`, `css`, `line` | `on count map sync transform` are reserved (no meaning); keywords can't be variables/params; `markup css code line` are builder OUTPUT fields, never parameter names |
 | 20 | `use Combat` | `need "Author.Bundle"` (`use` is retired, VS0338) |
+| 21 | a state in text or a flag: `c["attacked"] = true`, `t.status = "done"`, `if c.zone == "hand"`, a list of ids per zone edited with `without(…)` | a state is a MARK: `unmark c #InHand  mark c #OnBoard`, `mark u #Attacked`, then `target $Unit #OnBoard not #Attacked as u`. Fields hold values (hp, cost, name); marks hold states and roles (RULES-OF-THUMB 5) |
 
 Also: no ternary; no map/dictionary literal; no generics; no top-level `enum` (enums live inside a shape);
 two declarations with the same name in one bundle is VS0320 (no overloading — use defaults or builder
@@ -797,3 +798,7 @@ stepper, web preview, AI assistant that compiles suggestions before offering the
     nested `target`s means a link is missing (`$Parent { of }` = where it sits, `$Owner { ownerId }` = what it belongs
     to, both in Vein.Core: use them before inventing one); save with `toText<Format>(Loom)`, load with
     `weave Loom(text)` through the same loom (built in — no `need`).
+13. Every state, and every change of state, is a mark: `unmark` the old, `mark` the new, and `target` by the
+    mark (`target $Unit #OnBoard not #Attacked as u`). No text or bool field for "where it is" or "what it
+    has done": fields are for values. Data from `fromJson` that has states goes through a loom first, so it
+    is identities that can carry marks.

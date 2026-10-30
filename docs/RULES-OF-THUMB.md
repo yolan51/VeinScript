@@ -65,11 +65,33 @@ Two `target`s nest only when they look at TWO identities: a group, and the one c
 
 **Spot it:** `target $X on b` where `b` is the binding of the `target` right around it.
 
-## 5. Name roles with marks, not with text
+## 5. Name roles and states with marks, not with text
 
 A button is "the Add button" because it wears `#Add`, not because its label says "Add". Labels get
 translated, ids change between runs, and marks are checked by the compiler. Compare *data* by value; identify
 *roles* by mark.
+
+**A state is a mark too.** When something goes from one state to another, `unmark` the old one and `mark` the
+new one. That covers a card going from the hand to the board, a unit that has attacked, a task that is done,
+or a window that is open:
+```
+unmark c #InHand  mark c #OnBoard                      // not: s["hand"] = without(s.hand, c)  s["board"] += c
+mark u #Attacked                                       // not: u["attacked"] = true
+target $Unit #OnBoard not #Attacked as u { … }         // not: target s.board as id { if not cardOf(id).attacked { … } }
+```
+Each `target` then asks for exactly the identities in that state, and reads as the sentence it means. A
+misspelt mark does not compile, while a misspelt `"atacked"` matches nothing, silently. Keep in a shape field
+what is a quantity or a value (hp, a cost, a name). Keep in marks what is a state or a role: a yes/no, one of
+a few named stages, a membership.
+
+**Spot it:**
+- a text or bool field set to literals and tested in an `if` (`t.status = "done"`, `if c.Card.zone == "hand"`,
+  `c["attacked"] = true`);
+- a list of ids per place, edited with `without(…)` and `+=`;
+- a keyword list tested with `has(kw, "Guard")`.
+
+Only an identity carries a mark, so a record from `fromJson` has to become one first: weave it through a loom
+(rule 10).
 
 ## 6. Say what you leave out in the query
 
