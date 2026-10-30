@@ -23,6 +23,7 @@
 // to put the `hear` in a shard and call the SF from there. That is what `Medic` does below.
 
 bundle SfEmitHear by you {
+    need "Vein.Console"
 
     start @Boot { }
     event @Boot { }
@@ -48,9 +49,9 @@ bundle SfEmitHear by you {
 
     shard Fight {
         hear @Boot as b {
-            do *Vein.Console.Io.print("1. before the SF")
+            do print("1. before the SF")
             do strike("slime", 5)
-            do *Vein.Console.Io.print("2. after the SF")
+            do print("2. after the SF")
             do combo("goblin")
         }
     }
@@ -58,10 +59,10 @@ bundle SfEmitHear by you {
     // Another shard hears what the SF emitted — nothing about the emit being inside an SF changes that.
     shard Log {
         hear @Hit as h {
-            do *Vein.Console.Io.print("   Log heard @Hit: " + h.who + " takes " + h.amount)
+            do print("   Log heard @Hit: \(h.who) takes \(h.amount)")
         }
         hear @Healed as h {
-            do *Vein.Console.Io.print("   Log heard @Healed: " + h.who + " +" + h.amount)
+            do print("   Log heard @Healed: \(h.who) +\(h.amount)")
         }
     }
 

@@ -1,6 +1,7 @@
 VeinIR v1  file=samples/target_on.vein
 Bundle D22  author=me
 |--- Need Vein.Math
+|--- Need Vein.Console
 |--- Shape $Hp
 |    `--- Field n: int = Int 10
 |--- Shape $Pos
@@ -21,12 +22,10 @@ Bundle D22  author=me
 |--- Shard Move
 |    `--- EachTick as t
 |         |--- Target $Pos as p
-|         |    `--- Assign = p.Pos.x
-|         |         `--- Concat
-|         |              |--- Path p.Pos.x
-|         |              `--- Binary *
-|         |                   |--- Float 60
-|         |                   `--- Path t.delta
+|         |    `--- Assign += p.Pos.x
+|         |         `--- Binary *
+|         |              |--- Float 60
+|         |              `--- Path t.delta
 |         |--- If
 |         |    |--- Cond = Binary ==
 |         |    |    |--- Path t.frame
@@ -54,29 +53,29 @@ Bundle D22  author=me
 `--- Shard Wounds
      |--- Hear @Hurt as w
      |    |--- Target $Hp on w.who as h
-     |    |    `--- Assign = h.Hp.n
-     |    |         `--- Binary -
-     |    |              |--- Path h.Hp.n
-     |    |              `--- Path w.amount
+     |    |    `--- Assign -= h.Hp.n
+     |    |         `--- Path w.amount
      |    |--- Target $Hp #Boss on w.who as h
-     |    |    `--- Emit *Vein.Console.Io.@Print
-     |    |         `--- Arg text = Concat
+     |    |    `--- Call print
+     |    |         `--- Concat
      |    |              |--- Str "boss hurt to "
-     |    |              `--- Binary -
-     |    |                   |--- Path h.Hp.n
-     |    |                   `--- Path w.amount
+     |    |              |--- Binary -
+     |    |              |    |--- Path h.Hp.n
+     |    |              |    `--- Path w.amount
+     |    |              `--- Str ""
      |    |--- Target $Hp on Int 0 as h
-     |    |    `--- Emit *Vein.Console.Io.@Print
-     |    |         `--- Arg text = Str "WRONG: on 0"
+     |    |    `--- Call print
+     |    |         `--- Str "WRONG: on 0"
      |    `--- Target $Pos on Int 999 as h
-     |         `--- Emit *Vein.Console.Io.@Print
-     |              `--- Arg text = Str "WRONG: on 999"
+     |         `--- Call print
+     |              `--- Str "WRONG: on 999"
      `--- Settled
           `--- Target $Hp $Pos as h
-               `--- Emit *Vein.Console.Io.@Print
-                    `--- Arg text = Concat
+               `--- Call print
+                    `--- Concat
                          |--- Str "boss "
                          |--- Path h.Hp.n
                          |--- Str " at "
-                         `--- Call round
-                              `--- Path h.Pos.x
+                         |--- Call round
+                         |    `--- Path h.Pos.x
+                         `--- Str ""

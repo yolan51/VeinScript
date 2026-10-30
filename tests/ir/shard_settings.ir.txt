@@ -1,5 +1,6 @@
 VeinIR v1  file=samples/shard_settings.vein
 Bundle D28  author=me
+|--- Need Vein.Console
 |--- Shard Spawner
 |    |--- Var rate: int = Int 2
 |    |--- Var running = Bool true
@@ -19,10 +20,11 @@ Bundle D28  author=me
           |    `--- Then
           |         |--- Assign = !Spawner.rate
           |         |    `--- Int 5
-          |         `--- Emit *Vein.Console.Io.@Print
-          |              `--- Arg text = Concat
+          |         `--- Call print
+          |              `--- Concat
           |                   |--- Str "set rate, still "
-          |                   `--- Ref !Spawner.rate
+          |                   |--- Ref !Spawner.rate
+          |                   `--- Str ""
           |--- If
           |    |--- Cond = Binary ==
           |    |    |--- Path t.frame
@@ -38,11 +40,12 @@ Bundle D28  author=me
           |         `--- Assign = !Spawner.running
           |              `--- Unary not
           |                   `--- Ref !Spawner.running
-          `--- Emit *Vein.Console.Io.@Print
-               `--- Arg text = Concat
+          `--- Call print
+               `--- Concat
                     |--- Str "frame "
                     |--- Path t.frame
                     |--- Str ": rate "
                     |--- Ref !Spawner.rate
                     |--- Str ", running "
-                    `--- Ref !Spawner.running
+                    |--- Ref !Spawner.running
+                    `--- Str ""

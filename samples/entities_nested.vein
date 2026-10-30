@@ -25,6 +25,7 @@
 // interpreter printed "/ace" — the slash with nothing in front of it.
 
 bundle EntitiesNested by you {
+    need "Vein.Console"
 
     shape $Deck { title: string }
     mark #Deck
@@ -51,7 +52,7 @@ bundle EntitiesNested by you {
             // is anonymous.
             target $Deck #Deck as d {
                 target $Card #Card as c {
-                    emit *Vein.Console.Io.@Print { text: d.Deck.title + " / " + c.Card.face }
+                    do print("\(d.Deck.title) / \(c.Card.face)")
                 }
             }
         }
@@ -64,7 +65,7 @@ bundle EntitiesNested by you {
             target $Deck #Deck as d {
                 let suits = ["hearts", "spades"]
                 target suits as s {
-                    emit *Vein.Console.Io.@Print { text: "   " + d.Deck.title + " has " + s }
+                    do print("   \(d.Deck.title) has \(s)")
                 }
             }
         }

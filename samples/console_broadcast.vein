@@ -8,6 +8,7 @@
 //   * to a RANDOM one               (pick(consoles))
 //   * to ALL of them                (target consoles as c)
 //
+// uwu: off — the full paths are the point of this sample, so `veinc uwu` leaves it as it is.
 // Stdlib events are fully qualified so their origin is obvious (*Vein.Console.Io.* = stdlib):
 //   @Console → spawn a named console   ·  @Send → write a line to console `to`
 //   @Message → a line that arrived     ·  @Print → write a line to THIS console

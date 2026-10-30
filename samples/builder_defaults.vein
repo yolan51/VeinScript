@@ -47,6 +47,7 @@
 // VS0347.
 
 bundle BuilderDefaults by you {
+    need "Vein.Console"
 
     // ---- three shapes, each with its own defaults ---------------------------------------------------
     //
@@ -127,21 +128,19 @@ bundle BuilderDefaults by you {
 
     shard Show {
         settled {
-            emit *Vein.Console.Io.@Print { text: "-- panels, in the column/order the layout asked for --" }
+            do print("-- panels, in the column/order the layout asked for --")
 
             // `by Style.class` would sort by appearance; `by Layout.order` is the one that means
             // anything here. Three shapes on one identity, and the query picks which of them to sort by.
             target $Content #Panel by Layout.order as p {
-                emit *Vein.Console.Io.@Print { text: "   " + p.Content.title }
-                emit *Vein.Console.Io.@Print { text: "      " + p.Content.body }
+                do print("   \(p.Content.title)")
+                do print("      \(p.Content.body)")
             }
 
-            emit *Vein.Console.Io.@Print { text: "-- the styling each one ended up with --" }
+            do print("-- the styling each one ended up with --")
             target $Style #Panel by Layout.order as p {
-                emit *Vein.Console.Io.@Print {
-                    text: "   class=" + p.Style.class + "  accent=" + p.Style.accent +
-                          "  padded=" + p.Style.padded + "  col=" + p.Layout.column
-                }
+                do print("   class=" + p.Style.class + "  accent=" + p.Style.accent +
+                          "  padded=" + p.Style.padded + "  col=" + p.Layout.column)
             }
         }
     }
@@ -167,12 +166,10 @@ bundle BuilderDefaults by you {
 
     shard ShowDraft {
         settled {
-            emit *Vein.Console.Io.@Print { text: "-- an empty value where there is no default, the default where there is --" }
+            do print("-- an empty value where there is no default, the default where there is --")
             target $Draft #Draft as d {
-                emit *Vein.Console.Io.@Print {
-                    text: "   title=[" + d.Draft.title + "] note=[" + d.Draft.note +
-                          "] slug=[" + d.Draft.slug + "]"
-                }
+                do print("   title=[" + d.Draft.title + "] note=[" + d.Draft.note +
+                          "] slug=[" + d.Draft.slug + "]")
             }
         }
     }

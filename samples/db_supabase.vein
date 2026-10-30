@@ -30,6 +30,7 @@
 // shape through NetHttp.Hook with no network — see `Vein_Rest_composes_the_header_string`.
 
 bundle DbSupabase by you {
+    need "Vein.Console"
 
     // ---- configuration ---------------------------------------------------------------------------
     //
@@ -134,7 +135,7 @@ bundle DbSupabase by you {
         // on the event — rather than querying for them. No `target` needed when the announcement itself
         // is what woke you up.
         hear *Vein.Rest.Db.@Connect as c {
-            emit *Vein.Console.Io.@Print { text: "GET " + c.base + selectPath() }
+            do print("GET \(c.base)\(selectPath())")
             do *Vein.Rest.Db.get(c.base, c.key, selectPath())
         }
     }
@@ -152,15 +153,11 @@ bundle DbSupabase by you {
             // because the service ANSWERED. Parsing without checking would hand `fromJson` an error
             // object and quietly produce zero rows.
             if not *Vein.Rest.Status.ok(f.status) {
-                emit *Vein.Console.Io.@Print { text: "-- " + f.status + " --" }
-                emit *Vein.Console.Io.@Print { text: "   " + f.body }
+                do print("-- \(f.status) --")
+                do print("   \(f.body)")
                 if *Vein.Rest.Status.clientError(f.status) {
-                    emit *Vein.Console.Io.@Print {
-                        text: "   a 401 here almost always means the Connection in shard Boot is still"
-                    }
-                    emit *Vein.Console.Io.@Print {
-                        text: "   the placeholder, and a 404 means the table is not named `tasks`."
-                    }
+                    do print("   a 401 here almost always means the Connection in shard Boot is still")
+                    do print("   the placeholder, and a 404 means the table is not named `tasks`.")
                 }
             } else {
                 // WHICH request was this? The select and the insert both land here, so the handler asks
@@ -174,7 +171,7 @@ bundle DbSupabase by you {
                         // a list — the same thing `target … as x` already walks and `len` already
                         // measures. No conversion step, and no shape declared for the wire format.
                         let rows = fromJson(f.body)
-                        emit *Vein.Console.Io.@Print { text: "read " + len(rows) + " rows" }
+                        do print("read \(len(rows)) rows")
 
                         target rows as row: $Task {
                             bring Task(row.id, row.title, row.rank, row.done)
@@ -183,7 +180,7 @@ bundle DbSupabase by you {
                         // Handed on rather than listed here: the brings above are not committed yet.
                         emit @Loaded { count: len(rows), base: c.Connection.base, key: c.Connection.key }
                     } else {
-                        emit *Vein.Console.Io.@Print { text: "wrote: " + f.body }
+                        do print("wrote: \(f.body)")
                     }
                 }
             }
@@ -192,7 +189,7 @@ bundle DbSupabase by you {
         // @Failed is the OTHER outcome, and it is a different thing entirely: no reply at all — bad host,
         // refused connection, timeout. Nothing to parse, and retrying is the only sensible response.
         hear *Vein.Net.Http.@Failed as f {
-            emit *Vein.Console.Io.@Print { text: "no answer from " + f.url + ": " + f.reason }
+            do print("no answer from \(f.url): \(f.reason)")
         }
     }
 
@@ -200,11 +197,9 @@ bundle DbSupabase by you {
 
     shard Listing {
         hear @Loaded as l {
-            emit *Vein.Console.Io.@Print { text: "-- " + l.count + " tasks, by rank --" }
+            do print("-- \(l.count) tasks, by rank --")
             target $Task #Task by Task.rank as t {
-                emit *Vein.Console.Io.@Print {
-                    text: "   " + t.Task.rank + "  " + t.Task.title + "  done=" + t.Task.done
-                }
+                do print("   \(t.Task.rank)  \(t.Task.title)  done=\(t.Task.done)")
             }
         }
     }
@@ -218,8 +213,8 @@ bundle DbSupabase by you {
             // because VeinScript cannot find a character to escape. PostgREST takes an array of rows, so
             // the object goes inside brackets.
             target $Draft #Draft as d {
-                let payload = "[" + toJson(d.Draft) + "]"
-                emit *Vein.Console.Io.@Print { text: "POST " + l.base + tablePath() + " " + payload }
+                let payload = "[\(toJson(d.Draft))]"
+                do print("POST \(l.base)\(tablePath()) \(payload)")
                 do *Vein.Rest.Db.post(l.base, l.key, tablePath(), payload)
             }
         }

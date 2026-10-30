@@ -645,8 +645,8 @@ public class DiagnosticsTests
         string output = sw.ToString();
 
         Assert.Contains("WARN  | a row has an empty title", output);
-        Assert.Contains("ERROR | Compute (once) at diagnostics.vein:98: Attempted to divide by zero.", output);
-        Assert.Contains("recovered from Compute (once, diagnostics.vein line 98): using 0", output);
+        Assert.Contains("ERROR | Compute (once) at diagnostics.vein:99: Attempted to divide by zero.", output);
+        Assert.Contains("recovered from Compute (once, diagnostics.vein line 99): using 0", output);
         Assert.DoesNotContain("THIS LINE NEVER PRINTS", output);
         // Still alive afterwards, and the rows the faulting run brought are intact.
         Assert.Contains("row: [write the docs] rank 3", output);

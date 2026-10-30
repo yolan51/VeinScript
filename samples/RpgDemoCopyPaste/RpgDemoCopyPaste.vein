@@ -18,7 +18,7 @@ bundle RpgDemoCopyPaste by yolan  {
     event @Attack { from: Entity, to: Entity }
     event @Slain  { who: Entity, name: string, reward: int }
 
-    SF say(text: string) { emit *Vein.Console.Io.@Print { text: text } }
+    SF say(text: string) { do print(text) }
 
     // --- setup ----------------------------------------------------------------
     shard Setup {
@@ -92,7 +92,7 @@ bundle RpgDemoCopyPaste by yolan  {
                 if e.Stats.hp <= 0 {
                     unmark e #Alive
                     if e carries #Player {
-                        do say(e.Stats.name + " has fallen. Game over.")
+                        do say("\(e.Stats.name) has fallen. Game over.")
                     } else {
                         emit @Slain { who: e, name: e.Stats.name, reward: foeReward(e) }
                     }
@@ -110,7 +110,7 @@ bundle RpgDemoCopyPaste by yolan  {
         }
 
         hear @Slain as s {
-            do say("You slew the " + s.name + "! +" + s.reward + " gold.")
+            do say("You slew the \(s.name)! +\(s.reward) gold.")
             target $Game #World as g { g.Game.gold += s.reward }
 
             // win when no foes remain alive
@@ -119,7 +119,7 @@ bundle RpgDemoCopyPaste by yolan  {
                 target $Foe #Alive as f { foes += 1 }
                 if foes == 0 {
                     g.Game.phase = Phase.Win
-                    do say("The dungeon is cleared! Gold: " + g.Game.gold)
+                    do say("The dungeon is cleared! Gold: \(g.Game.gold)")
                 }
             }
         }

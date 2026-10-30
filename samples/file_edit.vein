@@ -44,6 +44,7 @@
 // the same job routed by `tag` instead — one handler, no path spelled twice (RULES 28c).
 
 bundle FileEdit by you {
+    need "Vein.Console"
 
     // One log line worth keeping. `n` is its 1-based number, so the report reads back in file order.
     shape $Problem { n: int, text: string }
@@ -99,7 +100,7 @@ bundle FileEdit by you {
                 // `updated` equals what was read, and the cycle stops on its own. A handle-and-close API
                 // would not have helped here; the loop is in the events, not the file.
                 if not (updated == f.text) {
-                    emit *Vein.Console.Io.@Print { text: "config: fullscreen switched on" }
+                    do print("config: fullscreen switched on")
 
                     // The whole of `write text to file`. There is no `close` because there is no handle.
                     emit *Vein.Files.Io.@WriteFile { path: f.path, text: updated, append: false }
@@ -126,7 +127,7 @@ bundle FileEdit by you {
                     // The condition the sketch could not have grown into: mentions ERROR, but is not
                     // the test line. A second clause costs a word here and a new keyword there.
                     if contains(l, "ERROR") and not contains(l, "test") {
-                        seen = seen + 1
+                        seen += 1
                         bring Problem(Index + 1, l) as e
 
                         // And a decision made once, remembered as a mark rather than re-tested later.
@@ -135,7 +136,7 @@ bundle FileEdit by you {
 
                     // `startsWith` on a whole word, which `l[0] == "F"` cannot do.
                     if startsWith(l, "FATAL") {
-                        seen = seen + 1
+                        seen += 1
                         bring Problem(Index + 1, l) as fatal
                         mark fatal #Fatal
                     }
@@ -150,15 +151,15 @@ bundle FileEdit by you {
 
     shard Report {
         hear @Scanned as s {
-            emit *Vein.Console.Io.@Print { text: "log: " + s.count + " line(s) worth keeping" }
+            do print("log: \(s.count) line(s) worth keeping")
 
             target $Problem #Problem as p {
-                emit *Vein.Console.Io.@Print { text: "  line " + p.Problem.n + ": " + p.Problem.text }
+                do print("  line \(p.Problem.n): \(p.Problem.text)")
             }
 
             // The reason marking beat re-testing: this query repeats no condition.
             target $Problem #Fatal as p {
-                emit *Vein.Console.Io.@Print { text: "  FATAL at line " + p.Problem.n }
+                do print("  FATAL at line \(p.Problem.n)")
             }
         }
     }
@@ -172,7 +173,7 @@ bundle FileEdit by you {
         }
 
         hear *Vein.Files.Io.@FileMissing as m {
-            emit *Vein.Console.Io.@Print { text: "could not use " + m.path + ": " + m.reason }
+            do print("could not use \(m.path): \(m.reason)")
         }
     }
 }

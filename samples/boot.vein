@@ -11,7 +11,7 @@ bundle Game {
 
     shard Kernel {
         hear @NewGame as g {
-            emit @Response { status: 200, body: "new game seed=" + g.seed + " players=" + g.players }
+            emit @Response { status: 200, body: "new game seed=\(g.seed) players=\(g.players)" }
         }
     }
 }

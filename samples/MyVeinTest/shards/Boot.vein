@@ -14,7 +14,7 @@ shard Boot {
     }
 
     hear @Drained as d {
-        emit *Vein.Console.Io.@Print { text: "drained by " + d.amount }
+        emit *Vein.Console.Io.@Print { text: "drained by \(d.amount)" }
         	  // max: int   from $Gauge   REQUIRED — give it a value
 			        target $Gauge as ga{
             	do print(string(ga.Gauge.max))

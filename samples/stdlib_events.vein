@@ -28,6 +28,7 @@
 bundle StdlibEvents by you {
 
     need "Vein.UI"
+    need "Vein.Console"
 
     shape $Log { line: string }
     mark #Logged
@@ -60,19 +61,19 @@ bundle StdlibEvents by you {
 
     shard Keys {
         hear *Vein.Input.Keyboard.@KeyDown as k {
-            emit *Vein.Console.Io.@Print { text: "key down: " + k.key }
+            do print("key down: \(k.key)")
         }
     }
 
     shard Typing {
         hear *Vein.Input.Keyboard.@TextInput as t {
-            emit *Vein.Console.Io.@Print { text: "typed: " + t.text }
+            do print("typed: \(t.text)")
         }
     }
 
     shard Pointer {
         hear *Vein.Input.Mouse.@MouseDown as m {
-            emit *Vein.Console.Io.@Print { text: "mouse " + m.button + " at " + m.x + "," + m.y }
+            do print("mouse \(m.button) at \(m.x),\(m.y)")
         }
     }
 
@@ -83,13 +84,13 @@ bundle StdlibEvents by you {
 
     shard Reacting {
         hear *Vein.UI.Interaction.@Clicked as c {
-            emit *Vein.Console.Io.@Print { text: "clicked entity " + c.target }
+            do print("clicked entity \(c.target)")
         }
     }
 
     shard Focusing {
         hear *Vein.UI.Interaction.@Focused as f {
-            emit *Vein.Console.Io.@Print { text: "focused entity " + f.target }
+            do print("focused entity \(f.target)")
         }
     }
 
@@ -105,13 +106,13 @@ bundle StdlibEvents by you {
 
     shard Wounds {
         hear *Vein.Game.Combat.@Damaged as d {
-            emit *Vein.Console.Io.@Print { text: "damaged " + d.target + " for " + d.amount }
+            do print("damaged \(d.target) for \(d.amount)")
         }
     }
 
     shard Contacts {
         hear *Vein.Game.Collision.@Collided as c {
-            emit *Vein.Console.Io.@Print { text: "collision between " + c.a + " and " + c.b }
+            do print("collision between \(c.a) and \(c.b)")
         }
     }
 }

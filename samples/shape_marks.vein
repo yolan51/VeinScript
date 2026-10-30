@@ -34,6 +34,7 @@
 // would stop creating anything with nothing reported.
 
 bundle ShapeMarks by you {
+    need "Vein.Console"
 
     mark #CameraFollow
     mark #Rendered
@@ -90,18 +91,18 @@ bundle ShapeMarks by you {
     shard Watch {
         settled {
             var carrying = 0
-            target $Actor $Shield as b { carrying = carrying + 1 }
+            target $Actor $Shield as b { carrying += 1 }
             var marked = 0
-            target $Actor #Shielded as b { marked = marked + 1 }
-            emit *Vein.Console.Io.@Print { text: "shield: carrying " + carrying + ", marked " + marked }
+            target $Actor #Shielded as b { marked += 1 }
+            do print("shield: carrying \(carrying), marked \(marked)")
 
             var cams = 0
-            target $GameCamera #CameraFollow #Rendered #Cullable as c { cams = cams + 1 }
-            emit *Vein.Console.Io.@Print { text: "cameras wearing all four marks: " + cams }
+            target $GameCamera #CameraFollow #Rendered #Cullable as c { cams += 1 }
+            do print("cameras wearing all four marks: \(cams)")
 
             var ghosts = 0
-            target $Ghost #Ghost as g { ghosts = ghosts + 1 }
-            emit *Vein.Console.Io.@Print { text: "identities from a builder with no mark line: " + ghosts }
+            target $Ghost #Ghost as g { ghosts += 1 }
+            do print("identities from a builder with no mark line: \(ghosts)")
         }
     }
 }

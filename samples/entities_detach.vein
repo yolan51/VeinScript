@@ -14,6 +14,7 @@
 //   bash tools/check-backend.sh          (the same program, emitted to C# and diffed against the above)
 
 bundle EntitiesDetach by you {
+    need "Vein.Console"
 
     shape $Health { hp: int folds sum }
     shape $Shield { sp: int folds sum }
@@ -50,7 +51,7 @@ bundle EntitiesDetach by you {
         settled {
             target $Health $Shield #Mob as self {
                 if self.Shield.sp <= 0 {
-                    emit *Vein.Console.Io.@Print { text: "shatter e" + Entity + " sp=" + self.Shield.sp }
+                    do print("shatter e\(Entity) sp=\(self.Shield.sp)")
                     unattach $Shield from self
                 }
             }
@@ -61,10 +62,10 @@ bundle EntitiesDetach by you {
         settled {
             // Still shielded — shrinks as shields shatter, which is the removal being visible to a query.
             target $Shield #Mob as self {
-                emit *Vein.Console.Io.@Print { text: "  shielded e" + Entity + " sp=" + self.Shield.sp }
+                do print("  shielded e\(Entity) sp=\(self.Shield.sp)")
             }
             target $Health #Mob as self {
-                emit *Vein.Console.Io.@Print { text: "  alive    e" + Entity + " hp=" + self.Health.hp }
+                do print("  alive    e\(Entity) hp=\(self.Health.hp)")
             }
         }
     }

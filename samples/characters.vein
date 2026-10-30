@@ -30,6 +30,7 @@
 // compile to the backend.
 
 bundle Characters by you {
+    need "Vein.Console"
 
     // ---- classification, written the obvious way ------------------------------------------------
     //
@@ -60,7 +61,7 @@ bundle Characters by you {
         var why: string
 
         run once {
-            emit *Vein.Console.Io.@Print { text: "identifier check" }
+            do print("identifier check")
 
             target words("count _x 9lives has-dash ok_2 Zeta") as w {
                 ok = true
@@ -69,7 +70,7 @@ bundle Characters by you {
                 // The first character decides whether it can start at all.
                 if not (isLetter(w[0]) or w[0] == "_") {
                     ok = false
-                    why = "starts with '" + w[0] + "'"
+                    why = "starts with '\(w[0])'"
                 }
 
                 // Then every character, including the first again — cheap, and it keeps the two rules
@@ -78,7 +79,7 @@ bundle Characters by you {
                     target chars(w) as c {
                         if not isIdentChar(c) {
                             ok = false
-                            why = "contains '" + c + "'"
+                            why = "contains '\(c)'"
                         }
                     }
                 }
@@ -96,10 +97,10 @@ bundle Characters by you {
         hear @Checked as c {
             target $Word #Checked as w {
                 if w.Word.ok {
-                    emit *Vein.Console.Io.@Print { text: "  ok       " + w.Word.text }
+                    do print("  ok       \(w.Word.text)")
                 }
                 if not w.Word.ok {
-                    emit *Vein.Console.Io.@Print { text: "  rejected  " + w.Word.text + "   " + w.Word.why }
+                    do print("  rejected  \(w.Word.text)   \(w.Word.why)")
                 }
             }
         }
@@ -118,11 +119,11 @@ bundle Characters by you {
             target chars("attack at dawn") as ch {
                 if isLower(ch) {
                     // ROT13. `code(ch) - code("a")` is the letter's position, +13 wraps at 26.
-                    out = out + chr(code("a") + (code(ch) - code("a") + 13) % 26)
+                    out += chr(code("a") + (code(ch) - code("a") + 13) % 26)
                 }
-                if not isLower(ch) { out = out + ch }
+                if not isLower(ch) { out += ch }
             }
-            emit *Vein.Console.Io.@Print { text: "rot13: " + out }
+            do print("rot13: \(out)")
         }
     }
 
@@ -135,13 +136,13 @@ bundle Characters by you {
     shard Casing {
         hear @Checked as c {
             if not ("Zeta" == "zeta") {
-                emit *Vein.Console.Io.@Print { text: "ordinal: Zeta is not zeta" }
+                do print("ordinal: Zeta is not zeta")
             }
             if lower("Zeta") == lower("zeta") {
-                emit *Vein.Console.Io.@Print { text: "lowered: Zeta is zeta" }
+                do print("lowered: Zeta is zeta")
             }
             if "Z" < "a" {
-                emit *Vein.Console.Io.@Print { text: "and every capital sorts before every lowercase" }
+                do print("and every capital sorts before every lowercase")
             }
         }
     }

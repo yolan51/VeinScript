@@ -5,6 +5,7 @@
 // else supplies, which is the point of the split.
 
 bundle Gate by you {
+    need "Vein.Console"
 
     publicator Doors {
         shared("The gate is open; here is the port anyone listening should use.")
@@ -16,7 +17,7 @@ bundle Gate by you {
 
     shard Announce {
         hear @Opened as o {
-            emit *Vein.Console.Io.@Print { text: "[Gate] open on " + o.at + " — a listener may now bind" }
+            do print("[Gate] open on \(o.at) — a listener may now bind")
         }
     }
 }

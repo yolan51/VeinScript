@@ -18,6 +18,7 @@
 // sees the result.
 
 bundle Destroying by you {
+    need "Vein.Console"
 
     shape $Health { hp: int }
     shape $Shield { sp: int }
@@ -102,13 +103,11 @@ bundle Destroying by you {
             var shielded = 0
             var living = 0
 
-            target $Health #Alive as a { alive = alive + 1 }
-            target $Shield as s { shielded = shielded + 1 }
-            target $Health as h { living = living + 1 }
+            target $Health #Alive as a { alive += 1 }
+            target $Shield as s { shielded += 1 }
+            target $Health as h { living += 1 }
 
-            emit *Vein.Console.Io.@Print {
-                text: "during   alive " + alive + "   shielded " + shielded + "   entities " + living
-            }
+            do print("during   alive \(alive)   shielded \(shielded)   entities \(living)")
         }
     }
 
@@ -118,13 +117,11 @@ bundle Destroying by you {
             var shielded = 0
             var living = 0
 
-            target $Health #Alive as a { alive = alive + 1 }
-            target $Shield as s { shielded = shielded + 1 }
-            target $Health as h { living = living + 1 }
+            target $Health #Alive as a { alive += 1 }
+            target $Shield as s { shielded += 1 }
+            target $Health as h { living += 1 }
 
-            emit *Vein.Console.Io.@Print {
-                text: "after    alive " + alive + "   shielded " + shielded + "   entities " + living
-            }
+            do print("after    alive \(alive)   shielded \(shielded)   entities \(living)")
         }
     }
 }

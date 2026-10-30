@@ -271,7 +271,7 @@ bundle Kanban by you {
     }
 
     fn plural(n: int, word: string) return string {
-        if n == 1 { return "1 " + word }
+        if n == 1 { return "1 \(word)" }
         return string(n) + " " + word + "s"
     }
 }

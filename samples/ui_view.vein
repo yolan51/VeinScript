@@ -18,8 +18,8 @@
 // the width would have had to be listening earlier and stored it. `$View` is an identity the host keeps
 // current, so any shard can ask at any time — the same arrangement a camera already has.
 //
-// `@Print` is reached by its qualified path rather than a `need "Vein.Console"`, because that bundle
-// exports a `spawn` and would shadow the built-in one every line below depends on (VS0217).
+// `need "Vein.Console"` (for `do print`) leaves the `spawn()` calls below alone, though that bundle has an SF
+// named `spawn`: a bare call reaches the built-in, and the SF only with `do` (VS0217).
 //
 // The host attaches `$View`. This sample attaches it itself, because `veinc run` has no window: that is
 // the one thing here a real host does differently, and it is one `attach` either way.
@@ -28,6 +28,7 @@ bundle UiView by you {
 
     need "Vein.Math"
     need "Vein.UI"
+    need "Vein.Console"
 
     mark #Hud
 
@@ -94,12 +95,10 @@ bundle UiView by you {
     shard Report {
         settled {
             target $View as v {
-                emit *Vein.Console.Io.@Print { text: "view " + v.View.width + "x" + v.View.height }
+                do print("view \(v.View.width)x\(v.View.height)")
             }
             target $Text $Rect $Font #Hud as w {
-                emit *Vein.Console.Io.@Print {
-                    text: w.Text.content + " at " + w.Rect.x + "," + w.Rect.y + " @" + w.Font.size + "px"
-                }
+                do print("\(w.Text.content) at \(w.Rect.x),\(w.Rect.y) @\(w.Font.size)px")
             }
         }
     }

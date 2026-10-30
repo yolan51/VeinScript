@@ -1,5 +1,6 @@
 VeinIR v1  file=samples/audience_not.vein
 Bundle Lobby  author=you
+|--- Need Vein.Console
 |--- Event @Chat
 |    `--- Field text: string
 |--- Shard Ledger
@@ -20,19 +21,22 @@ Bundle Lobby  author=you
 |              `--- Arg text = Str "hi from Kiosk"
 |--- Shard AllBut
 |    `--- Hear @Chat as c  audience=[not !Ledger not !Spammer]
-|         `--- Emit *Vein.Console.Io.@Print
-|              `--- Arg text = Concat
+|         `--- Call print
+|              `--- Concat
 |                   |--- Str "all-but: "
-|                   `--- Path c.text
+|                   |--- Path c.text
+|                   `--- Str ""
 |--- Shard OnlyLedger
 |    `--- Hear @Chat as c  audience=[!Ledger]
-|         `--- Emit *Vein.Console.Io.@Print
-|              `--- Arg text = Concat
+|         `--- Call print
+|              `--- Concat
 |                   |--- Str "only-ledger: "
-|                   `--- Path c.text
+|                   |--- Path c.text
+|                   `--- Str ""
 `--- Shard Unbanned
      `--- Hear @Chat as c  audience=[not #Banned]
-          `--- Emit *Vein.Console.Io.@Print
-               `--- Arg text = Concat
+          `--- Call print
+               `--- Concat
                     |--- Str "unbanned: "
-                    `--- Path c.text
+                    |--- Path c.text
+                    `--- Str ""

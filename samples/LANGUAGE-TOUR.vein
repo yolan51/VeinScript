@@ -120,7 +120,7 @@ bundle Demo {
 
     shard Report {
         hear @SyncedHit as s {
-            emit @Response { status: 200, body: "amount " + s.amount + " from " + s.from.kind + "." + s.from.name }
+            emit @Response { status: 200, body: "amount \(s.amount) from \(s.from.kind).\(s.from.name)" }
         }
     }
 }
@@ -151,7 +151,7 @@ bundle Demo {
 
     shard Auditor {
         hear @Damage as d audience $Session #Trusted {
-            emit @Response { status: 200, body: "audited trusted damage " + d.amount + " from " + d.from.kind + "." + d.from.name }
+            emit @Response { status: 200, body: "audited trusted damage \(d.amount) from \(d.from.kind).\(d.from.name)" }
         }
     }
 }
@@ -209,7 +209,7 @@ bundle Site {
         hear @Render as r {
             emit @Response {
                 status: 200
-                body: "<html><body>" + html + "</body></html>"
+                body: "<html><body>\(html)</body></html>"
             }
         }
     }
@@ -237,10 +237,10 @@ bundle App {
     }
 
     // Pre-built elements: params then an output field (markup/code/css) whose value is the template.
-    builder Heading    { text: string   markup = "<h1>" + text + "</h1>" }
+    builder Heading    { text: string   markup = "<h1>\(text)</h1>" }
     builder CounterView { markup = "<p>Count: <span id=\"n\">0</span></p>" }
-    builder Button     { label: string  markup = "<button onclick=\"inc()\">" + label + "</button>" }
-    builder Item       { label: string  markup = "<li>" + label + "</li>" }
+    builder Button     { label: string  markup = "<button onclick=\"inc()\">\(label)</button>" }
+    builder Item       { label: string  markup = "<li>\(label)</li>" }
     builder IncFn      { code = "let c=0; function inc(){ c+=1; document.getElementById('n').innerText=c; }" }
     builder BaseCss    { css = "body{font-family:sans-serif;margin:2rem} button{cursor:pointer}" }
 
@@ -273,7 +273,7 @@ bundle App {
         hear @Render as r {
             emit @Response {
                 status: 200
-                body: "<!doctype html><html><head><style>" + css + "</style></head><body>" + html + "<script>" + js + "</script></body></html>"
+                body: "<!doctype html><html><head><style>\(css)</style></head><body>\(html)<script>\(js)</script></body></html>"
             }
         }
     }
@@ -307,11 +307,11 @@ bundle App {
     // directly, so there's no literal to construct and no name to repeat at the `bring` site.
     builder Heading {
         $Heading
-        markup = "<h1>" + text + "</h1>"
+        markup = "<h1>\(text)</h1>"
     }
     builder Button {
         $Button
-        markup = "<button id=\"" + id + "\" class=\"" + class + "\" onclick=\"" + onclick + "()\">" + label + "</button>"
+        markup = "<button id=\"\(id)\" class=\"\(class)\" onclick=\"\(onclick)()\">\(label)</button>"
     }
 
     // Provide the fields straight — positionally, or `bring Button ?` to see/fill them.
@@ -330,7 +330,7 @@ bundle App {
         var html: string
         hear @Html as f { html += f.markup }
         hear @Render as r {
-            emit @Response { status: 200, body: "<html><body>" + html + "</body></html>" }
+            emit @Response { status: 200, body: "<html><body>\(html)</body></html>" }
         }
     }
 }
@@ -368,20 +368,20 @@ bundle App {
     builder Display {
         slot: Id
         initial: string
-        markup = "<span id=\"" + slot.name + "\">" + initial + "</span>"
+        markup = "<span id=\"\(slot.name)\">\(initial)</span>"
     }
     builder Button {
         b: Control
-        markup = "<button id=\"" + b.id.name + "\" class=\"" + b.class.name + "\" onclick=\"" + b.onclick.name + "()\">" + b.label + "</button>"
+        markup = "<button id=\"\(b.id.name)\" class=\"\(b.class.name)\" onclick=\"\(b.onclick.name)()\">\(b.label)</button>"
     }
     builder Define {
         f: Fn
-        code = "function " + f.name + "(){ " + f.body + " }"
+        code = "function \(f.name)(){ \(f.body) }"
     }
     builder Rule {
         c: Class
         decl: string
-        css = "." + c.name + "{" + decl + "}"
+        css = ".\(c.name){\(decl)}"
     }
 
     shard Ui {
@@ -389,7 +389,7 @@ bundle App {
             // Declare each handle ONCE. inc's body reads counter.name, so "counter" is written once.
             let counter = Id { name: "counter" }
             let primary = Class { name: "primary" }
-            let inc     = Fn { name: "inc", body: "let e=document.getElementById('" + counter.name + "'); e.innerText=(+e.innerText)+1" }
+            let inc     = Fn { name: "inc", body: "let e=document.getElementById('\(counter.name)'); e.innerText=(+e.innerText)+1" }
 
             bring Rule(primary, "cursor:pointer;font-weight:bold")
             bring Display(counter, "0")
@@ -408,7 +408,7 @@ bundle App {
         hear @Script as s { js += s.code }
         hear @Style as st { css += st.css }
         hear @Render as r {
-            emit @Response { status: 200, body: "<!doctype html><html><head><style>" + css + "</style></head><body>" + html + "<script>" + js + "</script></body></html>" }
+            emit @Response { status: 200, body: "<!doctype html><html><head><style>\(css)</style></head><body>\(html)<script>\(js)</script></body></html>" }
         }
     }
 }
@@ -456,11 +456,11 @@ bundle Entities {
         // correct, because during the tick another shard may still be subtracting.
         settled {
             target $Health #Enemy as self {
-                emit *Vein.Console.Io.@Print { text: "enemy " + Entity + " hp " + self.Health.hp }
+                emit *Vein.Console.Io.@Print { text: "enemy \(Entity) hp \(self.Health.hp)" }
                 if self.Health.hp <= 0 {
                     mark self #Dead
                     unmark self #Enemy
-                    emit *Vein.Console.Io.@Print { text: "enemy " + Entity + " died" }
+                    emit *Vein.Console.Io.@Print { text: "enemy \(Entity) died" }
                 }
             }
         }
@@ -509,7 +509,7 @@ bundle ConsoleRoles by you {
                 when #Main {
                     round += 1
                     let workers = [#Alpha, #Beta]
-                    emit *Vein.Console.Io.@Send { to: pick(workers), text: "ping " + round }
+                    emit *Vein.Console.Io.@Send { to: pick(workers), text: "ping \(round)" }
                 }
             }
         }
@@ -522,7 +522,7 @@ bundle ConsoleRoles by you {
         // ADVISORY (the sender's name is unauthenticated); over Vein.Net it is enforced — §10.
         hear *Vein.Console.Io.@Message as m audience #Main {
             seen += 1
-            emit *Vein.Console.Io.@Print { text: m.from + " → " + m.text + " (#" + seen + ")" }
+            emit *Vein.Console.Io.@Print { text: "\(m.from) → \(m.text) (#\(seen))" }
         }
     }
 
@@ -530,7 +530,7 @@ bundle ConsoleRoles by you {
     // makes the sender go quiet, and a silent window is indistinguishable from a dead one.
     shard Reachability {
         hear *Vein.Console.Io.@Undelivered as u {
-            emit *Vein.Console.Io.@Print { text: "  (" + u.to + " is not running)" }
+            emit *Vein.Console.Io.@Print { text: "  (\(u.to) is not running)" }
         }
     }
 }
@@ -570,7 +570,7 @@ bundle NetPeer by you {
     // Byte for byte the console version — nothing here says "network".
     shard Trusted {
         hear *Vein.Net.Peer.@Message as m audience #Spoke {
-            emit *Vein.Net.Peer.@Send { to: m.from, text: "ack " + m.text }
+            emit *Vein.Net.Peer.@Send { to: m.from, text: "ack \(m.text)" }
         }
     }
 
@@ -582,10 +582,10 @@ bundle NetPeer by you {
             emit *Vein.Net.Http.@Fetch { url: "https://httpbin.org/ip", method: "GET", body: "" }
         }
         hear *Vein.Net.Http.@Fetched as r {
-            emit *Vein.Console.Io.@Print { text: r.status + " " + r.body }
+            emit *Vein.Console.Io.@Print { text: "\(r.status) \(r.body)" }
         }
         hear *Vein.Net.Http.@Failed as f {
-            emit *Vein.Console.Io.@Print { text: "unreachable " + f.url + " — " + f.reason }
+            emit *Vein.Console.Io.@Print { text: "unreachable \(f.url) — \(f.reason)" }
         }
     }
 }
@@ -626,13 +626,13 @@ bundle ChatRoster by you {
             if not known {
                 let e = spawn()
                 attach $Client to e { addr: m.from }
-                emit *Vein.Console.Io.@Print { text: "* " + m.from + " joined" }
+                emit *Vein.Console.Io.@Print { text: "* \(m.from) joined" }
             }
 
             // Relay to everyone except the sender.
             target $Client as self {
                 if not (self.Client.addr == m.from) {
-                    emit *Vein.Net.Peer.@Send { to: self.Client.addr, text: m.from + ": " + m.text }
+                    emit *Vein.Net.Peer.@Send { to: self.Client.addr, text: "\(m.from): \(m.text)" }
                 }
             }
         }
@@ -643,7 +643,7 @@ bundle ChatRoster by you {
             target $Client as self {
                 if self.Client.addr == u.to {
                     destroy self
-                    emit *Vein.Console.Io.@Print { text: "* " + u.to + " left" }
+                    emit *Vein.Console.Io.@Print { text: "* \(u.to) left" }
                 }
             }
         }
@@ -691,7 +691,7 @@ bundle Store by you {
 
     shard Fulfilment {
         hear @Ordered as o {
-            emit *Vein.Console.Io.@Print { text: "[Store] " + o.qty + " x " + o.item }
+            emit *Vein.Console.Io.@Print { text: "[Store] \(o.qty) x \(o.item)" }
             emit @Shipped { item: o.item }
         }
     }
@@ -732,7 +732,7 @@ bundle UseDemo by you {
     shard Watch {
         hear @Placed as p {
             // The qualified form, side by side with the bare one above. Same function, same result.
-            do *Vein.Console.Io.print(p.label + " at " + p.x + "," + p.y)
+            do *Vein.Console.Io.print("\(p.label) at \(p.x),\(p.y)")
         }
     }
 }

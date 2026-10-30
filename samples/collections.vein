@@ -100,8 +100,8 @@ bundle Collections by you {
         }
 
         hear @Show as s {
-            target $Room.~exits as r, x { do print(r.Room.name + " -> " + x.Room.name) }      // one flat loop
-            target $Guild.~members as g, m { do print(g.Guild.name + ": " + m.Person.name) }  // one line per member
+            target $Room.~exits as r, x { do print("\(r.Room.name) -> \(x.Room.name)") }      // one flat loop
+            target $Guild.~members as g, m { do print("\(g.Guild.name): \(m.Person.name)") }  // one line per member
         }
     }
 
@@ -117,22 +117,22 @@ bundle Collections by you {
         }
         hear @Show as s {
             target $Guild as g {
-                target $Person as p { if p.Person.name == "Cy" { do print("Cy is an Owl: " + g.Guild.~members.has(p)) } }
+                target $Person as p { if p.Person.name == "Cy" { do print("Cy is an Owl: \(g.Guild.~members.has(p))") } }
                 target $Person as p { if p.Person.name == "Bob" { g.Guild.~members.remove(p) } }
             }
-            target $Chat as c { do print("chat: " + join(c.Chat.~lines, " ")) }
-            target $Board.~scores as b, e { do print(e.key + " = " + e.value) }
+            target $Chat as c { do print("chat: \(join(c.Chat.~lines, " "))") }
+            target $Board.~scores as b, e { do print("\(e.key) = \(e.value)") }
             emit @Leave { }
         }
         hear @Leave as l {
-            target $Guild as g { do print("Owls after Bob left: " + names(g)) }
+            target $Guild as g { do print("Owls after Bob left: \(names(g))") }
             target $Person as p { if p.Person.name == "Cy" { destroy p } }
             target $Chat as c { c.Chat.~lines.clear() }
             emit @Gone { }
         }
         hear @Gone as gone {
-            target $Guild as g { do print("Owls after Cy is gone: " + names(g)) }
-            target $Chat as c { do print("chat after clear: " + len(c.Chat.~lines) + " lines") }
+            target $Guild as g { do print("Owls after Cy is gone: \(names(g))") }
+            target $Chat as c { do print("chat after clear: \(len(c.Chat.~lines)) lines") }
         }
     }
 
@@ -140,8 +140,8 @@ bundle Collections by you {
     fn names(g: Entity) return string {
         var all = ""
         target g.Guild.~members as m {
-            if not (all == "") { all = all + " " }
-            all = all + m.Person.name
+            if not (all == "") { all += " " }
+            all += m.Person.name
         }
         return all
     }

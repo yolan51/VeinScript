@@ -23,13 +23,14 @@
 // readable but a length. Not TLS though: one static key, so no forward secrecy and no cert identity.
 
 bundle PeerHub by you {
+    need "Vein.Console"
 
     shard Boot {
         run once {
             // `as` is who this program IS on the network. Without it every peer in the world would
             // answer to #Main — harmless for one machine's pipes, useless across a network.
             emit *Vein.Net.Peer.@Listen { as: #Hub, at: 9700, key: "shared-secret" }
-            emit *Vein.Console.Io.@Print { text: "hub listening on 9700 as #Hub — waiting for #Spoke" }
+            do print("hub listening on 9700 as #Hub — waiting for #Spoke")
         }
     }
 
@@ -38,9 +39,9 @@ bundle PeerHub by you {
     // honoured by well-behaved peers.
     shard Trusted {
         hear *Vein.Net.Peer.@Message as m audience #Spoke {
-            emit *Vein.Console.Io.@Print { text: "trusted " + m.from + ": " + m.text }
+            do print("trusted \(m.from): \(m.text)")
             // Replying to a peer that was never linked — the route was learned when it spoke.
-            emit *Vein.Net.Peer.@Send { to: m.from, text: "ack " + m.text }
+            emit *Vein.Net.Peer.@Send { to: m.from, text: "ack \(m.text)" }
         }
     }
 
@@ -49,7 +50,7 @@ bundle PeerHub by you {
     // and a program that cannot see strangers cannot report them either.
     shard Inbox {
         hear *Vein.Net.Peer.@Message as m {
-            emit *Vein.Console.Io.@Print { text: "  (inbox saw " + m.from + ")" }
+            do print("  (inbox saw \(m.from))")
         }
     }
 
@@ -57,7 +58,7 @@ bundle PeerHub by you {
     // "no answer" has to be an event, or a dead machine is indistinguishable from a quiet one.
     shard Reachability {
         hear *Vein.Net.Peer.@Undelivered as u {
-            emit *Vein.Console.Io.@Print { text: "  (" + u.to + " unreachable)" }
+            do print("  (\(u.to) unreachable)")
         }
     }
 }

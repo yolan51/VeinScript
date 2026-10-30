@@ -24,7 +24,7 @@ bundle WebDemo by you {
         var html: string
         hear *Vein.Web.Http.@Html as f   { html += f.markup }
         hear *Vein.Web.Http.@Render as r {
-            emit *Vein.Web.Http.@Response { status: 200, body: "<html><body>" + html + "</body></html>" }
+            emit *Vein.Web.Http.@Response { status: 200, body: "<html><body>\(html)</body></html>" }
         }
     }
 

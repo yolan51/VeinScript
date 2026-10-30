@@ -24,6 +24,7 @@
 bundle Market by you {
 
     need "kit.Shop"
+    need "Vein.Console"
 
     shard Till {
         run once {
@@ -55,7 +56,7 @@ bundle Market by you {
 		}
 
         hear @Sold as s {
-            emit *Vein.Console.Io.@Print { text: "sold " + s.item + " for " + s.amount + " " + s.currency }
+            do print("sold \(s.item) for \(s.amount) \(s.currency)")
         }
     }
 
@@ -63,9 +64,7 @@ bundle Market by you {
     shard Shelf {
         settled {
             target $Price $Stock #Crate as c {
-                emit *Vein.Console.Io.@Print {
-                    text: "crate: " + c.Stock.count + " at " + c.Price.amount + " " + c.Price.currency
-                }
+                do print("crate: \(c.Stock.count) at \(c.Price.amount) \(c.Price.currency)")
             }
         }
     }

@@ -29,6 +29,7 @@
 //   enemies 3
 
 bundle Arcade by you {
+    need "Vein.Console"
     event @Chat { text: string }
 
     // ---- a group to pause -------------------------------------------------------------------------
@@ -38,11 +39,11 @@ bundle Arcade by you {
         each tick {
             t += 1
             if t == 2 {
-                emit *Vein.Console.Io.@Print { text: "menu opens" }
+                do print("menu opens")
                 mute #Gameplay
             }
             if t == 4 {
-                emit *Vein.Console.Io.@Print { text: "menu closes" }
+                do print("menu closes")
                 unmute #Gameplay
             }
         }
@@ -52,7 +53,7 @@ bundle Arcade by you {
         var n: int = 0
         each tick {
             n += 1
-            emit *Vein.Console.Io.@Print { text: "physics " + n }
+            do print("physics \(n)")
         }
     }
 
@@ -60,7 +61,7 @@ bundle Arcade by you {
         var n: int = 0
         each tick {
             n += 1
-            emit *Vein.Console.Io.@Print { text: "enemies " + n }
+            do print("enemies \(n)")
         }
     }
 
@@ -83,10 +84,10 @@ bundle Arcade by you {
     shard Chat {
         hear @Chat as c audience not #Banned {
             if c.from carries #Trusted {
-                emit *Vein.Console.Io.@Print { text: "chat (friend): " + c.text }
+                do print("chat (friend): \(c.text)")
             }
             if not (c.from carries #Trusted) {
-                emit *Vein.Console.Io.@Print { text: "chat: " + c.text }
+                do print("chat: \(c.text)")
             }
         }
     }

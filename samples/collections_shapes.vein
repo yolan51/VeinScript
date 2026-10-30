@@ -104,11 +104,11 @@ bundle CollectionShapes by you {
         }
 
         hear @Show as s {
-            target $Guild.~members as g, m { do print(g.Guild.name + ": " + m.Person.name) }     // one line per member
-            target $Bag.~items as b, i { do print(b.Bag.name + " holds " + i.Item.name) }
-            target $Hero.~slots as h, e { target $Item on e.value as i { do print(h.Hero.name + "'s " + e.key + ": " + i.Item.name) } }
-            target $Net.~ping as n, e { target $Server on e.key as srv { do print(n.Net.from + " -> " + srv.Server.name + " " + e.value + " ms") } }
-            do print("items alive: " + countItems())
+            target $Guild.~members as g, m { do print("\(g.Guild.name): \(m.Person.name)") }     // one line per member
+            target $Bag.~items as b, i { do print("\(b.Bag.name) holds \(i.Item.name)") }
+            target $Hero.~slots as h, e { target $Item on e.value as i { do print("\(h.Hero.name)'s \(e.key): \(i.Item.name)") } }
+            target $Net.~ping as n, e { target $Server on e.key as srv { do print("\(n.Net.from) -> \(srv.Server.name) \(e.value) ms") } }
+            do print("items alive: \(countItems())")
             emit @Change { }
         }
 
@@ -124,14 +124,14 @@ bundle CollectionShapes by you {
         }
 
         hear @Again as a {
-            target $Guild.~members as g, m { do print(g.Guild.name + ": " + m.Person.name) }
+            target $Guild.~members as g, m { do print("\(g.Guild.name): \(m.Person.name)") }
             var people = 0
-            target $Person as p { people = people + 1 }
-            do print("people alive: " + people)
-            target $Bag as b { if len(b.Bag.~items) == 0 { do print(b.Bag.name + " holds nothing") } }
-            target $Bag.~items as b, i { do print(b.Bag.name + " holds " + i.Item.name) }
-            target $Hero.~slots as h, e { target $Item on e.value as i { do print(h.Hero.name + "'s " + e.key + ": " + i.Item.name) } }
-            do print("items alive: " + countItems())
+            target $Person as p { people += 1 }
+            do print("people alive: \(people)")
+            target $Bag as b { if len(b.Bag.~items) == 0 { do print("\(b.Bag.name) holds nothing") } }
+            target $Bag.~items as b, i { do print("\(b.Bag.name) holds \(i.Item.name)") }
+            target $Hero.~slots as h, e { target $Item on e.value as i { do print("\(h.Hero.name)'s \(e.key): \(i.Item.name)") } }
+            do print("items alive: \(countItems())")
             emit @End { }
         }
 
@@ -143,14 +143,14 @@ bundle CollectionShapes by you {
         }
 
         hear @Last as l {
-            do print("items alive: " + countItems())
-            target $Net.~ping as n, e { target $Server on e.key as srv { do print(n.Net.from + " -> " + srv.Server.name + " " + e.value + " ms") } }
+            do print("items alive: \(countItems())")
+            target $Net.~ping as n, e { target $Server on e.key as srv { do print("\(n.Net.from) -> \(srv.Server.name) \(e.value) ms") } }
         }
     }
 
     fn countItems() return int {
         var n = 0
-        target $Item as i { n = n + 1 }
+        target $Item as i { n += 1 }
         return n
     }
 }

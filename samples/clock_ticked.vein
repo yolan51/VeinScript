@@ -21,6 +21,7 @@
 bundle ClockTicked by you {
 
     need "Vein.Time"
+    need "Vein.Console"
 
     shape $Odometer { frames: int, seconds: float }
     mark #Odometer
@@ -36,7 +37,7 @@ bundle ClockTicked by you {
         hear *Vein.Time.Clock.@Ticked as t {
             target $Odometer #Odometer as o {
                 o.Odometer.frames = t.frame
-                o.Odometer.seconds = o.Odometer.seconds + t.delta
+                o.Odometer.seconds += t.delta
             }
         }
     }
@@ -44,9 +45,7 @@ bundle ClockTicked by you {
     shard Report {
         settled {
             target $Odometer #Odometer as o {
-                emit *Vein.Console.Io.@Print {
-                    text: "frame " + o.Odometer.frames + " at " + *Vein.Math.Round.roundTo(o.Odometer.seconds, 4) + "s"
-                }
+                do print("frame \(o.Odometer.frames) at \(*Vein.Math.Round.roundTo(o.Odometer.seconds, 4))s")
             }
         }
     }

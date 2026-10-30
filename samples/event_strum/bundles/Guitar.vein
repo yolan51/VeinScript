@@ -7,6 +7,7 @@
 // `Author.Bundle.Name`, so this one is `alice.Guitar.Strum`, whatever the others are called.
 
 bundle Guitar by alice {
+    need "Vein.Console"
 
     publicator Api {
         shared("A guitar string was strummed.")
@@ -17,7 +18,7 @@ bundle Guitar by alice {
     // When the Band strums the Banjo, this shard hears nothing.
     shard Player {
         hear @Strum as s {
-            emit *Vein.Console.Io.@Print { text: "[guitar] heard its own Strum: note " + s.note + " on fret " + s.fret }
+            do print("[guitar] heard its own Strum: note \(s.note) on fret \(s.fret)")
         }
     }
 }

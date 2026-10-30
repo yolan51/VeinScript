@@ -131,7 +131,7 @@ shard Reference {
                 bring Open("ul")
                     target $Section #Doc as self {
                         bring Open("li")
-                            bring Link("#sec" + self.Section.ord, self.Section.title)
+                            bring Link("#sec\(self.Section.ord)", self.Section.title)
                         bring Close("li")
                     }
                 bring Close("ul")

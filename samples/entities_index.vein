@@ -22,6 +22,7 @@
 //   bash tools/check-backend.sh
 
 bundle EntitiesIndex by you {
+    need "Vein.Console"
 
     shape $Row  { title: string }
     shape $Wide { extra: int }
@@ -48,26 +49,26 @@ bundle EntitiesIndex by you {
     shard Numbered {
         settled {
             // The everyday use: a numbered list, with no counter the program has to carry itself.
-            emit *Vein.Console.Io.@Print { text: "-- all six, numbered --" }
+            do print("-- all six, numbered --")
             target $Row #Row as r {
-                emit *Vein.Console.Io.@Print { text: (Index + 1) + ". " + r.Row.title }
+                do print((Index + 1) + ". " + r.Row.title)
             }
 
             // A cutoff. `Index` is 0-based, so "the first three" is `< 3`.
-            emit *Vein.Console.Io.@Print { text: "-- top 3 --" }
+            do print("-- top 3 --")
             target $Row #Row as r {
-                if Index < 3 { emit *Vein.Console.Io.@Print { text: "   " + r.Row.title } }
+                if Index < 3 { do print("   \(r.Row.title)") }
             }
 
             // Striping — the every-other-row case a table needs. `%` on the counter, nothing else.
-            emit *Vein.Console.Io.@Print { text: "-- even positions --" }
+            do print("-- even positions --")
             target $Row #Row as r {
-                if Index % 2 == 0 { emit *Vein.Console.Io.@Print { text: "   " + Index + " " + r.Row.title } }
+                if Index % 2 == 0 { do print("   \(Index) \(r.Row.title)") }
             }
 
             // The first one, which is the only end of the list that can be tested. See the header.
             target $Row #Row as r {
-                if Index == 0 { emit *Vein.Console.Io.@Print { text: "first is " + r.Row.title } }
+                if Index == 0 { do print("first is \(r.Row.title)") }
             }
 
             // Two components, and the FILTER is the point. Three of the six carry `$Wide`; the other
@@ -75,12 +76,10 @@ bundle EntitiesIndex by you {
             // the positions those three occupy in the full list. `Index < 2` therefore keeps beta and
             // gamma. Count positions instead and it would keep only beta, so this filter changes the
             // NUMBER of lines, not just the numbers in them — which is what check-backend pins.
-            emit *Vein.Console.Io.@Print { text: "-- first two of the wide ones --" }
+            do print("-- first two of the wide ones --")
             target $Row $Wide #Row as r {
                 
-                    emit *Vein.Console.Io.@Print {
-                        text: "   " + Index + " " + r.Row.title + " extra=" + r.Wide.extra
-                    }
+                    do print("   \(Index) \(r.Row.title) extra=\(r.Wide.extra)")
                 
             }
         }

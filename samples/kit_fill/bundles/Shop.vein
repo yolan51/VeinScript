@@ -24,6 +24,6 @@ bundle Shop by kit {
         builder Crate { $Price $Stock   mark #Crate }
 
         shared("A printed receipt line.")
-        builder Receipt { $Price, item: string   line = "receipt: " + item + " " + amount + " " + currency }
+        builder Receipt { $Price, item: string   line = "receipt: \(item) \(amount) \(currency)" }
     }
 }

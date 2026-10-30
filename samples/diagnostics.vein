@@ -31,6 +31,7 @@
 // six lines still appear, in the runtime's own format.
 
 bundle DiagnosticsDemo by you {
+    need "Vein.Console"
 
     shape $Row { title: string, rank: int }
     mark #Row
@@ -51,9 +52,9 @@ bundle DiagnosticsDemo by you {
         hear *Vein.Diagnostics.Report.@DiagnosticRaised as d {
             // severity is an int, not an enum: 0 info / 1 warning / 2 error. stdlib/Diagnostics.vein
             // says why — a cross-bundle enum needs link-time support that does not exist yet.
-            if d.severity == 0 { emit *Vein.Console.Io.@Print { text: "   note  | " + d.message } }
-            if d.severity == 1 { emit *Vein.Console.Io.@Print { text: "   WARN  | " + d.message } }
-            if d.severity == 2 { emit *Vein.Console.Io.@Print { text: "   ERROR | " + d.message } }
+            if d.severity == 0 { do print("   note  | \(d.message)") }
+            if d.severity == 1 { do print("   WARN  | \(d.message)") }
+            if d.severity == 2 { do print("   ERROR | \(d.message)") }
         }
     }
 
@@ -61,7 +62,7 @@ bundle DiagnosticsDemo by you {
 
     shard Validate {
         run once {
-            emit *Vein.Console.Io.@Print { text: "-- checking the rows --" }
+            do print("-- checking the rows --")
 
             bring Row("write the docs", 3)
             bring Row("", -1)
@@ -78,8 +79,8 @@ bundle DiagnosticsDemo by you {
 
     shard Compute {
         run once {
-            emit *Vein.Console.Io.@Print { text: "-- dividing --" }
-            emit *Vein.Console.Io.@Print { text: "   5 % 2 = " + (5 % 2) }
+            do print("-- dividing --")
+            do print("   5 % 2 = \(5 % 2)")
 
             // `% 0` genuinely throws, and this is the whole demonstration:
             //
@@ -95,8 +96,8 @@ bundle DiagnosticsDemo by you {
             // The zero is a VALUE, as it is in a real program — a count that came out empty. A literal
             // `5 % 0` is refused by C# outright, so the compiled half of this sample never built.
             let empty = 2 - 2
-            emit *Vein.Console.Io.@Print { text: "   5 % " + empty + " = " + (5 % empty) }
-            emit *Vein.Console.Io.@Print { text: "   THIS LINE NEVER PRINTS" }
+            do print("   5 % \(empty) = \(5 % empty)")
+            do print("   THIS LINE NEVER PRINTS")
         }
     }
 
@@ -108,7 +109,7 @@ bundle DiagnosticsDemo by you {
     shard Recover {
         hear *Vein.Diagnostics.Report.@DiagnosticRaised as d {
             if d.shard == "Compute" and d.severity == 2 {
-                emit *Vein.Console.Io.@Print { text: "   recovered from " + d.shard + " (" + d.phase + ", " + d.file + " line " + d.line + "): using 0" }
+                do print("   recovered from \(d.shard) (\(d.phase), \(d.file) line \(d.line)): using 0")
             }
         }
     }
@@ -120,9 +121,9 @@ bundle DiagnosticsDemo by you {
     // first, and the empty output is what caught it.
     shard Carry_on {
         settled {
-            emit *Vein.Console.Io.@Print { text: "-- the program is still alive --" }
+            do print("-- the program is still alive --")
             target $Row #Row as r {
-                emit *Vein.Console.Io.@Print { text: "   row: [" + r.Row.title + "] rank " + r.Row.rank }
+                do print("   row: [\(r.Row.title)] rank \(r.Row.rank)")
             }
         }
     }
@@ -140,7 +141,7 @@ bundle DiagnosticsDemo by you {
 
     shard Unreachable {
         hear *Vein.Net.Http.@Failed as f {
-            do *Vein.Diagnostics.Report.error("no answer from " + f.url + ": " + f.reason)
+            do *Vein.Diagnostics.Report.error("no answer from \(f.url): \(f.reason)")
         }
     }
 }

@@ -1,5 +1,6 @@
 VeinIR v1  file=samples/builder_defaults.vein
 Bundle BuilderDefaults  author=you
+|--- Need Vein.Console
 |--- Shape $Content
 |    |--- Field title: string
 |    `--- Field body: string = Str "(no description yet)"
@@ -46,22 +47,24 @@ Bundle BuilderDefaults  author=you
 |              `--- Arg = Ref base
 |--- Shard Show
 |    `--- Settled
-|         |--- Emit *Vein.Console.Io.@Print
-|         |    `--- Arg text = Str "-- panels, in the column/order the layout asked for --"
+|         |--- Call print
+|         |    `--- Str "-- panels, in the column/order the layout asked for --"
 |         |--- Target $Content #Panel as p
-|         |    |--- Emit *Vein.Console.Io.@Print
-|         |    |    `--- Arg text = Concat
+|         |    |--- Call print
+|         |    |    `--- Concat
 |         |    |         |--- Str "   "
-|         |    |         `--- Path p.Content.title
-|         |    `--- Emit *Vein.Console.Io.@Print
-|         |         `--- Arg text = Concat
+|         |    |         |--- Path p.Content.title
+|         |    |         `--- Str ""
+|         |    `--- Call print
+|         |         `--- Concat
 |         |              |--- Str "      "
-|         |              `--- Path p.Content.body
-|         |--- Emit *Vein.Console.Io.@Print
-|         |    `--- Arg text = Str "-- the styling each one ended up with --"
+|         |              |--- Path p.Content.body
+|         |              `--- Str ""
+|         |--- Call print
+|         |    `--- Str "-- the styling each one ended up with --"
 |         `--- Target $Style #Panel as p
-|              `--- Emit *Vein.Console.Io.@Print
-|                   `--- Arg text = Concat
+|              `--- Call print
+|                   `--- Concat
 |                        |--- Str "   class="
 |                        |--- Path p.Style.class
 |                        |--- Str "  accent="
@@ -86,11 +89,11 @@ Bundle BuilderDefaults  author=you
 |              `--- Arg = Ref base
 `--- Shard ShowDraft
      `--- Settled
-          |--- Emit *Vein.Console.Io.@Print
-          |    `--- Arg text = Str "-- an empty value where there is no default, the default whe..."
+          |--- Call print
+          |    `--- Str "-- an empty value where there is no default, the default whe..."
           `--- Target $Draft #Draft as d
-               `--- Emit *Vein.Console.Io.@Print
-                    `--- Arg text = Concat
+               `--- Call print
+                    `--- Concat
                          |--- Str "   title=["
                          |--- Path d.Draft.title
                          |--- Str "] note=["

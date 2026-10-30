@@ -47,7 +47,7 @@ bundle Site {
         hear @Render as r {
             emit @Response {
                 status: 200
-                body: "<html><body>" + html + "</body></html>"
+                body: "<html><body>\(html)</body></html>"
             }
         }
     }

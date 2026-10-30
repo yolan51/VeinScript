@@ -45,7 +45,7 @@ bundle ConsoleTool by you {
             bring Score("Grace Hopper", 88)
             bring Score("Linus", 71)
 
-            do print("hello " + who + " — type `<name> <points>`, `show`, or `quit`.")
+            do print("hello \(who) — type `<name> <points>`, `show`, or `quit`.")
             do printInline("score> ")
         }
 
@@ -66,7 +66,7 @@ bundle ConsoleTool by you {
                         // Every word but the last is the name, however many there are.
                         let name = join(slice(parts, 0, n - 1), " ")
                         bring Score(name, int(parts[n - 1]))
-                        do print("added " + name)
+                        do print("added \(name)")
                     }
                     do printInline("score> ")
                 }
@@ -83,7 +83,7 @@ bundle ConsoleTool by you {
 
         hear @InputEnded as e {
             do print("")
-            do print("bye — " + e.lines + " line(s) read.")
+            do print("bye — \(e.lines) line(s) read.")
         }
     }
 }

@@ -21,11 +21,11 @@ bundle App {
     // directly, so there's no literal to construct and no name to repeat at the `bring` site.
     builder Heading {
         $Heading
-        markup = "<h1>" + text + "</h1>"
+        markup = "<h1>\(text)</h1>"
     }
     builder Button {
         $Button
-        markup = "<button id=\"" + id + "\" class=\"" + class + "\" onclick=\"" + onclick + "()\">" + label + "</button>"
+        markup = "<button id=\"\(id)\" class=\"\(class)\" onclick=\"\(onclick)()\">\(label)</button>"
     }
 
     // Provide the fields straight — positionally, or `bring Button ?` to see/fill them.
@@ -44,7 +44,7 @@ bundle App {
         var html: string
         hear @Html as f { html += f.markup }
         hear @Render as r {
-            emit @Response { status: 200, body: "<html><body>" + html + "</body></html>" }
+            emit @Response { status: 200, body: "<html><body>\(html)</body></html>" }
         }
     }
 }

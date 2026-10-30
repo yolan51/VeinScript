@@ -13,6 +13,7 @@
 // *Vein.Math / *Vein.Console calls below. `shared` is the only thing that crosses a bundle boundary.
 
 bundle Functions by you {
+    need "Vein.Console"
 
     start @Boot { }
     event @Boot { }
@@ -30,7 +31,7 @@ bundle Functions by you {
         // An `SF` emits — it names an intent so callers don't hand-assemble the event every time.
         shared("Announce a score to the console.")
         SF announce(label: string, value: int) {
-            emit *Vein.Console.Io.@Print { text: label + ": " + value }
+            do print(label + ": " + value)
         }
     }
 
@@ -52,10 +53,10 @@ bundle Functions by you {
 
             // 3. Call a SHARED fn from another bundle. Resolved and imported at compile time, so this
             //    needs no link step: `clamp` is Vein.Math's, not ours.
-            emit *Vein.Console.Io.@Print { text: "clamp(99, 0, 10) = " + *Vein.Math.Scalars.clamp(99.0, 0.0, 10.0) }
+            do print("clamp(99, 0, 10) = \(*Vein.Math.Scalars.clamp(99.0, 0.0, 10.0))")
 
             // 4. Call a SHARED SF from another bundle. Same rule, but it emits instead of returning.
-            do *Vein.Console.Io.print("— all of the above came from four function calls")
+            do print("— all of the above came from four function calls")
         }
     }
 }

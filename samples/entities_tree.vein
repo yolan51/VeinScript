@@ -30,6 +30,7 @@
 // the per-deck emit goes away.
 
 bundle EntitiesTree by you {
+    need "Vein.Console"
 
     // A deck counts its own children WITHOUT knowing about them: each card contributes 1 to its parent's
     // `count`, and `folds sum` reconciles the five concurrent writes. The deck holds no list of children.
@@ -81,13 +82,13 @@ bundle EntitiesTree by you {
 
     shard Show {
         hear @Show as d {
-            emit *Vein.Console.Io.@Print { text: "== " + d.title }
+            do print("== \(d.title)")
 
             // ONE flat loop, filtered against `d.deck` — a HEAR binding, which reads correctly inside a
             // `target` loop. An outer TARGET binding would not; that asymmetry is 12c exactly.
             target $Card $Parent as c {
                 if c.Parent.of == d.deck {
-                    emit *Vein.Console.Io.@Print { text: "   - " + c.Card.title }
+                    do print("   - \(c.Card.title)")
                 }
             }
         }
@@ -120,7 +121,7 @@ bundle EntitiesTree by you {
     shard Tally {
         settled {
             target $Deck #Deck as d {
-                emit *Vein.Console.Io.@Print { text: d.Deck.title + " holds " + d.Deck.count + " card(s)" }
+                do print("\(d.Deck.title) holds \(d.Deck.count) card(s)")
             }
         }
     }
@@ -129,9 +130,7 @@ bundle EntitiesTree by you {
     shard Links {
         settled {
             target $Card $Parent as c {
-                emit *Vein.Console.Io.@Print {
-                    text: "card e" + Entity + " '" + c.Card.title + "' → parent e" + c.Parent.of
-                }
+                do print("card e\(Entity) '\(c.Card.title)' → parent e\(c.Parent.of)")
             }
         }
     }

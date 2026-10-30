@@ -23,6 +23,7 @@
 bundle EntitiesFilter by you {
 
     need "Vein.Filter"
+    need "Vein.Console"
 
     shape $Row { title: string, rank: int }
     mark #Row
@@ -43,45 +44,45 @@ bundle EntitiesFilter by you {
     shard Show {
         settled {
             // By VALUE. Both ends included, so 2..4 is beta, gamma, delta.
-            emit *Vein.Console.Io.@Print { text: "-- rank between 2 and 4 --" }
+            do print("-- rank between 2 and 4 --")
             target $Row #Row as r {
                 if between(r.Row.rank, 2, 4) {
-                    emit *Vein.Console.Io.@Print { text: "   " + r.Row.title + " rank " + r.Row.rank }
+                    do print("   \(r.Row.title) rank \(r.Row.rank)")
                 }
             }
 
             // The complement, which is what `outside` is for — no `not` around the call.
-            emit *Vein.Console.Io.@Print { text: "-- and the ones outside it --" }
+            do print("-- and the ones outside it --")
             target $Row #Row as r {
                 if outside(r.Row.rank, 2, 4) {
-                    emit *Vein.Console.Io.@Print { text: "   " + r.Row.title + " rank " + r.Row.rank }
+                    do print("   \(r.Row.title) rank \(r.Row.rank)")
                 }
             }
 
             // By POSITION. The same predicates, given `Index` instead of a field.
-            emit *Vein.Console.Io.@Print { text: "-- first three positions --" }
+            do print("-- first three positions --")
             target $Row #Row as r {
-                if firstN(Index, 3) { emit *Vein.Console.Io.@Print { text: "   " + Index + " " + r.Row.title } }
+                if firstN(Index, 3) { do print("   \(Index) \(r.Row.title)") }
             }
 
-            emit *Vein.Console.Io.@Print { text: "-- striped: even positions --" }
+            do print("-- striped: even positions --")
             target $Row #Row as r {
-                if even(Index) { emit *Vein.Console.Io.@Print { text: "   " + Index + " " + r.Row.title } }
+                if even(Index) { do print("   \(Index) \(r.Row.title)") }
             }
 
             // `sign` is the one that is not a predicate, and the one that is genuinely awkward to write
             // inline — an `if` chain returning -1, 0 or 1.
-            emit *Vein.Console.Io.@Print { text: "-- negative ranks --" }
+            do print("-- negative ranks --")
             target $Row #Row as r {
                 if sign(r.Row.rank) < 0 {
-                    emit *Vein.Console.Io.@Print { text: "   " + r.Row.title + " rank " + r.Row.rank }
+                    do print("   \(r.Row.title) rank \(r.Row.rank)")
                 }
             }
 
-            emit *Vein.Console.Io.@Print { text: "-- ranks divisible by 2 --" }
+            do print("-- ranks divisible by 2 --")
             target $Row #Row as r {
                 if divisible(r.Row.rank, 2) {
-                    emit *Vein.Console.Io.@Print { text: "   " + r.Row.title + " rank " + r.Row.rank }
+                    do print("   \(r.Row.title) rank \(r.Row.rank)")
                 }
             }
 
@@ -95,11 +96,11 @@ bundle EntitiesFilter by you {
             // Ranks here run -2..5, so eight passes with an offset — and the offset is the honest cost.
             // The range has to be known, which is why "order at the source" is the better answer whenever
             // you control the source. See samples/rows_in_order.vein for that side of it.
-            emit *Vein.Console.Io.@Print { text: "-- by rank, ascending --" }
+            do print("-- by rank, ascending --")
             repeat 8 as pass {
                 target $Row #Row as r {
                     if r.Row.rank == pass - 2 {
-                        emit *Vein.Console.Io.@Print { text: "   rank " + r.Row.rank + "  " + r.Row.title }
+                        do print("   rank \(r.Row.rank)  \(r.Row.title)")
                     }
                 }
             }

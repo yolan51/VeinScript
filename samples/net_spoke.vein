@@ -15,6 +15,7 @@
 //      authentication happens at the RECEIVER, so a bad key looks exactly like a peer that went quiet.
 
 bundle PeerSpoke by you {
+    need "Vein.Console"
 
     shard Boot {
         run once {
@@ -25,7 +26,7 @@ bundle PeerSpoke by you {
             // up yet is ordinary, and the first send simply comes back as @Undelivered.
             emit *Vein.Net.Peer.@Link { name: #Hub, at: "127.0.0.1:9700", key: "shared-secret" }
 
-            emit *Vein.Console.Io.@Print { text: "spoke up as #Spoke — pinging #Hub every 2s" }
+            do print("spoke up as #Spoke — pinging #Hub every 2s")
         }
     }
 
@@ -34,21 +35,21 @@ bundle PeerSpoke by you {
 
         every 2 {
             round += 1
-            emit *Vein.Console.Io.@Print { text: "→ Hub: ping " + round }
+            do print("→ Hub: ping \(round)")
             // Identical to a console @Send. The routing table, not this line, decides it goes over TCP.
-            emit *Vein.Net.Peer.@Send { to: #Hub, text: "ping " + round }
+            emit *Vein.Net.Peer.@Send { to: #Hub, text: "ping \(round)" }
         }
     }
 
     shard Replies {
         hear *Vein.Net.Peer.@Message as m audience #Hub {
-            emit *Vein.Console.Io.@Print { text: m.from + " replied: " + m.text }
+            do print("\(m.from) replied: \(m.text)")
         }
     }
 
     shard Reachability {
         hear *Vein.Net.Peer.@Undelivered as u {
-            emit *Vein.Console.Io.@Print { text: "  (" + u.to + " is not up — start samples/net_peer.vein)" }
+            do print("  (\(u.to) is not up — start samples/net_peer.vein)")
         }
     }
 }

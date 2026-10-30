@@ -35,6 +35,7 @@
 //   bash tools/check-backend.sh          (the same program, emitted to C# and diffed against the above)
 
 bundle EntitiesTemplate by you {
+    need "Vein.Console"
 
     shape $Health { hp: int folds sum }
     shape $Shield { sp: int folds sum }
@@ -67,16 +68,16 @@ bundle EntitiesTemplate by you {
     shard Report {
         settled {
             target $Health $Shield #Unit as self {
-                emit *Vein.Console.Io.@Print { text: "unit  e" + Entity + " hp=" + self.Health.hp + " sp=" + self.Shield.sp }
+                do print("unit  e\(Entity) hp=\(self.Health.hp) sp=\(self.Shield.sp)")
             }
             // The templates that attached only one shape are visible to the single-component queries and
             // absent from the paired one above — which is the check that a template attaches exactly what
             // it declares and nothing else.
             target $Health #Unit as self {
-                emit *Vein.Console.Io.@Print { text: "  health e" + Entity + " hp=" + self.Health.hp }
+                do print("  health e\(Entity) hp=\(self.Health.hp)")
             }
             target $Shield #Unit as self {
-                emit *Vein.Console.Io.@Print { text: "  shield e" + Entity + " sp=" + self.Shield.sp }
+                do print("  shield e\(Entity) sp=\(self.Shield.sp)")
             }
         }
     }

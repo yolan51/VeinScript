@@ -11,6 +11,7 @@
 // the language cannot read an environment variable. Two files is the honest version.
 
 bundle ChatBob by you {
+    need "Vein.Console"
 
     shard Boot {
         run once {
@@ -20,7 +21,7 @@ bundle ChatBob by you {
             // hello below simply comes back as @Undelivered.
             emit *Vein.Net.Peer.@Link { name: #Server, at: "127.0.0.1:9700", key: "chat-secret" }
 
-            emit *Vein.Console.Io.@Print { text: "Bob connected — type a line and press Enter" }
+            do print("Bob connected — type a line and press Enter")
 
             // Saying hello is what teaches the SERVER how to reach us: it reads the return port off this
             // signed frame. Without it the server could not relay anything to Bob until Bob spoke.
@@ -39,13 +40,13 @@ bundle ChatBob by you {
     // the network rather than merely asking them politely not to talk to us.
     shard Incoming {
         hear *Vein.Net.Peer.@Message as m audience #Server {
-            emit *Vein.Console.Io.@Print { text: m.text }
+            do print(m.text)
         }
     }
 
     shard Reachability {
         hear *Vein.Net.Peer.@Undelivered as u {
-            emit *Vein.Console.Io.@Print { text: "  (server is not running — start samples/chat/server.vein)" }
+            do print("  (server is not running — start samples/chat/server.vein)")
         }
     }
 }

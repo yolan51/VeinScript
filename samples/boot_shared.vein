@@ -17,7 +17,7 @@ bundle World by studio {
     start @Boot { seed: 42 }                                // mode defaults to "play"
 
     shard Sim {
-        hear @Boot as b { emit @Response { status: 200, body: "world seed=" + b.seed + " mode=" + b.mode } }
+        hear @Boot as b { emit @Response { status: 200, body: "world seed=\(b.seed) mode=\(b.mode)" } }
     }
 }
 
@@ -28,6 +28,6 @@ bundle Ui by studio {
     start @Boot { seed: 42, mode: "menu" }                 // same shape, different payload
 
     shard Screen {
-        hear @Boot as b { emit @Response { status: 200, body: "ui mode=" + b.mode } }
+        hear @Boot as b { emit @Response { status: 200, body: "ui mode=\(b.mode)" } }
     }
 }

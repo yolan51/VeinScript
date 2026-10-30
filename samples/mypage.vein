@@ -18,10 +18,10 @@ bundle App {
     }
 
     // Pre-built elements: params then an output field (markup/code/css) whose value is the template.
-    builder Heading    { text: string   markup = "<h1>" + text + "</h1>" }
+    builder Heading    { text: string   markup = "<h1>\(text)</h1>" }
     builder CounterView { markup = "<p>Count: <span id=\"n\">0</span></p>" }
-    builder Button     { label: string  markup = "<button onclick=\"inc()\">" + label + "</button>" }
-    builder Item       { label: string  markup = "<li>" + label + "</li>" }
+    builder Button     { label: string  markup = "<button onclick=\"inc()\">\(label)</button>" }
+    builder Item       { label: string  markup = "<li>\(label)</li>" }
     builder IncFn      { code = "let c=0; function inc(){ c+=1; document.getElementById('n').innerText=c; }" }
     builder BaseCss    { css = "body{font-family:sans-serif;margin:2rem} button{cursor:pointer}" }
 
@@ -54,7 +54,7 @@ bundle App {
         hear @Render as r {
             emit @Response {
                 status: 200
-                body: "<!doctype html><html><head><style>" + css + "</style></head><body>" + html + "<script>" + js + "</script></body></html>"
+                body: "<!doctype html><html><head><style>\(css)</style></head><body>\(html)<script>\(js)</script></body></html>"
             }
         }
     }

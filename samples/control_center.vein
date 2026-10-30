@@ -52,6 +52,7 @@
 // into one of these ends it before anything arrives. Run them in real terminals.
 
 bundle ControlCenter by you {
+    need "Vein.Console"
 
     // One row of the roster: a worker Control has heard from. `addr` is its console address, which is
     // what `@Send` needs to answer it.
@@ -65,14 +66,14 @@ bundle ControlCenter by you {
         run once {
             match here() {
                 when #Control {
-                    emit *Vein.Console.Io.@Print { text: "CONTROL — waiting for workers." }
-                    emit *Vein.Console.Io.@Print { text: "Start others with VEIN_CONSOLE=Alpha / =Beta." }
+                    do print("CONTROL — waiting for workers.")
+                    do print("Start others with VEIN_CONSOLE=Alpha / =Beta.")
                 }
 
                 // Everything that is not Control is a worker, including a plain `veinc run` with no
                 // environment variable at all — that one is #Main, and it works exactly the same.
                 else {
-                    emit *Vein.Console.Io.@Print { text: "WORKER " + here() + " — type a line and press Enter." }
+                    do print("WORKER \(here()) — type a line and press Enter.")
 
                     // Announcing is what puts this process on Control's roster. Control is told the
                     // sender by the transport, so there is nothing to introduce ourselves with.
@@ -100,10 +101,10 @@ bundle ControlCenter by you {
                     if not known {
                         let e = spawn()
                         attach $Worker to e { addr: m.from }
-                        emit *Vein.Console.Io.@Print { text: "* " + m.from + " joined" }
+                        do print("* \(m.from) joined")
                     }
 
-                    emit *Vein.Console.Io.@Print { text: m.from + ": " + m.text }
+                    do print("\(m.from): \(m.text)")
 
                     // THE RELAY. Everyone except the sender — no `!=` in VeinScript (LANGUAGE.md §7),
                     // so inequality is `not (a == b)`. Without the guard the sender hears their own line
@@ -112,14 +113,14 @@ bundle ControlCenter by you {
                     // This is the line that makes the demo: Alpha addressed Control, and Beta receives.
                     target $Worker as w {
                         if not (w.Worker.addr == m.from) {
-                            emit *Vein.Console.Io.@Send { to: w.Worker.addr, text: m.from + ": " + m.text }
+                            emit *Vein.Console.Io.@Send { to: w.Worker.addr, text: "\(m.from): \(m.text)" }
                         }
                     }
                 }
 
                 // A worker just shows what arrived. It reached us through Control, from a process that
                 // does not know we exist.
-                else { emit *Vein.Console.Io.@Print { text: "  <- " + m.text } }
+                else { do print("  <- \(m.text)") }
             }
         }
     }
@@ -130,7 +131,7 @@ bundle ControlCenter by you {
         hear *Vein.Console.Io.@Input as i {
             match here() {
                 // Control is a relay, not a participant — a line typed here goes nowhere on purpose.
-                when #Control { emit *Vein.Console.Io.@Print { text: "(control relays; it does not chat)" } }
+                when #Control { do print("(control relays; it does not chat)") }
                 else { emit *Vein.Console.Io.@Send { to: #Control, text: i.text } }
             }
         }
@@ -144,7 +145,7 @@ bundle ControlCenter by you {
 
     shard Reachability {
         hear *Vein.Console.Io.@Undelivered as u {
-            emit *Vein.Console.Io.@Print { text: "(no one is listening as " + u.to + " — is Control running?)" }
+            do print("(no one is listening as \(u.to) — is Control running?)")
 
             // Control drops a worker that has gone away. `destroy` takes the identity AND its component;
             // unmarking would leave the row behind, and a returning worker would then be given a second

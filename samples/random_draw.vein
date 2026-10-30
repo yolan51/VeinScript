@@ -20,6 +20,7 @@
 // numbers — which is why this file draws from ONE shard and leaves the interleaving to no one.
 
 bundle RandomDraw by you {
+    need "Vein.Console"
 
     shape $Roll { value: int, kept: bool }
     mark #Rolled
@@ -29,22 +30,16 @@ bundle RandomDraw by you {
         each tick {
             // A raw draw is a float in [0, 1). Rounded for printing, because the full 17 digits are the
             // double's business and not the reader's.
-            emit *Vein.Console.Io.@Print {
-                text: "raw   " + *Vein.Math.Round.roundTo(random(), 4)
-            }
+            do print("raw   \(*Vein.Math.Round.roundTo(random(), 4))")
 
             // THE IDIOM FOR A WHOLE NUMBER IN A RANGE: scale, then truncate. `int()` truncates toward
             // zero, so `int(random() * 6) + 1` is 1..6 with every face equally likely — and no face can
             // come out 7, because random() never returns 1.0.
-            emit *Vein.Console.Io.@Print {
-                text: "d6    " + (int(random() * 6.0) + 1)
-            }
+            do print("d6    \(int(random() * 6.0) + 1)")
 
             // A COIN, which is `chance 50%` written as an expression instead of a statement. Worth
             // showing beside `chance` so the relationship is visible: one is sugar for the other.
-            emit *Vein.Console.Io.@Print {
-                text: "coin  " + (random() < 0.5)
-            }
+            do print("coin  \(random() < 0.5)")
         }
     }
 
@@ -62,9 +57,9 @@ bundle RandomDraw by you {
         each tick {
             target $Roll #Rolled as r {
                 if r.Roll.kept {
-                    emit *Vein.Console.Io.@Print { text: "  roll " + r.Roll.value + " (kept)" }
+                    do print("  roll \(r.Roll.value) (kept)")
                 } else {
-                    emit *Vein.Console.Io.@Print { text: "  roll " + r.Roll.value }
+                    do print("  roll \(r.Roll.value)")
                 }
             }
         }

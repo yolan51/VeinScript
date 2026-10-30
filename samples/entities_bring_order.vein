@@ -19,6 +19,7 @@
 //   bash tools/check-backend.sh
 
 bundle EntitiesBringOrder by you {
+    need "Vein.Console"
 
     shape $Row { title: string, rank: int }
     mark #Row
@@ -46,16 +47,16 @@ bundle EntitiesBringOrder by you {
             // NOT an ordered query — plain spawn order. It comes out sorted because the brings were
             // sorted, which is the whole point: the order is baked in at creation, so every later
             // reader gets it for free.
-            emit *Vein.Console.Io.@Print { text: "-- spawn order, which is now rank order --" }
+            do print("-- spawn order, which is now rank order --")
             target $Row #Row as r {
-                emit *Vein.Console.Io.@Print { text: "   e" + Entity + "  " + r.Row.rank + "  " + r.Row.title }
+                do print("   e\(Entity)  \(r.Row.rank)  \(r.Row.title)")
             }
 
             // alpha and bravo share rank 1 and keep the order they were written in — the sort is
             // stable, so ties fall back to source order rather than to whichever the comparer saw first.
-            emit *Vein.Console.Io.@Print { text: "-- ties keep the written order --" }
+            do print("-- ties keep the written order --")
             target $Row #Row as r {
-                if r.Row.rank == 1 { emit *Vein.Console.Io.@Print { text: "   " + r.Row.title } }
+                if r.Row.rank == 1 { do print("   \(r.Row.title)") }
             }
         }
     }

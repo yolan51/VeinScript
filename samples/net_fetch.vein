@@ -15,10 +15,11 @@
 // console stays responsive and the `every 5` timer below keeps ticking while a slow host hangs.
 
 bundle FetchDemo by you {
+    need "Vein.Console"
 
     shard Boot {
         run once {
-            emit *Vein.Console.Io.@Print { text: "asking httpbin for an IP…" }
+            do print("asking httpbin for an IP…")
             emit *Vein.Net.Http.@Fetch  { url: "https://httpbin.org/ip", method: "GET", body: "" }
         }
     }
@@ -35,14 +36,14 @@ bundle FetchDemo by you {
 
     shard Results {
         hear *Vein.Net.Http.@Fetched as r {
-            emit *Vein.Console.Io.@Print { text: r.status + " " + r.url }
-            emit *Vein.Console.Io.@Print { text: r.body }
+            do print("\(r.status) \(r.url)")
+            do print(r.body)
         }
 
         // Reached only when nothing came back. Worth handling separately: a program that treats an
         // unreachable host as an empty body will happily parse silence as data.
         hear *Vein.Net.Http.@Failed as f {
-            emit *Vein.Console.Io.@Print { text: "unreachable " + f.url + " — " + f.reason }
+            do print("unreachable \(f.url) — \(f.reason)")
         }
     }
 }

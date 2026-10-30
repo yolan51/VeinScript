@@ -1,5 +1,6 @@
 // D28: `!Shard.setting` reads a shard's setting, and sets it at the next commit.
 bundle D28 by me {
+    need "Vein.Console"
     shard Spawner {
         tune("Crates made each frame.")
         var rate: int = 2
@@ -13,11 +14,11 @@ bundle D28 by me {
             // A write lands at the commit: this frame still reads the value it had.
             if t.frame == 2 {
                 !Spawner.rate = 5
-                emit *Vein.Console.Io.@Print { text: "set rate, still " + !Spawner.rate }
+                do print("set rate, still \(!Spawner.rate)")
             }
             if t.frame == 3 { !Spawner.rate += 1 }
             if t.frame == 4 { !Spawner.running = not !Spawner.running }
-            emit *Vein.Console.Io.@Print { text: "frame " + t.frame + ": rate " + !Spawner.rate + ", running " + !Spawner.running }
+            do print("frame \(t.frame): rate \(!Spawner.rate), running \(!Spawner.running)")
         }
     }
 }

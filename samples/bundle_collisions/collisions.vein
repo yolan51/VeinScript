@@ -34,6 +34,7 @@ bundle Collisions by you {
     // possible at all. See the note at the bottom about `as`, which removes it by removing a name.
     need "acme.Radio"
     need "zenith.Courier"
+    need "Vein.Console"
 
     shard Loud {
         run once {
@@ -54,11 +55,11 @@ bundle Collisions by you {
     // only one event after linking; now each hears its own and reads fields the other does not have.
     shard Listen {
         hear *acme.Radio.Wire.@Dispatch as d {
-            emit *Vein.Console.Io.@Print { text: "[radio]   " + d.channel + ": " + d.text }
+            do print("[radio]   \(d.channel): \(d.text)")
         }
 
         hear *zenith.Courier.Post.@Dispatch as d {
-            emit *Vein.Console.Io.@Print { text: "[courier] " + d.text + "  urgent=" + d.urgent }
+            do print("[courier] \(d.text)  urgent=\(d.urgent)")
         }
     }
 }

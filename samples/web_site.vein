@@ -62,8 +62,8 @@ bundle WebSite by you {
                 if r.method == "POST" {
                     // `who` is a form field, and it arrives as an ordinary payload field. `?` on the
                     // event declaration is what lets a field the program never declared be read here.
-                    bring Heading("Hello " + r.who)
-                    bring Paragraph("Submitted with " + r.method + ", body: " + r.body)
+                    bring Heading("Hello \(r.who)")
+                    bring Paragraph("Submitted with \(r.method), body: \(r.body)")
                     bring Link("/greet", "again")
                 }
             }
@@ -92,7 +92,7 @@ bundle WebSite by you {
             if not (html == "") {
                 emit @Response {
                     status: 200
-                    body: "<!doctype html><html><head><meta charset=\"utf-8\"><title>VeinScript</title></head><body>" + html + "</body></html>"
+                    body: "<!doctype html><html><head><meta charset=\"utf-8\"><title>VeinScript</title></head><body>\(html)</body></html>"
                 }
             }
         }

@@ -22,6 +22,7 @@
 //   bash tools/check-backend.sh
 
 bundle EntitiesOrdered by you {
+    need "Vein.Console"
 
     shape $Row { title: string, rank: int }
     mark #Row
@@ -41,30 +42,30 @@ bundle EntitiesOrdered by you {
 
     shard Show {
         settled {
-            emit *Vein.Console.Io.@Print { text: "-- spawn order --" }
+            do print("-- spawn order --")
             target $Row #Row as r {
-                emit *Vein.Console.Io.@Print { text: "   " + r.Row.rank + "  " + r.Row.title }
+                do print("   \(r.Row.rank)  \(r.Row.title)")
             }
 
             // By an int field. Negatives sort before positives, which a string sort would not do.
-            emit *Vein.Console.Io.@Print { text: "-- by rank --" }
+            do print("-- by rank --")
             target $Row #Row by Row.rank as r {
-                emit *Vein.Console.Io.@Print { text: "   " + r.Row.rank + "  " + r.Row.title }
+                do print("   \(r.Row.rank)  \(r.Row.title)")
             }
 
             // By a string field. "Zeta" sorts BEFORE the lowercase names because ordinal comparison puts
             // uppercase first — a culture-aware sort would place it between bravo and charlie, so this
             // line is the one that proves the two runtimes agree on which comparison is used.
-            emit *Vein.Console.Io.@Print { text: "-- by title --" }
+            do print("-- by title --")
             target $Row #Row by Row.title as r {
-                emit *Vein.Console.Io.@Print { text: "   " + r.Row.title }
+                do print("   \(r.Row.title)")
             }
 
             // `alpha` and `bravo` both hold rank 1, and they come out in spawn order — alpha was brought
             // first. A sort that was not stable could give either.
-            emit *Vein.Console.Io.@Print { text: "-- ties keep spawn order --" }
+            do print("-- ties keep spawn order --")
             target $Row #Row by Row.rank as r {
-                if r.Row.rank == 1 { emit *Vein.Console.Io.@Print { text: "   " + r.Row.title } }
+                if r.Row.rank == 1 { do print("   \(r.Row.title)") }
             }
         }
     }

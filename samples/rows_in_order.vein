@@ -34,6 +34,7 @@
 // so it is not in tools/check-backend.sh, for the same reason samples/entities_tree.vein is not.
 
 bundle RowsInOrder by you {
+    need "Vein.Console"
 
     // A list VALUE exists (`[1,2,3]`, `xs[0]`, `len`, and `target xs as x`), but there is no list TYPE, so
     // a shape or an event payload cannot declare one — a result set cannot arrive as
@@ -58,7 +59,7 @@ bundle RowsInOrder by you {
 
     shard Ingest {
         hear @RowArrived as r {
-            emit *Vein.Console.Io.@Print { text: "ingesting " + r.title }
+            do print("ingesting \(r.title)")
             bring Row(r.title, r.rank)
 
             // THE TRAP, and it is not about ordering. Commit happens per EVENT, so this query sees every
@@ -66,7 +67,7 @@ bundle RowsInOrder by you {
             // output below: ingesting gamma shows nothing, ingesting alpha shows gamma, ingesting beta
             // shows gamma and alpha. A count taken here would be short by one, every time.
             target $Row #Row as x {
-                emit *Vein.Console.Io.@Print { text: "   visible now: " + x.Row.title }
+                do print("   visible now: \(x.Row.title)")
             }
         }
     }
@@ -75,15 +76,11 @@ bundle RowsInOrder by you {
     // here — there are no folds — but it is a phase after the events, which is what this needs.
     shard Listing {
         settled {
-            emit *Vein.Console.Io.@Print { text: "rows, in the order they were brought:" }
+            do print("rows, in the order they were brought:")
             target $Row #Row as r {
-                emit *Vein.Console.Io.@Print {
-                    text: "   e" + Entity + "  " + r.Row.title + "  (rank " + r.Row.rank + ")"
-                }
+                do print("   e\(Entity)  \(r.Row.title)  (rank \(r.Row.rank))")
             }
-            emit *Vein.Console.Io.@Print {
-                text: "ranks read 3, 1, 2 — no query sorts on `rank`. The next shard shows what does."
-            }
+            do print("ranks read 3, 1, 2 — no query sorts on `rank`. The next shard shows what does.")
         }
     }
 
@@ -99,16 +96,14 @@ bundle RowsInOrder by you {
     // source, where an index exists.
     shard ByRank {
         settled {
-            emit *Vein.Console.Io.@Print { text: "the same rows, ordered by rank:" }
+            do print("the same rows, ordered by rank:")
 
             // `repeat n as i` counts 0…n-1, so the ranks 1…3 are `i + 1`. The range has to be KNOWN —
             // that is the real constraint on this technique, not the cost.
             repeat 3 as i {
                 target $Row #Row as r {
                     if r.Row.rank == i + 1 {
-                        emit *Vein.Console.Io.@Print {
-                            text: "   e" + Entity + "  " + r.Row.title + "  (rank " + r.Row.rank + ")"
-                        }
+                        do print("   e\(Entity)  \(r.Row.title)  (rank \(r.Row.rank))")
                     }
                 }
             }

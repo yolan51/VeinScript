@@ -32,20 +32,20 @@ bundle App {
     builder Display {
         slot: Id
         initial: string
-        markup = "<span id=\"" + slot.name + "\">" + initial + "</span>"
+        markup = "<span id=\"\(slot.name)\">\(initial)</span>"
     }
     builder Button {
         b: Control
-        markup = "<button id=\"" + b.id.name + "\" class=\"" + b.class.name + "\" onclick=\"" + b.onclick.name + "()\">" + b.label + "</button>"
+        markup = "<button id=\"\(b.id.name)\" class=\"\(b.class.name)\" onclick=\"\(b.onclick.name)()\">\(b.label)</button>"
     }
     builder Define {
         f: Fn
-        code = "function " + f.name + "(){ " + f.body + " }"
+        code = "function \(f.name)(){ \(f.body) }"
     }
     builder Rule {
         c: Class
         decl: string
-        css = "." + c.name + "{" + decl + "}"
+        css = ".\(c.name){\(decl)}"
     }
 
     shard Ui {
@@ -53,7 +53,7 @@ bundle App {
             // Declare each handle ONCE. inc's body reads counter.name, so "counter" is written once.
             let counter = Id { name: "counter" }
             let primary = Class { name: "primary" }
-            let inc     = Fn { name: "inc", body: "let e=document.getElementById('" + counter.name + "'); e.innerText=(+e.innerText)+1" }
+            let inc     = Fn { name: "inc", body: "let e=document.getElementById('\(counter.name)'); e.innerText=(+e.innerText)+1" }
 
             bring Rule(primary, "cursor:pointer;font-weight:bold")
             bring Display(counter, "0")
@@ -72,7 +72,7 @@ bundle App {
         hear @Script as s { js += s.code }
         hear @Style as st { css += st.css }
         hear @Render as r {
-            emit @Response { status: 200, body: "<!doctype html><html><head><style>" + css + "</style></head><body>" + html + "<script>" + js + "</script></body></html>" }
+            emit @Response { status: 200, body: "<!doctype html><html><head><style>\(css)</style></head><body>\(html)<script>\(js)</script></body></html>" }
         }
     }
 }
