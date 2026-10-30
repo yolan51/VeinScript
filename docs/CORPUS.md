@@ -71,13 +71,19 @@ reads empty, recursion past 256 returns null, a `let` reassigned) still stand.
 
 - **Fixed 2026-10-30:** a function's own `var` lost its writes to the calling shard's variable of the same
   name; `fromJson` turned every integer into a float (d7fddc0).
-- **Open, from VeinCards' VEIN_REPORT:**
-  - an event field named `id` reads the event's built-in id;
-  - `target d as kv` gives `kv.key` and `kv.value` empty on a parsed object;
-  - `slice` on a text gives `[]` with no error;
-  - `$Parent` composes only if the program names `$World` somewhere;
-  - any type name passes `veinc check` (`dictionary`, `any`);
-  - an error deep in nested SF calls is reported at the outer `hear`.
+- **Fixed 2026-10-30, from VeinCards' VEIN_REPORT** (fc87bd8, b54e3e5, 09d52ef):
+  - an event field named `id` reads what the emit wrote, not the event's built-in id;
+  - `target d as kv` gives `kv.key` and `kv.value` on a parsed object;
+  - `slice` on a text gives the text between;
+  - `$Parent` composes without the program naming `$World`, on both runtimes;
+  - a slip of a type name is an error (VS0392); `json` and `dictionary` are the names for parsed values;
+  - a fault deep in nested calls names the failing line and the calls between.
+- **Fixed 2026-10-30, ROADMAP Tier 1 rows 2, 3, 5–11:** misspelt fields (VS0391), `serve` file
+  confinement, bundle-level state (VS0394), runtime caps as faults, fns that fall off (VS0395), enum arm
+  typos (VS0242), `let` reassignment (VS0390), reserved words as names (VS0397). Also: the stdlib's own
+  manifest links, and VS0357 no longer warns about another program's settings. After these, the corpus
+  check finds 4 programs with problems, down from 13, and the new checks found nothing wrong in the other
+  repos' code.
 
 ## Fix order
 

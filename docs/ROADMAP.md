@@ -115,16 +115,16 @@ row was checked against the code on 2026-10-09.
 
 | # | Today, silently | Where | Fix |
 |---|---|---|---|
-| 2 | `target rows as row: $Task { row.titel }` reads empty, though RULES 27 says the fields are checked | Resolve types the binding and reports nothing | warn on a field the ascribed shape lacks |
-| 3 | `hear @E as e { e.feild }` reads empty | payload fields are typed in Resolve | the same warning for `hear` bindings (vein.lock already covers a field a bundle *removed*) |
+| 2 | ✅ 2026-10-30 (VS0391): `target rows as row: $Task { row.titel }` reads empty, though RULES 27 says the fields are checked | Resolve types the binding and reports nothing | warn on a field the ascribed shape lacks |
+| 3 | ✅ 2026-10-30 (VS0391): `hear @E as e { e.feild }` reads empty | payload fields are typed in Resolve | the same warning for `hear` bindings (vein.lock already covers a field a bundle *removed*) |
 | 4 | ✅ 2026-10-25: a shared `fn` calling a sibling by bare name answered empty when called from another bundle | `Lower.OwnerCall` | an imported body's bare call resolves against its OWNER: its own fns, then the bundles it `need`s (`OwnerScopedImportTests`) |
-| 5 | `serve` lets a program read any path (`..`, absolute) while answering HTTP | `Interp.ResolvePath` | confine to the project under `serve` — security |
-| 6 | a bundle-level `let`/`var` is dropped | `Lower.LowerMember`, "not modeled yet" | an error until module state is designed |
-| 7 | recursion past 256 returns null; `while` past 100k stops | `Interp` caps | raise `@DiagnosticRaised`, so a guard sees it |
-| 8 | an `fn … return T` that falls off the end returns null | `Interp.CallUser` | a warning at the declaration |
-| 9 | a typo in an enum `match` arm never matches (mark arms are checked) | `Lower`, `MatchStmt` | check arms against the enum's cases |
-| 10 | reassigning a `let` is accepted | `Mutable` is carried and never checked | an error |
-| 11 | `on transform map count sync` and `T?` give generic parse errors; KEYWORDS.md claims meanings for three (`mute`/`unmute` got one: D18) | the parser never handles them | a "reserved" diagnostic; decide or cut (SYNTAX-DECISIONS open item) |
+| 5 | ✅ 2026-10-30 (serve confines files to the project): `serve` lets a program read any path (`..`, absolute) while answering HTTP | `Interp.ResolvePath` | confine to the project under `serve` — security |
+| 6 | ✅ 2026-10-30 (VS0394): a bundle-level `let`/`var` is dropped | `Lower.LowerMember`, "not modeled yet" | an error until module state is designed |
+| 7 | ✅ 2026-10-30 (a fault, @DiagnosticRaised): recursion past 256 returns null; `while` past 100k stops | `Interp` caps | raise `@DiagnosticRaised`, so a guard sees it |
+| 8 | ✅ 2026-10-30 (VS0395): an `fn … return T` that falls off the end returns null | `Interp.CallUser` | a warning at the declaration |
+| 9 | ✅ 2026-10-30 (VS0242): a typo in an enum `match` arm never matches (mark arms are checked) | `Lower`, `MatchStmt` | check arms against the enum's cases |
+| 10 | ✅ 2026-10-30 (VS0390): reassigning a `let` is accepted | `Mutable` is carried and never checked | an error |
+| 11 | ✅ 2026-10-30 (VS0397, one diagnostic): `on transform map count sync` and `T?` give generic parse errors; KEYWORDS.md claims meanings for three (`mute`/`unmute` got one: D18) | the parser never handles them | a "reserved" diagnostic; decide or cut (SYNTAX-DECISIONS open item) |
 
 **Unlocked by the same audit (M).** `IrExpr.ResolvedType` IS assigned now — Resolve runs on every
 lowering — so the comments saying it never is are stale (`Lower.CheckLiteralType`, `CSharpBackend`,

@@ -62,3 +62,34 @@ done
 echo
 echo "lines of code per folder (comments out):"
 for l in $labels; do printf '  %-16s %6d\n' "$l" "$(grep -E "^$l"$'\t' "$WORK/lines.txt" | cut -f2- | grep -cvE '^[[:space:]]*$')"; done
+
+# THE CORE WORDS, per folder. A program whose rules state lives on identities says `attach`, `mark` and
+# `target` all the time; one that keeps it in dictionaries says `fromJson` instead. VeinCards (fromJson 268,
+# unmark 0) and VeinChain (mark 0) showed the second kind on 2026-10-30: their sessions were pointed at no
+# VeinScript doc, and learned the language by guessing.
+echo
+echo "core words per folder (how the rules keep their state):"
+VOCAB=$(cat <<'EOF'
+mark|\bmark [a-z!]
+unmark|\bunmark
+attach|\battach (\$|\*)
+unattach|\bunattach
+bring|\bbring
+spawn|spawn\(\)
+target|\btarget
+hear|\bhear
+emit|\bemit
+fromJson|fromJson\(
+indexOf+substring|indexOf\(|substring\(
+parse/weave|parse(Lines|Pairs|Fields|Split|Words|Text|Chars)\(|\bweave
+EOF
+)
+printf '  %-16s' "folder"; echo "$VOCAB" | while IFS='|' read -r word _; do printf ' %9s' "$(echo "$word" | cut -c1-9)"; done; echo
+for l in $labels; do
+    printf '  %-16s' "$l"
+    echo "$VOCAB" | while IFS= read -r row; do
+        regex=$(awk -F'|' '{ r=$2; for (i=3; i<=NF; i++) r=r "|" $i; print r }' <<<"$row")
+        printf ' %9d' "$(grep -E "^$l"$'\t' "$WORK/lines.txt" | cut -f2- | grep -cE -- "$regex")"
+    done
+    echo
+done
