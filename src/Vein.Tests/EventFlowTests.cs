@@ -103,4 +103,35 @@ public class EventFlowTests
         Assert.Contains(flow.Shards, s => s.Bundle == "Movement" && s.Name == "Drift");
         Assert.True(flow.Bundles.Single(b => b.Name == "Movement").Needed);
     }
+
+    [Fact]
+    public void Every_bundle_by_an_author_is_one_map_and_a_copy_is_said()
+    {
+        // A game and its tools are programs of their own by one author; the Flow tab's "Every bundle by this
+        // author" draws them together. A file declaring a bundle another already declares (a copy left lying
+        // about) is said, and another author's program is not drawn.
+        string dir = Path.Combine(Path.GetTempPath(), "vein-author-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "tools"));
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "game.vein"),
+                "bundle Game by me {\n    need \"Vein.Console\"\n    event @Go { }\n    shard S { run once { emit @Go { } }\n        hear @Go as g { do print(\"go\") } }\n}\n");
+            File.WriteAllText(Path.Combine(dir, "tools", "build.vein"),
+                "bundle Build by me {\n    need \"Vein.Console\"\n    shard B { run once { do print(\"built\") } }\n}\n");
+            File.WriteAllText(Path.Combine(dir, "tools", "old_build.vein"),
+                "bundle Build by me {\n    shard B { run once { } }\n}\n");
+            File.WriteAllText(Path.Combine(dir, "tools", "theirs.vein"),
+                "bundle Theirs by you {\n    shard T { run once { } }\n}\n");
+
+            var flow = EventFlow.ForAuthor(dir, "me", Path.Combine(dir, "game.vein"));
+
+            Assert.Equal(new[] { "Game", "Build" }, flow.Bundles.Where(b => !b.IsLibrary).Select(b => b.Name));
+            Assert.True(flow.Bundles[0].IsPrincipal);
+            Assert.Contains(flow.Problems, p => p.Contains("two files declare bundle Build"));
+            // Both print: one Vein.Console box, heard from both programs.
+            var console = Assert.Single(flow.Bundles, b => b.IsLibrary && b.Name == "Vein.Console");
+            Assert.Equal(new[] { "Build", "Game" }, flow.Event("Print")!.Emitters.Select(e => e.Bundle).OrderBy(b => b));
+        }
+        finally { try { Directory.Delete(dir, recursive: true); } catch (IOException) { } }
+    }
 }

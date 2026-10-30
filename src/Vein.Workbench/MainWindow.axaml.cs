@@ -194,7 +194,7 @@ public partial class MainWindow : Window
         {
             if (_bottomPanel.SelectedIndex == TabSymbols) _symbolsPanel.Update(_rootFolder, _currentPath);
             if (_bottomPanel.SelectedIndex == TabTune) _tunePanel.Update(RunPath);
-            if (_bottomPanel.SelectedIndex == TabFlow) _flowPanel.Update(RunPath);
+            if (_bottomPanel.SelectedIndex == TabFlow) { _flowPanel.ProjectRoot = _rootFolder; _flowPanel.Update(RunPath); }
             if (_bottomPanel.SelectedIndex == TabFormats) _formatsPanel.Update(RunPath);
             if (_bottomPanel.SelectedIndex == TabDna) _dnaPanel.Update(_currentPath);
             if (_bottomPanel.SelectedIndex == TabChain) { _chainPanel.Session = _session; _chainPanel.Update(_currentPath); }
@@ -1977,7 +1977,7 @@ public partial class MainWindow : Window
             if (ReferenceEquals(doc, _tabs.Active)) Build();
 
             // The map is read from disk, so a save — of any bundle the app links — is when it can change.
-            if (_bottomPanel.SelectedIndex == TabFlow) _flowPanel.Update(RunPath);
+            if (_bottomPanel.SelectedIndex == TabFlow) { _flowPanel.ProjectRoot = _rootFolder; _flowPanel.Update(RunPath); }
             if (_bottomPanel.SelectedIndex == TabFormats) _formatsPanel.Update(RunPath);
 
             // Live reload. `veinc serve` reads the file once at boot and the runtime has no reload path

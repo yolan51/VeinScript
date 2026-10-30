@@ -438,9 +438,13 @@ switch (command)
 
     // `veinc flow` — who emits what and who hears it, across every bundle the program links: the data the
     // Workbench's Flow tab draws. `--all` keeps the standard library's events (`@Print`, `@Ticked`, …).
+    // `--author` draws every program under the current folder by the same author as this one — a game and
+    // its tools — as the Flow tab's "Every bundle by this author" does.
     case "flow":
     {
-        var flow = EventFlow.For(path);
+        var flow = args.Contains("--author") && EventFlow.AuthorOf(path) is { } author
+            ? EventFlow.ForAuthor(Directory.GetCurrentDirectory(), author, path)
+            : EventFlow.For(path);
         if (args.Contains("--json"))
             Console.WriteLine(JsonSerializer.Serialize(flow, new JsonSerializerOptions { WriteIndented = true }));
         else

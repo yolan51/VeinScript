@@ -171,11 +171,24 @@ public sealed class EventFlow
 
         if (parts.Count > 0) bundles.AddRange(Libraries(bundles, parts[0]));
 
-        // ---- events -----------------------------------------------------------------------------
+        return new EventFlow
+        {
+            Name = name,
+            Bundles = bundles,
+            Events = EventsOf(bundles, start),
+            Start = start,
+            Problems = diag?.Items.Where(d => d.Severity == Severity.Error).Select(d => d.ToString()).ToList()
+                       ?? (IReadOnlyList<string>)Array.Empty<string>(),
+        };
+    }
+
+    /// Every event with its two ends, from what the bundles' units emit and hear.
+    private static List<FlowEvent> EventsOf(IReadOnlyList<FlowBundle> bundles, (string Event, FlowPlace At)? start)
+    {
         var emitters = new Dictionary<string, List<FlowEnd>>(StringComparer.Ordinal);
         var hearers = new Dictionary<string, List<FlowEnd>>(StringComparer.Ordinal);
         if (start is { } boot && bundles.Count > 0)
-            Add(emitters, boot.Item1, new FlowEnd(bundles[0].Name, "start", boot.Item2, "boot"));
+            Add(emitters, boot.Event, new FlowEnd(bundles[0].Name, "start", boot.At, "boot"));
 
         foreach (var shard in bundles.SelectMany(b => b.Shards))
             foreach (var u in shard.Units)
@@ -185,22 +198,107 @@ public sealed class EventFlow
                     Add(emitters, e.Event, new FlowEnd(shard.Bundle, shard.Name, e.At, e.Via is null ? "" : "via " + e.Via));
             }
 
-        var events = emitters.Keys.Concat(hearers.Keys).Distinct(StringComparer.Ordinal)
+        return emitters.Keys.Concat(hearers.Keys).Distinct(StringComparer.Ordinal)
             .OrderBy(k => k.Contains('.') ? 0 : 1).ThenBy(Interp.EventName, StringComparer.Ordinal).ThenBy(k => k, StringComparer.Ordinal)
             .Select(k => new FlowEvent(k,
                 emitters.TryGetValue(k, out var em) ? em : Array.Empty<FlowEnd>(),
                 hearers.TryGetValue(k, out var he) ? he : Array.Empty<FlowEnd>()))
             .ToList();
+    }
 
-        return new EventFlow
+    /// The author a `.vein` file's bundle or app is written by — `veincards` in `bundle ReferenceCombat by
+    /// veincards` — from its first lines; null for a fragment or a file that declares none.
+    public static string? AuthorOf(string file)
+    {
+        try
         {
-            Name = name,
-            Bundles = bundles,
-            Events = events,
-            Start = start,
-            Problems = diag?.Items.Where(d => d.Severity == Severity.Error).Select(d => d.ToString()).ToList()
-                       ?? (IReadOnlyList<string>)Array.Empty<string>(),
-        };
+            foreach (string line in File.ReadLines(file).Take(80))
+            {
+                var m = System.Text.RegularExpressions.Regex.Match(line, @"^\s*(?:bundle|app)\s+[A-Za-z_][\w.]*\s+by\s+([A-Za-z_][\w.]*)");
+                if (m.Success) return m.Groups[1].Value;
+            }
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        return null;
+    }
+
+    /// Folders a project keeps that are not its programs: build output, an engine's cache, old versions.
+    private static readonly HashSet<string> NotPrograms = new(StringComparer.OrdinalIgnoreCase)
+        { "bin", "obj", ".git", ".godot", ".vein", "node_modules", "archive" };
+
+    /// Every program in `root` written by `author`, drawn as one map: each one's bundles and the links between
+    /// them — an event one emits and another hears, and the libraries they share.
+    ///
+    /// A PROJECT IS MORE THAN ITS GAME. Vein Cards' tools are bundles by veincards beside it — the card
+    /// builder, the four rule references, a test client — each its own program, so the Flow tab, which drew the
+    /// program in the open tab, never showed them together. `preferred` (the open program) comes first, so its
+    /// boot event is the map's beginning. Two files declaring one bundle are a problem, said: only the first is
+    /// drawn, and a copy left lying about (`zz_oldkeys_probe.vein` is BuildCards again) is how that happens.
+    public static EventFlow ForAuthor(string root, string author, string? preferred = null)
+    {
+        var files = new List<string>();
+        void Walk(string dir)
+        {
+            try
+            {
+                foreach (string f in Directory.EnumerateFiles(dir, "*.vein"))
+                    if (!BundleLoader.IsFragment(f) && AuthorOf(f) == author) files.Add(Path.GetFullPath(f));
+                foreach (string sub in Directory.EnumerateDirectories(dir))
+                    if (!NotPrograms.Contains(Path.GetFileName(sub))) Walk(sub);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+        Walk(root);
+        files = files.OrderBy(f => preferred is not null && string.Equals(f, Path.GetFullPath(preferred), StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                     .ThenBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+
+        var problems = new List<string>();
+        var bundles = new List<FlowBundle>();
+        var drawnBy = new Dictionary<string, string>(StringComparer.Ordinal);   // bundle → the file drawn for it
+        var libraries = new Dictionary<string, FlowBundle>(StringComparer.Ordinal);
+        (string Event, FlowPlace At)? start = null;
+
+        foreach (string file in files)
+        {
+            EventFlow flow;
+            try { flow = For(file); }
+            catch (Exception ex) { problems.Add($"{Path.GetFileName(file)}: {ex.Message}"); continue; }
+            problems.AddRange(flow.Problems.Select(p => $"{Path.GetFileName(file)}: {p}"));
+            if (start is null && flow.Start is { } s) start = s;
+
+            foreach (var b in flow.Bundles)
+            {
+                if (b.IsLibrary)
+                {
+                    libraries[b.Name] = libraries.TryGetValue(b.Name, out var had) ? Union(had, b) : b;
+                    continue;
+                }
+                if (drawnBy.TryGetValue(b.Name, out var first))
+                {
+                    if (!string.Equals(first, file, StringComparison.OrdinalIgnoreCase))
+                        problems.Add($"two files declare bundle {b.Name}: {Path.GetRelativePath(root, first)} and {Path.GetRelativePath(root, file)} — only the first is drawn");
+                    continue;
+                }
+                drawnBy[b.Name] = file;
+                bundles.Add(b with { IsPrincipal = bundles.Count == 0 });
+            }
+        }
+        bundles.AddRange(libraries.Values.OrderBy(l => l.Name, StringComparer.Ordinal));
+        return new EventFlow { Name = author, Bundles = bundles, Events = EventsOf(bundles, start), Start = start, Problems = problems };
+    }
+
+    /// One library box from two programs' views of it: every publicator, and every unit once.
+    private static FlowBundle Union(FlowBundle a, FlowBundle b)
+    {
+        var shards = a.Shards.ToDictionary(s => s.Name, StringComparer.Ordinal);
+        foreach (var s in b.Shards)
+            shards[s.Name] = shards.TryGetValue(s.Name, out var had)
+                ? had with { Units = had.Units.Concat(s.Units.Where(u => !had.Units.Any(x => x.Trigger == u.Trigger && x.IsHear == u.IsHear
+                                                                            && x.Emits.Select(e => e.Event).SequenceEqual(u.Emits.Select(e => e.Event))))).ToList() }
+                : s;
+        return a with { Shards = shards.Values.OrderBy(s => s.Name, StringComparer.Ordinal).ToList() };
     }
 
     /// The standard-library bundles this program's events come from and go to, one per bundle, one "shard" per

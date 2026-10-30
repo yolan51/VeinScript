@@ -19,6 +19,11 @@ internal sealed class EventFlowPanel : UserControl
     private readonly TextBlock _status = new() { Foreground = Brushes.Gray, FontSize = 11, Margin = new Avalonia.Thickness(8, 2), TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly TextBox _filter = new() { Width = 200, FontSize = 12, Watermark = "highlight: bundle, shard or @event" };
     private readonly CheckBox _stdlib = new() { Content = "Standard library", FontSize = 12 };
+    private readonly CheckBox _author = new() { Content = "Every bundle by this author", FontSize = 12 };
+    private string? _program;
+
+    /// The project folder the explorer shows — where "Every bundle by this author" looks for the author's programs.
+    public string? ProjectRoot { get; set; }
     private int _request;
 
     /// Open a file at a line. Wired by the window to the shared GoTo.
@@ -35,6 +40,8 @@ internal sealed class EventFlowPanel : UserControl
         // nearly every shard, and drawn they turn a program's shape into a hairball.
         _stdlib.IsCheckedChanged += (_, _) => _canvas.ShowStdlib = _stdlib.IsChecked == true;
         _filter.TextChanged += (_, _) => _canvas.Filter = _filter.Text ?? "";
+        // A project's tools are programs of their own, by the same author: drawn together, with what links them.
+        _author.IsCheckedChanged += (_, _) => Update(_program);
         _canvas.Status = s => _status.Text = s.Length > 0 ? s : Hint;
 
         var bar = new StackPanel
@@ -42,7 +49,7 @@ internal sealed class EventFlowPanel : UserControl
             Orientation = Orientation.Horizontal,
             Spacing = 8,
             Margin = new Avalonia.Thickness(8, 5),
-            Children = { _filter, _stdlib, fit, reset, _summary },
+            Children = { _filter, _stdlib, _author, fit, reset, _summary },
         };
 
         var root = new DockPanel();
@@ -61,6 +68,9 @@ internal sealed class EventFlowPanel : UserControl
     /// Draw the flow of `program` (the run entry, else the open file).
     public void Update(string? program)
     {
+        _program = program;
+        bool byAuthor = _author.IsChecked == true;   // read here: a control is the UI thread's, the work runs off it
+        string? projectRoot = ProjectRoot;
         int request = ++_request;
         if (program is null || !File.Exists(program))
         {
@@ -73,7 +83,12 @@ internal sealed class EventFlowPanel : UserControl
         {
             EventFlow? flow = null;
             string? error = null;
-            try { flow = EventFlow.For(program); }
+            try
+            {
+                flow = byAuthor && EventFlow.AuthorOf(program) is { } author
+                    ? EventFlow.ForAuthor(projectRoot ?? Path.GetDirectoryName(program)!, author, program)
+                    : EventFlow.For(program);
+            }
             catch (Exception ex) { error = ex.Message; }
 
             Dispatcher.UIThread.Post(() =>
@@ -86,7 +101,7 @@ internal sealed class EventFlowPanel : UserControl
                 _summary.Text = $"{flow.Name} — {flow.Bundles.Count} bundle(s) · {flow.Shards.Count()} shard(s) · " +
                                 $"{flow.Events.Count(e => e.Key.Contains('.'))} event(s)" +
                                 (dead > 0 ? $" · {dead} dead end(s), in red" : "") +
-                                (flow.Problems.Count > 0 ? $" · {flow.Problems.Count} error(s) — drawn from what compiled" : "");
+                                (flow.Problems.Count > 0 ? $" · {flow.Problems.Count} problem(s): {flow.Problems[0]}" : "");
                 _summary.Foreground = flow.Problems.Count > 0 || dead > 0 ? new SolidColorBrush(Color.Parse("#E0A458")) : Brushes.Gray;
             });
         });
