@@ -2261,9 +2261,11 @@ public sealed class Interp
         // data. The repeated name is remembered as ambiguous, so a LATER reference to it is said, not guessed.
         bool refers = w.Params.Any(p => p.RefersByName);
         var woven = new List<(WovenRecord Record, long Identity)>();
+        var ignored = new SortedSet<string>(StringComparer.Ordinal);   // keys no parameter took, said once in @Woven
         foreach (var record in Weave.ReadAll(text, w.Format, w.Params))
         {
             if (record.Problem is not null) { Problem(record.Text, record.Problem); continue; }
+            ignored.UnionWith(record.Ignored);
             if (record.Name is { Length: > 0 } name && _wovenNames.ContainsKey(name))
             {
                 if (refers)
@@ -2369,7 +2371,8 @@ public sealed class Interp
             {
                 ["loom"] = w.Loom, ["record"] = record, ["why"] = why,
             });
-        Emit("Woven", new Dictionary<string, object?>(StringComparer.Ordinal) { ["loom"] = w.Loom, ["count"] = (long)count });
+        Emit("Woven", new Dictionary<string, object?>(StringComparer.Ordinal)
+            { ["loom"] = w.Loom, ["count"] = (long)count, ["ignored"] = string.Join(", ", ignored) });
     }
 
     /// <summary>`toText<Format>(Loom)` (D23, the way out): every identity the loom would make, as text.</summary>

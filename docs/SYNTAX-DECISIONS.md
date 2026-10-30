@@ -801,6 +801,13 @@ hear *Vein.Files.Io.@FileLoaded as f { weave Card(f.text)  weave Ability(f.text)
 - **A list of plain values is a `list<T>` field** (`keywords`), as it already was. **A list of objects is
   records of their own**, woven by their own loom with `owner`, and not a field holding JSON. That keeps them
   identities: each can carry marks and be targeted.
+- **One object inside a record fills fields named by its keys, joined with `_`.** An ability's
+  `"filter": {"keyword": "Swarm", "cost_at_most": 3}` fills `filter_keyword` and `filter_cost_at_most`, and
+  `"condition": {"damaged": true}` fills `condition_damaged`. A small object like this is part of its record,
+  not an identity of its own, so it needs no loom and no name.
+- **What no field takes is said.** `@Woven { loom, count, ignored }` lists the keys of the text no parameter
+  took ("art_prompt, concept, flavor"), and an object none of whose keys were taken is listed once. Before
+  this, data left behind looked exactly like data that was never there.
 - **`toText<Cards>(Card)` writes under the same keys** (`{"cards": [ … ]}`), so it reads back. A format with
   `owner` reads and does not write: its records go back inside their owners, which only the owner's loom knows.
 

@@ -29,8 +29,10 @@ bundle Weaving by Vein {
         // Raised by the runtime after `weave Loom(text)`, queued like any emit — so when it is handled the
         // identities have committed and a `target` sees them. That is why it doubles as "queryable now":
         //     hear @Woven as w { if w.loom == "Server" { target $Server #Listed as s { … } } }
-        shared("A weave finished: `count` records of loom `loom` were woven, and can be queried now.")
-        event @Woven { loom: string, count: int }
+        // `ignored` names the keys of the text no field took ("art_prompt, concept"), so data left behind is not
+        // mistaken for data that was never there. A nested object fills `key_sub` fields (`filter_keyword`).
+        shared("A weave finished: `count` records of loom `loom` were woven, and can be queried now; `ignored` lists keys no field took.")
+        event @Woven { loom: string, count: int, ignored: string = "" }
 
         // One per record that could not be woven, in the order found, before @Woven; the rest are woven
         // anyway. `why` names the record:  "S1=9811:S7": `peers`: no record named "S7"

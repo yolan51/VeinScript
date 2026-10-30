@@ -30,12 +30,12 @@ public class WeaveNestedTests
             loom<Abilities> Ability { $Ability  mark #Ability }
         """;
 
-    private static string[] Run(string decls, string once, string show)
+    private static string[] Run(string decls, string once, string show, string hears = "")
     {
         string source = "bundle T by you {\n    need \"Vein.Console\"\n" + decls + "\n    event @Show { }\n" +
                         "    shard Setup {\n        run once {\n" + once + "\n            emit @Show { }\n        }\n" +
                         "        hear @Show as s {\n" + show + "\n        }\n" +
-                        "        hear @Unwoven as u { do print(\"! \" + u.why) }\n    }\n}";
+                        "        hear @Unwoven as u { do print(\"! \" + u.why) }\n" + hears + "\n    }\n}";
         var r = new VeinCompilerService().Compile(new CompileRequest("t.vein", source));
         Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
         var output = new StringWriter();
@@ -64,6 +64,41 @@ public class WeaveNestedTests
 
         // Three abilities, two of them `draw`, two on one card: none refused, each linked to its own card.
         Assert.Equal(new[] { "shield 2 of Shardling", "draw 1 of Shardling", "draw 0 of Wisp" }, lines);
+    }
+
+    [Fact]
+    public void An_object_inside_a_record_fills_fields_named_by_its_keys()
+    {
+        // Vein Cards' abilities carry `"filter": {"keyword": "Swarm"}` and `"condition": {"damaged": true}`: one
+        // small object each, which no field could take.
+        string data =
+            "{\\\"cards\\\": [{\\\"id\\\": \\\"c1\\\", \\\"name\\\": \\\"Hive\\\", \\\"cost\\\": 5, \\\"abilities\\\": [" +
+            "{\\\"effect\\\": \\\"aura_buff\\\", \\\"filter\\\": {\\\"keyword\\\": \\\"Swarm\\\", \\\"cost_at_most\\\": 3}}, " +
+            "{\\\"effect\\\": \\\"damage\\\", \\\"condition\\\": {\\\"damaged\\\": true}, \\\"art_prompt\\\": \\\"a hive\\\"}]}]}";
+        string decls = Decls.Replace("shape $Ability { effect: string, amount: int = 0, card: Entity }",
+            "shape $Ability { effect: string, amount: int = 0, filter_keyword: string = \"\", filter_cost_at_most: int = 0, " +
+            "condition_damaged: bool = false, card: Entity }");
+
+        var lines = Run(decls,
+            $"            let text = \"{data}\"\n            weave Card(text)\n            weave Ability(text)",
+            "            target $Ability #Ability as a { do print(a.Ability.effect + \" [\" + a.Ability.filter_keyword + \" \" + a.Ability.filter_cost_at_most + \"] \" + a.Ability.condition_damaged) }");
+
+        Assert.Equal(new[] { "aura_buff [Swarm 3] false", "damage [ 0] true" }, lines);
+    }
+
+    [Fact]
+    public void Keys_no_field_takes_are_said_once_in_woven()
+    {
+        // `art_prompt` is a value no field takes; `condition` is an object none of whose keys a field takes, so it
+        // is named once rather than as `condition_damaged`.
+        string data =
+            "{\\\"cards\\\": [{\\\"id\\\": \\\"c1\\\", \\\"name\\\": \\\"A\\\", \\\"cost\\\": 1, \\\"art_prompt\\\": \\\"x\\\", \\\"condition\\\": {\\\"damaged\\\": true}}, " +
+            "{\\\"id\\\": \\\"c2\\\", \\\"name\\\": \\\"B\\\", \\\"cost\\\": 2, \\\"art_prompt\\\": \\\"y\\\"}]}";
+
+        var lines = Run(Decls, $"            weave Card(\"{data}\")", "",
+            "        hear @Woven as w { do print(w.loom + \" \" + w.count + \" ignored: \" + w.ignored) }");
+
+        Assert.Contains("Card 2 ignored: art_prompt, condition", lines);
     }
 
     [Fact]

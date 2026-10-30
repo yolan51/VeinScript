@@ -46,6 +46,10 @@ public sealed class WovenRecord
     public HashSet<string> Missing { get; } = new(StringComparer.Ordinal);
 
     public string? Problem { get; set; }
+
+    /// Keys of the record no parameter took — a nested object none of whose keys were taken is named once.
+    /// Said in @Woven (`ignored`), so data left behind is not mistaken for data that was never there.
+    public List<string> Ignored { get; } = new();
 }
 
 /// <summary>The reading half of `weave` (D23): records out of a text, values out of a record.</summary>
@@ -117,12 +121,42 @@ public static class Weave
             records.Add(record);
             if (item is not Dictionary<string, object?> obj) { record.Problem = "it is not an object"; continue; }
             var byName = new Dictionary<string, object?>(StringComparer.Ordinal);
-            foreach (var (k, v) in obj) byName[k] = v;
+            Flatten(obj, "", byName);
             if (owner is not null) byName[owner] = holder;
             Fill(record, byName, prms, format);
+            var taken = prms.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+            Unused(obj, "", taken, record.Ignored);
         }
         return records;
     }
+
+    /// A record's values by name — and an OBJECT among them by its keys too, joined with `_`: `"filter":
+    /// {"keyword": "Swarm"}` fills `filter_keyword`. An ability's filter and its condition are one small
+    /// object each in Vein Cards' cards, and no field could take an object, so they were dropped without a
+    /// word. A list of objects is records of their own, through a loom with `owner`.
+    private static void Flatten(Dictionary<string, object?> obj, string prefix, Dictionary<string, object?> byName)
+    {
+        foreach (var (k, v) in obj)
+        {
+            byName[prefix + k] = v;
+            if (v is Dictionary<string, object?> inner) Flatten(inner, prefix + k + "_", byName);
+        }
+    }
+
+    /// The keys no parameter took; an object none of whose keys were taken is one key, not each of its own.
+    private static void Unused(Dictionary<string, object?> obj, string prefix, HashSet<string> taken, List<string> ignored)
+    {
+        foreach (var (k, v) in obj)
+        {
+            string name = prefix + k;
+            if (taken.Contains(name)) continue;
+            if (v is Dictionary<string, object?> inner && AnyTaken(inner, name + "_", taken)) Unused(inner, name + "_", taken, ignored);
+            else ignored.Add(name);
+        }
+    }
+
+    private static bool AnyTaken(Dictionary<string, object?> obj, string prefix, HashSet<string> taken) =>
+        obj.Any(kv => taken.Contains(prefix + kv.Key) || kv.Value is Dictionary<string, object?> inner && AnyTaken(inner, prefix + kv.Key + "_", taken));
 
     /// The records at `keys[i..]` below `node`, each with the name of the object that holds it. An array is
     /// walked wherever it stands. False when the path reaches nothing at all — a key no object has.
