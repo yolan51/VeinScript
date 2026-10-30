@@ -3259,6 +3259,12 @@ public sealed partial class Lower
         if (flat.Line("delimiter") is not null && flat.Root != "Csv")
             _diag.Error("VS0366", $"format {f.Name} says `delimiter`, which only a format `from Csv` has — " +
                 "a custom format cuts its values with `values`.", f.Lines.First(l => l.Word == "delimiter").Span);
+        // `owner` names whose a nested record is, so it means something only where records nest: in JSON,
+        // under a `records` path.
+        if (flat.Line("owner") is not null && (flat.Root != "Json" || flat.Line("records") is null))
+            _diag.Error("VS0366", $"format {f.Name} says `owner`, which only a format `from Json` with a `records` path has — " +
+                "it gives each record the name of the object it is nested in (`records \"cards.abilities\"  owner \"card\"`).",
+                f.Lines.FirstOrDefault(l => l.Word == "owner")?.Span ?? f.Span);
     }
 
     /// A loom, checked where it is declared: its format exists, it builds an identity, its columns name

@@ -772,6 +772,41 @@ to the language.
 
 `toJson(shape)` stays: it writes one shape's JSON, for a reply or a payload. Interpreter-only, like `weave`.
 
+### D23, nested JSON — `records "a.b"` and `owner "x"` (DECIDED 2026-10-30)
+
+A data file is rarely a bare array. Vein Cards' cards are `{ "exported_at": …, "cards": [ … ] }`, and each card
+holds a list of ability objects. A `loom<Json>` read that whole object as ONE record, so the game read its
+data with `fromJson` and walked it by hand: 158 `fromJson`, 300 `get(…)`, and no identity for a card or an
+ability. Two words of a `format … from Json` bring it in through `weave` instead:
+
+```
+format Cards     from Json { records "cards" }                         // the array under "cards"
+format Abilities from Json { records "cards.abilities"  owner "card" }  // every card's abilities
+
+shape $Card    { id: string, name: string, cost: int, keywords: list<string> = [] }
+shape $Ability { effect: string, amount: int = 0, card: Entity }
+loom<Cards>     Card    { $Card     mark #Card }
+loom<Abilities> Ability { $Ability  mark #Ability }
+
+hear *Vein.Files.Io.@FileLoaded as f { weave Card(f.text)  weave Ability(f.text) }
+```
+
+- **`records` says where the records are**: keys from the top, `.` between them, walking through every array
+  it meets. A path no object has is one `@Unwoven` ("it has no `deck`"); a card with no `abilities` simply has none.
+- **`owner` says whose a nested record is**: each one gets that value set to the name of the object holding it,
+  its first value, which is the rule that names every woven record. With an `Entity` parameter of that name,
+  the ability links to the card another loom wove.
+- **A nested record has no name of its own.** It is reached through its owner. Named by its first value, two
+  `draw` abilities would be one name twice, and the second refused.
+- **A list of plain values is a `list<T>` field** (`keywords`), as it already was. **A list of objects is
+  records of their own**, woven by their own loom with `owner`, and not a field holding JSON. That keeps them
+  identities: each can carry marks and be targeted.
+- **`toText<Cards>(Card)` writes under the same keys** (`{"cards": [ … ]}`), so it reads back. A format with
+  `owner` reads and does not write: its records go back inside their owners, which only the owner's loom knows.
+
+`owner` anywhere but a `from Json` format with a `records` path is VS0366. No word was added to the language;
+`records` already existed and `owner` joins the format words.
+
 ## D24 — `~` collections: many of something, as a field with a declared kind and type {#collections}
 
 > **Reported as** `VS0371` (a literal of the wrong kind going into a collection — `bring`, `add`, `has`),

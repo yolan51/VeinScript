@@ -71,7 +71,7 @@ public static class Weave
 
     /// <summary>The words a `format` body may use.</summary>
     public static readonly IReadOnlyList<string> Words =
-        new[] { "records", "name", "values", "pairs", "lists", "quotes", "delimiter", "comments", "columns" };
+        new[] { "records", "name", "values", "pairs", "lists", "quotes", "delimiter", "comments", "columns", "owner" };
 
     /// <summary>Arrangements tried before giving up on placing optional values.</summary>
     public const int MaxArrangements = 64;
@@ -96,18 +96,48 @@ public static class Weave
         if (parsed is null)
             return new List<WovenRecord> { new() { Text = Short(text), Problem = "it is not JSON" } };
 
-        var items = parsed is List<object?> list ? list : new List<object?> { parsed };
+        // WHERE THE RECORDS ARE (`records "cards"`), and whose they are (`owner "card"`). A file is rarely a
+        // bare array: Vein Cards' card files are `{ "exported_at": …, "cards": [ … ] }`, each card holding a
+        // list of ability objects — and a loom read the whole object as ONE record. The path walks keys from
+        // the top, and through every array it meets, so `records "cards.abilities"` is each ability of each
+        // card; `owner` gives each of those the name of the object holding it — its first value, the rule that
+        // names every woven record — so a `card: Entity` parameter links it to the card another loom wove.
+        string? path = format.Line("records");
+        string? owner = format.Line("owner");
+        var found = new List<(object? Item, object? Owner)>();
+        if (path is null)
+            foreach (var item in parsed is List<object?> list ? list : new List<object?> { parsed }) found.Add((item, null));
+        else if (!Gather(parsed, path.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), 0, null, found))
+            return new List<WovenRecord> { new() { Text = Short(text), Problem = $"it has no `{path}`" } };
+
         var records = new List<WovenRecord>();
-        foreach (var item in items)
+        foreach (var (item, holder) in found)
         {
             var record = new WovenRecord { Text = Short(Json.Write(item)) };
             records.Add(record);
             if (item is not Dictionary<string, object?> obj) { record.Problem = "it is not an object"; continue; }
             var byName = new Dictionary<string, object?>(StringComparer.Ordinal);
             foreach (var (k, v) in obj) byName[k] = v;
+            if (owner is not null) byName[owner] = holder;
             Fill(record, byName, prms, format);
         }
         return records;
+    }
+
+    /// The records at `keys[i..]` below `node`, each with the name of the object that holds it. An array is
+    /// walked wherever it stands. False when the path reaches nothing at all — a key no object has.
+    private static bool Gather(object? node, string[] keys, int i, object? holder, List<(object? Item, object? Owner)> found)
+    {
+        if (node is List<object?> items)
+        {
+            bool any = items.Count == 0 && i == keys.Length;
+            foreach (var item in items) any |= Gather(item, keys, i, holder, found);
+            return any;
+        }
+        if (i == keys.Length) { found.Add((node, holder)); return true; }
+        if (node is not Dictionary<string, object?> obj || !obj.TryGetValue(keys[i], out var next)) return false;
+        Gather(next, keys, i + 1, obj.Values.FirstOrDefault(), found);
+        return true;
     }
 
     private static List<WovenRecord> ReadCsv(string text, WeaveFormat format, IReadOnlyList<WeaveParam> prms)
@@ -318,7 +348,9 @@ public static class Weave
             if (Convert(raw, p, format, out object? value) is { } why) { record.Problem = why; return; }
             record.Values[p.Name] = value;
         }
-        if (prms.Count > 0 && record.Values.TryGetValue(prms[0].Name, out var name)) record.Name = Str(name);
+        // A record nested in another (`owner`) has no name of its own — it is reached through its owner. Named by
+        // its first value, two abilities of one card would be one name twice, and the second refused.
+        if (format.Line("owner") is null && prms.Count > 0 && record.Values.TryGetValue(prms[0].Name, out var name)) record.Name = Str(name);
     }
 
     /// <summary>An empty value where a non-text one belongs (a blank Csv cell, `S1=9811::box`): not given,
@@ -419,6 +451,16 @@ public static class Weave
                                   IReadOnlyList<WeaveParam> prms, IReadOnlyList<object?> defaults,
                                   List<(string Record, string Why)> problems)
     {
+        // Records read from inside others (`owner`) are written by the loom of the records that hold them:
+        // here there is no holder to put them back into, and a flat array would not read back the same.
+        if (format.Line("owner") is not null)
+        {
+            foreach (var values in records)
+                problems.Add((prms.Count > 0 ? Str(values.GetValueOrDefault(prms[0].Name)) : "",
+                              $"format {format.Name} reads records nested in others (`owner`), and does not write them"));
+            return "";
+        }
+
         var written = new List<string>();
         foreach (var values in records)
         {
@@ -443,7 +485,13 @@ public static class Weave
     {
         switch (format.Root)
         {
-            case "Json": return "[" + string.Join(",\n ", records) + "]\n";
+            // Under the keys `records` names, so what is written reads back through the same path.
+            case "Json":
+                string array = "[" + string.Join(",\n ", records) + "]";
+                if (format.Line("records") is { } path)
+                    foreach (string key in path.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Reverse())
+                        array = "{" + Json.Write(key) + ": " + array + "}";
+                return array + "\n";
             case "Csv":
                 string header = string.Join(format.Line("delimiter") ?? ",", prms.Select(p => p.Name));
                 return string.Join("\n", records.Prepend(header)) + "\n";
