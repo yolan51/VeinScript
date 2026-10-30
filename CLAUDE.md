@@ -36,6 +36,9 @@ ask the user first.** Losing a useful file is far worse than leaving a temp fold
   engine host such as Godot 4.7 builds on net8). Engines consume them as packages (`tools/pack.sh`).
 - **Build:** `dotnet build VeinScript.sln`
 - **Tests:** `dotnet test src/Vein.Tests`   ·   **Golden IR:** `bash tools/check-ir.sh`   ·   **Backend equivalence:** `bash tools/check-backend.sh`   ·   **Backend speed:** `bash tools/check-perf.sh`
+- **Corpus:** `bash tools/check-corpus.sh` checks every `.vein` in every repo on the Desktop (`corpus.txt`);
+  `bash tools/count-corpus.sh` counts the workarounds. Run the first before a compiler commit. Findings:
+  [docs/CORPUS.md](docs/CORPUS.md).
 - **JIT tests:** `dotnet test src/Vein.Jit.Tests` — a second suite, so the main one does not carry Roslyn.
 - **CLI (`veinc`):** `src/Vein.Cli` — run via `dotnet run --project src/Vein.Cli -- <cmd>` or the wrapper
   `.\veinc.cmd <cmd>`. Commands: `new add remove restore packages check lock settings tokens ast ir render serve run build emit graph events flow formats scaffold symbols exec lsp`. `lsp` is the editor protocol for VS Code (`editors/vscode`, docs/EDITORS.md).

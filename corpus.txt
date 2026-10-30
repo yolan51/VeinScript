@@ -1,0 +1,20 @@
+# corpus.txt — every folder of VeinScript code we own, checked as one test suite of the language.
+#
+#   bash tools/check-corpus.sh      every bundle and app compiles (veinc check), diagnostics grouped by code
+#   bash tools/count-corpus.sh      how often each known workaround appears: fix the biggest counts first
+#
+# One folder per line, relative to this repo; `label = folder`. The other repos sit beside this one on the
+# Desktop. A folder that is missing is reported and skipped, so a fresh clone still runs.
+# Skipped inside every folder: bin/ obj/ .godot/ .git/ out/ artifacts/ addons/ build/ node_modules/ .vein/
+
+first/stdlib        = stdlib
+first/samples       = samples
+first/apps          = apps
+first/Demo          = Demo
+bundle              = ../VeinScriptBundle
+chain               = ../VeinChain
+cards               = ../VeinCards/VeinProjects/VeinCards
+showdown            = ../VeinShowdown
+godot               = ../VeinGodot
+desktop             = ../VeinDesktop
+# VeinDNA holds no .vein files (its genes are C#-hosted bundles from the packages), so it is not listed.
