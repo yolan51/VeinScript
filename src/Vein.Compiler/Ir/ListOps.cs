@@ -15,10 +15,17 @@ public static class ListOps
     public static List<object?> Plus(object? left, object? right)
     {
         var result = left is IEnumerable<object?> l ? l.ToList() : new List<object?>();
-        if (right is IReadOnlyList<object?> r) result.AddRange(r);
-        else result.Add(right);
+        Append(result, right);
         return result;
     }
+
+    /// What `+` adds to a list, added to THIS one: a list's items, or one item.
+    public static void Append(List<object?> list, object? right)
+    {
+        if (right is IReadOnlyList<object?> r) list.AddRange(r);
+        else list.Add(right);
+    }
+
 
     /// `xs[i] = v` or `m["k"] = v`. An index one past the end appends — the natural way to fill a list a
     /// slot at a time — and anything further is an error, not a silent drop: a write that goes nowhere is
@@ -91,4 +98,19 @@ public static class ListOps
         string s when long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) => n,
         _ => -1,
     };
+}
+
+/// A list `xs += item` built, held by one local variable and nothing else — so the next `+=` may append in
+/// place, and nobody can tell it from the copy `Plus` would have made.
+///
+/// WHY: growing copies, so building a list of n items in a loop cost n² steps — 40,000 appends took 8.6 s
+/// where GDScript takes 4 ms (VeinCards' VEINSCRIPT_SPEED.md), and Vein Cards grows lists this way in 189
+/// places. The interpreter sets `Shared` the moment the variable is read in a way that could keep the list
+/// (`let ys = xs`, an argument, a payload, a `return`); after that the next `+=` copies once, as it always
+/// did, into a new GrowingList. A read that keeps nothing — `len(xs)`, `xs[i]` — leaves it alone.
+public sealed class GrowingList : List<object?>
+{
+    public bool Shared;
+
+    public GrowingList(IEnumerable<object?> items) : base(items) { }
 }

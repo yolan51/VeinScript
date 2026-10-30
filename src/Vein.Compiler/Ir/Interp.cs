@@ -88,33 +88,20 @@ public sealed class Interp
     /// User `fn`/`SF` declarations by name. An `fn` returns a value; an `SF` emits and returns null.
     private readonly Dictionary<string, IrFunction> _functions = new(StringComparer.Ordinal);
 
-    /// Unwinds an `fn` body to its call site. Control flow, not an error — caught only in CallUser.
-    private sealed class ReturnSignal : Exception
-    {
-        public readonly object? Value;
-        public ReturnSignal(object? value) => Value = value;
-    }
-
-    /// `break` and `continue`, unwound to the nearest loop the same way `return` unwinds to its call.
+    /// How a statement finished: on to the next one, or unwinding to the nearest call (`return`) or loop
+    /// (`break`, `continue`). Every Exec, ExecStmt and ExecLoop hands it back up; CallUser and Iterate
+    /// consume it.
     ///
-    /// THESE DID NOTHING AT ALL until they were added here. They lex, they parse, they lower to IrBreak
-    /// and IrContinue, and the C# backend emits real `break;`/`continue;` — but this switch had no case
-    /// for either, so the interpreter ran straight past them and finished the loop. The two runtimes
-    /// disagreed on any program that used them, and nothing caught it because no sample did.
+    /// THESE WERE EXCEPTIONS, thrown per `return` and caught in CallUser. A .NET throw costs microseconds,
+    /// so every call cost ~12.5 µs and `fib(25)` took 3.5 s where GDScript takes 70 ms (VeinCards'
+    /// VEINSCRIPT_SPEED.md). Real programs are made of small `fn`s, so it was the biggest single cost.
     ///
-    /// An exception for control flow is the same trade `return` already makes: threading a status
-    /// through every Exec, ExecStmt and ExecLoop would touch every statement in the interpreter to
-    /// serve two keywords. They carry no payload and no stack trace is ever read, so one instance of
-    /// each is reused rather than allocated per hop.
-    private sealed class BreakSignal : Exception
-    {
-        public static readonly BreakSignal It = new();
-    }
+    /// `break` and `continue` DID NOTHING AT ALL before they were added: they lowered to IrBreak and
+    /// IrContinue, the C# backend emitted them, and this switch ran straight past them.
+    private enum Flow : byte { Next, Return, Break, Continue }
 
-    private sealed class ContinueSignal : Exception
-    {
-        public static readonly ContinueSignal It = new();
-    }
+    /// The value a `return` carries, read by CallUser the moment the Flow.Return reaches it.
+    private object? _returned;
 
     private int _callDepth;
 
@@ -1660,13 +1647,9 @@ public sealed class Interp
         long startedActivations = _activations;
         int outerCalls = _calls.Count;
 
+        // A `return` that escaped its fn, or a `break`/`continue` written outside any loop, simply ends the
+        // block — reporting a runtime error for it would turn a harmless mistake into a failed frame.
         try { Exec(body, owner, locals); }
-        catch (ReturnSignal) { /* a `return` that escaped its fn — the block simply ends */ }
-        // A `break`/`continue` written outside any loop. It means nothing, and ending the block is the
-        // same answer `return` gets here — reporting a runtime error for it would turn a harmless
-        // mistake into a failed frame.
-        catch (BreakSignal) { }
-        catch (ContinueSignal) { }
         // Out of gas is the HOST's to hear, not the program's: the work did not finish, and no handler may
         // turn that into a diagnostic and carry on as if it had.
         catch (OutOfGas) { throw; }
@@ -2136,18 +2119,24 @@ public sealed class Interp
 
     // ---- statements -----------------------------------------------------
 
-    private void Exec(IrBlock block, Instance self, Dictionary<string, object?> locals)
+    private Flow Exec(IrBlock block, Instance self, Dictionary<string, object?> locals)
     {
-        foreach (var s in block.Statements) ExecStmt(s, self, locals);
+        var statements = block.Statements;
+        for (int i = 0; i < statements.Count; i++)
+        {
+            var flow = ExecStmt(statements[i], self, locals);
+            if (flow != Flow.Next) return flow;
+        }
+        return Flow.Next;
     }
 
-    private void ExecStmt(IrStmt s, Instance self, Dictionary<string, object?> locals)
+    private Flow ExecStmt(IrStmt s, Instance self, Dictionary<string, object?> locals)
     {
         Burn();
         if (s.At is { } place) _at = place;   // a statement Lower generated runs as the one around it
         switch (s)
         {
-            case IrBlock b: Exec(b, self, locals); break;
+            case IrBlock b: return Exec(b, self, locals);
 
             // `ordered by k` — the block runs FIRST with every bring deferred, then the deferred bodies
             // run sorted. Executing as we went would let an earlier bring change what a later key reads,
@@ -2157,8 +2146,10 @@ public sealed class Interp
             {
                 var frame = new List<Deferred>();
                 _orderFrames.Push(frame);
-                try { Exec(ord.Collect, self, locals); }
+                Flow collected;
+                try { collected = Exec(ord.Collect, self, locals); }
                 finally { _orderFrames.Pop(); }
+                if (collected != Flow.Next) return collected;   // left before anything was brought
 
                 // OrderBy is a STABLE sort, so brings that tie keep the order they were reached in —
                 // which for a `target` loop is the order the rows arrived. Ties are common (a rank
@@ -2166,6 +2157,7 @@ public sealed class Interp
                 // the sort's internals.
                 long prevIndex = _currentIndex, prevEntity = _currentEntity;
                 var prevBinds = new List<object?>(_targetBinds);
+                var flow = Flow.Next;
                 foreach (var d in frame.OrderBy(d => d.Key, EntityStore.OrderKey.Instance))
                 {
                     // RESTORED, not merely saved. The body runs OUTSIDE the loop it was written in, and
@@ -2177,20 +2169,22 @@ public sealed class Interp
                     _targetBinds.Clear();
                     _targetBinds.AddRange(d.Binds);
                     _at = d.At ?? _at;   // its statements are the bring's, generated: a fault is the bring's line
-                    Exec(d.Body, self, d.Locals);
+                    if ((flow = Exec(d.Body, self, d.Locals)) != Flow.Next) break;
                 }
                 _currentIndex = prevIndex;
                 _currentEntity = prevEntity;
                 _targetBinds.Clear();
                 _targetBinds.AddRange(prevBinds);
-                break;
+                return flow;
             }
 
             // A `bring` inside an `ordered by`. The key is read HERE, with this iteration's bindings; the
             // body is put aside with a copy of them, because by the time it runs the loop has moved on.
             case IrOrderedBring ob:
             {
-                if (_orderFrames.Count == 0) { Exec(ob.Body, self, locals); break; }
+                if (_orderFrames.Count == 0) return Exec(ob.Body, self, locals);
+                // The copy below holds every local's list too, so none of them may grow in place any more.
+                foreach (var held in locals.Values) if (held is GrowingList grown) grown.Shared = true;
                 _orderFrames.Peek().Add(new Deferred(
                     Eval(ob.Key, self, locals),
                     ob.Body,
@@ -2199,25 +2193,25 @@ public sealed class Interp
                     _currentIndex,
                     _currentEntity,
                     ob.At));
-                break;
+                return Flow.Next;
             }
-            case IrLet l: locals[l.Name] = l.Init is null ? null : Eval(l.Init, self, locals); break;
-            case IrAssign a: DoAssign(a, self, locals); break;
+            case IrLet l: locals[l.Name] = l.Init is null ? null : Eval(l.Init, self, locals); return Flow.Next;
+            case IrAssign a: DoAssign(a, self, locals); return Flow.Next;
             case IrIf i:
-                if (Truthy(Eval(i.Cond, self, locals))) Exec(i.Then, self, locals);
-                else if (i.Else is not null) Exec(i.Else, self, locals);
-                break;
-            case IrLoop lp: ExecLoop(lp, self, locals); break;
-            case IrExprStmt e: Eval(e.Expr, self, locals); break;
+                if (Truthy(Eval(i.Cond, self, locals))) return Exec(i.Then, self, locals);
+                return i.Else is not null ? Exec(i.Else, self, locals) : Flow.Next;
+            case IrLoop lp: return ExecLoop(lp, self, locals);
+            case IrExprStmt e: Eval(e.Expr, self, locals); return Flow.Next;
             // Unwinds to the enclosing CallUser. The parser only admits `return` inside an `fn`, so a
-            // stray signal cannot escape into the event loop.
-            case IrReturn r: throw new ReturnSignal(r.Value is null ? null : Eval(r.Value, self, locals));
-            case IrBreak: throw BreakSignal.It;
-            case IrContinue: throw ContinueSignal.It;
-            case IrMatch m: ExecMatch(m, self, locals); break;
-            case IrWeave w: ExecWeave(w, self, locals); break;
-            // break/continue not exercised by the render path yet
-            default: break;
+            // stray one ends no more than the handler it is in.
+            case IrReturn r:
+                _returned = r.Value is null ? null : Eval(r.Value, self, locals);
+                return Flow.Return;
+            case IrBreak: return Flow.Break;
+            case IrContinue: return Flow.Continue;
+            case IrMatch m: return ExecMatch(m, self, locals);
+            case IrWeave w: ExecWeave(w, self, locals); return Flow.Next;
+            default: return Flow.Next;
         }
     }
 
@@ -2358,7 +2352,7 @@ public sealed class Interp
             }
 
             locals["__wpre"] = identity;
-            Exec(w.Record, self, locals);
+            Exec(w.Record, self, locals);   // a loom's generated bring: it holds no return, break or continue
             count++;
             brought = identity;
         }
@@ -2451,30 +2445,32 @@ public sealed class Interp
     /// `match subject { when Name { … } else { … } }`. An arm matches by NAME, because that is what both
     /// kinds of pattern evaluate to: an enum case and a mark each yield their own bare name. So
     /// `match here() { when #Alpha { … } }` is a switch on which console this process is running as.
-    private void ExecMatch(IrMatch m, Instance self, Dictionary<string, object?> locals)
+    private Flow ExecMatch(IrMatch m, Instance self, Dictionary<string, object?> locals)
     {
         string subject = Str(Eval(m.Subject, self, locals));
         foreach (var arm in m.Arms)
-            if (arm.CaseName == subject) { Exec(arm.Body, self, locals); return; }
-        if (m.Else is not null) Exec(m.Else, self, locals);
+            if (arm.CaseName == subject) return Exec(arm.Body, self, locals);
+        return m.Else is not null ? Exec(m.Else, self, locals) : Flow.Next;
     }
 
-    /// One pass of a loop body. False means the loop must stop.
+    /// One pass of a loop body: Next to go on, Break to stop, Return to stop and pass the `return` up.
     ///
     /// Every loop kind goes through here so `break` and `continue` mean the same thing in all four —
     /// `while`, `repeat`, an identity `target` and a collection `target`. A `continue` inside a
     /// `target` still ends that entity's activation cleanly, because the caller's `finally` runs
     /// between this returning and the next iteration starting.
-    private bool Iterate(IrBlock body, Instance self, Dictionary<string, object?> locals)
+    private Flow Iterate(IrBlock body, Instance self, Dictionary<string, object?> locals)
     {
-        try { Exec(body, self, locals); }
-        catch (ContinueSignal) { }
-        catch (BreakSignal) { return false; }
-        return true;
+        var flow = Exec(body, self, locals);
+        return flow == Flow.Continue ? Flow.Next : flow;
     }
 
-    private void ExecLoop(IrLoop lp, Instance self, Dictionary<string, object?> locals)
+    /// What a loop hands back once it has stopped: a `return` goes on up, a `break` ended here.
+    private static Flow After(Flow last) => last == Flow.Return ? Flow.Return : Flow.Next;
+
+    private Flow ExecLoop(IrLoop lp, Instance self, Dictionary<string, object?> locals)
     {
+        var flow = Flow.Next;
         switch (lp.Kind)
         {
             case IrLoopKind.While:
@@ -2492,7 +2488,7 @@ public sealed class Interp
                                "its condition never became false. If the work really is that long, do a part of it each tick");
                         break;
                     }
-                    if (!Iterate(lp.Body, self, locals)) break;
+                    if ((flow = Iterate(lp.Body, self, locals)) != Flow.Next) break;
                 }
                 break;
             }
@@ -2503,7 +2499,7 @@ public sealed class Interp
                   {
                       _currentIndex = i;                       // `Index` works here too; `as i` names the same number
                       if (lp.Var is not null) locals[lp.Var] = i;
-                      if (!Iterate(lp.Body, self, locals)) break;
+                      if ((flow = Iterate(lp.Body, self, locals)) != Flow.Next) break;
                   }
                   _currentIndex = prevIdx; }
                 break;
@@ -2531,7 +2527,7 @@ public sealed class Interp
                         _activations++;
                         _store.BeginActivation(entity);
                         bool more;
-                        try { more = Iterate(lp.Body, self, locals); }
+                        try { more = (flow = Iterate(lp.Body, self, locals)) == Flow.Next; }
                         finally
                         {
                             // The activation and the bind stack unwind FIRST, whatever the body did.
@@ -2546,7 +2542,8 @@ public sealed class Interp
                     _currentIndex = prevIdx;
                 }
                 // `target <expr> as x { … }` — iterate a collection. Not an identity query, so no overlay.
-                else if (lp.Source is not null && Eval(lp.Source, self, locals) is System.Collections.IEnumerable src and not string)
+                // Peeked: the loop walks a copy, so `xs += …` inside it cannot change what it walks.
+                else if (lp.Source is not null && Peek(lp.Source, self, locals) is System.Collections.IEnumerable src and not string)
                 {
                     long idx = -1, prevIdx = _currentIndex;
                     foreach (var item in src is IDictionary<string, object?> record ? Entries(record) : src.Cast<object?>().ToList())
@@ -2555,7 +2552,7 @@ public sealed class Interp
                         _targetBinds.Add(item);
                         if (lp.Var is not null) locals[lp.Var] = item;
                         bool more;
-                        try { more = Iterate(lp.Body, self, locals); }
+                        try { more = (flow = Iterate(lp.Body, self, locals)) == Flow.Next; }
                         finally { _targetBinds.RemoveAt(_targetBinds.Count - 1); }
                         if (!more) break;
                     }
@@ -2564,6 +2561,7 @@ public sealed class Interp
                 break;
             }
         }
+        return After(flow);
     }
 
     /// A record walked by `target d as kv` — a parsed object, a payload — as its ENTRIES, each a record with
@@ -2585,6 +2583,20 @@ public sealed class Interp
 
     private void DoAssign(IrAssign a, Instance self, Dictionary<string, object?> locals)
     {
+        // `xs += item` (`xs = xs + item`) on a local list: in place when only this variable holds it (GrowingList).
+        // The two Burns are the `+` and the read of `xs` that Eval would have counted, so gas stays exact.
+        if (a.Target is IrLocalRef target && a.Value is IrBinary { Op: IrBinOp.Add, Left: IrLocalRef left } add
+            && left.Name == target.Name && locals.TryGetValue(target.Name, out var current) && current is IReadOnlyList<object?> held)
+        {
+            Burn(); Burn();
+            var item = Eval(add.Right, self, locals);
+            if (current is GrowingList own && !own.Shared) { ListOps.Append(own, item); return; }
+            var grown = new GrowingList(held);
+            ListOps.Append(grown, item);
+            locals[target.Name] = grown;
+            return;
+        }
+
         var value = Eval(a.Value, self, locals);
         // Local first, as `Eval` reads it. Shard-first made a function's own `var cats` lose every write to
         // the CALLING shard's `var cats` — the fn returned its first value and the shard's changed, and a
@@ -2612,7 +2624,7 @@ public sealed class Interp
         // like the read: a list is the same list everywhere it is held.
         if (a.Target is IrIndex ix)
         {
-            var recv = Eval(ix.Receiver, self, locals);
+            var recv = Peek(ix.Receiver, self, locals);
             var key = Eval(ix.Index, self, locals);
             ListOps.Set(recv, key, value);
         }
@@ -2644,6 +2656,19 @@ public sealed class Interp
 
     // ---- expressions ----------------------------------------------------
 
+    /// A read that keeps no hold on what it reads — the receiver of `xs[i]`, the argument of `len(xs)` — so a
+    /// GrowingList it finds stays this variable's alone. Counted like the Eval it stands in for.
+    private object? Peek(IrExpr e, Instance self, Dictionary<string, object?> locals)
+    {
+        if (e is not IrLocalRef r || !locals.TryGetValue(r.Name, out var v)) return Eval(e, self, locals);
+        Burn();
+        return v;
+    }
+
+    /// Built-ins that read their arguments and answer something new, never the argument itself or a view of it.
+    private static readonly HashSet<string> KeepsNothing = new(StringComparer.Ordinal)
+    { "len", "join", "toJson", "string", "sort", "slice", "contains", "indexOf" };
+
     private object? Eval(IrExpr e, Instance self, Dictionary<string, object?> locals)
     {
         Burn();
@@ -2651,7 +2676,11 @@ public sealed class Interp
         {
             case IrLiteral l: return l.Value;
             case IrLocalRef r:
-                if (locals.TryGetValue(r.Name, out var lv)) return lv;
+                if (locals.TryGetValue(r.Name, out var lv))
+                {
+                    if (lv is GrowingList grown) grown.Shared = true;   // whoever reads it may keep it
+                    return lv;
+                }
                 if (self.State.TryGetValue(r.Name, out var sv)) return sv;
                 // A bare `self` used as a value = the nearest entity's id (aligns with `Entity`).
                 if (r.Name == "self") return _currentEntity;
@@ -2662,7 +2691,8 @@ public sealed class Interp
             //
             // The fallback is the shard, for a `self` that names no binding in scope.
             case IrSelfRef sr:
-                return locals.TryGetValue(sr.Bind, out var bound) ? bound
+                if (locals.TryGetValue(sr.Bind, out var bound) && bound is GrowingList boundList) boundList.Shared = true;
+                return locals.TryGetValue(sr.Bind, out bound) ? bound
                      : _targetBinds.Count > 0 ? _targetBinds[^1]
                      : self.Name;
             case IrEntityRef: return _currentEntity;   // `Entity` — nearest entity's int id (0 = none)
@@ -2690,7 +2720,7 @@ public sealed class Interp
             case IrList li: return li.Items.Select(i => Eval(i, self, locals)).ToList();
             case IrIndex ix:
             {
-                var recv = Eval(ix.Receiver, self, locals);
+                var recv = Peek(ix.Receiver, self, locals);
                 var key = Eval(ix.Index, self, locals);
                 // An index truncates toward zero, so `list[random() * len(list)]` picks an element and
                 // needs no cast. Out of range reads null rather than throwing — a runtime is not a place
@@ -2706,11 +2736,12 @@ public sealed class Interp
             case IrCall call:
                 if (call.Callee is IrLocalRef fn)
                 {
-                    var args = call.Args.Select(a => Eval(a, self, locals)).ToList();
                     // A user `fn`/`SF` shadows nothing built-in: look it up first, then the prebuilts.
-                    return _functions.TryGetValue(fn.Name, out var decl)
-                        ? CallUser(decl, args, self)
-                        : Prebuilt(fn.Name, args);
+                    bool user = _functions.TryGetValue(fn.Name, out var decl);
+                    bool keepsNothing = !user && KeepsNothing.Contains(fn.Name);
+                    var args = new List<object?>(call.Args.Count);
+                    foreach (var arg in call.Args) args.Add(keepsNothing ? Peek(arg, self, locals) : Eval(arg, self, locals));
+                    return user ? CallUser(decl!, args, self) : Prebuilt(fn.Name, args);
                 }
                 return null;
             case IrStructInit si:
@@ -2746,9 +2777,10 @@ public sealed class Interp
             for (int i = 0; i < f.Params.Count; i++)
                 scope[f.Params[i].Name] = i < args.Count ? args[i] : null;
 
-            try { Exec(f.Body, self, scope); }
-            catch (ReturnSignal r) { return r.Value; }
-            return null;                       // fell off the end (an SF, or an fn with no return)
+            if (Exec(f.Body, self, scope) != Flow.Return) return null;   // fell off the end (an SF, or an fn with no return)
+            var value = _returned;
+            _returned = null;
+            return value;
         }
         finally
         {
@@ -3135,7 +3167,11 @@ public sealed class Interp
                             if ((fld.Name is "origin" or "source" && IsTail(fld)) || payload.ContainsKey(fld.Name)) continue;
                             if (fld.Default is not null) payload[fld.Name] = Eval(fld.Default, self, locals);
                             else if (_current is not null && _current.TryGetValue(fld.Name, out var cv)) payload[fld.Name] = cv;
-                            else if (locals.TryGetValue(fld.Name, out var lv)) payload[fld.Name] = lv;
+                            else if (locals.TryGetValue(fld.Name, out var lv))
+                            {
+                                if (lv is GrowingList grown) grown.Shared = true;   // the payload holds it now
+                                payload[fld.Name] = lv;
+                            }
                             else if (si.FillRest) payload[fld.Name] = ZeroVal(fld.Type.Name);   // `?` placeholder
                         }
                     // Auto provenance. Two layers kept separate:
@@ -3198,7 +3234,7 @@ public sealed class Interp
             }
             case "CollHas":
             {
-                var coll = Eval(rc.Args[0], self, locals);
+                var coll = Peek(rc.Args[0], self, locals);
                 var v = Eval(rc.Args[1], self, locals);
                 if (coll is VeinMap map) return map.Keys.Any(k => LooseEq(k, v));   // a map is asked about a KEY
                 return coll is List<object?> items && items.Any(i => LooseEq(i, v));
