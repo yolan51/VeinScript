@@ -656,8 +656,15 @@ public sealed class VeinWorld
     {
         if (ExitCode is not null) return;
         ExitCode = code;
+        QuitBy = Unit is { } u ? $"{u.Shard} ({u.Phase}) at {u.File}:{Line}" : "the host";
+        // A game that closes itself says nothing — a quit is not an error — so finding WHICH `@Quit` closed
+        // it (Vein Cards under Godot, compiled, in 5 runs of 7) meant guessing. Asked for, it is said.
+        if (Environment.GetEnvironmentVariable("VEIN_TRACE_QUIT") is { Length: > 0 }) Err.WriteLine($"(quit {code} by {QuitBy}, frame {Tick})");
         Quitting?.Invoke(code);
     }
+
+    /// Who asked to quit — the unit and line, or "the host" — once someone has.
+    public string? QuitBy { get; private set; }
 
     /// What is paused right now — Interp.MutedMarks/MutedShards, for a host'"'"'s debugger.
     public IReadOnlyCollection<string> MutedMarks => _mutedMarks;
