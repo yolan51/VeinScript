@@ -48,6 +48,32 @@ public sealed class Resolve
     /// described at runtime.
     private readonly Dictionary<string, string> _selfComps = new(StringComparer.Ordinal);
 
+    /// Every shape a `target $A $B … as x` query matched, by binding — what `x.field` with no shape named
+    /// could have meant (see `UnknownField.OffIdentity`).
+    private readonly Dictionary<string, IReadOnlyList<string>> _queryComps = new(StringComparer.Ordinal);
+
+    /// Locals whose type was INFERRED for a `var` — `var cur = row.Task` — and may be anything after the next
+    /// assignment. Typed for the backends as before, but no field read through one is called unknown: a `let`
+    /// cannot change what it holds (VS0390), and a declared type is the author's own word.
+    private readonly HashSet<string> _guessed = new(StringComparer.Ordinal);
+
+    private readonly List<UnknownField> _unknown = new();
+
+    /// A field read or written through a receiver whose DECLARATION is known here — a component handle, an
+    /// event payload, a record an ascription or a declared type describes — and that the declaration does
+    /// not have. At run time every one of these is an empty read or a write nothing reads back.
+    ///
+    /// Recorded, not reported: this pass still reports nothing. `Lower` owns the source spans and turns each
+    /// into VS0391 (or VS0393 when `OffIdentity`).
+    ///
+    /// `OffIdentity` — `row.title` where `row` is a `target $Task` binding: an IDENTITY, which has no fields
+    /// of its own. The interpreter reads it as empty while the C# backend quietly read `$Task`'s `title`,
+    /// so the two runtimes disagreed about a line that is simply missing its shape (`row.Task.title`).
+    public sealed record UnknownField(IrFieldAccess Access, IrType Owner, bool OffIdentity = false);
+
+    /// Every `UnknownField` in the module, in the order met.
+    public IReadOnlyList<UnknownField> Unknown => _unknown;
+
     public Resolve(IrModule module)
     {
         _module = module;
@@ -67,13 +93,17 @@ public sealed class Resolve
     }
 
     /// Annotate the whole module in place. Returns it for chaining.
-    public static IrModule Run(IrModule module)
+    public static IrModule Run(IrModule module) => Run(module, out _);
+
+    /// …and hand back the field accesses no declaration has (`UnknownField`), for `Lower` to report.
+    public static IrModule Run(IrModule module, out IReadOnlyList<UnknownField> unknown)
     {
         var r = new Resolve(module);
         foreach (var f in module.Functions) r.Function(f, null);
         foreach (var s in module.Shards)
             foreach (var m in s.Methods)
                 r.Function(m, s);
+        unknown = r.Unknown;
         return module;
     }
 
@@ -84,6 +114,8 @@ public sealed class Resolve
     {
         _locals.Clear();
         _selfComps.Clear();
+        _queryComps.Clear();
+        _guessed.Clear();
         if (owner is not null)
             foreach (var st in owner.State) _locals[st.Name] = st.Type;
         foreach (var p in f.Params) _locals[p.Name] = p.Type;
@@ -108,6 +140,7 @@ public sealed class Resolve
                 var t = Expr(l.Init);
                 if (l.Type is not null) _locals[l.Name] = l.Type;
                 else if (t is not null) _locals[l.Name] = t;
+                if (l.Mutable && l.Type is null) _guessed.Add(l.Name); else _guessed.Remove(l.Name);
                 return;
             }
 
@@ -141,6 +174,7 @@ public sealed class Resolve
         Expr(lp.Cond);
         Expr(lp.Count);
         Expr(lp.Source);
+        if (lp.Var is not null) _guessed.Remove(lp.Var);
 
         // Every branch below writes ONLY `_locals[lp.Var]`, and `IrSelfRef` reads back out of it by name.
         // There is no separate "what does self mean here" state to push and pop any more: the binding is
@@ -154,6 +188,7 @@ public sealed class Resolve
             {
                 _locals[lp.Var] = IrTypeRef.Of("Entity");
                 if (q.Components.FirstOrDefault() is { } c) _selfComps[lp.Var] = c;
+                _queryComps[lp.Var] = q.Components;
             }
         }
         else if (lp.Kind == IrLoopKind.Repeat && lp.Var is not null)
@@ -315,6 +350,11 @@ public sealed class Resolve
         return null;
     }
 
+    /// What the runtime puts on EVERY event beyond its declared fields (LANGUAGE.md §3.7, `Interp.Emit`):
+    /// `origin`, `source` and `from` are typed on the payload already, the rest are always there to read.
+    private static readonly HashSet<string> Envelope = new(StringComparer.Ordinal)
+        { "id", "from", "origin", "source", "bundle", "cause", "trail" };
+
     /// `x.field`, in the three shapes this IR produces:
     ///   `self.Comp`        — an entity plus a component name; the pair is a handle, not a value
     ///   `self.Comp.field`  — that handle's field, typed from the component declaration
@@ -323,23 +363,48 @@ public sealed class Resolve
     {
         var recv = Expr(fa.Receiver);
 
+        // `<something typed>.field` — look the field up on the receiver's declaration. Covers a component
+        // handle, an event payload and a record an ascription describes with one rule, because all of them
+        // are IrTypes with fields.
+        //
+        // BEFORE the component rule below, because a record is not an identity. `row.Task.title` on a
+        // `target rows as row: $Task` row reads a key called "Task", which no $Task has — it used to be typed
+        // as the component and read as empty.
+        if (recv is not null && _types.TryGetValue(recv.Name, out var decl)
+            && decl.Kind is IrTypeKind.Component or IrTypeKind.Message or IrTypeKind.Struct)
+        {
+            var field = decl.Fields.FirstOrDefault(f => f.Name == fa.Field);
+            if (field is null && Known(decl, fa.Receiver) && !(decl.Kind == IrTypeKind.Message && Envelope.Contains(fa.Field)))
+                _unknown.Add(new UnknownField(fa, decl));
+            return field?.Type;
+        }
+
         // `<entity>.Comp` — naming a component off any entity-valued expression, which the interpreter
         // allows from a `target` binding and from a plain Entity field alike.
         if (_types.TryGetValue(fa.Field, out var comp) && comp.Kind == IrTypeKind.Component)
             return IrTypeRef.Of(fa.Field);
 
-        // `<something typed>.field` — look the field up on the receiver's declaration. Covers a
-        // component handle and an event payload with one rule, because both are IrTypes with fields.
-        if (recv is not null && _types.TryGetValue(recv.Name, out var decl))
-            return decl.Fields.FirstOrDefault(f => f.Name == fa.Field)?.Type;
-
-        // `self.field` with no component named — the query bound one, so try it.
+        // `self.field` with no component named — the query bound one, so try it. The C# backend reads that
+        // component's field; the interpreter reads an identity, which has no fields, and answers empty. So
+        // it is typed for the backend as before, and recorded: the line is missing its shape.
         if (fa.Receiver is IrSelfRef sr && _selfComps.TryGetValue(sr.Bind, out var sc)
             && _types.TryGetValue(sc, out var self))
+        {
+            if (_queryComps.GetValueOrDefault(sr.Bind)?.Select(c => _types.GetValueOrDefault(c))
+                    .FirstOrDefault(t => t?.Fields.Any(f => f.Name == fa.Field) == true) is { } carrier)
+                _unknown.Add(new UnknownField(fa, carrier, OffIdentity: true));
             return self.Fields.FirstOrDefault(f => f.Name == fa.Field)?.Type;
+        }
 
         return null;
     }
+
+    /// Whether the receiver's type is the program's own word rather than a guess: anything but a `var`
+    /// whose type was inferred from its first value. The provenance record is left alone — the IR declares
+    /// two of the fields the runtime fills (`from.identity`, `from.marks`, … are read too).
+    private bool Known(IrType decl, IrExpr receiver) =>
+        !decl.Attrs.Any(a => a.Name == "provenance")
+        && !(receiver is IrLocalRef { Name: var n } && _guessed.Contains(n));
 
     /// The desugared runtime calls. All but `random` are STATEMENTS — `emit @X { … }` and
     /// `attach $C to e` produce a value nobody reads — so their type is `void`, and saying so is not a

@@ -70,10 +70,16 @@ public sealed partial class Lower
 
     private static readonly string[] OutputFields = { "markup", "code", "css", "line" };
 
-    /// Type names, so VS0241 can tell `int i = 0` (a C-style declaration this language does not have)
-    /// from an ordinary stray identifier.
+    /// The built-in type names — what VS0392 accepts before it looks at declarations, and how VS0241 tells
+    /// `int i = 0` (a C-style declaration this language does not have) from an ordinary stray identifier.
+    ///
+    /// Two of them name what `fromJson` gives back, whose shape the source does not say, so nothing about
+    /// either is checked: `dictionary` is a parsed object — RULES 24b's own word for it, the counterpart of
+    /// `list` for a parsed array — and `json` is a value whose kind the data decides (an object, a list, text,
+    /// a number, a bool or nothing). Vein Cards needed both and the language named neither, so it wrote them
+    /// anyway and nothing objected (VEIN_REPORT #13); they are the words it chose, 365 and 46 times.
     private static readonly HashSet<string> TypeNames = new(StringComparer.Ordinal)
-        { "int", "float", "string", "bool", "Entity", "Mark", "list", "map" };
+        { "int", "float", "string", "bool", "percent", "void", "Entity", "Mark", "list", "map", "dictionary", "json" };
 
     /// `Author.Bundle` of the bundle being lowered — the first two segments of every event key it owns.
     ///
@@ -229,6 +235,7 @@ public sealed partial class Lower
                 case EventDecl ed: _events[ed.Name] = ed; break;
                 case FuncDecl fd: _localFuncs.Add(fd.Name); _funcDecls[fd.Name] = fd; break;
                 case EnumDecl ed2: _enums[ed2.Name] = ed2.Cases; break;
+                case TypeDecl td: _typeDecls.Add(td.Name); break;
                 case MarkDecl md: _declaredMarks.Add(md.Name); break;
                 // `need "a.B"` widens bare names; `need "a.B" as C` does not — it binds the alias for
                 // `*C.…` paths instead. One or the other, never both.
@@ -305,7 +312,7 @@ public sealed partial class Lower
             switch (m)
             {
                 case PublicatorDecl pub: foreach (var sub in pub.Members) LowerMember(sub); break;
-                case BuilderDecl bd: CheckLoom(bd); break;    // templates, not emitted to IR directly
+                case BuilderDecl bd: CheckLoom(bd); UseTypes(bd.Members); break;    // templates, not emitted to IR directly
                 case FormatDecl fm: CheckFormat(fm); break;   // D23: how text is read; nothing to emit
                 case ShapeDecl s: types.AddRange(LowerShape(s)); break;
                 case TypeDecl t: types.Add(LowerType(t)); break;
@@ -396,7 +403,10 @@ public sealed partial class Lower
         // bundle, because a consumer that received an unresolved module would look exactly like one that
         // received a resolved one and silently fall back to guessing. That is the failure this pass
         // exists to end, so it must not be possible to skip it.
-        return Semantics.Resolve.Run(new IrModule(bundle.Name, types, funcs, shards) { Start = start });
+        CheckTypeNames();
+        var module = Semantics.Resolve.Run(new IrModule(bundle.Name, types, funcs, shards) { Start = start }, out var unknown);
+        ReportUnknownFields(unknown, start?.Event);
+        return module;
     }
 
     /// The same `Author.Bundle` in two search roots — e.g. an installed `bundles/` copy alongside the
@@ -987,6 +997,7 @@ public sealed partial class Lower
 
     private IEnumerable<IrType> LowerShape(ShapeDecl s)
     {
+        UseTypes(s.Members);
         var fields = new List<IrField>();
         var extraEnums = new List<IrType>();
         foreach (var member in s.Members)
@@ -1012,10 +1023,13 @@ public sealed partial class Lower
         foreach (var e in extraEnums) yield return e;
     }
 
-    private IrType LowerType(TypeDecl t) => new(
-        t.Name, IrTypeKind.Struct,
-        t.Fields.Select(f => new IrField(f.Name, Ty(f.Type), ParseFold(f.Fold, f.Span), LowerDefault(f.Default))).ToList(),
-        Array.Empty<IrEnumCase>(), t.Doc, Array.Empty<IrAttr>());
+    private IrType LowerType(TypeDecl t)
+    {
+        UseTypes(t.Fields);
+        return new(t.Name, IrTypeKind.Struct,
+            t.Fields.Select(f => new IrField(f.Name, Ty(f.Type), ParseFold(f.Fold, f.Span), LowerDefault(f.Default))).ToList(),
+            Array.Empty<IrEnumCase>(), t.Doc, Array.Empty<IrAttr>());
+    }
 
     private IrExpr? LowerDefault(Expr? e) => e is null ? null : LowerExpr(e);
     private IrTypeRef Ty(TypeRef? t) => t is null ? IrTypeRef.Of("infer") : LowerTypeRef(t);
@@ -1743,6 +1757,7 @@ public sealed partial class Lower
 
     private IrType LowerEvent(EventDecl e)
     {
+        UseTypes(e.Members);
         var fields = ExpandMembers(e.Members)
             .Select(m => new IrField(m.Name, Ty(m.Type), null, LowerDefault(m.Default))).ToList();
         // Every event carries its emitter's identity and its provenance — see AddPayloadTail.
@@ -1804,6 +1819,9 @@ public sealed partial class Lower
         string name = _shardFuncNames.TryGetValue(f.Name, out var qualified) && _funcDecls.GetValueOrDefault(f.Name) == f ? qualified : f.Name;
         string outerUnit = _unit;
         _unit = "fn:" + name;
+        using var names = BodyNames(f.Params.Select(p => p.Name), imported: _importDepth > 0);
+        foreach (var p in f.Params) UseType(p.Type);
+        UseType(f.Return);
         try
         {
             return new(name,
@@ -1856,6 +1874,7 @@ public sealed partial class Lower
         IReadOnlyList<string>? carriedShapes = null, IReadOnlyList<string>? carriedMarks = null)
     {
         using var own = ShardFunctions(name, members);
+        using var reach = StateOf(name);
         // A shard is a set of scheduled behaviour blocks; each `target` query nests inside a schedule.
         var state = new List<IrField>();
         var methods = new List<IrFunction>();
@@ -1891,6 +1910,7 @@ public sealed partial class Lower
     /// and a hot reload's starting-value comparison all see the same program.
     private IrField LowerStateVar(VarDecl v, string shard)
     {
+        UseType(v.Type);
         var type = v.Type is null ? IrTypeRef.Of("infer") : LowerTypeRef(v.Type);
         Expr? init = v.Init;
         if (v.Tune && init is not null && Settings.Find(_ownerKey, shard + "." + v.Name) is { } entry)
@@ -1935,6 +1955,7 @@ public sealed partial class Lower
     private IrShard LowerView(ViewDecl vw)
     {
         using var own = ShardFunctions(vw.Name, vw.Members);
+        using var reach = StateOf(vw.Name);
         var state = new List<IrField>();
         var methods = new List<IrFunction>();
         foreach (var m in vw.Members)
@@ -2078,6 +2099,7 @@ public sealed partial class Lower
             RegisterImportedEvent(path, "Ticked");
             prms = new[] { new IrParam(clock, IrTypeRef.Of(EventKey(path, "Ticked"))) };
         }
+        using var names = BodyNames(prms.Select(p => p.Name));
         return new IrFunction(name, prms, IrTypeRef.Of("void"), LowerBlock(sb.Body),
             false, null, new[] { attr, At(sb.Span) });
     }
@@ -2207,6 +2229,7 @@ public sealed partial class Lower
         // body is lowered knowing which fields vein.lock says drifted (CheckHearRead).
         IrBlock body;
         using (HearReads(hb))
+        using (BodyNames(new[] { hb.Bind }))
             body = LowerBlock(hb.Body);
         return new IrFunction(
             $"hear_{hb.Event}",
@@ -2272,8 +2295,13 @@ public sealed partial class Lower
         {
             case Block b: return LowerBlock(b);
             case LocalVarStmt lv:
-                return new IrLet(lv.Decl.Name, lv.Decl.Type is null ? null : LowerTypeRef(lv.Decl.Type),
+            {
+                UseType(lv.Decl.Type);
+                var let = new IrLet(lv.Decl.Name, lv.Decl.Type is null ? null : LowerTypeRef(lv.Decl.Type),
                     lv.Decl.Init is null ? null : LowerExpr(lv.Decl.Init), lv.Decl.Mutable);
+                DeclareName(lv.Decl.Name, isLet: !lv.Decl.Mutable, lv.Decl.Span);   // after its initialiser
+                return let;
+            }
             case IfStmt i:
             {
                 IrBlock? els = i.Else switch
@@ -2293,12 +2321,21 @@ public sealed partial class Lower
                 // `as row: $Row` names a shape, so a name that resolves to nothing is worth saying —
                 // the ascription's whole value is that the fields get checked, and a misspelt shape
                 // would silently switch that back off.
-                if (t.AsShape is { } shp && !_shapeFields.ContainsKey(shp)
-                    && ResolveUsed(Index.Shapes, "$", shp, t.Span) is null)
-                    _diag.Warning("VS0233",
-                        $"Unknown shape '${shp}' — `as {t.Bind}: ${shp}` cannot check the fields it reads.", t.Span);
+                //
+                // A NEEDED bundle's shape is given a type here, as a query's is: Resolve checks the fields
+                // the body reads against the module's types, and an ascription naming a shape the module
+                // had no type for was checked against nothing (VS0391).
+                if (t.AsShape is { } shp && !_shapeFields.ContainsKey(shp))
+                {
+                    if (ResolveUsed(Index.Shapes, "$", shp, t.Span) is { } used)
+                        RegisterImportedShape(shp, used.Value.Members.OfType<FieldDecl>().ToList());
+                    else
+                        _diag.Warning("VS0233",
+                            $"Unknown shape '${shp}' — `as {t.Bind}: ${shp}` cannot check the fields it reads.", t.Span);
+                }
 
                 using var _ = BindTarget(t.Bind);
+                DeclareName(t.Bind, isLet: false, t.Span);   // the interpreter keeps it as a local after the loop
                 return new IrLoop(IrLoopKind.Target, null, t.Bind, src, null, null, LowerBlock(t.Body))
                     { ElementShape = t.AsShape };
             }
@@ -2355,6 +2392,7 @@ public sealed partial class Lower
                 IrExpr? on = q.On is null ? null : LowerExpr(q.On);
 
                 using var _ = BindTarget(q.Bind);
+                DeclareName(q.Bind, isLet: false, q.Span);
                 // Inside the body, the binding carries every shape the query matched on — certain.
                 int carried = _carried.Count;
                 foreach (var shape in q.Components) _carried.Add((q.Bind, shape, "the target matched it"));
@@ -2363,7 +2401,11 @@ public sealed partial class Lower
                 return new IrLoop(IrLoopKind.Target, null, q.Bind, null, new IrQuery(q.Components, q.Tags, q.Bind, q.OrderShape, q.OrderField) { On = on, Excluded = q.Excluded }, null, body);
             }
             case RepeatStmt r:
-                return new IrLoop(IrLoopKind.Repeat, null, r.Var, null, null, LowerExpr(r.Count), LowerBlock(r.Body));
+            {
+                var count = LowerExpr(r.Count);
+                if (r.Var is not null) DeclareName(r.Var, isLet: false, r.Span);
+                return new IrLoop(IrLoopKind.Repeat, null, r.Var, null, null, count, LowerBlock(r.Body));
+            }
             case MatchStmt m:
                 return new IrMatch(LowerExpr(m.Subject),
                     m.Arms.Select(a => { if (a.IsMark) UseMark(a.CaseName, a.Span); return new IrMatchArm(a.CaseName, LowerBlock(a.Body)); }).ToList(),
@@ -2596,6 +2638,7 @@ public sealed partial class Lower
 
         bool generated = br.Bind is null;
         string ent = br.Bind ?? ("__ent" + _identityDepth++);
+        if (br.Bind is not null) DeclareName(br.Bind, isLet: false, br.Span);
         // A woven record lands ON the identity its weave pre-spawned (D23), so a record further down the text
         // could already be named by one above it; every other bring spawns here, as it always has.
         stmts.Add(new IrLet(ent, null, _bringOnto ?? new IrCall(new IrLocalRef("spawn"), Array.Empty<IrExpr>()), false));
@@ -3121,6 +3164,7 @@ public sealed partial class Lower
         }
         finally { _bringOnto = null; }
 
+        if (ws.Bind is not null) DeclareName(ws.Bind, isLet: false, ws.Span);
         return new IrWeave(ws.Loom, source, format, prms.Select(ToWeaveParam).ToList(),
             new IrBlock(record, Transparent: true), ws.Bind,
             System.IO.Path.GetFileName(ws.Span.File), ws.Span.Line);
@@ -3455,7 +3499,9 @@ public sealed partial class Lower
     private IrStmt LowerAssign(AssignStmt a)
     {
         if (a.Target is ShardSettingExpr setting) return LowerSetShardSetting(setting, a);
+        CheckLetAssign(a);
         var target = LowerExpr(a.Target);
+        NoteFieldWrite(target);
         var value = LowerExpr(a.Value);
         IrBinOp? compound = a.Op switch
         {
@@ -3580,7 +3626,7 @@ public sealed partial class Lower
             case MemberExpr me:
                 CheckHearRead(me);
                 CheckCollectionRead(me);
-                return new IrFieldAccess(LowerExpr(me.Receiver), me.Name);
+                return NoteField(new IrFieldAccess(LowerExpr(me.Receiver), me.Name), me.Span);
 
             // `s.Guild.~members has p` (D24).
             case HasExpr has:

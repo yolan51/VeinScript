@@ -115,7 +115,7 @@ bundle RpgDemoCopyPaste by yolan  {
 
             // win when no foes remain alive
             target $Game #World as g {
-                let foes = 0
+                var foes = 0
                 target $Foe #Alive as f { foes += 1 }
                 if foes == 0 {
                     g.Game.phase = Phase.Win
