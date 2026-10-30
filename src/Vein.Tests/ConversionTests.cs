@@ -217,4 +217,44 @@ public class ConversionTests
 
         Assert.Contains("got 13", output.ToString());
     }
+
+    [Fact]
+    public void FromJson_keeps_a_whole_number_whole()
+    {
+        // A C# conditional of `long : double` is a double, so every parsed integer was a float and
+        // `d.i / 4` gave 1.5 where `6 / 4` written in source gives 1.
+        Assert.Equal("1 6", Say("(fromJson(\"{\\\"i\\\": 6}\").i / 4) + \" \" + fromJson(\"{\\\"i\\\": 6}\").i"));
+        Assert.Equal("1.5", Say("fromJson(\"{\\\"f\\\": 1.5}\").f"));
+    }
+
+    [Fact]
+    public void A_functions_own_var_takes_its_writes_not_the_calling_shards()
+    {
+        // The write went shard-first while the read went local-first: the fn returned "local" and the
+        // shard's `cats` became "set in a block" (Vein Cards' deck filter, 2026-10-30).
+        var r = new VeinCompilerService().Compile(new CompileRequest("t.vein", """
+            bundle T by you {
+                fn choose(flag: bool) return string {
+                    var cats = "local"
+                    if flag { cats = "set in a block" }
+                    cats = cats + "!"
+                    return cats
+                }
+                shard S {
+                    var cats = "the shard's filter"
+                    run once {
+                        let got = choose(true)
+                        cats = cats + "?"
+                        emit *Vein.Console.Io.@Print { text: got + " | " + cats }
+                    }
+                }
+            }
+            """));
+        Assert.True(r.Success, string.Join("\n", r.Diagnostics.Select(d => d.ToString())));
+
+        var output = new StringWriter();
+        new Interp { Ticks = 1 }.Run(r.Modules[0], new StringReader(""), output);
+
+        Assert.Equal("set in a block! | the shard's filter?", output.ToString().Trim());
+    }
 }

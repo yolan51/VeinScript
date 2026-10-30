@@ -34,7 +34,9 @@ internal static class Json
         JsonValueKind.String => e.GetString(),
         JsonValueKind.True => true,
         JsonValueKind.False => false,
-        JsonValueKind.Number => e.TryGetInt64(out long l) ? l : e.GetDouble(),
+        // `(object)` matters: without it the conditional's type is `double` and every integer came back a
+        // float — `fromJson("{\"i\": 6}").i / 4` gave 1.5 where `6 / 4` gives 1 (Vein Cards, 2026-10-30).
+        JsonValueKind.Number => e.TryGetInt64(out long l) ? (object)l : e.GetDouble(),
         _ => null,   // null, and the undefined kind
     };
 

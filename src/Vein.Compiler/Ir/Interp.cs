@@ -2241,9 +2241,12 @@ public sealed class Interp
     private void DoAssign(IrAssign a, Instance self, Dictionary<string, object?> locals)
     {
         var value = Eval(a.Value, self, locals);
+        // Local first, as `Eval` reads it. Shard-first made a function's own `var cats` lose every write to
+        // the CALLING shard's `var cats` — the fn returned its first value and the shard's changed, and a
+        // Vein Cards tool wrote its page to a file named after the overwritten `let out` (2026-10-30).
         if (a.Target is IrLocalRef r)
         {
-            if (self.State.ContainsKey(r.Name)) self.State[r.Name] = value;
+            if (!locals.ContainsKey(r.Name) && self.State.ContainsKey(r.Name)) self.State[r.Name] = value;
             else locals[r.Name] = value;
             return;
         }
