@@ -23,7 +23,13 @@ mkdir -p "$FEED"
 
 for project in ShardECS.Contracts/Contracts ShardECS.SECS/SECS Vein.Compiler/Vein.Compiler Vein.Runtime.SECS/Vein.Runtime.SECS Vein.Jit/Vein.Jit Vein.Hosting/Vein.Hosting Vein.Cloud/Vein.Cloud Vein.Cli/Vein.Cli; do
   echo "packing $project $VERSION…"
-  dotnet pack "$REPO/src/$project.csproj" -c Release -p:Version="$VERSION" -o "$FEED" --nologo -v quiet >/dev/null
+  # The output is kept for a failure: a running veinc locks Vein.Cli's bin, and a pack that dies quietly
+  # leaves the feed one package short with only a missing "ok" line to say so.
+  if ! out="$(dotnet pack "$REPO/src/$project.csproj" -c Release -p:Version="$VERSION" -o "$FEED" --nologo -v quiet 2>&1)"; then
+    echo "FAILED: $project" >&2
+    echo "$out" | grep -E "error|locked by" | sort -u | head -5 >&2
+    exit 1
+  fi
 done
 
 echo "ok: Vein.Hosting and its dependencies, and the veinc tool (Vein.Cli), $VERSION → $FEED"
