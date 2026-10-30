@@ -16,8 +16,9 @@ bundle Diagnostics by Vein {
         }
 
         // WHERE it happened, filled in by the runtime — for a fault, and for every info/warn/error a shard
-        // raises: the shard, the unit of work (`once`, `tick`, `settled`, `hear @Event`), and the file and
-        // line that unit starts on. So a collector can CATCH ONE FAILURE and not just log them all:
+        // raises: the shard, the unit of work (`once`, `tick`, `settled`, `hear @Event`), and the file and the
+        // line of the statement that failed — inside a called fn or SF too, the message naming the calls
+        // between (`in fn a ← hear @Load`). So a collector can CATCH ONE FAILURE and not just log them all:
         //     hear @DiagnosticRaised as d { if d.shard == "LoadSave" { …start from defaults… } }
         // Empty / 0 when there is no unit (raised by a host).
         shared("A diagnostic was produced: severity, message, and where — shard, phase (once / tick / hear @E), file and line.")

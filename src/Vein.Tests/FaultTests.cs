@@ -32,7 +32,7 @@ public class FaultTests : IDisposable
         return (game, lines);
     }
 
-    // Line numbers below are this source's: `run once` of LoadSave on line 8, the tick of Breaks on line 12.
+    // Line numbers below are this source's: a fault names the statement that failed — `10 % zero` on line 10, `1 % zero` on line 14.
     private const string Save = """
         bundle Saves by me {
             need "Vein.Diagnostics"
@@ -69,8 +69,8 @@ public class FaultTests : IDisposable
         var (game, lines) = Start("saves.vein", Save, mode);
         for (int i = 0; i < 4; i++) game.Step(1.0 / 60);
 
-        Assert.Contains("heard 2 LoadSave | once | saves.vein:8 | LoadSave (once) at saves.vein:8: Attempted to divide by zero.", lines);
-        Assert.Contains("heard 2 Breaks | tick | saves.vein:12 | Breaks (tick) at saves.vein:12: Attempted to divide by zero.", lines);
+        Assert.Contains("heard 2 LoadSave | once | saves.vein:10 | LoadSave (once) at saves.vein:10: Attempted to divide by zero.", lines);
+        Assert.Contains("heard 2 Breaks | tick | saves.vein:14 | Breaks (tick) at saves.vein:14: Attempted to divide by zero.", lines);
         Assert.Contains("heard 1 Warns | once | saves.vein:17 | the save is old", lines);
         Assert.DoesNotContain(lines, l => l.StartsWith("never"));
 
@@ -98,7 +98,7 @@ public class FaultTests : IDisposable
         game.Step(1.0 / 60);
 
         Assert.Contains("ERR (warning: the save is old — Warns (once) at quiet.vein:3)", lines);
-        Assert.Contains("ERR (error: Breaks (once) at quiet.vein:4: Attempted to divide by zero.)", lines);
+        Assert.Contains("ERR (error: Breaks (once) at quiet.vein:6: Attempted to divide by zero.)", lines);
         Assert.Contains("alive", lines);
     }
 }

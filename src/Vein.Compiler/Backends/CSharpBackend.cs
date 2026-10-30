@@ -782,7 +782,9 @@ public sealed class CSharpBackend : IVeinBackend
                     _bound.Add(clock.Name);
                     sb.AppendLine($"            var {DeclareLocal(clock.Name)} = new {{ frame = World.FrameNumber, delta = World.FrameDelta }};");
                 }
+                _inUnit = true;
                 EmitBlock(sb, m.Body, 3);
+                _inUnit = false;
                 GuardClose(sb, unit);
                 sb.AppendLine("    }");
                 continue;
@@ -806,7 +808,9 @@ public sealed class CSharpBackend : IVeinBackend
                 sb.AppendLine($"    private void {handlerNames[m]}({EventType(ev)} {Ident(p?.Name ?? "e")})");
                 sb.AppendLine("    {");
                 GuardOpen(sb, unit);
+                _inUnit = true;
                 EmitBlock(sb, m.Body, 3);
+                _inUnit = false;
                 GuardClose(sb, unit);
                 sb.AppendLine("    }");
                 continue;
@@ -887,6 +891,12 @@ public sealed class CSharpBackend : IVeinBackend
         sb.AppendLine("        finally { World.Leave(__outer); }");
     }
 
+    /// True while a unit's body is emitted — a phase or a `hear` — and false in a `fn`/`SF`. In a unit each
+    /// statement sets `World.Line` first, so a fault names the line that failed, as the interpreter's does
+    /// (IrStmt.At). A function keeps no such bookkeeping: a store per statement in every call is not what a
+    /// `clamp` should cost, so a fault inside one names the unit's statement that called it.
+    private bool _inUnit;
+
     // ---- statements ------------------------------------------------------
 
     private void EmitBlock(StringBuilder sb, IrBlock block, int depth)
@@ -910,6 +920,8 @@ public sealed class CSharpBackend : IVeinBackend
     private void EmitStmt(StringBuilder sb, IrStmt stmt, int depth)
     {
         string pad = new string(' ', depth * 4);
+        // Where this statement is, for a fault in it (VeinWorld.Fault) — the interpreter sets `_at` alike.
+        if (_inUnit && stmt.At is { } at) sb.AppendLine($"{pad}World.Line = {at.Line};");
         switch (stmt)
         {
             case IrBlock b: EmitBlock(sb, b, depth); break;
@@ -1001,7 +1013,11 @@ public sealed class CSharpBackend : IVeinBackend
             }
 
             case IrLoop { Kind: IrLoopKind.While } w:
-                sb.AppendLine($"{pad}while ({Expr(w.Cond)})");
+                // The condition is asked again after every turn, at the `while`'s own line — not the line of
+                // the body's last statement — as Interp.ExecLoop asks it.
+                sb.AppendLine(_inUnit && w.At is { } whileAt
+                    ? $"{pad}while (World.Here({whileAt.Line}) && ({Expr(w.Cond)}))"
+                    : $"{pad}while ({Expr(w.Cond)})");
                 EmitBlock(sb, w.Body, depth);
                 break;
 
@@ -1046,7 +1062,15 @@ public sealed class CSharpBackend : IVeinBackend
                 sb.AppendLine($"{pad}    long {cap} = {_indexVar};");
                 _indexVar = cap;
                 sb.AppendLine($"{pad}    {_orderList}.Add(({Expr(ob.Key)}, () =>");
-                EmitBlock(sb, ob.Body, depth + 2);
+                if (_inUnit && ob.At is { } bringAt)
+                {
+                    // Run later, after the whole block: a fault in it is the bring's line (Interp's Deferred.At).
+                    sb.AppendLine($"{pad}    {{");
+                    sb.AppendLine($"{pad}        World.Line = {bringAt.Line};");
+                    EmitBlock(sb, ob.Body, depth + 2);
+                    sb.AppendLine($"{pad}    }}");
+                }
+                else EmitBlock(sb, ob.Body, depth + 2);
                 sb.AppendLine($"{pad}    ));");
                 _indexVar = prevIdx;
                 sb.AppendLine(pad + "}");
@@ -1749,6 +1773,14 @@ public sealed class CSharpBackend : IVeinBackend
                 // handler to dispatch to — the world writes it.
                 if (c.Args.Count > 0 && c.Args[0] is IrStructInit si2 && _events.Contains(si2.TypeName))
                 {
+                    // An event that DECLARES its own `from` (`@Attack { from: Entity }`) keeps what the emit
+                    // wrote, as the interpreter keeps it (Interp.Owns): the provenance went into an `int`
+                    // field and the program did not compile.
+                    if (_eventTypes.TryGetValue(si2.TypeName, out var emitted)
+                        && emitted.Fields.FirstOrDefault(f => f.Name == "from") is { } ownFrom
+                        && ownFrom.Type.Name != Lower.ProvenanceType)
+                        return $"World.Emit(\"{si2.TypeName}\", {StructInit(si2)})";
+
                     // PROVENANCE, filled at the emit site with the same two values the interpreter uses:
                     // `Interp` tags every payload with the emitting First-Class object (FromOf), and a
                     // shard's kind is VeinKind.Shard. Leaving it empty would compile and then disagree
@@ -2319,7 +2351,9 @@ public sealed class CSharpBackend : IVeinBackend
             sb.AppendLine($"            var e = new {type}();");
             foreach (var f in e.Fields)
             {
-                if (f.Name is "origin" or "source") continue;
+                // The tail's `origin`/`source` (Entity) are left as they are; an event's own field of that
+                // name (`origin: string`) is a field like any other, as Interp.FireHost fills it.
+                if (f.Name is "origin" or "source" && f.Type.Name == "Entity") continue;
                 if (f.Name == "from" && f.Type.Name == Lower.ProvenanceType)
                 {
                     sb.AppendLine($"            e.from = new {Ident(Lower.ProvenanceType)} {{ name = sender, kind = \"Runtime\" }};");

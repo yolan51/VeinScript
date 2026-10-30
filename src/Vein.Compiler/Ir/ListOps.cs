@@ -57,12 +57,28 @@ public static class ListOps
     /// `slice(xs, start, count)` — a new list of `count` elements from `start`, or everything from `start`
     /// when `count` is left out. CLAMPED like `substring`, whose argument order it follows: a slice past the
     /// end is shorter, never an error, so `slice(args(), 1)` is "the rest" even when there is none.
-    public static List<object?> Slice(object? list, object? start, object? count)
+    ///
+    /// A TEXT slices as text, by the same rule: `slice("hello", 1, 3)` is "ell". It answered `[]` — a string
+    /// is not a list of values, so it fell through to the empty list — and said nothing, in a language where
+    /// `s[i]` and `len(s)` already treat a text as a sequence (Vein Cards #16).
+    public static object Slice(object? list, object? start, object? count)
     {
+        if (list is string text)
+        {
+            var (at, length) = Range(text.Length, start, count);
+            return text.Substring(at, length);
+        }
         var all = list is IEnumerable<object?> l ? l.ToList() : new List<object?>();
-        int from = (int)Math.Clamp(Index(start), 0, all.Count);
-        int take = count is null ? all.Count - from : (int)Math.Clamp(Index(count), 0, all.Count - from);
+        var (from, take) = Range(all.Count, start, count);
         return all.GetRange(from, take);
+    }
+
+    /// Where a slice of `size` items starts and how many it takes: both clamped, a missing count is the rest.
+    private static (int From, int Take) Range(int size, object? start, object? count)
+    {
+        int from = (int)Math.Clamp(Index(start), 0, size);
+        int take = count is null ? size - from : (int)Math.Clamp(Index(count), 0, size - from);
+        return (from, take);
     }
 
     /// A new list, sorted as `target … by Shape.field` sorts: text ordinally, numbers numerically, stable.

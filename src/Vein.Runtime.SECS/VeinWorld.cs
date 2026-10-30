@@ -620,7 +620,8 @@ public sealed class VeinWorld
     // part (docs/RULES.md 12b) — it is what makes "wire it in one event, read it in the next" work, and
     // a drain that committed once at the end would quietly break every program built on that.
 
-    private readonly Queue<(string Name, object Payload)> _events = new();
+    /// Each queued event with where it was emitted — the unit and its line — for DrainCapped to name.
+    private readonly Queue<(string Name, object Payload, VeinUnit? Site, long Line)> _events = new();
     private readonly Dictionary<string, List<(VeinSystem? Owner, Action<object> Handler)>> _handlers = new(StringComparer.Ordinal);
 
     /// Register a `hear` handler. Called from a system's `Subscribe`, before the first phase runs, so a
@@ -642,17 +643,19 @@ public sealed class VeinWorld
     {
         // A diagnostic raised inside a unit — `do warn(…)` — says where, as Interp.Stamp makes it.
         if (@event == "DiagnosticRaised" && Unit is { } unit) StampDiagnostic?.Invoke(payload, unit);
-        _events.Enqueue((@event, payload));
+        _events.Enqueue((@event, payload, Unit, Line));
     }
 
     /// The guard is the interpreter's, for the same reason: a pair of handlers that emit each other's
-    /// event is a live-lock, and stopping is better than hanging with no output.
+    /// event is a live-lock, and stopping is better than hanging with no output — and, as there, stopping
+    /// is SAID (DrainCapped).
     public void Drain()
     {
         int guard = 0;
-        while (_events.Count > 0 && guard++ < 10_000)
+        while (_events.Count > 0)
         {
-            var (name, payload) = _events.Dequeue();
+            if (guard++ >= 10_000) { DrainCapped(); break; }
+            var (name, payload, _, _) = _events.Dequeue();
             Observed?.Invoke(name, payload);
             _handlers.TryGetValue(name, out var hs);
             // A DIAGNOSTIC IS NEVER DROPPED (Interp.Drain): heard by an unmuted shard, or printed.
@@ -692,14 +695,37 @@ public sealed class VeinWorld
     /// The unit running now, so a diagnostic raised inside it says where (StampDiagnostic).
     public VeinUnit? Unit { get; private set; }
 
+    /// The line of the unit's statement running now — generated code sets it before each statement of a
+    /// phase or `hear` body — so a fault names the line that failed, as Interp.RunUnit does; 0 before the
+    /// first. A `fn`/`SF` body keeps no such bookkeeping, so a call stays as cheap as it was: a fault inside
+    /// one is reported at the unit's statement that made the call, where the interpreter names the
+    /// statement inside it and the calls between.
+    public long Line;
+
+    /// Set the line and go on: a `while` condition is asked again at its own line every turn.
+    public bool Here(long line)
+    {
+        Line = line;
+        return true;
+    }
+
+    /// The lines of the units outside the running one — units nest when a handler's drain runs another.
+    private readonly Stack<long> _outerLines = new();
+
     public VeinUnit? Enter(VeinUnit unit)
     {
         var outer = Unit;
         Unit = unit;
+        _outerLines.Push(Line);
+        Line = 0;
         return outer;
     }
 
-    public void Leave(VeinUnit? outer) => Unit = outer;
+    public void Leave(VeinUnit? outer)
+    {
+        Unit = outer;
+        Line = _outerLines.Count > 0 ? _outerLines.Pop() : 0;
+    }
 
     /// The event whose handlers are running, while they run: a fault in a @DiagnosticRaised handler cannot
     /// become another one (a loop the queue guard would end at 10,000, the cause long buried).
@@ -717,15 +743,57 @@ public sealed class VeinWorld
 
     public void Fault(VeinUnit unit, Exception ex)
     {
+        // At the statement that failed (Line), once the unit reached one: `shard` and `phase` still name the
+        // unit, `file` and `line` are the statement's — the interpreter's report, field for field.
+        var at = Line > 0 ? unit with { Line = Line } : unit;
         if (_draining == "DiagnosticRaised")
         {
             Faulted = true;
-            Err.WriteLine($"(error in {unit.Where} while reporting: {ex.Message})");
+            Err.WriteLine($"(error in {at.Where} while reporting: {ex.Message})");
             return;
         }
-        string message = $"{unit.Where}: {ex.Message}";
-        if (Diagnose is { } raise) raise(2, message, unit);
+        string message = $"{at.Where}: {ex.Message}";
+        if (Diagnose is { } raise) raise(2, message, at);
         else { Faulted = true; Err.WriteLine($"(error: {message})"); }
+    }
+
+    /// Set while DrainCapped's own diagnostic is handled, so a runaway there cannot report itself again.
+    private bool _reportingDrainCap;
+
+    /// Interp.DrainCapped: the queue handled 10,000 events in one drain. The drain still stops — a frame must
+    /// end — and now says so, naming the event next in line and where it was emitted. The diagnostic is
+    /// handled at once with the queued events set aside, which go back afterwards for the next drain.
+    private void DrainCapped()
+    {
+        const string what = "10,000 events in one drain";
+        if (_reportingDrainCap)
+        {
+            Faulted = true;
+            Err.WriteLine($"(error: {what}, while reporting one — the events left wait for the next drain)");
+            return;
+        }
+
+        var next = _events.Peek();
+        var held = _events.ToArray();
+        _events.Clear();
+        var site = next.Site is { } u ? (next.Line > 0 ? u with { Line = next.Line } : u) : new VeinUnit("", "", "", 0);
+        string message = $"{what} — @{next.Name[(next.Name.LastIndexOf('.') + 1)..]} is still being emitted, and the " +
+                         "events still queued wait for the next drain. Events that cause each other never settle: give " +
+                         "the cycle a condition that ends it. A batch that large is better walked with `target` than " +
+                         "sent as an event per item.";
+        if (Diagnose is { } raise) raise(2, message, site);
+        else
+        {
+            Faulted = true;
+            Err.WriteLine($"(error: {DiagnosticText(new VeinDiagnostic(2, message, site.Shard, site.Phase, site.File, site.Line))})");
+        }
+        _reportingDrainCap = true;
+        try { Drain(); }
+        finally
+        {
+            _reportingDrainCap = false;
+            foreach (var e in held) _events.Enqueue(e);
+        }
     }
 
     /// A diagnostic in a program that never hears @DiagnosticRaised: printed, with where it was raised —

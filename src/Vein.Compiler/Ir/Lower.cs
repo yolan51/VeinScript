@@ -2256,7 +2256,17 @@ public sealed partial class Lower
     /// The `Why` of an entry that says the shape was REMOVED here (`unattach`).
     private const string Gone = "\0gone";
 
+    /// One statement, and where it is written (IrStmt.At) — so a fault inside it names this line, on both
+    /// runtimes, rather than the `hear` or block it was reached from. A statement a nested lowering already
+    /// placed keeps its own place.
     private IrStmt LowerStmt(Stmt s)
+    {
+        var lowered = LowerStmtCore(s);
+        lowered.At ??= new IrLine(System.IO.Path.GetFileName(s.Span.File), s.Span.Line);
+        return lowered;
+    }
+
+    private IrStmt LowerStmtCore(Stmt s)
     {
         switch (s)
         {

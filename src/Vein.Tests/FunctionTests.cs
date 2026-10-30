@@ -87,13 +87,17 @@ public class FunctionTests
     }
 
     [Fact]
-    public void Runaway_recursion_is_bounded_not_fatal()
+    public void Runaway_recursion_is_bounded_and_said()
     {
-        // A depth guard, so a non-terminating fn yields null instead of blowing the stack.
+        // A depth guard, so a non-terminating fn cannot blow the stack. It used to answer null and let the
+        // unit carry on, which printed "r=" as if nothing had happened (ROADMAP Tier 1 row 7); it is now a
+        // fault that stops the unit and names the function.
         var output = Run("bundle T by me { start @Boot { } event @Boot { } " +
                          "fn loop(n: int) return int { return loop(n) } " +
                          "shard M { hear @Boot as b { emit *Vein.Console.Io.@Print { text: \"r=\" + loop(1) } } } }");
-        Assert.Contains("r=", output);
+        Assert.Contains("calls nested 256 deep", output);
+        Assert.Contains("fn loop", output);
+        Assert.DoesNotContain("r=", output);
     }
 
     [Fact]

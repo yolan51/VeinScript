@@ -169,8 +169,11 @@ public class ReplicaTests : IDisposable
         }
         Assert.Equal(replica.StateHash(), game.StateHash());
 
-        // Without a budget the same work is merely cut short, as a game needs: the frame must end.
-        Assert.True(replica.Execute("Spin", F(("turns", 1_000_000L))).Ok);
+        // Without a budget the frame still ends, as a game needs — but the cap is a fault like any other now,
+        // where it used to be a silent cut that reported success (ROADMAP Tier 1 row 7).
+        var cut = replica.Execute("Spin", F(("turns", 1_000_000L)));
+        Assert.False(cut.Ok);
+        Assert.Contains("100,000", cut.Reason);
     }
 
     [Theory]

@@ -117,7 +117,20 @@ public sealed class Interp
     }
 
     private int _callDepth;
-    private readonly Queue<(string Name, Dictionary<string, object?> Payload)> _queue = new();
+
+    /// One queued event: its payload, and the envelope the RUNTIME keeps for it beside the payload — its id
+    /// and causation chain, the sender the `audience` barrier tests, and where it was emitted.
+    ///
+    /// Beside, not only in, because an event may DECLARE a field named like the envelope. `event @HostMatch
+    /// { id: string }` read back "ev50", the runtime's id, where the emit had said "M1" (Vein Cards #18), and
+    /// `@Attack { from: Entity }` read the sender's provenance in place of the attacker, so
+    /// samples/RpgDemoCopyPaste's hero never landed a blow. A declared field now keeps what the emit gave it
+    /// (Lower.AddPayloadTail's rule), and the chain and the barrier read their own copies here.
+    private sealed record Queued(
+        string Name, Dictionary<string, object?> Payload, string Id, List<object?> Trail, object? Sender,
+        (string Shard, string Phase, SourceAt? At)? Unit, IrLine? Stmt);
+
+    private readonly Queue<Queued> _queue = new();
     private readonly List<string> _log = new();
     private readonly VeinIdentityRegistry _registry = new();   // the Vein First-Class graph (nodes)
     private readonly List<GraphEdge> _edges = new();           //   … and its emit edges
@@ -143,10 +156,10 @@ public sealed class Interp
     /// as row` also pushes onto the nameless bind stack that IrSelfRef reads (docs/RULES.md 12c),
     /// `Index` for the loop counter, and `Entity` for an identity query's current entity. All are
     /// COPIES: the loop keeps reassigning them, so a reference would leave every deferred body looking
-    /// at the last row.
+    /// at the last row. `At` is the bring's own line, which a fault in its body reports.
     private sealed record Deferred(
         object? Key, IrBlock Body, Dictionary<string, object?> Locals,
-        List<object?> Binds, long Index, long Entity);
+        List<object?> Binds, long Index, long Entity, IrLine? At = null);
 
     /// The `ordered by` blocks currently collecting. A stack because they nest — the inner one takes the
     /// brings, and the outer keeps whatever it had already gathered.
@@ -163,10 +176,14 @@ public sealed class Interp
     // ---- gas: a budget that FAILS rather than truncates ------------------------------------------------
     //
     // The safety caps below (a `while` at 100,000 turns, recursion at 256, the queue at 10,000 events)
-    // stop a runaway program SILENTLY — right for a game, where a frame must end, and wrong for a host that
-    // has to agree with other machines about whether a piece of work finished. With a budget set, every
-    // statement and expression costs one step, and running out — or hitting a cap — throws OutOfGas out of
-    // the host call, through every handler, so the host knows the work did NOT finish and can roll it back.
+    // stop a runaway program — a frame must end. They used to stop it SILENTLY: recursion answered null, the
+    // `while` simply ended, and the block carried on with whatever it had, which is a wrong answer nobody is
+    // told about (ROADMAP Tier 1, row 7). Now a cap is a FAULT of the unit that hit it: the unit stops and
+    // @DiagnosticRaised says which cap, where, and what to write instead (Capped, DrainCapped).
+    //
+    // With a budget set, every statement and expression costs one step, and running out — or hitting a cap —
+    // throws OutOfGas out of the host call, through every handler, so a host that has to agree with other
+    // machines about whether a piece of work finished knows it did NOT, and can roll it back.
 
     /// Steps allowed per host call (FireHost); 0, the default, is no budget at all.
     public long Budget { get; set; }
@@ -182,11 +199,26 @@ public sealed class Interp
         if (++GasUsed > Budget) throw new OutOfGas($"out of gas after {Budget} steps");
     }
 
-    /// A safety cap was reached: silent without a budget, a failure with one.
-    private void Capped(string what)
+    /// A safety cap was reached. With a budget it is OutOfGas, the host's to hear. Without one it is a fault
+    /// of the unit running (RunUnit turns it into @DiagnosticRaised, at the statement that hit it), so the
+    /// unit stops rather than carrying on past a cut-short loop or a null that stood in for an answer.
+    ///
+    /// Outside any unit — a shard `var` whose starting value recurses, a `start` field — there is nothing to
+    /// stop and nobody to throw to, so the diagnostic is queued and the caller carries on as it always did.
+    private void Capped(string what, string fix)
     {
         if (Budget > 0) throw new OutOfGas(what);
+        if (_unit is not null) throw new CapReached($"{what} — {fix}");
+        Emit("DiagnosticRaised", new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["severity"] = 2L, ["message"] = $"{what} — {fix}",
+            ["shard"] = "", ["phase"] = "", ["file"] = _at?.File ?? "", ["line"] = _at?.Line ?? 0L,
+            ["origin"] = null, ["bundle"] = _bundle,
+        });
     }
+
+    /// A cap, as a fault: not OutOfGas (a budget's), and not a signal — it unwinds to RunUnit like any error.
+    private sealed class CapReached(string message) : Exception(message);
 
     /// A pure program (Purity) is one whose every run agrees: nothing reads the clock, the environment or
     /// the machine, and nothing reaches outside — files, network, consoles. A host that asked for one has
@@ -219,8 +251,13 @@ public sealed class Interp
 
     /// Event payloads by name — the boot directive and every `emit` fill omitted fields from these.
     private Dictionary<string, IrType> _events = new(StringComparer.Ordinal);
+
+    /// The envelope names each event DECLARES as fields of its own, by event key — what `Owns` answers.
+    private readonly Dictionary<string, HashSet<string>> _ownEnvelope = new(StringComparer.Ordinal);
+
     private int _eventSeq;
-    private Dictionary<string, object?>? _current;   // the event currently being handled (for cause/trail)
+    private Dictionary<string, object?>? _current;   // the payload being handled (an emit fills omitted fields from it)
+    private Queued? _currentEvent;                   // …and its envelope: the id and trail its effects are caused by
     private string? _responseBody;
     private long _responseStatus = 200;
     private TextWriter? _out;   // console stdout sink (set in Run); @Print writes here. Null in Render.
@@ -433,6 +470,12 @@ public sealed class Interp
                                   .ToDictionary(t => t.Name, StringComparer.Ordinal);
         _events = module.Types.Where(t => t.Kind == IrTypeKind.Message)
                               .ToDictionary(t => t.Name, StringComparer.Ordinal);
+        foreach (var (key, type) in _events)
+        {
+            var own = type.Fields.Where(f => !IsTail(f) && f.Name is "id" or "cause" or "trail" or "bundle" or "from" or "origin")
+                                 .Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
+            if (own.Count > 0) _ownEnvelope[key] = own;
+        }
         _store.Declare(module.Types);   // field defaults + each field's fold reducer
 
         // Module-level `fn`/`SF` declarations, callable by name from any body. Shard-local ones are
@@ -476,6 +519,20 @@ public sealed class Interp
         }
     }
 
+    /// A field Lower's AddPayloadTail ADDED to an event rather than one its declaration wrote: the tail's
+    /// `from` is the provenance, its `origin` and `source` are Entity. A field of the same name with another
+    /// type was declared, and is the event's own.
+    private static bool IsTail(IrField f) => f.Name switch
+    {
+        "from" => f.Type.Name == Lower.ProvenanceType,
+        "origin" or "source" => f.Type.Name == "Entity",
+        _ => false,
+    };
+
+    /// Does event `ev` declare a field `name` of the envelope (`id`, `cause`, `trail`, `bundle`, `from`,
+    /// `origin`) itself? Then the runtime leaves it as the emit wrote it.
+    private bool Owns(string ev, string name) => _ownEnvelope.TryGetValue(ev, out var own) && own.Contains(name);
+
     /// Fire the boot event: the declared `start` event + payload, else the default @Request { path }.
     private void FireBoot(IrModule module, string requestPath, IReadOnlyDictionary<string, object?>? inputs)
     {
@@ -492,7 +549,7 @@ public sealed class Interp
             if (_events.TryGetValue(bootEvent, out var et))
                 foreach (var fld in et.Fields)
                 {
-                    if (fld.Name is "origin" or "source" || boot.ContainsKey(fld.Name)) continue;
+                    if ((fld.Name is "origin" or "source" && IsTail(fld)) || boot.ContainsKey(fld.Name)) continue;
                     if (fld.Default is not null) boot[fld.Name] = Eval(fld.Default, bootInst, noLocals);
                     else if (st.FillRest) boot[fld.Name] = ZeroVal(fld.Type.Name);
                 }
@@ -512,8 +569,11 @@ public sealed class Interp
         // Run inputs override named payload fields (e.g. CLI --set path=/home). See docs/RUNTIME.md.
         if (inputs is not null) foreach (var kv in inputs) boot[kv.Key] = kv.Value;
 
-        boot["from"] = FromOf(reqFc); boot["origin"] = null; boot["bundle"] = _bundle;
-        Emit(bootEvent, boot);
+        var sender = FromOf(reqFc);
+        if (!Owns(bootEvent, "from")) boot["from"] = sender;
+        if (!Owns(bootEvent, "origin")) boot["origin"] = null;
+        if (!Owns(bootEvent, "bundle")) boot["bundle"] = _bundle;
+        Emit(bootEvent, boot, sender);
     }
 
     /// Fire an @Input event carrying a line the user typed at the console.
@@ -663,17 +723,18 @@ public sealed class Interp
         if (key is null) return false;
 
         var host = _registry.Register("host", VeinKind.Runtime);
-        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
-        {
-            ["from"] = FromOf(host), ["origin"] = null, ["bundle"] = _bundle
-        };
+        var sender = FromOf(host);
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (!Owns(key, "from")) payload["from"] = sender;
+        if (!Owns(key, "origin")) payload["origin"] = null;
+        if (!Owns(key, "bundle")) payload["bundle"] = _bundle;
         foreach (var fld in _events[key].Fields)
-            if (fld.Name is not ("from" or "origin" or "source") && fld.Default is not null)
+            if (!IsTail(fld) && fld.Default is not null)
                 payload[fld.Name] = Eval(fld.Default, new Instance { Name = "host", Fc = host }, new Dictionary<string, object?>());
         if (fields is not null)
             foreach (var (f, v) in fields) payload[f] = v;
 
-        Emit(key, payload);
+        Emit(key, payload, sender);
         Drain();
         return true;
     }
@@ -1482,15 +1543,69 @@ public sealed class Interp
                             string what, bool canRaise = true, SourceAt? at = null)
     {
         // The unit running, so a diagnostic raised INSIDE it — `do warn(…)` — says where, as a fault does
-        // (Stamp). Saved and put back: units nest when a handler's drain runs another.
+        // (Stamp). Saved and put back: units nest when a handler's drain runs another — and so is the
+        // statement running, which belongs to the unit outside.
         var outer = _unit;
+        var outerAt = _at;
         _unit = (owner.Name, what, at);
+        _at = null;
         try { RunUnit(body, owner, locals, what, canRaise, at); }
-        finally { _unit = outer; }
+        finally { _unit = outer; _at = outerAt; }
     }
 
     /// The unit of work running now: its shard, its phase (`once`, `tick`, `hear @E`) and where it is written.
     private (string Shard, string Phase, SourceAt? At)? _unit;
+
+    /// The statement running now. A call's statements set it and the call's return puts the caller's back,
+    /// so it is always the INNERMOST — the line a fault reports (RunUnit), where it used to report only the
+    /// unit the fault was reached from.
+    private IrLine? _at;
+
+    /// The `fn`/`SF` calls open now, outermost first — a fault's call chain ("in fn a ← SF b ← hear @E").
+    private readonly List<IrFunction> _calls = new();
+
+    /// What RunUnit's exception filter saw: the statement that failed and the calls it was reached through.
+    private IrLine? _pinnedAt;
+    private List<string>? _pinnedCalls;
+
+    /// Read where a fault happened, in RunUnit's exception FILTER. A filter runs BEFORE the stack unwinds, so
+    /// every call between is still open and `_at` is still the innermost statement; by the time the catch
+    /// body runs, each of those calls has returned and put its caller's place back. `outerCalls` are the
+    /// calls a unit outside this one had open — not part of this fault's chain. Always true: it only reads.
+    private bool Pin(int outerCalls)
+    {
+        _pinnedAt = _at;
+        _pinnedCalls = _calls.Count > outerCalls ? _calls.Skip(outerCalls).Select(CallLabel).ToList() : null;
+        return true;
+    }
+
+    /// `fn twice` / `SF deal` — a call as its author wrote it: a shard's own function without the shard prefix
+    /// Lower gives it (`Gun__twice`), an imported one by its own name rather than its mangled key.
+    private static string CallLabel(IrFunction f)
+    {
+        string name = f.Attrs.FirstOrDefault(a => a.Name == "imported")?.Args.FirstOrDefault() is string key
+            ? key[(key.LastIndexOf('.') + 1)..]
+            : f.Name.LastIndexOf("__", StringComparison.Ordinal) is var cut and > 0 ? f.Name[(cut + 2)..] : f.Name;
+        return (f.IsPure || f.Attrs.Any(a => a.Name == "sf") ? "SF " : "fn ") + name;
+    }
+
+    /// " in fn a ← SF b ← hear @Loaded": the calls a fault came through, innermost first, ending at the unit.
+    /// A run of one call is written once with its count — recursion that hit the cap is 256 of them — and a
+    /// chain still longer keeps its two ends, which are where to look.
+    private static string Through(List<string>? calls, string what)
+    {
+        if (calls is null || calls.Count == 0) return "";
+        var runs = new List<string>();
+        for (int i = calls.Count - 1; i >= 0;)
+        {
+            int start = i;
+            while (start > 0 && calls[start - 1] == calls[i]) start--;
+            runs.Add(i - start > 0 ? $"{calls[i]} ×{i - start + 1}" : calls[i]);
+            i = start - 1;
+        }
+        if (runs.Count > 8) runs = runs.Take(4).Append("…").Concat(runs.Skip(runs.Count - 3)).ToList();
+        return " in " + string.Join(" ← ", runs) + " ← " + what;
+    }
 
     /// "Compute (once) at diagnostics.vein:88" — a place a person can open.
     private static string Where(string shard, string phase, SourceAt? at) =>
@@ -1526,7 +1641,7 @@ public sealed class Interp
         bool measuring = Timed is not null;
         long startedAt = measuring ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
         long startedActivations = _activations;
-
+        int outerCalls = _calls.Count;
 
         try { Exec(body, owner, locals); }
         catch (ReturnSignal) { /* a `return` that escaped its fn — the block simply ends */ }
@@ -1538,9 +1653,15 @@ public sealed class Interp
         // Out of gas is the HOST's to hear, not the program's: the work did not finish, and no handler may
         // turn that into a diagnostic and carry on as if it had.
         catch (OutOfGas) { throw; }
-        catch (Exception ex)
+        catch (Exception ex) when (Pin(outerCalls))
         {
-            string where = Where(owner.Name, what, at);
+            // WHERE IT FAILED, not only which unit: the statement that threw, in whatever file it is written,
+            // and the calls it was reached through. A division by zero five SF calls below a `hear` was
+            // reported at the `hear` — Engine.vein:1771, the file-loaded handler — and the real line took a
+            // print at every step to find (Vein Cards #17). `shard` and `phase` still name the unit, so a
+            // collector's `if d.shard == "LoadSave"` means what it did; `file` and `line` are the statement's.
+            var place = _pinnedAt is { } stmt ? new SourceAt(stmt.File, stmt.Line) : at;
+            string where = Where(owner.Name, what, place) + Through(_pinnedCalls, what);
 
             // The HOST hears about it first, and unconditionally — including the `!canRaise` case
             // below, where the program cannot be told at all because a @DiagnosticRaised handler is
@@ -1557,7 +1678,7 @@ public sealed class Interp
             Emit("DiagnosticRaised", new Dictionary<string, object?>(StringComparer.Ordinal)
             {
                 ["severity"] = 2L, ["message"] = $"{where}: {ex.Message}",
-                ["shard"] = owner.Name, ["phase"] = what, ["file"] = at?.File ?? "", ["line"] = at?.Line ?? 0L,
+                ["shard"] = owner.Name, ["phase"] = what, ["file"] = place?.File ?? "", ["line"] = place?.Line ?? 0L,
                 ["origin"] = null, ["bundle"] = _bundle,
             });
         }
@@ -1725,14 +1846,16 @@ public sealed class Interp
         int guard = 0;
         while (_queue.Count > 0)
         {
-            if (guard++ >= 10_000) { Capped("10,000 events in one drain"); break; }
-            var (name, payload) = _queue.Dequeue();
+            if (guard++ >= 10_000) { DrainCapped(); break; }
+            var queued = _queue.Dequeue();
+            var (name, payload) = (queued.Name, queued.Payload);
             if (Pure && Purity.ReachesOutside(name))
             {
                 Err?.WriteLine($"(refused in a pure program: @{name})");
                 continue;
             }
-            _current = payload;   // emits inside handlers inherit this event's id into their trail
+            _current = payload;      // an emit inside a handler fills omitted fields from this event…
+            _currentEvent = queued;  // …and is caused by it: its id goes on the new event's trail
             Observed?.Invoke(EventName(name), payload);
             if (name == "Response") { _responseBody = Str(payload.GetValueOrDefault("body")); _responseStatus = AsLong(payload.GetValueOrDefault("status")); continue; }
             if (name == "Print") { _out?.WriteLine(Str(payload.GetValueOrDefault("text"))); continue; }
@@ -1826,9 +1949,11 @@ public sealed class Interp
             {
                 // Muted: the event is DROPPED for it, not held — `unmute` does not replay what it missed.
                 if (IsMuted(h.Owner)) { _log.Add($"{h.Owner.Fc} MUTED @{name}"); continue; }
-                if (!AudiencePermits(h, payload))
+                // The SENDER the runtime recorded, not the payload's `from`: an event may declare a `from` of
+                // its own, and a barrier that read that one would test whatever the emit wrote.
+                if (!AudiencePermits(h, queued.Sender))
                 {
-                    var f = payload.GetValueOrDefault("from") as Dictionary<string, object?>;
+                    var f = queued.Sender as Dictionary<string, object?>;
                     _log.Add($"{h.Owner.Fc} BLOCKS @{name} (audience) from {f?.GetValueOrDefault("kind")}.{f?.GetValueOrDefault("name")}");
                     continue;
                 }
@@ -1850,6 +1975,52 @@ public sealed class Interp
             // still deferred, which keeps the rule the phase model relies on — no unit observes a
             // half-changed world.
             CommitPhase();
+        }
+    }
+
+    /// Set while DrainCapped's own diagnostic is being handled, so a runaway there cannot report itself again.
+    private bool _reportingDrainCap;
+
+    /// The queue handled 10,000 events in one drain: events that cause each other in a cycle, or one burst
+    /// that large. With a budget that is OutOfGas, as before. Without one the drain still stops — a frame
+    /// must end — and now it SAYS so: @DiagnosticRaised names the event next in line, and its shard, phase,
+    /// file and line are where that event was emitted. It used to stop without a word, the rest of the queue
+    /// waiting for a drain that, in a one-shot run, never came.
+    ///
+    /// The diagnostic is handled AT ONCE, with the events still queued set aside: in a live-lock it would
+    /// otherwise wait behind them for ever, and a collector that prints it would print nothing. They go back
+    /// afterwards, in order, and run at the next drain as they always did.
+    private void DrainCapped()
+    {
+        const string what = "10,000 events in one drain";
+        if (Budget > 0) throw new OutOfGas(what);
+        if (_reportingDrainCap)
+        {
+            _faulted = true;
+            Err?.WriteLine($"(error: {what}, while reporting one — the events left wait for the next drain)");
+            return;
+        }
+
+        var next = _queue.Peek();
+        var held = _queue.ToArray();
+        _queue.Clear();
+        var (shard, phase, unitAt) = next.Unit ?? ("", "", null);
+        var place = next.Stmt is { } stmt ? new SourceAt(stmt.File, stmt.Line) : unitAt;
+        Emit("DiagnosticRaised", new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["severity"] = 2L,
+            ["message"] = $"{what} — @{EventName(next.Name)} is still being emitted, and the events still queued wait for " +
+                          "the next drain. Events that cause each other never settle: give the cycle a condition that ends " +
+                          "it. A batch that large is better walked with `target` than sent as an event per item.",
+            ["shard"] = shard, ["phase"] = phase, ["file"] = place?.File ?? "", ["line"] = place?.Line ?? 0L,
+            ["origin"] = null, ["bundle"] = _bundle,
+        });
+        _reportingDrainCap = true;
+        try { Drain(); }
+        finally
+        {
+            _reportingDrainCap = false;
+            foreach (var e in held) _queue.Enqueue(e);
         }
     }
 
@@ -1899,14 +2070,14 @@ public sealed class Interp
     /// This filters at the receiver and is advisory: `ConsoleBus` takes the sender's name from the
     /// message body and nothing authenticates it, so it guards against a mis-wired topology, not against
     /// a hostile process on the same machine.
-    private static bool AudiencePermits(Handler h, Dictionary<string, object?> payload)
+    private static bool AudiencePermits(Handler h, object? sender)
     {
         var aud = h.Aud;
         if (aud.IsEmpty) return true;
 
         HashSet<string> haveShapes, haveMarks;
         string? key;
-        var raw = payload.GetValueOrDefault("from");
+        var raw = sender;
         if (raw is string address)
         {
             // The same rule, over a mark set of one: the console's own address. A console is no shard,
@@ -1929,21 +2100,21 @@ public sealed class Interp
             && !(key is not null && aud.NotShards.Contains(key));
     }
 
-    private void Emit(string ev, Dictionary<string, object?> payload)
+    /// Queue an event. `sender` is who the `audience` barrier tests — the payload's `from` unless the event
+    /// declares a `from` of its own, when the emit site passes the real one.
+    private void Emit(string ev, Dictionary<string, object?> payload, object? sender = null)
     {
         if (ev == "DiagnosticRaised") Stamp(payload);
-        // Every event gets its own id (not an entity id) and a causation chain.
-        payload["id"] = "ev" + (++_eventSeq);
-        if (_current is not null)
-        {
-            payload["cause"] = _current.TryGetValue("id", out var cid) ? cid : "";
-            var trail = new List<object?>();
-            if (_current.TryGetValue("trail", out var t) && t is List<object?> prev) trail.AddRange(prev);
-            if (_current.TryGetValue("id", out var pid)) trail.Add(pid);
-            payload["trail"] = trail;                 // id[] — the whole chain that led here
-        }
-        else { payload["cause"] = ""; payload["trail"] = new List<object?>(); }
-        _queue.Enqueue((ev, payload));
+        // Every event gets its own id (not an entity id) and a causation chain, kept in the queue entry so the
+        // chain is the runtime's whatever the payload says. The payload gets them too — `e.id`, `e.cause`,
+        // `e.trail` — except a name the event declares itself, which reads what the emit wrote.
+        string id = "ev" + (++_eventSeq);
+        var trail = new List<object?>();
+        if (_currentEvent is { } cause) { trail.AddRange(cause.Trail); trail.Add(cause.Id); }
+        if (!Owns(ev, "id")) payload["id"] = id;
+        if (!Owns(ev, "cause")) payload["cause"] = _currentEvent?.Id ?? "";
+        if (!Owns(ev, "trail")) payload["trail"] = new List<object?>(trail);   // id[] — the whole chain that led here
+        _queue.Enqueue(new Queued(ev, payload, id, trail, sender ?? payload.GetValueOrDefault("from"), _unit, _at));
     }
 
     // ---- statements -----------------------------------------------------
@@ -1956,6 +2127,7 @@ public sealed class Interp
     private void ExecStmt(IrStmt s, Instance self, Dictionary<string, object?> locals)
     {
         Burn();
+        if (s.At is { } place) _at = place;   // a statement Lower generated runs as the one around it
         switch (s)
         {
             case IrBlock b: Exec(b, self, locals); break;
@@ -1987,6 +2159,7 @@ public sealed class Interp
                     _currentEntity = d.Entity;
                     _targetBinds.Clear();
                     _targetBinds.AddRange(d.Binds);
+                    _at = d.At ?? _at;   // its statements are the bring's, generated: a fault is the bring's line
                     Exec(d.Body, self, d.Locals);
                 }
                 _currentIndex = prevIndex;
@@ -2007,7 +2180,8 @@ public sealed class Interp
                     new Dictionary<string, object?>(locals, locals.Comparer),
                     new List<object?>(_targetBinds),
                     _currentIndex,
-                    _currentEntity));
+                    _currentEntity,
+                    ob.At));
                 break;
             }
             case IrLet l: locals[l.Name] = l.Init is null ? null : Eval(l.Init, self, locals); break;
@@ -2287,12 +2461,24 @@ public sealed class Interp
         switch (lp.Kind)
         {
             case IrLoopKind.While:
-                { int g = 0; while (Truthy(Eval(lp.Cond!, self, locals)))
-                  {
-                      if (g++ >= 100_000) { Capped("a `while` loop ran 100,000 times"); break; }
-                      if (!Iterate(lp.Body, self, locals)) break;
-                  } }
+            {
+                // The condition is asked again after every turn, and a fault in it belongs to the `while`'s
+                // line — not to the body's last statement, where the turn before left `_at`.
+                var header = _at;
+                for (int turns = 0; ; turns++)
+                {
+                    _at = header;
+                    if (!Truthy(Eval(lp.Cond!, self, locals))) break;
+                    if (turns >= 100_000)
+                    {
+                        Capped("a `while` loop ran 100,000 times",
+                               "its condition never became false. If the work really is that long, do a part of it each tick");
+                        break;
+                    }
+                    if (!Iterate(lp.Body, self, locals)) break;
+                }
                 break;
+            }
             case IrLoopKind.Repeat:
                 { long n = AsLong(Eval(lp.Count!, self, locals));
                   long prevIdx = _currentIndex;
@@ -2346,7 +2532,7 @@ public sealed class Interp
                 else if (lp.Source is not null && Eval(lp.Source, self, locals) is System.Collections.IEnumerable src and not string)
                 {
                     long idx = -1, prevIdx = _currentIndex;
-                    foreach (var item in src.Cast<object?>().ToList())
+                    foreach (var item in src is IDictionary<string, object?> record ? Entries(record) : src.Cast<object?>().ToList())
                     {
                         _currentIndex = ++idx;
                         _targetBinds.Add(item);
@@ -2362,6 +2548,16 @@ public sealed class Interp
             }
         }
     }
+
+    /// A record walked by `target d as kv` — a parsed object, a payload — as its ENTRIES, each a record with
+    /// `key` and `value`, in the order the keys were first put: the same thing a `~<map>` walk gives (VeinMap),
+    /// so `kv.key` reads alike on both. A key set again keeps its place, and nothing takes a key out of a record.
+    ///
+    /// It walked as .NET pairs, which nothing in the language can read: `kv.key` and `kv.value` were empty, and
+    /// only `string(kv)` showed "[a, 1]" — so Vein Cards scanned the text `toJson` wrote to find a record's keys.
+    private static List<object?> Entries(IDictionary<string, object?> record) =>
+        record.Select(e => (object?)new Dictionary<string, object?>(StringComparer.Ordinal) { ["key"] = e.Key, ["value"] = e.Value })
+              .ToList();
 
     private IEnumerable<long> OneOf(long id, IrQuery q)
     {
@@ -2515,8 +2711,18 @@ public sealed class Interp
     /// a fresh local scope — a function never sees its caller's locals.
     private object? CallUser(IrFunction f, List<object?> args, Instance self)
     {
-        if (_callDepth >= 256) { Capped("calls nested 256 deep"); return null; }   // runaway recursion: stop rather than blow the stack
+        // Runaway recursion: stopped rather than blowing the stack — and SAID (Capped), where it used to
+        // answer null and let the caller carry on computing with it.
+        if (_callDepth >= 256)
+        {
+            Capped("calls nested 256 deep",
+                   $"`{CallLabel(f)}` is called again before any call returns. A function that calls itself needs a case " +
+                   "that stops; or write the repetition as a `while` loop");
+            return null;
+        }
         _callDepth++;
+        _calls.Add(f);
+        var caller = _at;   // the calling statement: the rest of it, after this call returns, is the caller's again
         try
         {
             var scope = new Dictionary<string, object?>(StringComparer.Ordinal);
@@ -2527,7 +2733,12 @@ public sealed class Interp
             catch (ReturnSignal r) { return r.Value; }
             return null;                       // fell off the end (an SF, or an fn with no return)
         }
-        finally { _callDepth--; }
+        finally
+        {
+            _callDepth--;
+            _calls.RemoveAt(_calls.Count - 1);
+            _at = caller;
+        }
     }
 
     /// The events this interpreter IMPLEMENTS rather than merely delivers — the ones whose meaning is
@@ -2902,7 +3113,9 @@ public sealed class Interp
                     if (_events.TryGetValue(si.TypeName, out var et))
                         foreach (var fld in et.Fields)
                         {
-                            if (fld.Name is "origin" or "source" || payload.ContainsKey(fld.Name)) continue;
+                            // The tail's `origin`/`source` are the envelope's; an event's OWN field of that
+                            // name (`origin: string`) is filled like any other.
+                            if ((fld.Name is "origin" or "source" && IsTail(fld)) || payload.ContainsKey(fld.Name)) continue;
                             if (fld.Default is not null) payload[fld.Name] = Eval(fld.Default, self, locals);
                             else if (_current is not null && _current.TryGetValue(fld.Name, out var cv)) payload[fld.Name] = cv;
                             else if (locals.TryGetValue(fld.Name, out var lv)) payload[fld.Name] = lv;
@@ -2911,12 +3124,17 @@ public sealed class Interp
                     // Auto provenance. Two layers kept separate:
                     //   from   = the First-Class object that emitted (runtime identity)
                     //   origin = the ECS entity, when emitted inside a `target` (null outside one)
-                    payload["from"] = FromOf(self.Fc, self.Marks);
-                    payload["origin"] = _currentEntity == 0 ? null : _currentEntity;
-                    payload["bundle"] = _bundle;
+                    // A name the event declares itself is left as written (Owns): `@MeshDelivered { origin:
+                    // string }` names a mesh node, and replacing it with the entity id read back a number.
+                    // An `origin` this emit writes is kept too, as the compiled payload keeps it.
+                    var sender = FromOf(self.Fc, self.Marks);
+                    if (!Owns(si.TypeName, "from")) payload["from"] = sender;
+                    if (!Owns(si.TypeName, "origin") && !si.Fields.Any(f => f.Field == "origin"))
+                        payload["origin"] = _currentEntity == 0 ? null : _currentEntity;
+                    if (!Owns(si.TypeName, "bundle")) payload["bundle"] = _bundle;
                     _edges.Add(new GraphEdge(self.Fc.Name, self.Fc.Kind.ToString(), si.TypeName));
                     _log.Add($"{self.Fc} [{self.Fc.Identity}] emits @{si.TypeName}");
-                    Emit(si.TypeName, payload);
+                    Emit(si.TypeName, payload, sender);
                 }
                 return null;
             // Structural change. The arguments are evaluated NOW (they read the current world) but the
@@ -2949,13 +3167,15 @@ public sealed class Interp
                     else value = CollectionElement(value, spec.Element, where, op == "add" ? "add to" : op == "move" ? "move in" : "remove from");
                 }
                 // A `$Shape` element is checked AT the commit, after the commands queued before it — so an
-                // identity brought earlier in this event counts — and refused with this unit's place.
+                // identity brought earlier in this event counts — and refused with this unit's place, at the
+                // statement that asked for the change.
                 var unit = _unit;
+                var asked = _at;
                 _commands.Add(() =>
                 {
                     if (_store.ChangeCollection(e, shape, field, op, value, put)) return;
                     var (bad, need) = op == "put" && !CarriesNow(value, spec?.KeyCarries) ? (value, spec?.KeyCarries) : (op == "put" ? put : value, spec?.Carries);
-                    CommitFault(unit, $"{op} {shape}.~{field}: identity {Str(bad)} does not carry ${need}");
+                    CommitFault(unit, asked, $"{op} {shape}.~{field}: identity {Str(bad)} does not carry ${need}");
                 });
                 return null;
             }
@@ -3186,9 +3406,10 @@ public sealed class Interp
     private bool CarriesNow(object? value, string? shape) => shape is null || (value is long id && _store.Has(id, shape));
 
     /// A collection change refused at the commit (D24) — reported as a fault of the unit that wrote it.
-    private void CommitFault((string Shard, string Phase, SourceAt? At)? unit, string message)
+    private void CommitFault((string Shard, string Phase, SourceAt? At)? unit, IrLine? asked, string message)
     {
-        var (shard, phase, at) = unit ?? ("", "", null);
+        var (shard, phase, unitAt) = unit ?? ("", "", null);
+        var at = asked is { } stmt ? new SourceAt(stmt.File, stmt.Line) : unitAt;
         string where = shard == "" ? "" : Where(shard, phase, at) + ": ";
         Fault?.Invoke(new InterpFault(_tick, shard, phase, null, new InvalidOperationException(message)));
         Emit("DiagnosticRaised", new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -3230,10 +3451,32 @@ public sealed class Interp
         string s => s,
         double d => d.ToString(CultureInfo.InvariantCulture),
         bool b => b ? "true" : "false",
-        List<object?> xs => "[" + string.Join(", ", xs.ConvertAll(Str)) + "]",
-        VeinMap m => "{" + string.Join(", ", m.Entries.Select(e => Str(e.Key) + ": " + Str(e.Value))) + "}",
+        List<object?> or VeinMap or IDictionary<string, object?> => Nested(o, new HashSet<object>(ReferenceEqualityComparer.Instance)),
         _ => o.ToString() ?? ""
     };
+
+    /// A list, a `~<map>` or a RECORD — a parsed object, a payload, an entry `target d as kv` binds — as text.
+    /// A record is written as a map is; it printed `System.Collections.Generic.Dictionary` and its type
+    /// arguments, so `"" + d` showed .NET, and `==` (which compares anything else as text) found EVERY two
+    /// records equal. Shared state is often a record holding itself (`db.match.db`), so one already being
+    /// written is `{…}` rather than a walk that never ends.
+    private static string Nested(object? o, HashSet<object> open)
+    {
+        string Part(object? v) => v is List<object?> or VeinMap or IDictionary<string, object?> ? Nested(v, open) : Str(v);
+        if (o is null) return "";
+        if (!open.Add(o)) return o is List<object?> ? "[…]" : "{…}";
+        try
+        {
+            return o switch
+            {
+                List<object?> xs => "[" + string.Join(", ", xs.Select(Part)) + "]",
+                VeinMap m => "{" + string.Join(", ", m.Entries.Select(e => Part(e.Key) + ": " + Part(e.Value))) + "}",
+                IDictionary<string, object?> r => "{" + string.Join(", ", r.Select(e => e.Key + ": " + Part(e.Value))) + "}",
+                _ => Str(o),
+            };
+        }
+        finally { open.Remove(o); }
+    }
     private static object? Default(string typeName) => typeName switch { "string" or "Mark" => "", "int" => 0L, "float" => 0.0, "bool" => false, _ => null };
 
     // Typed zero used to satisfy required fields under `?` (fill-the-rest). A `Mark` (an identity

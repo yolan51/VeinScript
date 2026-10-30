@@ -87,7 +87,20 @@ public sealed record IrAttr(string Name, IReadOnlyList<object?> Args)
 
 // ---- statements ---------------------------------------------------------
 
-public abstract record IrStmt;
+public abstract record IrStmt
+{
+    /// Where the statement is written, so a fault names the LINE that failed and not only the unit it ran
+    /// in: a division by zero five SF calls below a `hear` was reported at the `hear` (Vein Cards, Engine.vein
+    /// 1771), and finding the real line took a print at every step. Set by Lower on every statement lowered
+    /// from source; null on one Lower generates, which then reports as the source statement around it.
+    ///
+    /// `internal set`, as `IrExpr.ResolvedType` is: an annotation on the tree, not part of its shape. Not
+    /// printed by IrPrinter, for the reason `@at` is not — a golden file must not change because a line moved.
+    public IrLine? At { get; internal set; }
+}
+
+/// A statement's place: the file NAME (no folder, as a unit's `@at` gives it — a person reads it) and line.
+public sealed record IrLine(string File, long Line);
 
 /// A statement sequence. `Transparent` means it introduces NO scope: the interpreter never did (an
 /// IrBlock shares its parent's locals), but the C# backend emits `{ … }`, so a `let` inside would be
