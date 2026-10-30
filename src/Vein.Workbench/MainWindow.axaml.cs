@@ -3056,10 +3056,30 @@ public partial class MainWindow : Window
 
     /// The node is kept on the item so selecting it can jump to the source that produced it. IrNode
     /// has carried a Span since the tree was written and nothing had ever read it.
-    private static TreeViewItem MakeItem(IrNode n)
+    /// One IR node. The first two levels are built open; anything deeper is built the first time it is
+    /// opened, from a placeholder that only shows the expander.
+    ///
+    /// EVERY NODE WAS BUILT, AND OPEN, BEFORE THE WINDOW COULD SHOW. Fine for a sample; for Vein Cards
+    /// (10,000 lines) it was tens of thousands of styled controls, twice (the restored session, then the
+    /// file), and the Workbench sat ~35 s with no window — which reads as "it does not open at all".
+    private static TreeViewItem MakeItem(IrNode n, int depth = 0)
     {
-        var item = new TreeViewItem { Header = Label(n), IsExpanded = true, Tag = n };
-        foreach (var c in n.Children) item.Items.Add(MakeItem(c));
+        bool open = depth < 2;
+        var item = new TreeViewItem { Header = Label(n), IsExpanded = open, Tag = n };
+        if (n.Children.Count == 0) return item;
+        if (open)
+        {
+            foreach (var c in n.Children) item.Items.Add(MakeItem(c, depth + 1));
+            return item;
+        }
+        item.Items.Add(new TreeViewItem { Header = "…" });
+        item.PropertyChanged += (_, e) =>
+        {
+            if (e.Property != TreeViewItem.IsExpandedProperty || !item.IsExpanded) return;
+            if (item.Items.Count != 1 || item.Items[0] is not TreeViewItem { Tag: null }) return;   // built already
+            item.Items.Clear();
+            foreach (var c in n.Children) item.Items.Add(MakeItem(c, 2));
+        };
         return item;
     }
 
