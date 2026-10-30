@@ -33,11 +33,21 @@ public sealed class Parser
     private Token Expect(TokenKind k, string what)
     {
         if (Check(k)) return Advance();
+        // A RESERVED WORD WHERE A NAME GOES — `var count = 0`, `fn twice(from: int)`, `hear @E as to`. That was
+        // VS0100 "Expected name, found KwCount 'count'", which never said the word is reserved, and the
+        // ParseError abandoned the whole declaration around it: the shard's own `}` then closed the bundle, and
+        // what followed was "Expected 'bundle' or 'app'". Vein Cards met eleven such words (VEIN_REPORT #11).
+        // The word is taken AS the name, so the parse goes on as the author meant it and this is the only
+        // error. It is still an error: no program that was rejected is accepted now.
+        if (k == TokenKind.Ident && IsReservedWord(Cur.Kind)) return ReservedName(false);
         _diag.Error("VS0100", $"Expected {what}, found {Cur.Kind} '{Cur.Text}'.", Here);
         throw new ParseError();
     }
 
     private static bool IsKeyword(TokenKind k) => k >= TokenKind.KwAnd && k <= TokenKind.KwShardView;
+
+    /// Every word the lexer reserves: `IsKeyword`'s range and `Entity`, `Index` and `app` after it.
+    private static bool IsReservedWord(TokenKind k) => k >= TokenKind.KwAnd && k <= TokenKind.KwApp;
 
     /// A name position (member after '.', a field name, a struct-field name) accepts an identifier
     /// OR any keyword spelled as text — so common words like `from`, `class`, `count`, `to` can be
@@ -45,9 +55,76 @@ public sealed class Parser
     private Token ExpectName(string what)
     {
         if (Check(TokenKind.Ident) || IsKeyword(Cur.Kind)) return Advance();
+        if (IsReservedWord(Cur.Kind)) return ReservedName(false);     // `Entity`, `Index`, `app`: not names here either
         _diag.Error("VS0100", $"Expected {what}, found {Cur.Kind} '{Cur.Text}'.", Here);
         throw new ParseError();
     }
+
+    /// VS0396 at the reserved word under the cursor, which is then taken as the name it was written as.
+    private Token ReservedName(bool called)
+    {
+        _diag.Error("VS0396", ReservedMessage(Cur.Text, called), Here);
+        return Advance();
+    }
+
+    private static string ReservedMessage(string word, bool called)
+    {
+        string why = word switch
+        {
+            "count" when called => " — the number of items in a list is `len(xs)`",
+            "base" => " — as a `bring` argument or a field's value it stands for the declared default",
+            _ => "",
+        };
+        return $"`{word}` is reserved in VeinScript{why}; name it differently, e.g. `{InsteadOf[word]}`.";
+    }
+
+    /// What to call it instead, for every word the lexer reserves. A suggestion that was itself reserved would
+    /// send the reader round in a circle, so SilentDeclarationTests compiles each one in place of its word.
+    private static readonly Dictionary<string, string> InsteadOf = new(StringComparer.Ordinal)
+    {
+        ["and"] = "both", ["as"] = "alias", ["attach"] = "attached", ["audience"] = "listeners",
+        ["builder"] = "maker", ["bridge"] = "link", ["bring"] = "brought", ["bundle"] = "pack",
+        ["by"] = "who", ["chance"] = "odds", ["count"] = "total", ["destroy"] = "doomed",
+        ["each"] = "item", ["else"] = "otherwise", ["emit"] = "emitted", ["event"] = "ev",
+        ["false"] = "off", ["folds"] = "folded", ["from"] = "source", ["hear"] = "heard",
+        ["let"] = "value", ["map"] = "lookup", ["mark"] = "tag", ["mute"] = "muted",
+        ["not"] = "negated", ["on"] = "enabled", ["or"] = "either", ["publicator"] = "api",
+        ["return"] = "result", ["settled"] = "done", ["SF"] = "sf", ["shape"] = "form",
+        ["shard"] = "piece", ["shared"] = "common", ["start"] = "begin", ["sync"] = "synced",
+        ["target"] = "goal", ["tick"] = "ticks", ["to"] = "dest", ["transform"] = "change",
+        ["true"] = "yes", ["unattach"] = "detached", ["unmark"] = "unmarked", ["unmute"] = "unmuted",
+        ["use"] = "usage", ["need"] = "needed", ["var"] = "variable", ["when"] = "moment",
+        ["fn"] = "func", ["type"] = "kind", ["enum"] = "kinds", ["if"] = "cond",
+        ["while"] = "looping", ["repeat"] = "times", ["break"] = "pause", ["continue"] = "resume",
+        ["match"] = "game", ["ShardView"] = "view", ["Entity"] = "entity", ["app"] = "application",
+        ["Index"] = "index", ["base"] = "baseValue", ["do"] = "todo", ["tune"] = "setting",
+        ["weave"] = "woven", ["loom"] = "weaver", ["format"] = "layout",
+    };
+
+    /// Words that BEGIN something — a statement, a declaration, a branch. One of these where a value goes is
+    /// nearly always that construct in the wrong place (an `else` a newline orphaned, RULES 2b; `let x = if …`),
+    /// so it stays VS0104 there, and is read as a misused name only when what follows can only follow a value.
+    private static readonly HashSet<TokenKind> Leading = new()
+    {
+        TokenKind.KwAnd, TokenKind.KwOr, TokenKind.KwAs, TokenKind.KwElse, TokenKind.KwWhen, TokenKind.KwIf,
+        TokenKind.KwWhile, TokenKind.KwRepeat, TokenKind.KwMatch, TokenKind.KwDo, TokenKind.KwFn, TokenKind.KwSf,
+        TokenKind.KwReturn, TokenKind.KwBreak, TokenKind.KwContinue, TokenKind.KwLet, TokenKind.KwVar,
+        TokenKind.KwEmit, TokenKind.KwHear, TokenKind.KwBring, TokenKind.KwWeave, TokenKind.KwAttach,
+        TokenKind.KwUnattach, TokenKind.KwDestroy, TokenKind.KwUnmark, TokenKind.KwMute, TokenKind.KwUnmute,
+        TokenKind.KwChance, TokenKind.KwEnum, TokenKind.KwBundle, TokenKind.KwApp, TokenKind.KwPublicator,
+        TokenKind.KwShard, TokenKind.KwShardView, TokenKind.KwBridge, TokenKind.KwBuilder, TokenKind.KwLoom,
+    };
+
+    /// A token that can only come AFTER a value: an operator, a member `.`, a closing bracket, a separator.
+    private static bool FollowsValue(TokenKind k) => k is
+        TokenKind.Dot or TokenKind.Assign or TokenKind.PlusEq or TokenKind.MinusEq or TokenKind.StarEq or
+        TokenKind.SlashEq or TokenKind.RParen or TokenKind.RBracket or TokenKind.Comma or TokenKind.Plus or
+        TokenKind.Star or TokenKind.Slash or TokenKind.Mod or TokenKind.Eq or TokenKind.Lt or TokenKind.Gt or
+        TokenKind.Le or TokenKind.Ge;
+
+    /// A reserved word that reads, here, as a NAME someone chose.
+    private bool ReservedAsName() =>
+        IsReservedWord(Cur.Kind) && (!Leading.Contains(Cur.Kind) || FollowsValue(Peek(1).Kind));
 
     /// Skip virtual newline terminators (and stray ones between members).
     private void SkipTerms() { while (Check(TokenKind.Term)) _i++; }
@@ -422,7 +499,7 @@ public sealed class Parser
         bool isVar = Match(TokenKind.KwVar);                             // optional `var`
         string name = ExpectName("member name").Text;
         TypeRef? type = Match(TokenKind.Colon) ? ParseTypeRef() : null;  // type optional (inferred)
-        string? fold = Match(TokenKind.KwFolds) ? Expect(TokenKind.Ident, "fold reducer").Text : null;
+        string? fold = Match(TokenKind.KwFolds) ? ExpectReducer() : null;
         Expr? def = Match(TokenKind.Assign) ? ParseExpr() : null;        // `=` ⇒ defaulted
         return new FieldDecl(name, type, fold, def, s) { IsVar = isVar };
     }
@@ -496,6 +573,7 @@ public sealed class Parser
         if (Check(TokenKind.ShapeRef))
         {
             var t = Advance();
+            NotNullable("$" + t.Text);
             return (new TypeRef("Entity", Array.Empty<TypeRef>(), false, t.Span), t.Text, owns);
         }
         return (ParseTypeRef(), null, owns);
@@ -508,16 +586,41 @@ public sealed class Parser
         string name = ExpectName("field name").Text;
         Expect(TokenKind.Colon, "':'");
         var type = ParseTypeRef();
-        string? fold = Match(TokenKind.KwFolds) ? Expect(TokenKind.Ident, "fold reducer").Text : null;
+        string? fold = Match(TokenKind.KwFolds) ? ExpectReducer() : null;
         Expr? def = Match(TokenKind.Assign) ? ParseExpr() : null;   // `name: Type = default`
         return new FieldDecl(name, type, fold, def, s);
+    }
+
+    /// The word after `folds`. A reducer is one of a fixed few (Lower.ParseFold), not a name the author picks, so
+    /// `folds count` is an unknown reducer — said in Lower's own words — rather than a reserved name to rename.
+    private string ExpectReducer()
+    {
+        if (Check(TokenKind.Ident)) return Advance().Text;
+        if (!IsReservedWord(Cur.Kind)) return Expect(TokenKind.Ident, "fold reducer").Text;
+        _diag.Error("VS0200", $"Unknown fold reducer '{Cur.Text}'. Use sum/min/max/replace/first/all/any.", Here);
+        return Advance().Text;
     }
 
     private TypeRef ParseTypeRef()
     {
         var s = Here;
+        string name;
         // `Entity` is a keyword but also the ECS entity type, so accept it in type position.
-        string name = Check(TokenKind.KwEntity) ? Advance().Text : Expect(TokenKind.Ident, "type").Text;
+        if (Check(TokenKind.KwEntity)) name = Advance().Text;
+        else if (IsReservedWord(Cur.Kind))
+        {
+            // `var m: map<string, int>` — LANGUAGE.md lists `map<K,V>`, the lexer reserves `map`, and no parser
+            // case ever took it: "Expected type, found KwMap", then the cascade. Said once, then read past, so
+            // the `<…>` after it still parses.
+            _diag.Error("VS0396", Cur.Kind == TokenKind.KwMap
+                ? "`map` is reserved in VeinScript and is not a type you can write: a dictionary needs no declared " +
+                  "type (`var scores = fromJson(\"{}\")`), and a map a shape carries is a collection field, " +
+                  "`~<map> scores: string | int`."
+                : $"`{Cur.Text}` is reserved in VeinScript and is not a type — write `int`, `float`, `string`, `bool`, " +
+                  "`Entity` or `list<…>`, or a type, shape or enum this bundle declares.", Here);
+            name = Advance().Text;
+        }
+        else name = Expect(TokenKind.Ident, "type").Text;
         var args = new List<TypeRef>();
         if (Match(TokenKind.Lt))
         {
@@ -525,9 +628,25 @@ public sealed class Parser
             while (Match(TokenKind.Comma)) args.Add(ParseTypeRef());
             Expect(TokenKind.Gt, "'>'");
         }
-        bool nullable = false; // `T?` — no '?' token yet; reserved for later
-        return new TypeRef(name, args, nullable, s);
+        var type = new TypeRef(name, args, false, s);
+        NotNullable(TypeText(type));
+        return type;
     }
+
+    /// `int?` (VS0397). LANGUAGE.md promised "nullable is `T?`" and nothing ever parsed it: the `?` was
+    /// "Expected ')'" or "Expected field name", wherever it stood, and recovery lost the declaration around it.
+    /// There is no `null` a type could admit or refuse — a missing value is a thing a program tests where it
+    /// reads it — so the `?` is said once and stepped over, and the declaration parses as the type without it.
+    private void NotNullable(string type)
+    {
+        if (!Check(TokenKind.Question)) return;
+        _diag.Error("VS0397", $"VeinScript has no nullable types — write `{type}`, not `{type}?`. No type says whether " +
+            "a value may be missing: test for it where the value is read.", Here);
+        Advance();
+    }
+
+    private static string TypeText(TypeRef t) =>
+        t.Args.Count == 0 ? t.Name : t.Name + "<" + string.Join(", ", t.Args.Select(TypeText)) + ">";
 
     /// SF is the only function kind. It never returns a value — it emits events (auto origin/source).
     /// `SF name(params) { … }` — a shard function: emits events, returns nothing.
@@ -1132,6 +1251,15 @@ public sealed class Parser
 
     private Stmt ParseStmt()
     {
+        // `target = 3`, `match.score += 1` — a reserved word used as a variable, at the head of a statement. It is
+        // the assignment it looks like (ParsePrimary reports the word), not the statement the keyword begins: no
+        // statement starts with a keyword and then `=` or `.`, so nothing that parsed is read differently.
+        // `let`/`var` are left out — `let = 5` is a missing name, not a variable called `let`.
+        if (IsReservedWord(Cur.Kind) && Cur.Kind is not (TokenKind.KwLet or TokenKind.KwVar)
+            && Peek(1).Kind is TokenKind.Assign or TokenKind.PlusEq or TokenKind.MinusEq or TokenKind.StarEq
+                or TokenKind.SlashEq or TokenKind.Dot)
+            return ParseAssignOrExpr();
+
         switch (Cur.Kind)
         {
             case TokenKind.KwLet: { var v = ParseVar(mutable: false); return new LocalVarStmt(v, v.Span); }
@@ -1575,9 +1703,13 @@ public sealed class Parser
         static bool StartsBuilderRef(TokenKind k) =>
             k is TokenKind.Ident or TokenKind.BuilderRef or TokenKind.Star;
 
+        // `bring count Coin(…)` with `count` a variable: the count, reported as a reserved word by ParsePrimary,
+        // rather than a builder named `count` and a stray `Coin(…)` after it. Only a word ParsePrimary REPORTS —
+        // `true`, `Entity` and `Index` are values there, and `bring Entity Coin(…)` must stay the error it was.
         Expr? count = null;
         if (Check(TokenKind.Int) || Check(TokenKind.Float) ||
-            (Check(TokenKind.Ident) && StartsBuilderRef(Peek(1).Kind)))
+            ((Check(TokenKind.Ident) || (ReservedAsName() && Cur.Kind is not (TokenKind.KwTrue or TokenKind.KwFalse
+                or TokenKind.KwEntity or TokenKind.KwIndex))) && StartsBuilderRef(Peek(1).Kind)))
             count = ParsePrimary();
 
         // The builder: bare `Name` (local, back-compat), `&Name` (local, sigil'd), or a qualified
@@ -1895,6 +2027,11 @@ public sealed class Parser
                 return new NameExpr(name, s);
             }
             default:
+                // A RESERVED WORD READ AS A VALUE — `count + 1` after `var count = 0`. One VS0396 at the word, and
+                // the parse goes on with it as the name, so the rest of the line is not lost to "Unexpected
+                // 'count' in expression" and a skip to the next line.
+                if (ReservedAsName())
+                    return new NameExpr(ReservedName(called: Peek(1).Kind == TokenKind.LParen).Text, s);
                 _diag.Error("VS0104", $"Unexpected '{Cur.Text}' in expression.", s);
                 throw new ParseError();
         }

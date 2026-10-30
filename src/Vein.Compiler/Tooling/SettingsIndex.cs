@@ -139,8 +139,8 @@ public static class SettingsIndex
             }
     }
 
-    /// A setting's literal as written: `5.0`, `-2`, `30%`, `"text"`, `true`.
-    private static string Spell(Expr e) => e switch
+    /// A setting's literal as written: `5.0`, `-2`, `30%`, `"text"`, `true`. Empty for anything computed.
+    internal static string Spell(Expr e) => e switch
     {
         UnaryExpr { Op: UnOp.Neg, Operand: var o } => "-" + Spell(o),
         LiteralExpr { Kind: LiteralKind.String, Value: var s } => "\"" + (s as string ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"",

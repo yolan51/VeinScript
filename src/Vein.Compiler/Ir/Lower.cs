@@ -324,7 +324,7 @@ public sealed partial class Lower
                 // Consumed by the Collect pass above, which builds the bare-name fallback list; there is
                 // nothing to lower, because `use` adds no IR — it only widens what a bare name may mean.
                 case NeedDecl: break;
-                case VarDecl: break;                 // module-level state: not modeled yet
+                case VarDecl v: ModuleState(v); break;
                 case StartDecl: break;               // captured separately below (module boot)
                 default: break;
             }
@@ -406,7 +406,38 @@ public sealed partial class Lower
         CheckTypeNames();
         var module = Semantics.Resolve.Run(new IrModule(bundle.Name, types, funcs, shards) { Start = start }, out var unknown);
         ReportUnknownFields(unknown, start?.Event);
+        CheckEnumArms();
         return module;
+    }
+
+    /// Every `match` this bundle lowered, with the statement it came from — kept until Resolve has typed the
+    /// subjects, which is what CheckEnumArms needs and the lowering of the `match` itself cannot know.
+    private readonly List<(IrMatch Ir, MatchStmt Ast)> _matches = new();
+
+    /// VS0242 for a `when` arm naming no case of the enum its `match` is over — the code `Way.Nroth` written as
+    /// a value already gets.
+    ///
+    /// An arm matches BY NAME (Interp.ExecMatch compares it with the subject's text), so `when Nroth` over a
+    /// `Way` compiled, never matched, and the `match` quietly did nothing for that value. Mark arms were checked
+    /// (VS0218, through UseMark); case arms are checked here the same way, against the enum's declared cases.
+    ///
+    /// ONLY WHERE THE SUBJECT IS AN ENUM: its type as Resolve recorded it — a field, parameter or variable
+    /// declared with one of this bundle's enums. A bare `when quit` over TEXT compares a word with the text, and
+    /// apps/tasks dispatches its verbs exactly so; a subject that is not certainly an enum is never checked, so
+    /// this cannot fire on a match that works.
+    private void CheckEnumArms()
+    {
+        foreach (var (ir, ast) in _matches)
+        {
+            if (ir.Subject.ResolvedType is not { Args.Count: 0 } subject || !_enums.TryGetValue(subject.Name, out var cases)) continue;
+            foreach (var arm in ast.Arms.Where(a => !a.IsMark && !cases.Contains(a.CaseName, StringComparer.Ordinal)))
+            {
+                string meant = Nearest(arm.CaseName, cases) is { } near ? $"; did you mean `{near}`?" : ".";
+                _diag.Error("VS0242",
+                    $"`when {arm.CaseName}` can never match: this `match` is over {subject.Name}, which has no case " +
+                    $"'{arm.CaseName}'{meant} {subject.Name} declares {string.Join(", ", cases)}.", arm.Span);
+            }
+        }
     }
 
     /// The same `Author.Bundle` in two search roots — e.g. an installed `bundles/` copy alongside the
@@ -1811,7 +1842,48 @@ public sealed partial class Lower
     private IrFunction LowerFunc(FuncDecl f)
     {
         CheckBuiltinName(f);
+        CheckFallsOff(f);
         return LowerFuncBody(f);
+    }
+
+    /// VS0395: an `fn … return T` with a path that reaches its end. There it answers EMPTY (Interp.CallUser's
+    /// `return null; // fell off the end`), not 0 and not false, and nothing says so at run time: `f(0)` of
+    /// `fn f(x: int) return int { if x > 0 { return 1 } }` printed as nothing, and `f(0) == 0` is false.
+    /// Warned at the declaration, where the missing `return` belongs.
+    ///
+    /// CONSERVATIVE, so it never fires on a function that cannot fall off. A block returns when any statement
+    /// in it does; an `if` when it has an `else` and both branches return; a `match` when every arm returns and
+    /// it has an `else` or names every case of an enum. A loop never counts: `while`, `repeat` and `target` may
+    /// run zero times, and a `while` is stopped at 100,000 passes. Left alone: an SF (it emits, VS0105), an fn
+    /// that declares no result, and a body imported from another bundle (its own bundle's compile reports it).
+    private void CheckFallsOff(FuncDecl f)
+    {
+        if (f.IsPure || f.Return is not { Name: not "void" } result || _importDepth > 0 || Returns(f.Body)) return;
+        string type = SignatureLock.TypeText(result);
+        _diag.Warning("VS0395",
+            $"`{f.Name}` is declared `return {type}`, but a path through it reaches the end without a `return`, and " +
+            $"there it answers empty — not 0, not false — so `{f.Name}(…) == 0` is false. End the body with a `return`, " +
+            "or give the `if` (or `match`) an `else` that returns; a `return` inside a loop does not count, since the " +
+            "loop may not run.", f.Span);
+    }
+
+    /// Whether every path through `s` ends in a `return` (see CheckFallsOff).
+    private bool Returns(Stmt? s) => s switch
+    {
+        ReturnStmt => true,
+        Block b => b.Statements.Any(Returns),
+        IfStmt i => i.Else is Stmt otherwise && Returns(i.Then) && Returns(otherwise),
+        MatchStmt m => m.Arms.All(a => Returns(a.Body)) && (m.Else is not null ? Returns(m.Else) : NamesEveryCase(m)),
+        _ => false,
+    };
+
+    /// A `match` with no `else` whose arms name every case of one of this bundle's enums. Its subject's type is
+    /// not known yet, so arms covering an enum are taken to be a match over it — which can only err towards
+    /// not warning.
+    private bool NamesEveryCase(MatchStmt m)
+    {
+        var named = m.Arms.Where(a => !a.IsMark).Select(a => a.CaseName).ToHashSet(StringComparer.Ordinal);
+        return _enums.Values.Any(cases => cases.Count > 0 && cases.All(named.Contains));
     }
 
     private IrFunction LowerFuncBody(FuncDecl f)
@@ -1901,6 +1973,30 @@ public sealed partial class Lower
         }
 
         return new IrShard(name, state, null, methods, doc, attrs);
+    }
+
+    /// A `let`/`var` at bundle level, or in a publicator — VS0394.
+    ///
+    /// IT WAS DROPPED. This case read `case VarDecl: break; // module-level state: not modeled yet`, so the
+    /// declaration lowered to nothing and each read of the name was a local nobody had set: `let top = 5` above
+    /// the shards, `"top=" + top` inside one, and the program printed "top=" with no diagnostic at any severity.
+    /// An error until module state is designed. The message names the three places such a value already lives,
+    /// spelled with this declaration's own name, type and value, so the fix is a move rather than a rewrite.
+    private void ModuleState(VarDecl v)
+    {
+        string value = v.Init is null ? "" : Tooling.SettingsIndex.Spell(v.Init);
+        string decl = $"{(v.Mutable ? "var" : "let")} {v.Name}" + (v.Type is null ? "" : ": " + SignatureLock.TypeText(v.Type))
+                    + (v.Init is null ? "" : " = " + (value.Length > 0 ? value : "…"));
+        string? type = v.Type is not null ? SignatureLock.TypeText(v.Type) : SettingKind(v) is { } kind ? KindName(kind) : null;
+        string constant = type is null
+            ? $"an `fn {v.Name}()` that returns it"
+            : $"`fn {v.Name}() return {type} {{ return {(value.Length > 0 ? value : "…")} }}`";
+
+        _diag.Error("VS0394",
+            $"`{v.Name}` is declared at bundle level, where VeinScript keeps no state: nothing would hold it, and every " +
+            $"read of it would answer empty. Move `{decl}` into the shard that uses it — a shard's `var` is its state; " +
+            "a value a project should be able to change is a setting there, with `tune(\"…\")` on the line above; and " +
+            $"a constant every shard reads is {constant}.", v.Span);
     }
 
     // ---- settings (D21) ---------------------------------------------------
@@ -2407,9 +2503,13 @@ public sealed partial class Lower
                 return new IrLoop(IrLoopKind.Repeat, null, r.Var, null, null, count, LowerBlock(r.Body));
             }
             case MatchStmt m:
-                return new IrMatch(LowerExpr(m.Subject),
+            {
+                var match = new IrMatch(LowerExpr(m.Subject),
                     m.Arms.Select(a => { if (a.IsMark) UseMark(a.CaseName, a.Span); return new IrMatchArm(a.CaseName, LowerBlock(a.Body)); }).ToList(),
                     m.Else is null ? null : LowerBlock(m.Else));
+                if (_importDepth == 0) _matches.Add((match, m));      // its case arms are checked once Resolve has run
+                return match;
+            }
             case ReturnStmt r: return new IrReturn(r.Value is null ? null : LowerExpr(r.Value));
             case BreakStmt: return new IrBreak();
             case ContinueStmt: return new IrContinue();
