@@ -18,7 +18,7 @@ internal sealed class EventFlowPanel : UserControl
     private readonly TextBlock _summary = new() { Foreground = Brushes.Gray, FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _status = new() { Foreground = Brushes.Gray, FontSize = 11, Margin = new Avalonia.Thickness(8, 2), TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly TextBox _filter = new() { Width = 200, FontSize = 12, Watermark = "highlight: bundle, shard or @event" };
-    private readonly CheckBox _stdlib = new() { Content = "Standard library events", FontSize = 12 };
+    private readonly CheckBox _stdlib = new() { Content = "Standard library", FontSize = 12 };
     private int _request;
 
     /// Open a file at a line. Wired by the window to the shared GoTo.

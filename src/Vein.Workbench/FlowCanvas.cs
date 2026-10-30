@@ -184,7 +184,8 @@ internal sealed class FlowCanvas : Control
         if (_flow is null) { InvalidateVisual(); return; }
 
         var rows = new List<UnitRow>();
-        foreach (var b in _flow.Bundles)
+        // The standard library's bundles are drawn only with its events: a box with no wires says nothing.
+        foreach (var b in _flow.Bundles.Where(b => _showStdlib || !b.IsLibrary))
         {
             var box = new BundleBox { Bundle = b };
             double y = BundleHead;
@@ -247,6 +248,8 @@ internal sealed class FlowCanvas : Control
         "tick" => "each tick",
         "frame" => "each frame",
         "every" => "every …",
+        "runtime" => "raised by the runtime",
+        "host" => "answered by the host",
         _ => trigger,
     };
 

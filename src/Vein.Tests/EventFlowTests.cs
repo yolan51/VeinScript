@@ -46,9 +46,16 @@ public class EventFlowTests
         var flow = Flow("event_flow", "event_flow.app.vein");
 
         Assert.Empty(flow.Problems);
-        Assert.Equal(new[] { "Game", "Combat", "Loot", "Inventory", "Quests", "Hud", "Telemetry" }, flow.Bundles.Select(b => b.Name));
+        Assert.Equal(new[] { "Game", "Combat", "Loot", "Inventory", "Quests", "Hud", "Telemetry" },
+                     flow.Bundles.Where(b => !b.IsLibrary).Select(b => b.Name));
         Assert.True(flow.Bundles[0].IsPrincipal);
         Assert.Equal("you.Game.Begin", flow.Start?.Event);
+
+        // The standard library it uses is drawn too, as the end @Print goes to (the Flow tab's "Standard library").
+        var console = Assert.Single(flow.Bundles, b => b.IsLibrary);
+        Assert.Equal("Vein.Console", console.Name);
+        Assert.Contains(console.Shards.SelectMany(s => s.Units), u => u.IsHear && u.Trigger == "Print");
+        Assert.Contains(flow.Event("Print")!.Hearers, h => h.Bundle == "Vein.Console");
 
         // Emitted, heard by nobody — and heard, emitted by nobody.
         Assert.True(flow.Event("you.Telemetry.Logged")!.Unheard);

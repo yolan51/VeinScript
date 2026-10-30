@@ -23,7 +23,11 @@ public sealed record FlowShard(string Bundle, string Name, string Kind, FlowPlac
     public IEnumerable<string> Emits => Units.SelectMany(u => u.Emits).Select(e => e.Event).Distinct(StringComparer.Ordinal);
 }
 
-public sealed record FlowBundle(string Name, string? Author, string File, bool IsPrincipal, bool Needed, IReadOnlyList<FlowShard> Shards);
+/// `IsLibrary`: a standard-library bundle the program uses, drawn as the end its events come from or go to —
+/// `Vein.Time` raises @Ticked, `Vein.Console` takes @Print. It has no shards of its own; its "shards" are its
+/// publicators, and their units are the runtime or the host acting for it.
+public sealed record FlowBundle(string Name, string? Author, string File, bool IsPrincipal, bool Needed, IReadOnlyList<FlowShard> Shards,
+    bool IsLibrary = false);
 
 /// One end of an event: a shard that emits or hears it. `Shard` is "start" for the app's boot event.
 public sealed record FlowEnd(string Bundle, string Shard, FlowPlace At, string Detail);
@@ -69,7 +73,8 @@ public sealed class EventFlow
     /// Errors that stopped the program linking; the flow is drawn from what did lower.
     public IReadOnlyList<string> Problems { get; init; } = Array.Empty<string>();
 
-    public IEnumerable<FlowShard> Shards => Bundles.SelectMany(b => b.Shards);
+    /// The program's shards — not the library boxes drawn beside them.
+    public IEnumerable<FlowShard> Shards => Bundles.Where(b => !b.IsLibrary).SelectMany(b => b.Shards);
 
     public FlowEvent? Event(string key) => Events.FirstOrDefault(e => e.Key == key);
 
@@ -164,6 +169,8 @@ public sealed class EventFlow
             bundles.Add(new FlowBundle(part.Decl.Name, part.Decl.Author, part.File, i == 0, part.Needed, shards));
         }
 
+        if (parts.Count > 0) bundles.AddRange(Libraries(bundles, parts[0]));
+
         // ---- events -----------------------------------------------------------------------------
         var emitters = new Dictionary<string, List<FlowEnd>>(StringComparer.Ordinal);
         var hearers = new Dictionary<string, List<FlowEnd>>(StringComparer.Ordinal);
@@ -194,6 +201,60 @@ public sealed class EventFlow
             Problems = diag?.Items.Where(d => d.Severity == Severity.Error).Select(d => d.ToString()).ToList()
                        ?? (IReadOnlyList<string>)Array.Empty<string>(),
         };
+    }
+
+    /// The standard-library bundles this program's events come from and go to, one per bundle, one "shard" per
+    /// publicator: it raises what the program hears from it (@Ticked, @Fetched, @KeyDown) and takes what the
+    /// program sends it (@Print, @Fetch, @WriteFile).
+    ///
+    /// THE MAP SHOWED ONE BOX for a game that runs on a clock, reads the keyboard and writes files: every bare
+    /// event was a loose label, with no say where it came from. An event belongs to the library that declares
+    /// it — a bundle the program `need`s first, when two declare the same name (Console's and Net's @Send).
+    private static IEnumerable<FlowBundle> Libraries(IReadOnlyList<FlowBundle> program, AppLinker.LinkedPart principal)
+    {
+        var heard = new HashSet<string>(StringComparer.Ordinal);
+        var sent = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var u in program.SelectMany(b => b.Shards).SelectMany(s => s.Units))
+        {
+            if (u.IsHear && !u.Trigger.Contains('.')) heard.Add(u.Trigger);
+            foreach (var e in u.Emits) if (!e.Event.Contains('.')) sent.Add(e.Event);
+        }
+        if (heard.Count == 0 && sent.Count == 0) yield break;
+
+        var needs = principal.Decl.Members.OfType<NeedDecl>().Select(n => $"{n.Author}.{n.Bundle}").ToHashSet(StringComparer.Ordinal);
+        var declared = StdlibIndex.Symbols(Path.GetDirectoryName(Path.GetFullPath(principal.File)))
+            .Where(s => s.Kind == SymbolKind.Event)
+            .GroupBy(s => s.Name, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.OrderBy(s => needs.Contains($"{s.Author}.{s.Bundle}") ? 0 : 1).First(), StringComparer.Ordinal);
+
+        // What the library does with each event: raise it (the program hears it, and does not raise it
+        // itself — or the runtime always does), take it (the program sends it, and nobody in it hears it).
+        var ends = heard.Union(sent)
+            .Where(declared.ContainsKey)
+            .Select(k => (Key: k, Symbol: declared[k],
+                          Raises: heard.Contains(k) && (Interp.RuntimeEvents.Contains(k) || !sent.Contains(k)),
+                          Takes: sent.Contains(k) && (Interp.HostEvents.Contains(k) || !heard.Contains(k))))
+            .Where(x => x.Raises || x.Takes);
+
+        foreach (var bundle in ends.GroupBy(x => $"{x.Symbol.Author}.{x.Symbol.Bundle}").OrderBy(g => g.Key, StringComparer.Ordinal))
+        {
+            var shards = new List<FlowShard>();
+            foreach (var pub in bundle.GroupBy(x => x.Symbol.Publicator ?? x.Symbol.Bundle).OrderBy(g => g.Key, StringComparer.Ordinal))
+            {
+                var units = new List<FlowUnit>();
+                FlowPlace Where(QualifiedSymbol s) => new(s.At?.File ?? "", s.At?.Line ?? 1);
+                foreach (var x in pub.OrderBy(x => x.Key, StringComparer.Ordinal))
+                {
+                    if (x.Takes) units.Add(new FlowUnit(x.Key, true, Where(x.Symbol), "", Array.Empty<FlowEmit>()));
+                    if (x.Raises)
+                        units.Add(new FlowUnit(Interp.RuntimeEvents.Contains(x.Key) ? "runtime" : "host", false, Where(x.Symbol), "",
+                                               new[] { new FlowEmit(x.Key, Where(x.Symbol), null) }));
+                }
+                shards.Add(new FlowShard(bundle.Key, pub.Key, "library", Where(pub.First().Symbol), "", units));
+            }
+            yield return new FlowBundle(bundle.Key, null, bundle.First().Symbol.At?.File ?? "",
+                                        IsPrincipal: false, Needed: true, shards, IsLibrary: true);
+        }
     }
 
     /// A shard-like declaration's name, where it is, and what it carries as `$S #M` text.
@@ -296,13 +357,13 @@ public sealed class EventFlow
     public string Render(bool includeStdlib = false)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"Event flow — {Name}   ({Bundles.Count} bundle(s), {Shards.Count()} shard(s))");
+        sb.AppendLine($"Event flow — {Name}   ({Bundles.Count(b => !b.IsLibrary)} bundle(s), {Bundles.Where(b => !b.IsLibrary).Sum(b => b.Shards.Count)} shard(s))");
         if (Start is { } st) sb.AppendLine($"  boot: start @{Interp.EventName(st.Event)}   ({Path.GetFileName(st.At.File)}:{st.At.Line})");
         foreach (var p in Problems) sb.AppendLine("  ! " + p);
 
         bool Shown(string key) => includeStdlib || key.Contains('.');
 
-        foreach (var b in Bundles)
+        foreach (var b in Bundles.Where(b => includeStdlib || !b.IsLibrary))
         {
             sb.AppendLine();
             sb.AppendLine($"{(b.IsPrincipal ? "★" : b.Needed ? "◇" : "■")} {(b.Author is null ? "" : b.Author + ".")}{b.Name}");
