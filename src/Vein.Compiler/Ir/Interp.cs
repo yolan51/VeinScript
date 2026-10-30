@@ -1269,15 +1269,25 @@ public sealed class Interp
         if (FrameRate <= 0) return;
         if (!_schedules.Any(s => s.Kind is "tick" or "frame" or "settled")) return;
 
-        var period = TimeSpan.FromSeconds(1.0 / FrameRate);
+        long period = TimeSpan.FromSeconds(1.0 / FrameRate).Ticks;
         double delta = 1.0 / FrameRate;
 
+        // PACED TO DEADLINES, NOT TO SLEEPS. Windows rounds a sleep up to its ~15.6 ms timer, so
+        // sleeping 16.7 ms took ~31 and a game on `t.delta` ran at half speed (VeinCards, VEIN_REPORT
+        // #21). Each frame now waits for its own slot on a stopwatch, so the overshoot of one sleep is
+        // taken out of the next and sixty frames last a second. `delta` stays fixed — the same frames
+        // `--ticks` gives. Far behind (a debugger pause), the clock starts over rather than bursting.
         var timer = new Thread(() =>
         {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            long next = 0;
             int frame = 0;
             while (true)
             {
-                Thread.Sleep(period);
+                next += period;
+                long wait = next - clock.Elapsed.Ticks;
+                if (wait > 0) Thread.Sleep(TimeSpan.FromTicks(wait));
+                else if (-wait > 5 * period) next = clock.Elapsed.Ticks;
                 int n = ++frame;
                 // Adding to a completed inbox throws — that is the run ending, so the thread ends too.
                 try { inbox.Add(() => { FireTicked(n, delta); Frame(); }); } catch { return; }
@@ -1300,12 +1310,19 @@ public sealed class Interp
         foreach (var sched in _schedules)
         {
             if (sched.Kind != "every" || sched.Seconds <= 0) continue;
-            var period = TimeSpan.FromSeconds(sched.Seconds);
+            long period = TimeSpan.FromSeconds(sched.Seconds).Ticks;
             var timer = new Thread(() =>
             {
+                // Paced to deadlines like the frame clock, so `every 1` does not drift a sleep's
+                // overshoot further behind each second.
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                long next = 0;
                 while (true)
                 {
-                    Thread.Sleep(period);
+                    next += period;
+                    long wait = next - clock.Elapsed.Ticks;
+                    if (wait > 0) Thread.Sleep(TimeSpan.FromTicks(wait));
+                    else if (-wait > 5 * period) next = clock.Elapsed.Ticks;
                     // Adding to a completed inbox throws — that is the run ending, so the thread ends too.
                     try { inbox.Add(() => Fire(sched)); } catch { return; }
                 }
