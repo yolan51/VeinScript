@@ -2570,7 +2570,7 @@ public sealed class Interp
     ///
     /// It walked as .NET pairs, which nothing in the language can read: `kv.key` and `kv.value` were empty, and
     /// only `string(kv)` showed "[a, 1]" — so Vein Cards scanned the text `toJson` wrote to find a record's keys.
-    private static List<object?> Entries(IDictionary<string, object?> record) =>
+    internal static List<object?> Entries(IDictionary<string, object?> record) =>
         record.Select(e => (object?)new Dictionary<string, object?>(StringComparer.Ordinal) { ["key"] = e.Key, ["value"] = e.Value })
               .ToList();
 
@@ -2721,17 +2721,7 @@ public sealed class Interp
             case IrIndex ix:
             {
                 var recv = Peek(ix.Receiver, self, locals);
-                var key = Eval(ix.Index, self, locals);
-                // An index truncates toward zero, so `list[random() * len(list)]` picks an element and
-                // needs no cast. Out of range reads null rather than throwing — a runtime is not a place
-                // to crash a user's console app.
-                if (recv is IReadOnlyList<object?> list)
-                { long i = AsLong(key); return i >= 0 && i < list.Count ? list[(int)i] : null; }
-                if (recv is IDictionary<string, object?> map) return map.TryGetValue(Str(key), out var mv) ? mv : null;
-                if (recv is VeinMap vm) return vm[key];   // `b.Board.~scores["ann"]` — the value type's zero when missing
-                if (recv is string str)
-                { long i = AsLong(key); return i >= 0 && i < str.Length ? str[(int)i].ToString() : null; }
-                return null;
+                return Index(recv, Eval(ix.Index, self, locals));
             }
             case IrCall call:
                 if (call.Callee is IrLocalRef fn)
@@ -2884,6 +2874,22 @@ public sealed class Interp
         // Local wall-clock time, ISO 8601 to the second. Pulled, not delivered — a deliberate exception
         // (RULES 28f) — and fixed by `VEIN_NOW` so a test can expect an exact date.
         "now" => Now(),
+        "pick" => args.Count > 0 && args[0] is IReadOnlyList<object?> { Count: > 0 } items
+            ? items[_rng.Next(items.Count)]
+            : null,
+        "random" => _rng.NextDouble(),
+        // A whole COMPONENT serialises, not just a scalar: `toJson(r.Row)` reads every field the shape
+        // declares. An entity cannot — nothing can ask an identity which shapes it carries (RULES.md 14)
+        // — so the thing you name is always a shape on one.
+        "toJson" => Json.Write(args.Count > 0 ? Expand(args[0]) : null),
+        _ => PureBuiltin(name, args)
+    };
+
+    /// The built-ins that need nothing but their arguments — no world, no clock, no randomness. Compiled code
+    /// calls these same arms (VeinValues.Call), so a built-in cannot mean one thing interpreted and another
+    /// compiled.
+    internal static object? PureBuiltin(string name, List<object?> args) => name switch
+    {
         // A list without element `i`, and a list sorted the way `by Shape.field` sorts — both NEW lists,
         // so `xs = remove(xs, 2)` reads as what it does.
         "remove" => args.Count > 1 ? ListOps.Remove(args[0], args[1]) : new List<object?>(),
@@ -2905,17 +2911,9 @@ public sealed class Interp
         "cryptoToken" => VeinCrypto.Token(AsLong(args.ElementAtOrDefault(0))),
         "cryptoSign" => VeinCrypto.Sign(Str(args.ElementAtOrDefault(0)), Str(args.ElementAtOrDefault(1))),
         "cryptoVerify" => VeinCrypto.Verify(Str(args.ElementAtOrDefault(0)), Str(args.ElementAtOrDefault(1)), Str(args.ElementAtOrDefault(2))),
-        "pick" => args.Count > 0 && args[0] is IReadOnlyList<object?> { Count: > 0 } items
-            ? items[_rng.Next(items.Count)]
-            : null,
         "len" => (long)(args.Count > 0 ? args[0] switch { System.Collections.ICollection c => c.Count, string s => s.Length, _ => 0 } : 0),
-        "random" => _rng.NextDouble(),
         "join" => args.Count > 1 && args[0] is System.Collections.IEnumerable e ? string.Join(Str(args[1]), e.Cast<object?>().Select(Str)) : "",
-
-        // A whole COMPONENT serialises, not just a scalar: `toJson(r.Row)` reads every field the shape
-        // declares. An entity cannot — nothing can ask an identity which shapes it carries (RULES.md 14)
-        // — so the thing you name is always a shape on one.
-        "toJson" => Json.Write(args.Count > 0 ? Expand(args[0]) : null),
+        "toJson" => Json.Write(args.Count > 0 ? args[0] : null),
 
         // An object comes back as a dictionary, and field access already resolves against one, so
         // `fromJson(body).title` needs nothing further. Malformed input is null rather than a crash.
@@ -3034,7 +3032,7 @@ public sealed class Interp
 
     /// Anything to a whole number. A float truncates toward zero rather than rounding, because
     /// `int(x)` is asked for most often to index or count, and 4.9 items is four.
-    private static long ToLong(object? v) => v switch
+    internal static long ToLong(object? v) => v switch
     {
         null => 0L,
         bool b => b ? 1L : 0L,
@@ -3051,7 +3049,7 @@ public sealed class Interp
     /// Anything to a real number. INVARIANT CULTURE on purpose: `"1.5"` must parse the same on a machine
     /// where the decimal separator is a comma, or a program would read its own saved files differently
     /// depending on where it ran.
-    private static double ToDouble(object? v) => v switch
+    internal static double ToDouble(object? v) => v switch
     {
         null => 0d,
         bool b => b ? 1d : 0d,
@@ -3085,7 +3083,7 @@ public sealed class Interp
     ///
     /// Words first, then numbers, and only then truthiness — which is what keeps `bool("cat")` true and
     /// agrees with `if` for every string that is not a written answer.
-    private static bool ToBool(object? v)
+    internal static bool ToBool(object? v)
     {
         if (v is not string s) return Truthy(v);
 
@@ -3356,7 +3354,28 @@ public sealed class Interp
 
         var l = Eval(b.Left, self, locals);
         var r = Eval(b.Right, self, locals);
-        switch (b.Op)
+        return Binary(b.Op, l, r);
+    }
+
+    /// `recv[key]`. An index truncates toward zero, so `list[random() * len(list)]` picks an element and needs
+    /// no cast. Out of range reads null rather than throwing — a runtime is not a place to crash a user's
+    /// console app.
+    internal static object? Index(object? recv, object? key)
+    {
+        if (recv is IReadOnlyList<object?> list)
+        { long i = AsLong(key); return i >= 0 && i < list.Count ? list[(int)i] : null; }
+        if (recv is IDictionary<string, object?> map) return map.TryGetValue(Str(key), out var mv) ? mv : null;
+        if (recv is VeinMap vm) return vm[key];   // `b.Board.~scores["ann"]` — the value type's zero when missing
+        if (recv is string str)
+        { long i = AsLong(key); return i >= 0 && i < str.Length ? str[(int)i].ToString() : null; }
+        return null;
+    }
+
+    /// Every operator but `and`/`or` on two values already computed — the interpreter's and, through
+    /// VeinValues, compiled code's: one implementation, so the two runtimes cannot answer differently.
+    internal static object? Binary(IrBinOp op, object? l, object? r)
+    {
+        switch (op)
         {
             case IrBinOp.Add:
                 // A LIST on the left builds a list: `xs += item` appends, `xs + ys` joins. It fell into
@@ -3420,7 +3439,7 @@ public sealed class Interp
     ///                          that disagreed would be a second answer to the same question.
     ///   both read as numbers → numeric, text that parses included.
     ///   otherwise            → ordinal on their text, which is where `==` also lands.
-    private static int Ordering(object? l, object? r)
+    internal static int Ordering(object? l, object? r)
     {
         if (l is string a && r is string b) return string.CompareOrdinal(a, b);
         if (AsNumber(l) is { } x && AsNumber(r) is { } y) return x.CompareTo(y);
@@ -3440,9 +3459,9 @@ public sealed class Interp
     };
 
     private static object Num(double v, object? l, object? r) => IsInt(l) && IsInt(r) ? (object)(long)v : v;
-    private static bool IsInt(object? o) => o is long or int;
-    private static bool Truthy(object? o) => o switch { null => false, bool b => b, long n => n != 0, double d => d != 0, string s => s.Length > 0, _ => true };
-    private static long AsLong(object? o) => o switch { long l => l, int i => i, double d => (long)d, _ => 0 };
+    internal static bool IsInt(object? o) => o is long or int;
+    internal static bool Truthy(object? o) => o switch { null => false, bool b => b, long n => n != 0, double d => d != 0, string s => s.Length > 0, _ => true };
+    internal static long AsLong(object? o) => o switch { long l => l, int i => i, double d => (long)d, _ => 0 };
     /// Equality across loosely-typed runtime values.
     ///
     /// This used to read `Equals(Str(l), Str(r)) || AsDouble(l) == AsDouble(r)`. The numeric arm was
@@ -3486,19 +3505,19 @@ public sealed class Interp
             $"{verb} {where}: {(value is string s ? "\"" + s + "\"" : Str(value))} is not {(element == "Entity" ? "an identity" : "a " + element)}"),
     };
 
-    private static bool LooseEq(object? l, object? r) =>
+    internal static bool LooseEq(object? l, object? r) =>
         IsNumeric(l) && IsNumeric(r)
             ? AsDouble(l) == AsDouble(r)
             : string.Equals(Str(l), Str(r), StringComparison.Ordinal);
 
     private static bool IsNumeric(object? o) => o is double or long or int or bool;
 
-    private static double AsDouble(object? o) => o switch { double d => d, long l => l, int i => i, bool b => b ? 1 : 0, _ => 0 };
+    internal static double AsDouble(object? o) => o switch { double d => d, long l => l, int i => i, bool b => b ? 1 : 0, _ => 0 };
     /// Any runtime value as text. The list arm is not a nicety: without it `"lines = " + lines` printed
     /// `System.Collections.Generic.List` plus a mangled type argument — a .NET implementation detail
     /// leaking into the output of a program written in a language that has no .NET in it. `join(list,
     /// sep)` is still how you render a list deliberately; this is what it looks like when you did not ask.
-    private static string Str(object? o) => o switch
+    internal static string Str(object? o) => o switch
     {
         null => "",
         string s => s,
