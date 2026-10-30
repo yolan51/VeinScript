@@ -41,6 +41,21 @@ public class UndeliveredSignalsTests
     }
 
     [Fact]
+    public void The_short_print_and_interpolation_give_the_same_signal()
+    {
+        // What `veinc uwu` turns the long form into. The interpolation lexes to the `+` chain, so its
+        // leading literal is found exactly as before.
+        var prefixes = Of(
+            "    need \"Vein.Console\"\n" +
+            "    shard R {\n" +
+            "        hear @Undelivered as u {\n" +
+            "            do print(\"(cannot reach \\(u.to))\")\n" +
+            "        }\n    }");
+
+        Assert.Equal("(cannot reach ", Assert.Single(prefixes));
+    }
+
+    [Fact]
     public void A_bundle_that_does_not_hear_it_signals_nothing()
     {
         // Most programs do not hear @Undelivered, and a terminal watching for nothing is right for them.

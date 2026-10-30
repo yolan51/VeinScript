@@ -21,9 +21,12 @@ if (args.Length > 0 && args[0] == "lsp")
 
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("usage: veinc <add|remove|restore|packages|lsp> …   or   veinc <new|check|lock|settings|test|tokens|ast|ir|render|serve|run|build|emit|graph|events|flow|formats|scaffold|symbols|exec> <file.vein> [arg]");
+    Console.Error.WriteLine("usage: veinc <add|remove|restore|packages|lsp> …   or   veinc <new|uwu|check|lock|settings|test|tokens|ast|ir|render|serve|run|build|emit|graph|events|flow|formats|scaffold|symbols|exec> <file.vein> [arg]");
     return 2;
 }
+
+// `uwu` rewrites C#-flavoured VeinScript into VeinScript, and takes a folder as well as a file.
+if (args.Length > 0 && args[0] == "uwu") return UwuCommand.Run(args);
 
 // `new` scaffolds a project — its second arg is `bundle|app`, not a file, so handle it before the
 // file-reading path below.

@@ -41,7 +41,8 @@ ask the user first.** Losing a useful file is far worse than leaving a temp fold
   [docs/CORPUS.md](docs/CORPUS.md).
 - **JIT tests:** `dotnet test src/Vein.Jit.Tests` — a second suite, so the main one does not carry Roslyn.
 - **CLI (`veinc`):** `src/Vein.Cli` — run via `dotnet run --project src/Vein.Cli -- <cmd>` or the wrapper
-  `.\veinc.cmd <cmd>`. Commands: `new add remove restore packages check lock settings tokens ast ir render serve run build emit graph events flow formats scaffold symbols exec lsp`. `lsp` is the editor protocol for VS Code (`editors/vscode`, docs/EDITORS.md).
+  `.\veinc.cmd <cmd>`. Commands: `new add remove restore packages uwu check lock settings tokens ast ir render serve run build emit graph events flow formats scaffold symbols exec lsp`. `lsp` is the editor protocol for VS Code (`editors/vscode`, docs/EDITORS.md).
+  `uwu <file|folder> [--write]` rewrites C#-flavoured VeinScript and the long forms (docs/TOOLING.md).
   `run`/`render`/`serve`/`build` also add lines to a project's `vein.lock` (RULES 20a); `lock` accepts a change.
 - **Commits:** work on `master` (the session's established flow); end commit messages with the
   `Co-Authored-By: Claude Opus 4.8` trailer.

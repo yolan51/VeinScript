@@ -14,6 +14,8 @@ compile. The language lives in ../VeinsScriptFirst, which is the source of truth
 
 ## Checking your work
 - Run `veinc check <file>` on every file you change. No warnings left.
+- Run `veinc uwu <file>` too: it rewrites C# habits into VeinScript (`--write` saves) and hints at what
+  only you can restructure, such as shard `var`s that should be a shape.
 - Run this repo's tests (`veinc test <folder>`, or its tests/run.sh). Never edit an expected output just
   to make a test pass: say what changed and why.
 

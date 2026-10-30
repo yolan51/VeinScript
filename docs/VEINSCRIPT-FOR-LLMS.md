@@ -730,6 +730,7 @@ principal.
 | `new bundle\|app\|scratch <Name> [--author A] [--workload site-bundles]` | scaffold a project (a workload is a starting program) |
 | `add\|remove <Package>`, `restore`, `packages` | library packages for a project with no build: `.veinproj` Packages → `.vein/libraries` |
 | `check <file>` | all diagnostics; prints `ok` when clean |
+| `uwu <file\|folder> [--write]` | C# habits rewritten as VeinScript (`;` `!=` `&&` `int x` `->` `$"{x}"`, a missing `do`), the long forms as the short ones (`do print`, `+=`, `"\(x)"`), and hints for what needs a person (shard vars that are things, a found-flag, a third `target`) |
 | `run <file> [--ticks N] [-- args…]` | console mode: stdin → `@Input`, `@Print` → stdout |
 | `render <file> [path] [--set k=v]` | one request → `HTTP status` + body |
 | `serve <file> [--port 8080]` | a real HTTP server |
@@ -789,7 +790,8 @@ stepper, web preview, AI assistant that compiles suggestions before offering the
 8. Read merged / folded values and do pick-ups and deaths in `settled`.
 9. No reserved word (`on count map sync transform`, any keyword) as a variable, parameter or builder
    parameter; `markup css code line` only as a builder's output field.
-10. If unsure whether something exists, say so and suggest `veinc check` — do not invent syntax.
+10. If unsure whether something exists, say so and suggest `veinc check` — do not invent syntax. Run
+    `veinc uwu <file>` on what you wrote: it rewrites the C# habits it can and names the ones it cannot.
 11. A number a designer will want to change goes in a shard as `tune("what it changes")` above a `var`
     with a literal starting value — never computed — and is changed in `vein.settings`, not by editing
     the shard.

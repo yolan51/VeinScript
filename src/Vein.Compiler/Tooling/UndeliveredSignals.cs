@@ -57,7 +57,8 @@ public static class UndeliveredSignals
         }
     }
 
-    /// Every literal that a `@Print`/`@Send` in this handler starts its text with.
+    /// Every literal that a `@Print`/`@Send` in this handler starts its text with — emitted, or through the
+    /// Console SF that emits it (`do print("(cannot reach \(u.to)")`, the form `veinc uwu` writes).
     ///
     /// The LEADING literal only. A handler prints `"(cannot reach " + u.to`, and only the constant half
     /// survives into the output in a predictable place — matching on a prefix is what makes that usable.
@@ -93,9 +94,15 @@ public static class UndeliveredSignals
                     foreach (var f in em.Fields)
                         if (f.Name is "text" or "body") Ex(f.Value);
                     break;
+                case ExprStmt { Expr: CallExpr { ViaDo: true, Args: [var text, ..] } call } when PrintsLine(call.Callee):
+                    Ex(text);
+                    break;
             }
         }
 
         Stm(body);
     }
+
+    private static bool PrintsLine(Expr callee) =>
+        callee is NameExpr { Name: "print" or "printError" } or StarRefExpr { Member: "print" or "printError" };
 }
