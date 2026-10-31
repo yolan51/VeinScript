@@ -72,6 +72,8 @@ internal sealed class EventFlowPanel : UserControl
         {
             Children =
             {
+                // What the find box matches, and nothing else — type a name, press this, look at one bundle.
+                Small("Only these", () => _canvas.ShowOnly(Matching().Select(b => b.Name), open: true)),
                 Small("All", () => _canvas.ShowOnly(_canvas.AllBundles.Select(b => b.Name))),
                 Small("None", () => _canvas.ShowOnly(Array.Empty<string>())),
                 Small("+ Neighbours", () => _canvas.AddNeighbours()),
@@ -113,9 +115,8 @@ internal sealed class EventFlowPanel : UserControl
     private void FillList()
     {
         _list.Children.Clear();
-        string find = (_find.Text ?? "").Trim();
         var all = _canvas.AllBundles.Where(b => !b.Library || _stdlib.IsChecked == true).ToList();
-        var shown = find.Length == 0 ? all : all.Where(b => b.Name.Contains(find, StringComparison.OrdinalIgnoreCase)).ToList();
+        var shown = Matching();
         _listCount.Text = $"{all.Count(b => !b.Hidden)} of {all.Count} bundle(s) drawn · {all.Sum(b => b.Shards)} shard(s)";
         foreach (var b in shown)
         {
@@ -129,9 +130,19 @@ internal sealed class EventFlowPanel : UserControl
                 HorizontalContentAlignment = HorizontalAlignment.Left,
             };
             label.Click += (_, _) => { if (tick.IsChecked != true) tick.IsChecked = true; _canvas.Find(name); };
-            ToolTip.SetTip(label, "click: find it on the map · double-click its title on the map: open or collapse it");
+            // Double-click: this bundle alone, opened — the quickest way to look at one of a hundred.
+            label.DoubleTapped += (_, _) => _canvas.ShowOnly(new[] { name }, open: true);
+            ToolTip.SetTip(label, "click: find it on the map · double-click: show only this bundle, opened");
             _list.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Children = { tick, label } });
         }
+    }
+
+    /// The bundles the find box matches (all of them when it is empty).
+    private List<FlowCanvas.BundleInfo> Matching()
+    {
+        string find = (_find.Text ?? "").Trim();
+        var all = _canvas.AllBundles.Where(b => !b.Library || _stdlib.IsChecked == true);
+        return (find.Length == 0 ? all : all.Where(b => b.Name.Contains(find, StringComparison.OrdinalIgnoreCase))).ToList();
     }
 
     private const string Hint =

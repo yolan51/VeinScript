@@ -210,12 +210,15 @@ internal sealed class FlowCanvas : Control
         if (hidden ? _hidden.Add(bundle) : _hidden.Remove(bundle)) Rebuild(keepView: true);
     }
 
-    public void ShowOnly(IEnumerable<string> bundles)
+    /// Draw these bundles and no others; `open` opens them too (a few looked at closely, not a map of boxes).
+    public void ShowOnly(IEnumerable<string> bundles, bool open = false)
     {
         var keep = bundles.ToHashSet(StringComparer.Ordinal);
         _hidden.Clear();
         if (_flow is not null) foreach (var b in _flow.Bundles) if (!keep.Contains(b.Name)) _hidden.Add(b.Name);
+        if (open && keep.Count <= CollapseBundles) foreach (var b in keep) _collapsed.Remove(b);
         Rebuild(keepView: false);
+        BundlesChanged?.Invoke();
     }
 
     /// Every bundle an event links to one already shown, shown too — "what does this talk to?".

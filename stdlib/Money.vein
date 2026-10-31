@@ -1,0 +1,115 @@
+// stdlib/Money.vein — VeinScript Standard Library : Vein.Money
+// Money as WHOLE CENTS in an int — never a float. A float is binary: `0.1 + 0.2` is 0.30000000000000004, so a
+// price kept in one drifts by fractions of a cent and totals stop adding up (`veinc check` warns, VS0404).
+// An int is 64-bit: whole cents up to 92 quadrillion, exactly. Every function here is exact — text is read and
+// written digit by digit, a split hands out the leftover cents one by one, a share rounds once, at the end.
+// Discover:  veinc symbols stdlib/Money.vein
+
+bundle Money by Vein {
+
+    publicator Cash {
+        // `cents` is the smallest unit of the currency (a cent, a penny); `currency` its code ("EUR", "USD").
+        // Add two amounts only when their currencies are the same: the shape keeps the code so a program can check.
+        shared("An amount of money: whole cents, and the currency code (\"EUR\"). Add only amounts of the same currency.")
+        shape $Amount { cents: int, currency: string = "" }
+
+        shared("Whether text is an amount: digits, optionally a sign, and at most two decimals (\"12.34\", \"-5\", \"0.5\").")
+        fn isCents(text: string) return bool {
+            let t = trim(text)
+            if len(t) == 0 { return false }
+            var digits = 0
+            var decimals = 0
+            var dot = false
+            var ok = true
+            target chars(t) as c {
+                if c == "-" or c == "+" {
+                    if Index > 0 { ok = false }
+                } else if c == "." {
+                    if dot { ok = false }
+                    dot = true
+                } else if code(c) >= 48 and code(c) <= 57 {
+                    if dot { decimals += 1 } else { digits += 1 }
+                } else {
+                    ok = false
+                }
+            }
+            return ok and digits > 0 and decimals <= 2 and not (dot and decimals == 0)
+        }
+
+        shared("Whole cents from text, exactly: \"12.34\" is 1234, \"-0.5\" is -50, \"7\" is 700. Text that is not an amount is 0: ask isCents first.")
+        fn parseCents(text: string) return int {
+            if not isCents(text) { return 0 }
+            var sign = 1
+            var whole = 0
+            var part = 0
+            var decimals = 0
+            var dot = false
+            target chars(trim(text)) as c {
+                if c == "-" {
+                    sign = -1
+                } else if c == "." {
+                    dot = true
+                } else if c == "+" {
+                    sign = 1
+                } else if dot {
+                    part = part * 10 + (code(c) - 48)
+                    decimals += 1
+                } else {
+                    whole = whole * 10 + (code(c) - 48)
+                }
+            }
+            if decimals == 1 { part = part * 10 }
+            return sign * (whole * 100 + part)
+        }
+
+        shared("Cents as text with two decimals: 1234 is \"12.34\", -50 is \"-0.50\", 7 is \"0.07\".")
+        fn formatCents(cents: int) return string {
+            var sign = ""
+            var n = cents
+            if n < 0 {
+                sign = "-"
+                n = 0 - n
+            }
+            let units = n / 100
+            let rest = n % 100
+            if rest < 10 { return sign + units + ".0" + rest }
+            return sign + units + "." + rest
+        }
+
+        shared("A total split into `parts` shares that add back to it exactly: the first shares take the leftover cents.")
+        fn splitCents(total: int, parts: int) return list<int> {
+            var shares: list<int> = []
+            if parts <= 0 { return shares }
+            let even = total / parts
+            var left = total - even * parts
+            repeat parts {
+                var share = even
+                if left > 0 {
+                    share += 1
+                    left -= 1
+                }
+                if left < 0 {
+                    share -= 1
+                    left += 1
+                }
+                shares += share
+            }
+            return shares
+        }
+
+        shared("cents × numerator ÷ denominator, rounded once to a whole cent, half away from zero — a tax, a discount, a fee.")
+        fn shareOf(cents: int, numerator: int, denominator: int) return int {
+            if denominator == 0 { return 0 }
+            let product = cents * numerator
+            var whole = product / denominator
+            var twice = (product - whole * denominator) * 2
+            if twice < 0 { twice = 0 - twice }
+            var limit = denominator
+            if limit < 0 { limit = 0 - limit }
+            if twice >= limit {
+                if (product < 0) == (denominator < 0) { whole += 1 } else { whole -= 1 }
+            }
+            return whole
+        }
+    }
+}

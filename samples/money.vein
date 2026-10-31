@@ -1,0 +1,65 @@
+// money.vein — money as whole cents, never a float (stdlib Vein.Money).
+//
+// A float is binary: 0.1 + 0.2 prints 0.30000000000000004 below. Kept in an `int` as cents, the same sum is
+// exactly 30 — and `veinc check` warns about a money-named float field (VS0404). Vein.Money reads and writes
+// amounts digit by digit, splits a bill so the shares add back to it exactly, and rounds a tax once.
+//
+// The sample checks itself: every line says `ok` or `FAIL`, and check-backend fails on a FAIL from either runtime.
+//
+//   veinc run samples/money.vein --ticks 1
+//   bash tools/check-backend.sh
+
+bundle MoneyDemo by you {
+    need "Vein.Console"
+    need "Vein.Money"
+
+    mark #Item
+
+    shard Till {
+        SF check(what: string, good: bool) {
+            if good { do print("ok    " + what) } else { do print("FAIL  " + what) }
+        }
+
+        run once {
+            // The bug this exists for.
+            do print("float: 0.1 + 0.2 = " + (0.1 + 0.2))
+            do check("cents: 10 + 20 = 30", 10 + 20 == 30)
+
+            // Text in and out, exactly.
+            do check("parse 12.34 is 1234", parseCents("12.34") == 1234)
+            do check("parse -0.5 is -50", parseCents("-0.5") == -50)
+            do check("parse 7 is 700", parseCents("7") == 700)
+            do check("parse +3.5 is 350", parseCents("+3.5") == 350)
+            do check("format 1234 is 12.34", formatCents(1234) == "12.34")
+            do check("format -50 is -0.50", formatCents(-50) == "-0.50")
+            do check("format 7 is 0.07", formatCents(7) == "0.07")
+            do check("1.234 is not an amount", not isCents("1.234"))
+            do check("1. is not an amount", not isCents("1."))
+            do check("abc is not an amount", not isCents("abc"))
+
+            // A bill split three ways: the shares add back to the bill, to the cent.
+            let shares = splitCents(1000, 3)
+            do print("10.00 split 3 ways: " + formatCents(shares[0]) + " " + formatCents(shares[1]) + " " + formatCents(shares[2]))
+            do check("the shares add back to 10.00", shares[0] + shares[1] + shares[2] == 1000)
+            let owed = splitCents(-1000, 3)
+            do check("a debt splits the same way", owed[0] + owed[1] + owed[2] == -1000)
+
+            // A tax, rounded once: 20% of 19.99 is 3.998, so 4.00.
+            do check("20% of 19.99 is 4.00", shareOf(1999, 20, 100) == 400)
+            do check("half a cent rounds away from zero", shareOf(5, 1, 2) == 3 and shareOf(-5, 1, 2) == -3)
+
+            // Amounts on identities, totalled — whole cents all the way.
+            repeat 3 as i {
+                let e = spawn()
+                attach $Amount to e { cents: 199 + i, currency: "EUR" }
+                mark e #Item
+            }
+        }
+
+        settled {
+            var total = 0
+            target $Amount #Item as a { if a.Amount.currency == "EUR" { total += a.Amount.cents } }
+            do print("basket: " + formatCents(total) + " EUR")
+        }
+    }
+}

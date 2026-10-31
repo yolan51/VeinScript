@@ -23,14 +23,14 @@
 //
 // Expected output:
 //
-//     Json: Rope x3 at 1.5
-//     Json: Lamp x1 at 0
-//     Csv: Torch, small x4 at 2.25
-//     Ini: Map x1 at 9
-//     KeyValue: Rag x2 at 0
-//     KeyValue: Coin x50 at 0.1
+//     Json: Rope x3 weighing 1.5
+//     Json: Lamp x1 weighing 0
+//     Csv: Torch, small x4 weighing 2.25
+//     Ini: Map x1 weighing 9
+//     KeyValue: Rag x2 weighing 0
+//     KeyValue: Coin x50 weighing 0.1
 //     ! SemiCsvItem: "Gem;lots;5": `qty`: "lots" is not a whole number
-//     SemiCsv: Bread x2 at 1.5
+//     SemiCsv: Bread x2 weighing 1.5
 //     S1 port 9811 near S2 S4
 //     S6 port 9816 near S5
 //     kick bob by ann for 10 min: spam, again
@@ -42,7 +42,7 @@ bundle WeaveFormats by you {
 
     need "Vein.Console"
 
-    shape $Item    { name: string, qty: int, price: float = 0.0 }
+    shape $Item    { name: string, qty: int, weight: float = 0.0 }
     shape $Node    { name: string, port: int, ~<list> near: string }
     shape $Kick    { kind: string, who: string, by: string, minutes: int, why: string }
     shape $Mob     { name: string, hp: int, x: int = 0, y: int = 0 }
@@ -102,11 +102,11 @@ bundle WeaveFormats by you {
 
     shard Setup {
         run once {
-            weave JsonItem("[{\"name\": \"Rope\", \"qty\": 3, \"price\": 1.5}, {\"name\": \"Lamp\", \"qty\": 1}]")
-            weave CsvItem("name,qty,price\n\"Torch, small\",4,2.25\n")
-            weave IniItem("[Map]\nqty = 1\nprice = 9\n; a comment\n")
-            weave KeyValueItem("Rag 2; Coin qty=50 price=0.1")
-            weave SemiCsvItem("name;qty;price\nBread;2;1.5\nGem;lots;5")
+            weave JsonItem("[{\"name\": \"Rope\", \"qty\": 3, \"weight\": 1.5}, {\"name\": \"Lamp\", \"qty\": 1}]")
+            weave CsvItem("name,qty,weight\n\"Torch, small\",4,2.25\n")
+            weave IniItem("[Map]\nqty = 1\nweight = 9\n; a comment\n")
+            weave KeyValueItem("Rag 2; Coin qty=50 weight=0.1")
+            weave SemiCsvItem("name;qty;weight\nBread;2;1.5\nGem;lots;5")
             weave Node("S1=9811:S2+S4; S6=9816:S5")
             weave Kick("K|bob|ann|10|spam, again")
             weave Mob("Goblin hp:30 x:4 y:2")
@@ -117,11 +117,11 @@ bundle WeaveFormats by you {
 
         // Each weave's records are queryable once its @Woven arrives.
         hear @Woven as w {
-            if w.loom == "JsonItem" { target $Item #FromJson as i { do print("Json: " + i.Item.name + " x" + i.Item.qty + " at " + i.Item.price) } }
-            if w.loom == "CsvItem" { target $Item #FromCsv as i { do print("Csv: " + i.Item.name + " x" + i.Item.qty + " at " + i.Item.price) } }
-            if w.loom == "IniItem" { target $Item #FromIni as i { do print("Ini: " + i.Item.name + " x" + i.Item.qty + " at " + i.Item.price) } }
-            if w.loom == "KeyValueItem" { target $Item #FromKeyValue as i { do print("KeyValue: " + i.Item.name + " x" + i.Item.qty + " at " + i.Item.price) } }
-            if w.loom == "SemiCsvItem" { target $Item #FromSemi as i { do print("SemiCsv: " + i.Item.name + " x" + i.Item.qty + " at " + i.Item.price) } }
+            if w.loom == "JsonItem" { target $Item #FromJson as i { do print("Json: " + i.Item.name + " x" + i.Item.qty + " weighing " + i.Item.weight) } }
+            if w.loom == "CsvItem" { target $Item #FromCsv as i { do print("Csv: " + i.Item.name + " x" + i.Item.qty + " weighing " + i.Item.weight) } }
+            if w.loom == "IniItem" { target $Item #FromIni as i { do print("Ini: " + i.Item.name + " x" + i.Item.qty + " weighing " + i.Item.weight) } }
+            if w.loom == "KeyValueItem" { target $Item #FromKeyValue as i { do print("KeyValue: " + i.Item.name + " x" + i.Item.qty + " weighing " + i.Item.weight) } }
+            if w.loom == "SemiCsvItem" { target $Item #FromSemi as i { do print("SemiCsv: " + i.Item.name + " x" + i.Item.qty + " weighing " + i.Item.weight) } }
             if w.loom == "Node" { target $Node as n { do print(n.Node.name + " port " + n.Node.port + " near " + join(n.Node.~near, " ")) } }
             if w.loom == "Kick" { target $Kick as k { do print("kick " + k.Kick.who + " by " + k.Kick.by + " for " + k.Kick.minutes + " min: " + k.Kick.why) } }
             if w.loom == "Mob" { target $Mob as m { do print(m.Mob.name + " hp " + m.Mob.hp + " at " + m.Mob.x + "," + m.Mob.y) } }

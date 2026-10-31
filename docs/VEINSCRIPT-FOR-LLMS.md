@@ -513,6 +513,8 @@ consoles: `@Console { name: Mark, firsttext }`, `@Send { to: Mark, text }`, `@Me
 bytes, tag }`; SFs `read(path) readAs(path, tag) write(path, text) append(path, text)`. Files are events;
 route answers by `tag`.
 
+**Vein.Money** — money as whole cents in an `int`, NEVER a `float` (VS0404 warns on a money-named float). `$Amount { cents, currency }`; `parseCents("12.34")` → 1234, `formatCents(1234)` → "12.34", `splitCents(1000, 3)` → [334, 333, 333] (adds back exactly), `shareOf(1999, 20, 100)` → 400 (one rounding, half away from zero), `isCents(text)` to validate input.
+
 **Vein.Crypto** — plain functions, both runtimes, all total (bad input → `""`, never an error). `Keys`:
 `newKeys()` (ONE secret text, both private keys — never send it), `publicKey(keys)` (the card to share),
 `fingerprint(publicKey)` (30 digits to compare by voice). `Box`: `seal(text, recipient, keys)` — for the

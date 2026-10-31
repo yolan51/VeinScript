@@ -519,6 +519,34 @@ public sealed partial class Lower
         }
     }
 
+    /// VS0404, a warning: MONEY in a float. A float is binary — `0.1 + 0.2` is 0.30000000000000004 — so a price, a
+    /// balance or a fee kept in one drifts by fractions of a cent, and totals stop adding up. Said where the field
+    /// or var is declared, by its name: a word that means money (`price`, `feeDue`, `account_balance`) and no word that
+    /// means a fraction (`taxRate`, `priceFactor`). Not `amount` or `cost`: in a game those are damage and mana. The fix: whole cents in an `int`, or `Vein.Money`'s `$Amount`.
+    private void CheckMoneyFloat(string where, string name, TypeRef? type, Expr? init, Lexing.SourceSpan span)
+    {
+        bool isFloat = type?.Name == "float" || (type is null && init is LiteralExpr { Kind: LiteralKind.Float });
+        if (!isFloat) return;
+        var words = System.Text.RegularExpressions.Regex.Matches(name, "[A-Z]?[a-z]+|[A-Z]+(?![a-z])")
+            .Select(m => m.Value.ToLowerInvariant()).ToList();
+        if (!words.Any(MoneyWords.Contains) || words.Any(FractionWords.Contains)) return;
+        _diag.Warning("VS0404",
+            $"`{where}` is money in a `float` — a float is binary, so `0.1 + 0.2` is 0.30000000000000004 and totals drift by " +
+            $"fractions of a cent. Keep whole cents in an `int` (`{name}Cents: int`), or use `$Amount` from `need \"Vein.Money\"`.", span);
+    }
+
+    private static readonly HashSet<string> MoneyWords = new(StringComparer.Ordinal)
+    {
+        "price", "prices", "balance", "cash", "money", "salary", "wage", "wages", "fee", "fees",
+        "payment", "payout", "refund", "revenue", "profit", "budget", "fund", "funds", "credit", "debit", "wallet", "dollars",
+        "euros", "cents", "pay", "paid", "tax", "invoice", "subtotal", "deposit", "withdrawal", "loan", "debt",
+    };
+
+    private static readonly HashSet<string> FractionWords = new(StringComparer.Ordinal)
+    {
+        "rate", "ratio", "percent", "percentage", "factor", "multiplier", "share", "fraction", "weight",
+    };
+
     /// VS0401, a hint: a STATE kept as text or a yes/no, where a mark says it (RULES-OF-THUMB 5).
     ///
     /// Vein Cards kept every state that way — `c["attacked"] = true`, a zone as a list of ids — and so did not
@@ -1221,7 +1249,10 @@ public sealed partial class Lower
         foreach (var member in s.Members)
         {
             if (member is FieldDecl f)
+            {
+                CheckMoneyFloat("$" + s.Name + "." + f.Name, f.Name, f.Type, f.Default, f.Span);
                 fields.Add(new IrField(f.Name, Ty(f.Type), ParseFold(f.Fold, f.Span), LowerDefault(f.Default)) { Collection = CheckCollection(f) });
+            }
             else if (member is EnumDecl en)
                 extraEnums.Add(LowerEnum(en, scope: s.Name));
         }
@@ -1976,6 +2007,7 @@ public sealed partial class Lower
     private IrType LowerEvent(EventDecl e)
     {
         UseTypes(e.Members);
+        foreach (var m in e.Members.OfType<FieldDecl>()) CheckMoneyFloat("@" + e.Name + "." + m.Name, m.Name, m.Type, m.Default, m.Span);
         var fields = ExpandMembers(e.Members)
             .Select(m => new IrField(m.Name, Ty(m.Type), null, LowerDefault(m.Default))).ToList();
         // Every event carries its emitter's identity and its provenance — see AddPayloadTail.
@@ -2204,6 +2236,7 @@ public sealed partial class Lower
     private IrField LowerStateVar(VarDecl v, string shard)
     {
         UseType(v.Type);
+        CheckMoneyFloat(shard + "." + v.Name, v.Name, v.Type, v.Init, v.Span);
         var type = v.Type is null ? IrTypeRef.Of("infer") : LowerTypeRef(v.Type);
         Expr? init = v.Init;
         if (v.Tune && init is not null && Settings.Find(_ownerKey, shard + "." + v.Name) is { } entry)
