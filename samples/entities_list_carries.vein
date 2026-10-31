@@ -118,11 +118,22 @@ bundle EntitiesListCarries by you {
                 }
             }
             if turn == 2 {
+                target lane as e {
+                    if e carries $Health { emit *Vein.Console.Io.@Print { text: "  mended: " + e.Unit.name + " hp=" + e.Health.hp } }
+                }
                 emit *Vein.Console.Io.@Print { text: "flipped guards=" + guards(lane) + " who=" + names(lane) + " awake=" + names(awake(lane)) }
                 target lane as e {
                     if e carries #Guard { emit *Vein.Console.Io.@Print { text: "  guard: " + e.Unit.name } }
                 }
             }
+        }
+    }
+
+    // A QUERY binding named like the list loops above (`e`), writing its shape. The C# backend once let the
+    // list-loop name leak into later queries, so `e.Health.hp = …` became an unassignable world read.
+    shard Mend {
+        each tick {
+            target $Health as e { e.Health.hp = e.Health.hp + 1 }
         }
     }
 

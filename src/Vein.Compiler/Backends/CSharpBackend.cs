@@ -1236,6 +1236,8 @@ public sealed class CSharpBackend : IVeinBackend
                 // `target lane as e` over a `list<Entity>`: the element is an identity, so it is an `int` the
                 // world calls take, and `e.Unit.name` reads the shape off the world (FieldAccess).
                 bool identities = loop.Source.ResolvedType is { Name: "list" or "set", Args: [{ Name: "Entity" }] };
+                // Only for this loop's body: a later `target $Walk as m` must not inherit this `m`.
+                bool wasIdentity = _identityElems.Contains(loop.Var ?? "__x");
                 if (identities) _identityElems.Add(loop.Var ?? "__x"); else _identityElems.Remove(loop.Var ?? "__x");
                 _localCs[elemVar] = identities ? "int" : "object";
                 string item = identities ? "__" + elemVar + "_item" : elemVar;
@@ -1245,6 +1247,7 @@ public sealed class CSharpBackend : IVeinBackend
                 sb.AppendLine($"{pad}    {_indexVar}++;");
                 foreach (var s in loop.Body.Statements) EmitStmt(sb, s, depth + 1);
                 sb.AppendLine(pad + "}");
+                if (wasIdentity) _identityElems.Add(loop.Var ?? "__x"); else _identityElems.Remove(loop.Var ?? "__x");
                 _indexVar = prevC;
                 return;
             }
@@ -1281,6 +1284,9 @@ public sealed class CSharpBackend : IVeinBackend
         _entityVar = entVar;
         _selfVars[bind] = entVar;
         _selfComps[bind] = comp;
+        // A query binding is the queried entity's components, never a list element, even if an earlier
+        // collection loop used the same name.
+        bool bindWasIdentity = _identityElems.Remove(bind);
 
         // Several components are an AND. `World.Query<T>` indexes on ONE, so the first drives the loop and
         // the rest are tested per entity — the entity is skipped unless it carries all of them.
@@ -1383,6 +1389,7 @@ public sealed class CSharpBackend : IVeinBackend
 
         _entityVar = prevEnt;
         _indexVar = prevIdx;
+        if (bindWasIdentity) _identityElems.Add(bind);
     }
 
     /// A list literal. `object[]` is the general answer and it is a poor one for the common case: the
