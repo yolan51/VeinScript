@@ -12,6 +12,9 @@ namespace Vein.Workbench;
 // Read from the program ON DISK, like the Tune tab, and only while the tab is showing: it links and lowers
 // every bundle, which is too much to do on each keystroke for a panel nobody is looking at. The work runs
 // off the UI thread, and a result that arrives after a newer request is dropped.
+//
+// For a project of a hundred bundles, the list on the left says which are drawn: tick, untick, find one, pull
+// in the bundles the shown ones talk to, collapse or open them all.
 internal sealed class EventFlowPanel : UserControl
 {
     private readonly FlowCanvas _canvas = new();
@@ -21,6 +24,14 @@ internal sealed class EventFlowPanel : UserControl
     private readonly CheckBox _stdlib = new() { Content = "Standard library", FontSize = 12 };
     private readonly CheckBox _author = new() { Content = "Every bundle by this author", FontSize = 12 };
     private readonly CheckBox _split = new() { Content = "Split bundles into shards", FontSize = 12 };
+    private readonly CheckBox _showList = new() { Content = "Bundle list", FontSize = 12, IsChecked = true };
+
+    // The bundle list.
+    private readonly TextBox _find = new() { FontSize = 12, Watermark = "find a bundle" };
+    private readonly StackPanel _list = new() { Spacing = 1 };
+    private readonly TextBlock _listCount = new() { Foreground = Brushes.Gray, FontSize = 11 };
+    private readonly Border _side;
+
     private string? _program;
 
     /// The project folder the explorer shows — where "Every bundle by this author" looks for the author's programs.
@@ -32,10 +43,8 @@ internal sealed class EventFlowPanel : UserControl
 
     public EventFlowPanel()
     {
-        var fit = new Button { Content = "Fit", Padding = new Avalonia.Thickness(10, 2), FontSize = 12 };
-        fit.Click += (_, _) => _canvas.Fit();
-        var reset = new Button { Content = "Re-layout", Padding = new Avalonia.Thickness(10, 2), FontSize = 12 };
-        reset.Click += (_, _) => _canvas.ResetLayout();
+        var fit = Small("Fit", () => _canvas.Fit());
+        var reset = Small("Re-layout", () => _canvas.ResetLayout());
 
         // Off by default, and it is the setting that keeps the map readable: @Print and @Ticked touch
         // nearly every shard, and drawn they turn a program's shape into a hairball.
@@ -47,27 +56,87 @@ internal sealed class EventFlowPanel : UserControl
         // placed by the events it sends and hears, across the width of the view.
         _split.IsCheckedChanged += (_, _) => _canvas.Explode = _split.IsChecked == true;
         _canvas.Status = s => _status.Text = s.Length > 0 ? s : Hint;
+        _canvas.BundlesChanged = FillList;
+        _find.TextChanged += (_, _) => FillList();
 
         var bar = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 8,
             Margin = new Avalonia.Thickness(8, 5),
-            Children = { _filter, _stdlib, _author, _split, fit, reset, _summary },
+            Children = { _showList, _filter, _stdlib, _author, _split, fit, reset, _summary },
         };
+
+        // The list: which bundles are drawn, and the moves that change many at once.
+        var buttons = new WrapPanel
+        {
+            Children =
+            {
+                Small("All", () => _canvas.ShowOnly(_canvas.AllBundles.Select(b => b.Name))),
+                Small("None", () => _canvas.ShowOnly(Array.Empty<string>())),
+                Small("+ Neighbours", () => _canvas.AddNeighbours()),
+                Small("Collapse all", () => _canvas.CollapseAll(true)),
+                Small("Open all", () => _canvas.CollapseAll(false)),
+            },
+        };
+        var side = new DockPanel { Margin = new Avalonia.Thickness(6, 4) };
+        DockPanel.SetDock(_find, Dock.Top);
+        DockPanel.SetDock(buttons, Dock.Top);
+        DockPanel.SetDock(_listCount, Dock.Top);
+        side.Children.Add(_find);
+        side.Children.Add(buttons);
+        side.Children.Add(_listCount);
+        side.Children.Add(new ScrollViewer { Content = _list });
+        _side = new Border { Width = 240, BorderBrush = new SolidColorBrush(Color.Parse("#2A3045")), BorderThickness = new Avalonia.Thickness(0, 0, 1, 0), Child = side };
+        _showList.IsCheckedChanged += (_, _) => _side.IsVisible = _showList.IsChecked == true;
 
         var root = new DockPanel();
         DockPanel.SetDock(bar, Dock.Top);
         DockPanel.SetDock(_status, Dock.Bottom);
+        DockPanel.SetDock(_side, Dock.Left);
         root.Children.Add(bar);
         root.Children.Add(_status);
+        root.Children.Add(_side);
         root.Children.Add(_canvas);
         Content = root;
         _status.Text = Hint;
     }
 
+    private static Button Small(string text, Action click)
+    {
+        var b = new Button { Content = text, Padding = new Avalonia.Thickness(8, 1), FontSize = 11, Margin = new Avalonia.Thickness(0, 2, 4, 2) };
+        b.Click += (_, _) => click();
+        return b;
+    }
+
+    /// One line per bundle: ticked is drawn; the name finds it; ▸ marks a collapsed one.
+    private void FillList()
+    {
+        _list.Children.Clear();
+        string find = (_find.Text ?? "").Trim();
+        var all = _canvas.AllBundles.Where(b => !b.Library || _stdlib.IsChecked == true).ToList();
+        var shown = find.Length == 0 ? all : all.Where(b => b.Name.Contains(find, StringComparison.OrdinalIgnoreCase)).ToList();
+        _listCount.Text = $"{all.Count(b => !b.Hidden)} of {all.Count} bundle(s) drawn · {all.Sum(b => b.Shards)} shard(s)";
+        foreach (var b in shown)
+        {
+            string name = b.Name;
+            var tick = new CheckBox { IsChecked = !b.Hidden, FontSize = 12, MinWidth = 0, Padding = new Avalonia.Thickness(2, 0) };
+            tick.IsCheckedChanged += (_, _) => _canvas.SetHidden(name, tick.IsChecked != true);
+            var label = new Button
+            {
+                Content = $"{(b.Collapsed ? "▸ " : "▾ ")}{name}   {b.Shards}",
+                FontSize = 12, Padding = new Avalonia.Thickness(4, 0), Background = Brushes.Transparent, BorderThickness = new Avalonia.Thickness(0),
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+            };
+            label.Click += (_, _) => { if (tick.IsChecked != true) tick.IsChecked = true; _canvas.Find(name); };
+            ToolTip.SetTip(label, "click: find it on the map · double-click its title on the map: open or collapse it");
+            _list.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Children = { tick, label } });
+        }
+    }
+
     private const string Hint =
-        "hover: who emits and who hears · click: pin · double-click: open · drag a bundle or a pill to move it · drag the floor to pan · wheel: zoom · F: fit";
+        "hover: who emits and who hears · click: pin · double-click a title: open or collapse · double-click a row: open the source · " +
+        "drag a bundle or a pill · drag the floor to pan · wheel: zoom · F: fit";
 
     /// Draw the flow of `program` (the run entry, else the open file).
     public void Update(string? program)
