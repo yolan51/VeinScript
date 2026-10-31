@@ -226,6 +226,7 @@ public sealed partial class CSharpBackend : IVeinBackend
 
         EmitEntryPoint(sb, module);
         EmitWeaving(sb);
+        EmitCollections(sb);
 
         // The comparer for `ordered by`, emitted only when used and identical to the interpreter's
         // EntityStore.OrderKey: numbers numerically, strings ORDINALLY — never by culture, or the two
@@ -529,7 +530,14 @@ public sealed partial class CSharpBackend : IVeinBackend
                 foreach (var f in t.Fields) sb.AppendLine($"    public {Cs(f.Type)} {Ident(f.Name)};");
                 // The sender's shard KEY — what an `audience !Shard` matches, as Interp.FromOf carries it. Not in
                 // the IR type (programs read `name` and `kind`); only this runtime's barrier reads it.
-                if (t.Name == Lower.ProvenanceType) sb.AppendLine("    public string key;");
+                if (t.Name == Lower.ProvenanceType)
+                {
+                    sb.AppendLine("    public string key;");
+                    // The sender's marks at the emit and the shapes it carries (D19/D20): what an `audience #M` and
+                    // `d.from carries #M` ask. Interp.FromOf carries the same three.
+                    sb.AppendLine("    public string[] marks;");
+                    sb.AppendLine("    public string[] shapes;");
+                }
                 sb.AppendLine("}");
                 sb.AppendLine();
                 break;
@@ -736,6 +744,10 @@ public sealed partial class CSharpBackend : IVeinBackend
         _currentShardIr = shard;
         sb.AppendLine($"public sealed class {ShardIdent(shard)} : VeinSystem");
         sb.AppendLine("{");
+        // The shapes it is declared carrying (`@carries`), for an `audience $Shape` and `d.from carries $Shape`.
+        if (shard.Attrs.FirstOrDefault(a => a.Name == "carries") is { Args.Count: > 0 } carries
+            && carries.Args[0] is IReadOnlyList<string> { Count: > 0 } shapes)
+            sb.AppendLine($"    public override string[] CarriedShapes {{ get; }} = new[] {{ {string.Join(", ", shapes.Select(s => "\"" + Escape(s) + "\""))} }};");
         _fields.Clear();
         foreach (var f in shard.State) _fields.Add(f.Name);
         _fieldCs.Clear();
@@ -775,6 +787,7 @@ public sealed partial class CSharpBackend : IVeinBackend
         // One C# method per `hear`, even when a shard hears an event twice — with two audiences, say
         // (samples/patterns/06). Both were `hear_Damage`, and C# refused the second (CS0111).
         var handlerNames = new Dictionary<IrFunction, string>(ReferenceEqualityComparer.Instance);
+        var everies = new List<string>();   // `World.Every(this, N, every_k);` — registered in Subscribe, in declaration order
         var taken = new HashSet<string>(StringComparer.Ordinal);
         foreach (var m in shard.Methods.Where(x => x.Attrs.Any(a => a.Name == "hear")))
         {
@@ -859,32 +872,47 @@ public sealed partial class CSharpBackend : IVeinBackend
                 continue;
             }
 
-            // `every N` is defined in real seconds, and this runtime has no wall clock — a stub that
-            // never fires would be silently wrong code rather than a missing feature.
-            _notes.Add($"{shard.Name}.{m.Name}: '{when ?? "?"}' not emitted — " +
-                       "`every N` needs a wall clock; the C# backend runs on the frame counter.");
+            // `every N`: real seconds, stepped by the world's AdvanceEvery (the host's clock, or the wall in a
+            // standalone run) — the interpreter's AdvanceEvery and timer threads, the same rules.
+            if (when == "every" && m.Attrs.FirstOrDefault(a => a.Name == "schedule") is { Args: [_, double seconds, ..] } && seconds > 0)
+            {
+                _bound.Clear();
+                ResetLocals();
+                string unit = Unit(sb, shard, m, "every");
+                string method = "every_" + everies.Count;
+                sb.AppendLine($"    private void {method}()");
+                sb.AppendLine("    {");
+                GuardOpen(sb, unit);
+                _inUnit = true;
+                EmitBlock(sb, m.Body, 3);
+                _inUnit = false;
+                GuardClose(sb, unit);
+                sb.AppendLine("    }");
+                everies.Add($"        World.Every(this, {seconds.ToString("R", System.Globalization.CultureInfo.InvariantCulture)}, {method});");
+                continue;
+            }
+            _notes.Add($"{shard.Name}.{m.Name}: '{when ?? "?"}' not emitted.");
         }
 
-        if (hears.Count > 0)
+        if (hears.Count > 0 || everies.Count > 0)
         {
             sb.AppendLine();
             sb.AppendLine("    public override void Subscribe()");
             sb.AppendLine("    {");
+            foreach (var line in everies) sb.AppendLine(line);
             foreach (var (m, ev) in hears)
             {
-                // `audience !Barn` / `audience not !Hud` — shards only — is enforced: the compiled `from`
-                // carries the sender's shard key, as the interpreter's does. An audience that asks for the
-                // sender's shapes or marks is not: the compiled `from` carries neither. Said out loud
-                // (BACKEND-CONTRACT rule 4), because the handler compiles and simply hears everything — a
-                // barrier that silently admits all is the worst way to be missing.
-                string? gate = m.Attrs.FirstOrDefault(a => a.Name == "audience") is { } aud ? ShardGate(aud, ev!) : null;
+                // The audience barrier (D19), checked before the handler: the compiled `from` carries the sender's
+                // key, marks and shapes. When it cannot be checked it is SAID (BACKEND-CONTRACT rule 4) — a barrier
+                // that silently admits all is the worst way to be missing.
+                string? gate = m.Attrs.FirstOrDefault(a => a.Name == "audience") is { } aud ? AudienceGate(aud, ev!) : null;
                 if (gate is not null)
                     sb.AppendLine($"        World.On(\"{ev}\", this, p => {{ var __f = (({EventType(ev!)})p).from; if ({gate}) {handlerNames[m]}(({EventType(ev!)})p); }});");
                 else
                     sb.AppendLine($"        World.On(\"{ev}\", this, p => {handlerNames[m]}(({EventType(ev!)})p));");
                 if (m.Attrs.Any(a => a.Name == "audience") && gate is null)
                     _notes.Add($"{shard.Name}.{m.Name}: `audience` not enforced — the C# backend delivers " +
-                               "this event from every sender (only an audience of `!Shard`s is checked compiled).");
+                               "this event from every sender (the event declares its own `from`).");
             }
             sb.AppendLine("    }");
         }
@@ -893,27 +921,36 @@ public sealed partial class CSharpBackend : IVeinBackend
         sb.AppendLine();
     }
 
-    /// The C# condition for an `audience` that names only shards (D19), over `__f`, the payload's `from`:
-    /// one of the named keys when any are named, none of the excluded ones. Null when the audience also
-    /// asks about shapes or marks, or when the event declares a `from` of its own — not checkable here.
-    private string? ShardGate(IrAttr aud, string ev)
+    /// The C# condition for an `audience` (D19), over `__f`, the payload's `from` — Interp.AudiencePermits line
+    /// for line: every required shape and mark carried, none of the excluded ones, one of the named shards when
+    /// any are named, none of the excluded shards. The compiled `from` carries the sender's key, its marks as
+    /// they stood at the emit, and its shapes. Null only when the event declares a `from` of its own (the
+    /// barrier then tests a sender the payload does not hold).
+    private string? AudienceGate(IrAttr aud, string ev)
     {
         IReadOnlyList<string> Arg(int i) => aud.Args.Count > i ? aud.Args[i] as IReadOnlyList<string> ?? Array.Empty<string>() : Array.Empty<string>();
-        if (Arg(0).Count + Arg(1).Count + Arg(2).Count + Arg(3).Count > 0) return null;
-        var shards = Arg(4);
-        var notShards = Arg(5);
-        if (shards.Count + notShards.Count == 0) return null;
         if (_eventTypes.TryGetValue(ev, out var type)
             && type.Fields.FirstOrDefault(f => f.Name == "from") is { } own && own.Type.Name != Lower.ProvenanceType)
             return null;
 
-        string AnyOf(IReadOnlyList<string> keys) =>
-            "(__f != null && (" + string.Join(" || ", keys.Select(k => $"__f.key == \"{Escape(k)}\"")) + "))";
+        static string Q(string s) => "\"" + Escape(s) + "\"";
+        static string Has(string list, string v) => $"System.Array.IndexOf(__f?.{list} ?? System.Array.Empty<string>(), {Q(v)}) >= 0";
+        const string Key = "!string.IsNullOrEmpty(__f?.key)";
         var parts = new List<string>();
-        if (shards.Count > 0) parts.Add(AnyOf(shards));
-        if (notShards.Count > 0) parts.Add("!" + AnyOf(notShards));
-        return string.Join(" && ", parts);
+        parts.AddRange(Arg(0).Select(s => Has("shapes", s)));
+        parts.AddRange(Arg(1).Select(m => Has("marks", m)));
+        parts.AddRange(Arg(2).Select(s => "!(" + Has("shapes", s) + ")"));
+        parts.AddRange(Arg(3).Select(m => "!(" + Has("marks", m) + ")"));
+        if (Arg(4).Count > 0) parts.Add($"({Key} && (" + string.Join(" || ", Arg(4).Select(k => $"__f.key == {Q(k)}")) + "))");
+        if (Arg(5).Count > 0) parts.Add($"!({Key} && (" + string.Join(" || ", Arg(5).Select(k => $"__f.key == {Q(k)}")) + "))");
+        return parts.Count == 0 ? "true" : string.Join(" && ", parts);
     }
+
+    /// An event's `from` at an emit this backend writes: the shard whose unit is running (World.Sender — the
+    /// caller, for an SF), its key, its marks as they stand now, and the shapes it carries.
+    private string Provenance() =>
+        $"new {Ident(Lower.ProvenanceType)} {{ name = {(_currentShard is { } n ? $"\"{Escape(n)}\"" : "World.Unit?.Shard ?? \"\"")}, kind = \"Shard\", " +
+        "key = World.Sender?.Key ?? \"\", marks = World.SenderMarks(), shapes = World.Sender?.CarriedShapes ?? System.Array.Empty<string>() }";
 
     // ---- the failure is a message: one guard per unit of work (Interp.RunGuarded) ----------------------
 
@@ -936,7 +973,7 @@ public sealed partial class CSharpBackend : IVeinBackend
     /// a closure per block per frame.
     private static void GuardOpen(StringBuilder sb, string unit)
     {
-        sb.AppendLine($"        var __outer = World.Enter({unit});");
+        sb.AppendLine($"        var __outer = World.Enter({unit}, this);");   // `this`: the sender of what the unit emits
         sb.AppendLine("        try");
         sb.AppendLine("        {");
     }
@@ -1365,7 +1402,7 @@ public sealed partial class CSharpBackend : IVeinBackend
             // Read with the OUTER loop's identity in scope, as Lower reads it outside the binding: `Entity`
             // in `on Entity` is the enclosing query's, never this one's.
             _entityVar = prevEnt;
-            string id = Expr(on);
+            string id = Ent(on);   // an identity in a map or list is a boxed long: converted, not cast
             _entityVar = entVar;
             sb.AppendLine($"{pad}foreach (var {entVar} in World.One<{comp}>((int)({id})))");
             sb.AppendLine(pad + "{");
@@ -1823,13 +1860,10 @@ public sealed partial class CSharpBackend : IVeinBackend
             case "DestroyEntity":
                 return $"World.Destroy({Ent(c.Args[0])})";
 
-            // D24: `.add`/`.remove`/`.clear`/`.put`/`.has` on a `~` collection. A compiled collection needs VeinWorld to replace a
-            // component inside a commit and to sweep destroyed ids out of every `~` field — not there yet.
-            // Said, never approximated: the program stays on the interpreter.
-            case "CollAdd" or "CollRemove" or "CollHas" or "CollClear" or "CollPut":
-                _notes.Add($"`.{c.Name[4..].ToLowerInvariant()}` on a `~` collection is interpreter-only — " +
-                           "this file will not compile; keep the program on `veinc run` (D24).");
-                return $"__VeinCollection_InterpreterOnly(\"{c.Name}\")";
+            // D24: `.add`/`.remove`/`.clear`/`.put`/`.move`/`has` on a `~` collection — through the interpreter's own
+            // CollectionRules (CSharpBackend.Collections.cs).
+            case "CollAdd" or "CollRemove" or "CollHas" or "CollClear" or "CollPut" or "CollMove":
+                return CollectionCall(c);
 
             // `x carries #M` (D20). On an entity it is the store's own question. On a sender's `from` it
             // cannot be answered here — the compiled `from` has a name and a kind, not marks — so the call
@@ -1839,10 +1873,8 @@ public sealed partial class CSharpBackend : IVeinBackend
                 bool shape = c.Args[2] is IrLiteral { Value: true };
                 if (c.Args[0] is IrFieldAccess { Field: "from" } || c.Args[0].ResolvedType?.Name == "VeinProvenance")
                 {
-                    _notes.Add($"`carries {(shape ? "$" : "#")}{what.Name}` on a sender's `from` has no C# emission — " +
-                               "the compiled `from` carries no marks or shapes, so this file will not compile. " +
-                               "Keep the program on `veinc run`.");
-                    return $"carries({Expr(c.Args[0])}, \"{Escape(what.Name)}\")";
+                    // D20: what the sender carried when it EMITTED — the compiled `from` holds its marks and shapes.
+                    return $"(System.Array.IndexOf(({Expr(c.Args[0])})?.{(shape ? "shapes" : "marks")} ?? System.Array.Empty<string>(), \"{Escape(what.Name)}\") >= 0)";
                 }
                 return shape
                     ? $"World.Has<{Ident(what.Name)}>({Ent(c.Args[0])})"
@@ -1958,19 +1990,10 @@ public sealed partial class CSharpBackend : IVeinBackend
                     // `Interp` tags every payload with the emitting First-Class object (FromOf), and a
                     // shard's kind is VeinKind.Shard. Leaving it empty would compile and then disagree
                     // for any program that reads `d.from.name`.
-                    var withFrom = si2 with
-                    {
-                        Fields = si2.Fields
-                            .Where(f => f.Field != "from")
-                            .Append(("from", (IrExpr)new IrStructInit(Lower.ProvenanceType, new[]
-                            {
-                                ("name", (IrExpr)new IrLiteral(_currentShard ?? "", IrLiteralKind.String)),
-                                ("kind", (IrExpr)new IrLiteral("Shard", IrLiteralKind.String)),
-                                ("key", (IrExpr)new IrLiteral(_currentShardIr is { } cs ? ShardKey(cs) : "", IrLiteralKind.String)),
-                            })))
-                            .ToList(),
-                    };
-                    return $"World.Emit(\"{si2.TypeName}\", {StructInit(withFrom)})";
+                    var without = si2 with { Fields = si2.Fields.Where(f => f.Field != "from").ToList() };
+                    string payload = StructInit(without);
+                    int close = payload.LastIndexOf('}');
+                    return $"World.Emit(\"{si2.TypeName}\", {payload[..close].TrimEnd()}{(without.Fields.Count > 0 ? "," : "")} from = {Provenance()} }})";
                 }
 
                 // An event from ANOTHER bundle — a stdlib one like @Fetch or @Send — has no declaration
@@ -2189,6 +2212,7 @@ public sealed partial class CSharpBackend : IVeinBackend
         "Entity" => "0",
         "string" or "Mark" => "\"\"",
         "list" => "new System.Collections.Generic.List<object?>()",
+        "map" => "new Vein.Compiler.Ir.VeinMap()",   // D24: its value type's zero is set at the attach (CollectionRules.Attached)
         "json" or "dictionary" or "infer" => "null",   // Interp.Default: nothing, until something is put there
         // A payload's `from` is a Provenance OBJECT, and `default` would be null — so a program
         // reading `d.from.kind` would throw where the interpreter reads a value. Named types get a
@@ -2221,6 +2245,7 @@ public sealed partial class CSharpBackend : IVeinBackend
         // as a type named `list`, and every program with such a helper (net.Mesh, net.Coop) stayed on the
         // interpreter.
         "list" => "System.Collections.Generic.List<object?>",
+        "map" => "Vein.Compiler.Ir.VeinMap",
         // A parsed record, or a value whose type nothing states: the interpreter's own values, decided at
         // run time through VeinValues. They were emitted as types named `dictionary` and `infer` (CS0246).
         "json" or "dictionary" or "infer" => "object",
@@ -2303,7 +2328,13 @@ public sealed partial class CSharpBackend : IVeinBackend
         sb.AppendLine();
         sb.AppendLine("        var world = Create();");
         sb.AppendLine("        world.Args = programArgs;");
-        sb.AppendLine("        world.Start();");
+        // `start @Boot { … }` (VS0219): the boot event, as `veinc run` fires it — a host raises its own.
+        if (module.Start is { } st && _events.Contains(st.Event))
+        {
+            var boot = new IrStructInit(st.Event, st.Fields.ToList());
+            sb.AppendLine($"        world.Start(() => world.Emit(\"{st.Event}\", {StructInit(boot)}));");
+        }
+        else sb.AppendLine("        world.Start();");
         sb.AppendLine("        world.Run(ticks);");
         // `quit(code)`, as `veinc run` returns it — and 1 after an error nobody heard, as `veinc run` does.
         sb.AppendLine("        Environment.ExitCode = world.ExitCode ?? (world.Faulted ? 1 : 0);");
@@ -2316,6 +2347,8 @@ public sealed partial class CSharpBackend : IVeinBackend
         sb.AppendLine("    public static VeinWorld Create()");
         sb.AppendLine("    {");
         sb.AppendLine("        var world = new VeinWorld();");
+        if (CollectionFields().Count > 0)   // D24: the interpreter's collection rules, on this world's typed fields
+            sb.AppendLine($"        world.Collections = {Coll}.Rules; world.CollectionHost = new {Coll}(world);");
         if (module.Functions.Count > 0) sb.AppendLine("        Fns.World = world;   // what an SF emits into");
 
         // THE TRANSFORM HIERARCHY, emitted only when this program has one. The interpreter composes in

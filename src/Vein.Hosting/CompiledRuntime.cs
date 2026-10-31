@@ -58,13 +58,14 @@ internal sealed class CompiledRuntime : IGameRuntime
     public IReadOnlyList<string> MutedMarks => _world.MutedMarks.OrderBy(m => m, StringComparer.Ordinal).ToList();
     public IReadOnlyList<string> MutedShards => _world.MutedShards;
 
-    public void Start() => Guard(_world.Start);
+    public void Start() => Guard(() => _world.Start());
 
     public void Step(double delta) => Guard(() =>
     {
         _net.Pump();   // what the network brought, before the frame — InterpRuntime.Step's order
         _world.Clock(_world.Tick + 1, delta);
         _world.Frame();
+        _world.AdvanceEvery(delta);   // `every N` on the HOST's clock, as InterpRuntime.Step does
     });
 
     public void Shutdown() => _net.Shutdown();

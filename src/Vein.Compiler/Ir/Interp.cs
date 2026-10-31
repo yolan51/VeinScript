@@ -3102,10 +3102,10 @@ public sealed class Interp
                     string where = $"{shape}.~{field}";
                     if (spec.Key is not null)
                     {
-                        value = CollectionElement(value, spec.Key, where, op == "put" ? "key of" : "remove from");
-                        if (op == "put") put = CollectionElement(put, spec.Element, where, "value of");
+                        value = CollectionRules.Element(value, spec.Key, where, op == "put" ? "key of" : "remove from");
+                        if (op == "put") put = CollectionRules.Element(put, spec.Element, where, "value of");
                     }
-                    else value = CollectionElement(value, spec.Element, where, op == "add" ? "add to" : op == "move" ? "move in" : "remove from");
+                    else value = CollectionRules.Element(value, spec.Element, where, op == "add" ? "add to" : op == "move" ? "move in" : "remove from");
                 }
                 // A `$Shape` element is checked AT the commit, after the commands queued before it — so an
                 // identity brought earlier in this event counts — and refused with this unit's place, at the
@@ -3124,8 +3124,7 @@ public sealed class Interp
             {
                 var coll = Peek(rc.Args[0], self, locals);
                 var v = Eval(rc.Args[1], self, locals);
-                if (coll is VeinMap map) return map.Keys.Any(k => LooseEq(k, v));   // a map is asked about a KEY
-                return coll is List<object?> items && items.Any(i => LooseEq(i, v));
+                return CollectionRules.Holds(coll, v);   // a map is asked about a KEY
             }
             case "AddTag":
             case "RemoveTag":
@@ -3381,19 +3380,6 @@ public sealed class Interp
             ["origin"] = null, ["bundle"] = _bundle,
         });
     }
-
-    private static object? CollectionElement(object? value, string element, string where, string verb = "add to") => element switch
-    {
-        "Entity" when value is long id && id > 0 => id,
-        "int" when value is long l => l,
-        "int" when value is double d && d == Math.Floor(d) => (long)d,
-        "float" when value is double d => d,
-        "float" when value is long l => (double)l,
-        "string" when value is string s => s,
-        "bool" when value is bool b => b,
-        _ => throw new InvalidOperationException(
-            $"{verb} {where}: {(value is string s ? "\"" + s + "\"" : Str(value))} is not {(element == "Entity" ? "an identity" : "a " + element)}"),
-    };
 
     internal static bool LooseEq(object? l, object? r) =>
         IsNumeric(l) && IsNumeric(r)

@@ -730,7 +730,7 @@ count } follows — queued, so it is handled after the commit, when a `target` s
 as "queryable now", which is what every program needed a hand-made `emit @Begin` for. Both live in
 `stdlib/Weaving` beside the formats, not with the diagnostics: a weave's results are control flow.
 
-Interpreter-only for now; `veinc emit` says so. `veinc formats` and the Workbench's Formats tab list every
+Both runtimes weave through one `Vein.Compiler.Ir.Weaver` (2026-10-31). `veinc formats` and the Workbench's Formats tab list every
 format a program can name and dry-run any of them against pasted text.
 
 ### D23, the way out — `toText<Format>(Loom)` (DECIDED 2026-10-27)
@@ -895,8 +895,8 @@ about a key, `.remove(k)` / `.clear()` as on a list, `len` counts keys. A walk s
 anything else are VS0375. A map has no literal yet: it takes no bring argument, starts empty and fills
 through `.put`.
 
-*What is not yet.* The C# backend reports the collection words as interpreter-only (`veinc emit` says so):
-compiling them needs VeinWorld to replace a component inside a commit and to sweep destroyed ids. Comparing
+*Compiled (2026-10-31).* The C# backend compiles the collection words through the interpreter's own
+`CollectionRules`: VeinWorld replaces the component at the commit and sweeps destroyed ids. Comparing
 two collections (`same`, `with`, `without`, `common`, `within`) waits for a program that needs it, and so do
 a map literal and weaving into a map.
 

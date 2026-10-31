@@ -1,0 +1,68 @@
+// audience_marks.vein — a barrier on what the SENDER carries: its marks and its shapes (D19, D20).
+//
+// A shard can carry shapes and marks: `shard Gate $Session #Trusted { … }`. An `audience` asks the sender
+// for them — `audience #Trusted` admits only a sender wearing the mark, `audience $Session` only one
+// carrying the shape, `not #Banned` keeps one out — and `d.from carries #M` asks the same in a body.
+//
+// What a sender carries is read AT THE EMIT: `mark !Kiosk #Banned` on frame 1 blocks what Kiosk sends after
+// it, not what it already sent. An SF's emit is its CALLER's, so Gate's `do announce(…)` is from Gate.
+// Both runtimes stamp the same sender, so check-backend holds them to one answer.
+//
+//   veinc run samples/audience_marks.vein --ticks 3
+//   bash tools/check-backend.sh
+
+bundle AudienceMarks by you {
+    need "Vein.Console"
+
+    shape $Session { user: string }
+    mark #Trusted
+    mark #Banned
+
+    event @Note { text: string }
+
+    SF announce(text: string) { emit @Note { text: text } }
+
+    shard Gate $Session #Trusted {
+        var frame = 0
+        each tick {
+            frame += 1
+            do announce("from Gate, tick " + frame)
+        }
+    }
+
+    shard Kiosk {
+        var frame = 0
+        each tick {
+            frame += 1
+            emit @Note { text: "from Kiosk, tick " + frame }
+        }
+    }
+
+    shard Admin {
+        var step = 0
+        each tick {
+            step += 1
+            if step == 1 { mark !Kiosk #Banned }      // lands at the commit: Kiosk's tick-1 note is already out
+            if step == 2 { unmark !Gate #Trusted }    // Gate keeps its shape, loses its mark
+        }
+    }
+
+    shard OnlyTrusted {
+        hear @Note as n audience #Trusted { do print("trusted:   " + n.text) }
+    }
+
+    shard OnlySessions {
+        hear @Note as n audience $Session { do print("session:   " + n.text) }
+    }
+
+    shard NotBanned {
+        hear @Note as n audience not #Banned { do print("unbanned:  " + n.text) }
+    }
+
+    shard Asks {
+        hear @Note as n {
+            if n.from carries #Banned { do print("asks: banned sender, " + n.text) }
+            if n.from carries $Session { do print("asks: a session, " + n.text) }
+        }
+    }
+}

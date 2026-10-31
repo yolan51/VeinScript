@@ -102,7 +102,7 @@ public sealed class VeinWorld
     /// matches on component PRESENCE, so the cache must be invalidated when the component actually
     /// arrives, not when the attach was requested.
     public void Attach<T>(int entity, T component) where T : struct, IVeinComponent<T> =>
-        Defer(() => { _structuralVersion++; _secs.Add(entity, component); Of<T>().Touch(entity); });
+        Defer(() => { _structuralVersion++; _secs.Add(entity, component); Of<T>().Touch(entity); Attached<T>(entity); });
 
     /// `unattach $C from e`. DEFERRED, like every other structural change and like the interpreter's own
     /// `RemoveComponent` — applied at the commit point so no unit in the phase sees a half-changed world.
@@ -112,7 +112,15 @@ public sealed class VeinWorld
     /// the same phase reconcile onto the component and are then discarded with it — which is what the
     /// interpreter does, rather than losing the writes or resurrecting the component.
     public void Detach<T>(int entity) where T : struct, IVeinComponent<T> =>
-        Defer(() => { _secs.Remove<T>(entity); _structuralVersion++; });
+        Defer(() =>
+        {
+            // D24: `unattach` of the shape that holds an owned collection ends what it owns.
+            var owned = Collections is { } rules && CollectionHost?.ShapeOf(typeof(T)) is { } shape
+                ? rules.Owned(CollectionHost, entity, shape) : null;
+            _secs.Remove<T>(entity);
+            _structuralVersion++;
+            if (owned is not null) foreach (long id in owned) DestroyNow((int)id);
+        });
 
     /// A component the RUNTIME owns, written straight through — NOT deferred.
     ///
@@ -174,6 +182,10 @@ public sealed class VeinWorld
 
     private void Unmake(int entity)
     {
+        // D24: what it OWNS ends with it — read before its components go. A dead identity owns nothing, which is
+        // also what stops a cycle of owners.
+        var owned = Collections is { } rules && CollectionHost is { } host && _alive.Contains(entity)
+            ? rules.Owned(host, entity, null) : null;
         _alive.Remove(entity);
         foreach (var b in _buckets.Values) b.Forget(entity);
         // Marks go with the entity: they are components now, so DestroyEntity takes them too.
@@ -186,6 +198,32 @@ public sealed class VeinWorld
         // the pool first, so this call takes back exactly the id just freed and drops it.
         _secs.CreateEntity();
         _structuralVersion++;
+        if (Collections is { } r && CollectionHost is { } h)
+        {
+            r.Forget(h, entity);   // no `~` collection is left naming it
+            if (owned is not null) foreach (long id in owned) DestroyNow((int)id);
+        }
+    }
+
+    // ---- `~` collections (D24): the interpreter's own rules (Vein.Compiler.Ir.CollectionRules) ------------
+
+    /// The program's collection fields and their kinds, and typed access to them — set by the generated Create
+    /// when the program declares any `~` field. Null: nothing here costs anything.
+    public Vein.Compiler.Ir.CollectionRules? Collections { get; set; }
+    public IVeinCollectionHost? CollectionHost { get; set; }
+
+    /// `x.Shape.~field.add(v)` and the rest, at the commit (the emitted code defers it). False when an element
+    /// that must carry a shape does not.
+    public bool ChangeCollection(int entity, string shape, string field, string op, object? value, object? put = null) =>
+        Collections is not { } rules || CollectionHost is not { } host || rules.Change(host, entity, shape, field, op, Id(value), Id(put));
+
+    /// An identity as the rules keep it: a long, as the interpreter does.
+    private static object? Id(object? v) => v is int i ? (long)i : v;
+
+    private void Attached<T>(int entity) where T : struct, IVeinComponent<T>
+    {
+        if (Collections is { } rules && CollectionHost is { } host && host.ShapeOf(typeof(T)) is { } shape)
+            rules.Attached(host, entity, shape);
     }
 
     // ---- queries ---------------------------------------------------------
@@ -342,6 +380,7 @@ public sealed class VeinWorld
     {
         system.Attach(this);
         _systems.Add(system);
+        system.Key = key;
         if (key is not null) _byKey[key] = system;
         system.Marks.UnionWith(marks);   // `shard X #M` — the marks it starts out carrying (D20)
         system.Subscribe();
@@ -486,11 +525,14 @@ public sealed class VeinWorld
     }
 
 
-    public void Start()
+    /// `boot`: the program's `start @Event`, queued after `run once` and before the drain — Interp's RunOnce,
+    /// FireBoot, Drain — so it is heard after what `run once` emitted and before anything that emitted in turn.
+    public void Start(Action? boot = null)
     {
         foreach (var s in _systems) if (!IsMuted(s)) s.Once();
         Commit();
         Compose?.Invoke();   // so the first `settled` reads a composed world
+        boot?.Invoke();
         Drain();   // Interp: RunOnce() then Drain() — events raised at boot are handled before frame 1
     }
 
@@ -515,11 +557,69 @@ public sealed class VeinWorld
 
     public void Run(int frames)
     {
+        // `every N` keeps the wall clock in a standalone run, as `veinc run`'s timer threads do.
+        var wall = System.Diagnostics.Stopwatch.StartNew();
+        double last = 0;
         for (int i = 0; i < frames && !Stopped; i++)   // `quit` stops the run, as Interp.RunFrames does
         {
             Clock(i + 1, 1.0 / 60.0);   // before the frame, as Interp.RunFrames does
             Frame();
+            if (_every.Count > 0)
+            {
+                double now = wall.Elapsed.TotalSeconds;
+                AdvanceEvery(now - last);
+                last = now;
+            }
         }
+    }
+
+    // ---- `every N` (Interp.AdvanceEvery / FireEvery, the same rules) ---------------------------------------
+    //
+    // Defined in real seconds, so not part of a frame: a host steps it with its own clock (CompiledRuntime.Step
+    // passes the frame's delta), a standalone run with the wall clock (Run). One firing is the shape of a frame:
+    // the block contributes, the phase commits, the events it emitted drain.
+
+    private readonly List<(VeinSystem System, double Seconds, Action Body)> _every = new();
+    private readonly List<double> _everyWaited = new();
+
+    /// An `every N` block, registered by its shard's Subscribe in declaration order.
+    public void Every(VeinSystem system, double seconds, Action body)
+    {
+        if (!(seconds > 0)) return;
+        _every.Add((system, seconds, body));
+        _everyWaited.Add(0);
+    }
+
+    /// Let `seconds` pass: each block fires once per whole N elapsed, in declaration order, keeping the
+    /// remainder — bounded, so a host that stalls for a minute does not fire a 0.1 s block six hundred times.
+    public void AdvanceEvery(double seconds)
+    {
+        if (!(seconds > 0)) return;
+        for (int i = 0; i < _every.Count; i++)
+        {
+            double n = _every[i].Seconds, waited = _everyWaited[i] + seconds;
+            for (int fired = 0; waited >= n && fired < 8 && !Stopped; fired++)
+            {
+                waited -= n;
+                FireEvery(i);
+            }
+            _everyWaited[i] = Math.Min(waited, n);
+        }
+    }
+
+    /// Fire every block once — "one turn of the wall clock", as Interp.FireEvery.
+    public void FireEvery()
+    {
+        for (int i = 0; i < _every.Count; i++) FireEvery(i);
+    }
+
+    private void FireEvery(int i)
+    {
+        var (system, _, body) = _every[i];
+        if (IsMuted(system)) return;
+        body();
+        Commit();
+        Drain();
     }
 
     public void Print(string text) => Out.WriteLine(text);
@@ -774,13 +874,24 @@ public sealed class VeinWorld
         return true;
     }
 
+    /// The shard whose unit is running — what an `emit` is FROM, including one inside an SF it called (the
+    /// interpreter's rule: what an SF emits, its caller emits). Null outside any shard (a host's event).
+    public VeinSystem? Sender { get; private set; }
+    private readonly Stack<VeinSystem?> _outerSystems = new();
+
+    /// The sender's marks as they stand NOW — snapshotted into the event, as Interp.FromOf does (D20): a later
+    /// `mark !X #M` does not rewrite what X already sent.
+    public string[] SenderMarks() => Sender is { } s ? s.Marks.ToArray() : Array.Empty<string>();
+
     /// The lines of the units outside the running one — units nest when a handler's drain runs another.
     private readonly Stack<long> _outerLines = new();
 
-    public VeinUnit? Enter(VeinUnit unit)
+    public VeinUnit? Enter(VeinUnit unit, VeinSystem? system = null)
     {
         var outer = Unit;
         Unit = unit;
+        _outerSystems.Push(Sender);
+        Sender = system ?? Sender;
         _outerLines.Push(Line);
         Line = 0;
         return outer;
@@ -789,6 +900,7 @@ public sealed class VeinWorld
     public void Leave(VeinUnit? outer)
     {
         Unit = outer;
+        Sender = _outerSystems.Count > 0 ? _outerSystems.Pop() : null;
         Line = _outerLines.Count > 0 ? _outerLines.Pop() : 0;
     }
 
@@ -805,6 +917,16 @@ public sealed class VeinWorld
     public Action<object, VeinUnit>? StampDiagnostic;
     /// Set by such a program: a @DiagnosticRaised payload's fields, for printing one nobody heard.
     public Func<object, VeinDiagnostic>? DescribeDiagnostic;
+
+    /// A change queued for the commit that could not be made there (D24: an element not carrying its shape) —
+    /// reported at the statement that ASKED for it, as Interp.CommitFault does: `asked` carries that line.
+    public void CommitFault(VeinUnit asked, string message)
+    {
+        long saved = Line;
+        Line = 0;
+        Fault(asked, new InvalidOperationException(message));
+        Line = saved;
+    }
 
     public void Fault(VeinUnit unit, Exception ex)
     {
@@ -915,6 +1037,12 @@ public abstract class VeinSystem
     /// The marks this system carries now — `shard X #M`, then any `mark !X #M` (D20).
     public HashSet<string> Marks { get; } = new(StringComparer.Ordinal);
 
+    /// The key `mute` and `audience !X` name it by (`Author.Bundle.Name`), set by Register.
+    public string? Key { get; internal set; }
+
+    /// The shapes it is declared carrying (`@carries`) — what an `audience $Shape` asks of a sender.
+    public virtual string[] CarriedShapes => Array.Empty<string>();
+
     /// Wire this system's `hear` handlers. Called by `Register`, so every subscription exists before any
     /// phase runs — a `run once` that emits must not outrun a handler that has not subscribed.
     public virtual void Subscribe() { }
@@ -926,4 +1054,11 @@ public abstract class VeinSystem
     /// `!Boards.hideDone` (D28): this system's settings by name. The emitter overrides both for a shard with any.
     public virtual object? GetSetting(string name) => null;
     public virtual void SetSetting(string name, object? value) { }
+}
+
+/// What a compiled program gives the D24 collection rules: typed access to its own `~` fields (generated), and
+/// which shape a component type is.
+public interface IVeinCollectionHost : Vein.Compiler.Ir.ICollectionHost
+{
+    string? ShapeOf(Type component);
 }

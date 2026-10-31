@@ -267,13 +267,15 @@ public class CSharpBackendTests
     }
 
     [Fact]
-    public void An_every_block_is_not_emitted_and_says_so()
+    public void An_every_block_is_registered_on_the_worlds_clock()
     {
-        var (_, notes) = Emit(
+        var (code, notes) = Emit(
             "  shape $H { hp: int }\n" +
             "  shard S { every 2 { } }");
 
-        Assert.Contains(notes, n => n.Contains("every"));
+        // Stepped by VeinWorld.AdvanceEvery — the host's clock, or the wall in a standalone run.
+        Assert.Contains("World.Every(this, 2, every_0);", code);
+        Assert.DoesNotContain(notes, n => n.Contains("every"));
     }
 
     [Fact]

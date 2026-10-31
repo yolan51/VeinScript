@@ -63,10 +63,7 @@ public sealed partial class CSharpBackend
     }
 
     /// `from` for an event this backend emits itself, as the interpreter tags it: the emitting shard.
-    private string FromHere() =>
-        _structs.Contains(Lower.ProvenanceType)
-            ? $", from = new {Ident(Lower.ProvenanceType)} {{ name = \"{Escape(_currentShard ?? "")}\", kind = \"Shard\" }}"
-            : "";
+    private string FromHere() => _structs.Contains(Lower.ProvenanceType) ? ", from = " + Provenance() : "";
 
     private string EmitUnwoven(string loom, string record, string why) =>
         _events.Contains("Unwoven")

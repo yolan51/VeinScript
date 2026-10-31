@@ -291,7 +291,8 @@ b.Board.~scores.put("ann", 3)    b.Board.~scores["ann"]     target $Board.~score
 - **The kind's promise is kept by the runtime**: a set holds a value once (from `bring` too), a ring only
   its last N. A destroyed identity leaves every `~` collection of Entity.
 - `m.Person.name` reads an element's data directly — an entity plus a shape is a handle (13b) — so there
-  is no inner lookup loop. Interpreter-only for now; `veinc emit` says so. `list<T>` stays legal.
+  is no inner lookup loop. Both runtimes keep the same promises through one `CollectionRules` (Vein.Compiler.Ir).
+  `list<T>` stays legal.
 - **The `~` says "many", not which kind — the Workbench says the rest**: a faint `‹map›`/`‹set›`/`‹ring 3›`
   after each `.~name`, the declaration on hover, `.~` completing the shape's collections with their kinds,
   `.~slots.` offering that kind's words (`put` on a map, `add` on the rest), and `~<` offering the four kinds.
@@ -455,8 +456,8 @@ lists what is exported. The one exception is a SHARD in an `audience` (17e): `*y
 Ledger. `not` works in front of `$`/`#` too: `audience $Session not #Banned`. Required `$`/`#` must ALL be
 carried, but listed `!` shards are ANY OF (a sender is one shard). A bare `!Name` is this bundle's shard,
 checked like `mute` (**VS0352**); another bundle's is `*Author.Bundle.!Name`, checked when the app links
-(**VS0353**). The C# backend enforces an audience of `!Shard`s (the compiled `from` carries the sender's shard key) and
-notes one that asks for the sender's marks or shapes, which the compiled `from` does not carry. SYNTAX-DECISIONS D19.
+(**VS0353**). The C# backend enforces every audience: the compiled `from` carries the sender's shard key, its marks
+as they stood at the emit, and the shapes it carries — and an SF's emit is its caller's. SYNTAX-DECISIONS D19.
 
 **17f. `x carries #M` is how a body asks what a sender or an entity carries.** `if d.from carries #Trusted`
 branches where an `audience` could only refuse; `if u carries #Boss` tests an entity outside a `target #Boss`

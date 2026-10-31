@@ -256,10 +256,10 @@ public class RuntimeParityTests : IDisposable
             }
             """);
 
-        // `audience` is not compiled yet: this program must FALL BACK, and say why.
-        var compiled = Play(path, VeinRuntime.Auto, 1);
-        Assert.Equal("interpreter", compiled.Runtime);
-        Assert.Contains("audience", compiled.Note);
+        // An audience on the sender's MARKS compiles now: the compiled `from` carries them, as they stood at the
+        // emit. So this program runs compiled, and plays as the interpreter does — the ban included.
+        Assert.Equal("compiled", Play(path, VeinRuntime.Auto, 1).Runtime);
+        Same(path, 6, (g, i) => { if (i == 2) Assert.True(g.Emit("TogglePause")); });
     }
 
     [Fact]
@@ -326,15 +326,16 @@ public class RuntimeParityTests : IDisposable
     }
 
     [Fact]
-    public void Every_N_is_not_compiled_yet_so_it_falls_back_and_says_why()
+    public void Every_N_compiles_and_runs_on_the_hosts_clock()
     {
+        // `every N` was the one schedule the C# backend had no clock for; the host's clock steps it now
+        // (VeinWorld.AdvanceEvery), as it steps the interpreter's. EveryCompiledTests counts the firings.
         string path = Write("every.vein", "bundle E by me { shard S { every 0.5 { emit *Vein.Console.Io.@Print { text: \"tick\" } } } }");
 
         var game = VeinGame.Open(path);   // Auto
-        Assert.Equal("interpreter", game.Runtime);
-        Assert.Contains("every", game.RuntimeNote);
-        Assert.Equal("interpreter", VeinGame.Open(path, VeinRuntime.Compiled).Runtime);   // never refuses to run
-        Assert.Equal("", VeinGame.Open(path, VeinRuntime.Interpreter).RuntimeNote);
+        Assert.Equal("compiled", game.Runtime);
+        Assert.Equal("", game.RuntimeNote);
+        Same(path, 4, (g, i) => g.Step(0.3));
     }
 
     [Fact]
@@ -596,10 +597,11 @@ public class RuntimeParityTests : IDisposable
         Assert.False(garbage.Precompiled);
         Assert.Equal("compiled", garbage.Runtime);
 
-        // A program the backend would run with less behaviour gets no bytes, and says why.
-        string every = Write("every2.vein", "bundle E by me { shard S { every 0.5 { emit *Vein.Console.Io.@Print { text: \"t\" } } } }");
-        Assert.Null(VeinGame.Precompile(every, out string why));
-        Assert.Contains("every", why);
+        // A program the backend would run with less behaviour gets no bytes, and says why: `here()` names the
+        // console a program runs in, which only the interpreter knows.
+        string here = Write("here2.vein", "bundle H by me { shard S { run once { let h = here() } } }");
+        Assert.Null(VeinGame.Precompile(here, out string why));
+        Assert.Contains("here", why);
     }
 
     [Theory]

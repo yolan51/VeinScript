@@ -242,7 +242,7 @@ public class ShardMarkTests
     }
 
     [Fact]
-    public void The_backend_answers_carries_for_an_entity_and_refuses_it_for_a_sender()
+    public void The_backend_answers_carries_for_an_entity_and_for_a_sender()
     {
         var entity = new CSharpBackend().Emit(Module(
             "  shape $H { hp: int }\n" +
@@ -252,6 +252,8 @@ public class ShardMarkTests
 
         var sender = new CSharpBackend().Emit(Module(
             "  event @Hit { }\n  shard Ear { hear @Hit as h { if h.from carries #Trusted { } } }"));
-        Assert.Contains(sender.Notes, n => n.Contains("carries #Trusted") && n.Contains("will not compile"));
+        // A sender's `from` carries its marks as they stood at the emit (D20).
+        Assert.DoesNotContain(sender.Notes, n => n.Contains("carries"));
+        Assert.Contains("h.from)?.marks", sender.Files[0].Contents);
     }
 }
