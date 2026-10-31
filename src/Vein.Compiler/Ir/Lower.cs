@@ -318,9 +318,15 @@ public sealed partial class Lower
                 case TypeDecl t: types.Add(LowerType(t)); break;
                 case EventDecl e: types.Add(LowerEvent(e)); break;
                 case FuncDecl f: funcs.Add(LowerFunc(f)); break;
-                case ShardDecl sh: shards.Add(LowerShardLike(sh.Name, sh.Members, "system", sh.Doc, sh.CarriedShapes, sh.CarriedMarks)); break;
-                case ViewDecl vw: shards.Add(LowerView(vw)); break;
-                case BridgeDecl br: shards.Add(LowerShardLike(br.Name, br.Members, "bridge", br.Doc, br.CarriedShapes, br.CarriedMarks)); break;
+                case ShardDecl sh:
+                    RefuseCarriedShapes("shard", sh.Name, sh.CarriedShapes, sh.Span);
+                    shards.Add(LowerShardLike(sh.Name, sh.Members, "system", sh.Doc, Array.Empty<string>(), sh.CarriedMarks)); break;
+                case ViewDecl vw:
+                    RefuseCarriedShapes("view", vw.Name, vw.CarriedShapes, vw.Span);
+                    shards.Add(LowerView(vw)); break;
+                case BridgeDecl br:
+                    RefuseCarriedShapes("bridge", br.Name, br.CarriedShapes, br.Span);
+                    shards.Add(LowerShardLike(br.Name, br.Members, "bridge", br.Doc, Array.Empty<string>(), br.CarriedMarks)); break;
                 // Consumed by the Collect pass above, which builds the bare-name fallback list; there is
                 // nothing to lower, because `use` adds no IR — it only widens what a bare name may mean.
                 case NeedDecl: break;
@@ -2123,6 +2129,16 @@ public sealed partial class Lower
         public void Dispose() => leave();
     }
 
+    /// VS0402: `shard Gate $Session { … }`. A shard carries MARKS — a shape is data on an identity, and on a shard it
+    /// would hold none: a mark under another name, which cannot change at run time (`mark !Gate #M`), mute a group
+    /// or be read with `carries`. Removed 2026-10-31 (D19 addendum).
+    private void RefuseCarriedShapes(string what, string name, IReadOnlyList<string> shapes, SourceSpan span)
+    {
+        foreach (var s in shapes)
+            _diag.Error("VS0402", $"`{what} {name} ${s}`: a {what} carries marks, not shapes — a shape is data on an identity, " +
+                $"and a {what} has none to hold. Write `#{s}`: `{what} {name} #{s}`, and `audience #{s}` where it is asked for.", span);
+    }
+
     private IrShard LowerShardLike(string name, IReadOnlyList<Node> members, string kind, string? doc,
         IReadOnlyList<string>? carriedShapes = null, IReadOnlyList<string>? carriedMarks = null)
     {
@@ -2249,7 +2265,7 @@ public sealed partial class Lower
         }
         var attrs = new List<IrAttr> { IrAttr.Of("view"), IrAttr.Of("key", ShardKey(vw.Name)) };
         if (vw.CarriedShapes.Count > 0 || vw.CarriedMarks.Count > 0)
-            attrs.Add(IrAttr.Of("carries", vw.CarriedShapes, vw.CarriedMarks));
+            attrs.Add(IrAttr.Of("carries", (IReadOnlyList<string>)Array.Empty<string>(), vw.CarriedMarks));
         return new IrShard(vw.Name, state, null, methods, vw.Doc, attrs);
     }
 
@@ -2497,6 +2513,10 @@ public sealed partial class Lower
         var notShards = new List<string>();
         foreach (var a in hb.AudienceShards)
             if (AudienceShardKey(a) is { } key) (a.Exclude ? notShards : shards).Add(key);
+        // VS0403: an audience asks for what a SENDER carries, and a sender (a shard) carries marks only (VS0402).
+        foreach (var s in hb.AudienceShapes.Concat(hb.ExcludedShapes))
+            _diag.Error("VS0403", $"`audience ${s}`: a sender carries marks, not shapes (VS0402). Write `audience #{s}`, and " +
+                $"give the sending shard the mark: `shard Name #{s}`.", hb.Span);
         if (hb.AudienceShapes.Count + hb.AudienceMarks.Count + hb.ExcludedShapes.Count + hb.ExcludedMarks.Count
             + hb.AudienceShards.Count > 0)
             attrs.Add(IrAttr.Of("audience", hb.AudienceShapes, hb.AudienceMarks,

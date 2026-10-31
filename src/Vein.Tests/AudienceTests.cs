@@ -28,7 +28,7 @@ public class AudienceTests
     private const string Carriers = @"
   event @Boot { }
   event @Damage { amount: int }
-  shard Trusted $Session #Trusted { hear @Boot as b { emit @Damage { amount: 5 } } }
+  shard Trusted #Session #Trusted { hear @Boot as b { emit @Damage { amount: 5 } } }
   shard Sneaky                    { hear @Boot as b { emit @Damage { amount: 99 } } }
   start @Boot { }
 ";
@@ -38,7 +38,7 @@ public class AudienceTests
     {
         var sw = new StringWriter();
         new Interp().Run(Module(Carriers +
-            "  shard Auditor { hear @Damage as d audience $Session #Trusted { " + P("\"saw \" + d.amount") + " } }"),
+            "  shard Auditor { hear @Damage as d audience #Session #Trusted { " + P("\"saw \" + d.amount") + " } }"),
             new StringReader(""), sw);
 
         Assert.Equal("saw 5", sw.ToString().Trim());   // 99 never arrives
@@ -59,10 +59,10 @@ public class AudienceTests
     [Fact]
     public void A_partial_match_is_still_refused()
     {
-        // Trusted carries $Session #Trusted but not #Admin — "ALL required" means all.
+        // Trusted carries #Session #Trusted but not #Admin — "ALL required" means all.
         var sw = new StringWriter();
         new Interp().Run(Module(Carriers +
-            "  shard Auditor { hear @Damage as d audience $Session #Admin { " + P("\"saw \" + d.amount") + " } }"),
+            "  shard Auditor { hear @Damage as d audience #Session #Admin { " + P("\"saw \" + d.amount") + " } }"),
             new StringReader(""), sw);
 
         Assert.Equal("", sw.ToString().Trim());
@@ -113,13 +113,14 @@ public class AudienceTests
     }
 
     [Fact]
-    public void A_shape_requirement_refuses_every_console_message()
+    public void A_shape_in_an_audience_or_on_a_shard_is_an_error()
     {
-        // Correct rather than broken: nothing tells the runtime what shapes a console holds, so it
-        // carries only its address. Demanding a shape of a console can never be satisfied.
-        var output = Deliver(Listener("audience $Session "), ("Alpha", "x"));
-
-        Assert.Equal("", output.Trim());
+        // A sender carries marks only (D19 addendum, 2026-10-31): a shape is data on an identity, and a shard has
+        // none to hold — on a shard it was a mark under another name. Both spellings are refused, with the fix.
+        var r = new VeinCompilerService().Compile(new CompileRequest("t.vein", "bundle T by me {\n  shape $S { a: int }\n  event @E { }\n" +
+            "  shard A $S { run once { emit @E { } } }\n  shard B { hear @E as e audience not $S { } }\n}"));
+        Assert.Contains(r.Diagnostics, d => d.Code == "VS0402" && d.Message.Contains("`shard A #S`"));
+        Assert.Contains(r.Diagnostics, d => d.Code == "VS0403" && d.Message.Contains("`audience #S`"));
     }
 
     // ---- D19: `not` excludes, and `!Shard` names the sender ------------------------------------
@@ -169,12 +170,12 @@ public class AudienceTests
     }
 
     [Fact]
-    public void Not_works_on_a_shape_and_mixes_with_a_required_entry()
+    public void Not_mixes_with_a_required_entry()
     {
         var output = RunLines(Carriers +
-            "  shard Auditor { hear @Damage as d audience #Trusted not $Session { " + P("\"saw \" + d.amount") + " } }");
+            "  shard Auditor { hear @Damage as d audience #Trusted not #Session { " + P("\"saw \" + d.amount") + " } }");
 
-        // Trusted carries #Trusted but also $Session; Sneaky carries neither. Nobody gets through.
+        // Trusted carries #Trusted but also #Session; Sneaky carries neither. Nobody gets through.
         Assert.Empty(output);
     }
 

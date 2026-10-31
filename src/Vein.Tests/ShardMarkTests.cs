@@ -186,12 +186,13 @@ public class ShardMarkTests
     }
 
     [Fact]
-    public void Carries_a_shape_reads_the_senders_carried_shapes()
+    public void Carries_reads_a_mark_the_sender_was_declared_with()
     {
+        // A shard carries marks only (VS0402): `shard Logged #Session`, asked as `h.from carries #Session`.
         var output = Run(
-            "  shape $Session { id: int }\n  event @Hit { }\n" +
-            "  shard Logged $Session { run once { emit @Hit { } } }\n" +
-            "  shard Ear { hear @Hit as h { if h.from carries $Session { " + P("\"session\"") + " } } }");
+            "  mark #Session\n  event @Hit { }\n" +
+            "  shard Logged #Session { run once { emit @Hit { } } }\n" +
+            "  shard Ear { hear @Hit as h { if h.from carries #Session { " + P("\"session\"") + " } } }");
 
         Assert.Equal(new[] { "session" }, output);
     }

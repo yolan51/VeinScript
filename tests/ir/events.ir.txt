@@ -7,7 +7,7 @@ Bundle Demo
 |--- Event @Response
 |    |--- Field status: int
 |    `--- Field body: string
-|--- Shard Combat  carries=[$Session #Trusted]
+|--- Shard Combat  carries=[#Session #Trusted]
 |    `--- Hear @Request as req
 |         `--- Emit @Damage
 |              `--- Arg amount = Int 5
@@ -16,7 +16,7 @@ Bundle Demo
 |         `--- Emit @Damage
 |              `--- Arg amount = Int 99
 `--- Shard Auditor
-     `--- Hear @Damage as d  audience=[$Session #Trusted]
+     `--- Hear @Damage as d  audience=[#Session #Trusted]
           `--- Emit @Response
                |--- Arg status = Int 200
                `--- Arg body = Concat

@@ -74,7 +74,7 @@ bundle Demo {
     event @Damage   { amount: int }
     event @Response { status: int, body: string }
 
-    shard Combat $Session #Trusted {
+    shard Combat #Session #Trusted {
         hear @Request as req { emit @Damage { amount: 5 } }
     }
 
@@ -83,7 +83,7 @@ bundle Demo {
     }
 
     shard Auditor {
-        hear @Damage as d audience $Session #Trusted {
+        hear @Damage as d audience #Session #Trusted {
             emit @Response { status: 200, body: "audited trusted damage " + d.amount + " from " + d.from.kind + "." + d.from.name }
         }
     }

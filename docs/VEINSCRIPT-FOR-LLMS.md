@@ -351,7 +351,7 @@ emit @Sold { currency: base }             // `base` = the declared default
 
 ```text
 hear @Chat as c audience not !Spammer { … }        // !Name = a SHARD; `not` excludes
-hear @Damage as d audience $Session #Trusted { … } // sender must carry these
+hear @Damage as d audience #Session #Trusted { … } // sender must carry these (marks: a shard carries no shapes)
 ```
 
 **`carries`**: `if d.from carries #Trusted { … }`, `if e carries $Shield { … }`; negate as

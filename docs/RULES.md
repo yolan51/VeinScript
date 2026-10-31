@@ -453,7 +453,7 @@ lists what is exported. The one exception is a SHARD in an `audience` (17e): `*y
 
 **17e. In an `audience`, `!Ledger` is a SHARD and `not` EXCLUDES — `!` never means "not".**
 `audience not !Ledger not !Billing` hears everyone except those two shards; `audience !Ledger` hears only
-Ledger. `not` works in front of `$`/`#` too: `audience $Session not #Banned`. Required `$`/`#` must ALL be
+Ledger. `not` works in front of `#` too: `audience #Session not #Banned`. Required `#` must ALL be
 carried, but listed `!` shards are ANY OF (a sender is one shard). A bare `!Name` is this bundle's shard,
 checked like `mute` (**VS0352**); another bundle's is `*Author.Bundle.!Name`, checked when the app links
 (**VS0353**). The C# backend enforces every audience: the compiled `from` carries the sender's shard key, its marks

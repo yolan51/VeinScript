@@ -959,9 +959,9 @@
       "goal": "Make a shard carry shapes and marks, and gate a `hear` with `audience` so only matching emitters get through.",
       "hook": "Two shards send the same event. One listener hears only one of them, and the trace says it blocked the other.",
       "say": [
-        "`shard Combat $Session #Trusted { … }`: a shard can itself carry shapes and marks.",
+        "`shard Combat #Session #Trusted { … }`: a shard can itself carry marks.",
         "Sneaky carries nothing, and both shards emit @Damage on the same request: 5 from Combat, 99 from Sneaky.",
-        "`hear @Damage as d audience $Session #Trusted` fires only when the emitter carries all of the listed shapes and marks.",
+        "`hear @Damage as d audience #Session #Trusted` fires only when the emitter carries all of the listed marks.",
         "The trace says 'Shard.Auditor BLOCKS @local.Demo.Damage (audience) from Shard.Sneaky', and the body is 'audited trusted damage 5 from Shard.Combat'.",
         "`d.from.kind` and `d.from.name` come for free, because every event knows who sent it.",
         "The barrier belongs to the listener. Sneaky's emit succeeds, it just reaches nobody who will accept it."
@@ -980,9 +980,9 @@
       },
       "gotchas": [
         "`audience` takes BARE names only. A qualified `*A.B.P.$Shape` there does not parse: it is VS0100 \"Expected '{', found Star '*'\" (RULES 17b's 'parses and resolves to nothing' is out of date for `audience`).",
-        "`$Session` is never declared as a shape in this file, and it still compiles.",
+        "`#Session` is a mark the shard carries — a shard carries marks only, never a shape (VS0402).",
         "Set MSYS_NO_PATHCONV=1 under Git Bash for the `/` argument (RULES 23).",
-        "`veinc ir samples/events.vein` shows `carries=[$Session #Trusted]` and `audience=[$Session #Trusted]` if you want to show it on screen."
+        "`veinc ir samples/events.vein` shows `carries=[#Session #Trusted]` and `audience=[#Session #Trusted]` if you want to show it on screen."
       ],
       "samples": [
         "samples/events.vein"
@@ -1567,9 +1567,9 @@
         "samples/events.vein"
       ],
       "title": "Audience: who may be heard",
-      "summary": "Two shards emit @Damage on the same request: Combat carries $Session #Trusted and Sneaky carries nothing. The Auditor's `hear ... audience $Session #Trusted` lets Combat's event through and blocks Sneaky's, and the render trace logs the block.",
+      "summary": "Two shards emit @Damage on the same request: Combat carries #Session #Trusted and Sneaky carries nothing. The Auditor's `hear ... audience #Session #Trusted` lets Combat's event through and blocks Sneaky's, and the render trace logs the block.",
       "teaches": [
-        "First-Class objects carrying shapes and marks (shard X $Shape #Mark)",
+        "First-Class objects carrying marks (shard X #Mark)",
         "audience barrier on hear",
         "event origin (from.kind / from.name)",
         "reading carries/audience in veinc ir"
@@ -1594,18 +1594,18 @@
       "interactive": false,
       "output": "  · Shard.Combat [VF:Shard:Combat#1] emits @local.Demo.Damage\n  · Shard.Sneaky [VF:Shard:Sneaky#2] emits @local.Demo.Damage\n  · Shard.Auditor [VF:Shard:Auditor#3] emits @Response\n  · Shard.Auditor BLOCKS @local.Demo.Damage (audience) from Shard.Sneaky\nHTTP 200\naudited trusted damage 5 from Shard.Combat",
       "video_value": "core",
-      "notes": "Captured with MSYS_NO_PATHCONV=1. The `·` lines are stderr. Also ran `veinc ir samples/events.vein`, and it shows carries=[$Session #Trusted] on Combat and audience=[$Session #Trusted] on the Auditor's hear. In tools/check-backend.sh (events.vein:2).",
+      "notes": "Captured with MSYS_NO_PATHCONV=1. The `·` lines are stderr. Also ran `veinc ir samples/events.vein`, and it shows carries=[#Session #Trusted] on Combat and audience=[#Session #Trusted] on the Auditor's hear. In tools/check-backend.sh (events.vein:2).",
       "talking_points": [
-        "A shard is a First-Class object that can itself carry shapes and marks: `shard Combat $Session #Trusted { … }`.",
-        "`hear @Damage as d audience $Session #Trusted` only fires when the EMITTER carries all of the listed shapes and marks.",
+        "A shard is a First-Class object that can itself carry marks: `shard Combat #Session #Trusted { … }`.",
+        "`hear @Damage as d audience #Session #Trusted` only fires when the EMITTER carries all of the listed marks.",
         "Both shards emit @Damage on the same request, and the trace says `Shard.Auditor BLOCKS @local.Demo.Damage (audience) from Shard.Sneaky`, so only `audited trusted damage 5 from Shard.Combat` comes back.",
         "The barrier belongs to the listener, not the sender. Sneaky's emit succeeds and simply reaches nobody who will accept it.",
-        "`veinc ir samples/events.vein` shows the result: `Shard Combat  carries=[$Session #Trusted]` and `Hear @Damage as d  audience=[$Session #Trusted]`."
+        "`veinc ir samples/events.vein` shows the result: `Shard Combat  carries=[#Session #Trusted]` and `Hear @Damage as d  audience=[#Session #Trusted]`."
       ],
       "gotchas": [
         "RULES 23: pass MSYS_NO_PATHCONV=1 under Git Bash for the `/` route argument.",
         "RULES 17b: audience takes a BARE $Shape/#Mark. A qualified one parses but resolves to nothing.",
-        "$Session is never declared as a shape in this file. The shard carries it by name only, and it still compiles.",
+        "#Session is a mark: a shard carries marks only, and `shard Combat $Session` would be VS0402.",
         "RULES 21: emit queues, so the Auditor handles both @Damage events after the @Request handlers finish."
       ]
     },
@@ -5845,8 +5845,8 @@
     },
     {
       "term": "audience",
-      "syntax": "hear @E as e audience $Session #Trusted { … }",
-      "meaning": "A barrier on a handler: it fires only when the emitter carries every listed shape and mark. It is enforced over Vein.Net (signed frames) and only advisory over the local console pipe.",
+      "syntax": "hear @E as e audience #Session #Trusted { … }",
+      "meaning": "A barrier on a handler: it fires only when the emitter carries every listed mark. It is enforced over Vein.Net (signed frames) and only advisory over the local console pipe.",
       "first_sample": "samples/events.vein"
     },
     {

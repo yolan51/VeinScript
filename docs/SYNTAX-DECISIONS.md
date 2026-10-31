@@ -478,7 +478,7 @@ bundle's shard.
 ```
 hear @Test as t audience not !Ledger not !Billing { … }   // anyone except those two shards
 hear @Test as t audience !Ledger { … }                    // only Ledger
-hear @Chat as c audience $Session not #Banned { … }       // carries $Session, does not carry #Banned
+hear @Chat as c audience #Session not #Banned { … }       // carries #Session, does not carry #Banned
 hear @Test as t audience not *you.Billing.!Invoicer { … } // another bundle's shard
 ```
 
@@ -502,8 +502,15 @@ used up the sigil on a negation. `!x` in an expression is still VS0006, now nami
 the handler, which a typo never matches and an app link breaks by renaming a duplicated shard. A barrier
 can also only ADMIT today, so "everyone but Ledger" needed a mark on every other shard.
 
-**Not enforced by the C# backend**, which ignores `audience` entirely and now says so with a note per
-handler; the interpreter, `veinc run`, `serve` and the Workbench enforce it.
+**Enforced by the C# backend too** (2026-10-31): the compiled `from` carries the sender's shard key and its marks
+as they stood at the emit, and the gate is the interpreter's rule line for line.
+
+**Addendum (DECIDED 2026-10-31): a sender carries MARKS, not shapes.** `shard Gate $Session { … }` and
+`audience $Session` are refused — **VS0402** on the shard (or view, or bridge), **VS0403** on the audience — each
+naming the mark to write instead. A shape is data on an identity; on a shard it held none, so it was a mark
+under another name — one that could not change at run time (`mark !Gate #M`, D20), mute a group or be read
+with `carries`. Nothing real used it: only the language tour and two samples, now `shard Combat #Session
+#Trusted` and `audience #Session #Trusted`. `d.from carries #M` asks for marks for the same reason.
 
 ---
 

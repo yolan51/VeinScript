@@ -128,8 +128,8 @@ bundle Demo {
 
 // ============================================================================================
 //  3. events.vein — THE `audience` BARRIER + PROVENANCE
-//  A First-Class object can CARRY shapes/marks: `shard Combat $Session #Trusted { ... }`.
-//  A `hear ... audience $Session #Trusted` only fires when the EMITTER carries ALL of them.
+//  A First-Class object can CARRY marks: `shard Combat #Session #Trusted { ... }`.
+//  A `hear ... audience #Session #Trusted` only fires when the EMITTER carries ALL of them.
 //  Every event also carries provenance you can read on the binding: `d.from.kind`, `d.from.name`.
 //  Run:  veinc render samples/events.vein /   (one @Damage fires, the other is blocked)
 // ============================================================================================
@@ -140,7 +140,7 @@ bundle Demo {
     event @Response { status: int, body: string }
 
     // Carries the credentials the auditor requires.
-    shard Combat $Session #Trusted {
+    shard Combat #Session #Trusted {
         hear @Request as req { emit @Damage { amount: 5 } }
     }
 
@@ -150,7 +150,7 @@ bundle Demo {
     }
 
     shard Auditor {
-        hear @Damage as d audience $Session #Trusted {
+        hear @Damage as d audience #Session #Trusted {
             emit @Response { status: 200, body: "audited trusted damage " + d.amount + " from " + d.from.kind + "." + d.from.name }
         }
     }
