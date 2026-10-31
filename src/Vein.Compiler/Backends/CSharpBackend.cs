@@ -2244,12 +2244,16 @@ public sealed class CSharpBackend : IVeinBackend
         // UTF-8, as `veinc run` writes (Interp.Run → ConsoleLauncher.UseUtf8). Left at the Windows code page,
         // `print("…and behind it")` came out as ".and behind it" here and right there.
         sb.AppendLine("        try { Console.OutputEncoding = new System.Text.UTF8Encoding(false); } catch { }");
+        // What follows `--` is the program's own, as `veinc run file -- …` hands it to `args()`.
         sb.AppendLine("        int ticks = 0;");
+        sb.AppendLine("        var programArgs = new List<string>();");
         sb.AppendLine("        for (int i = 0; i < args.Length; i++)");
-        sb.AppendLine("            if (args[i] == \"--ticks\" && i + 1 < args.Length) int.TryParse(args[++i], out ticks);");
+        sb.AppendLine("            if (args[i] == \"--\") { programArgs.AddRange(args.Skip(i + 1)); break; }");
+        sb.AppendLine("            else if (args[i] == \"--ticks\" && i + 1 < args.Length) int.TryParse(args[++i], out ticks);");
         sb.AppendLine("            else if (args[i].StartsWith(\"--ticks=\")) int.TryParse(args[i].Substring(8), out ticks);");
         sb.AppendLine();
         sb.AppendLine("        var world = Create();");
+        sb.AppendLine("        world.Args = programArgs;");
         sb.AppendLine("        world.Start();");
         sb.AppendLine("        world.Run(ticks);");
         // `quit(code)`, as `veinc run` returns it — and 1 after an error nobody heard, as `veinc run` does.
