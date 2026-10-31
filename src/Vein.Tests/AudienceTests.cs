@@ -252,11 +252,18 @@ public class AudienceTests
     }
 
     [Fact]
-    public void The_C_sharp_backend_says_it_does_not_enforce_an_audience()
+    public void The_C_sharp_backend_enforces_a_shard_audience_and_says_when_it_cannot()
     {
-        var result = new Vein.Compiler.Backends.CSharpBackend().Emit(Module(Senders +
+        // `!Shard` entries are checked compiled — the emitted `from` carries the sender's shard key
+        // (samples/audience_shards.vein proves both runtimes agree, in check-backend).
+        var shards = new Vein.Compiler.Backends.CSharpBackend().Emit(Module(Senders +
             "  shard Ear { hear @Test as t audience not !Ledger { } }"));
+        Assert.DoesNotContain(shards.Notes, n => n.Contains("`audience` not enforced"));
+        Assert.Contains("__f.key == \"me.T.Ledger\"", shards.Files[0].Contents);
 
-        Assert.Contains(result.Notes, n => n.Contains("`audience` not enforced"));
+        // A barrier on the sender's MARKS is not: the compiled `from` carries none. Said, not silently open.
+        var marks = new Vein.Compiler.Backends.CSharpBackend().Emit(Module(Senders +
+            "  shard Ear { hear @Test as t audience not #Banned { } }"));
+        Assert.Contains(marks.Notes, n => n.Contains("`audience` not enforced"));
     }
 }

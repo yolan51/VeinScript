@@ -54,6 +54,9 @@ public sealed class VeinWorld
 
     public IEnumerable<int> Alive => _alive;
 
+    /// Whether an identity still exists — what a woven name lives as long as (Vein.Compiler.Ir.Weaver).
+    public bool IsAlive(int entity) => _alive.Contains(entity);
+
     /// The same generator the interpreter carries — `Interp._rng = new Random(0)`. `chance 30%` lowers
     /// to a `random()` call, so a compiled run has to make the same draws in the same order or the two
     /// disagree on any program that branches probabilistically. Seeded rather than time-based for the

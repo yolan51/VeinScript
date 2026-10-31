@@ -2215,155 +2215,42 @@ public sealed class Interp
         }
     }
 
-    /// Every woven record's name → its identity, for the whole run: a later weave may point at a record an
-    /// earlier one wove. A name is woven once — a second record by that name, in any weave, is a problem,
-    /// never a silent shadow.
-    private readonly Dictionary<string, object?> _wovenNames = new(StringComparer.Ordinal);
-
-    /// Names woven more than once by looms whose records refer to nothing — kept, but no reference may pick one.
-    private readonly HashSet<string> _ambiguousNames = new(StringComparer.Ordinal);
+    /// Every woven name in this run, and the two passes that use them — shared with the C# backend's emitted
+    /// code (<see cref="Weaver"/>), so a woven record means the same thing on both runtimes.
+    private readonly Weaver _weaver = new();
 
     /// <summary>`weave Loom(text) [as x]` (D23): every record brought as `bring Loom(…)` brings it.</summary>
     /// <remarks>
-    /// <para>
-    /// <b>TWO PASSES.</b> The first READS every record (<see cref="Weave.ReadAll"/>, the same reader the
-    /// Workbench's Formats tab dry-runs), names it by its first parameter and SPAWNS its identity — spawn is
-    /// immediate (RULES 11). The second resolves `Entity` and `list&lt;Entity&gt;` names against every name
-    /// woven so far, this text's included, and runs the record's bring onto its identity. So S1 may name S4
-    /// before S4's line, and one record may name any number of others.
-    /// </para>
-    /// <para>
-    /// <b>RESULTS ARE EVENTS.</b> Each problem is one @Unwoven { loom, record, why }, in the order found; then
-    /// @Woven { loom, count }. Both queue (RULES 21), so @Woven is handled after this event commits — when a
-    /// `target` can see what was woven. A record with a problem is skipped; the rest are woven anyway.
-    /// </para>
+    /// The reading, naming and linking are <see cref="Weaver"/>'s. Here: each record's values become the locals
+    /// the loom's generated bring reads (`__wv_x`, and `__wm_x` when the text left it out), and the bring runs
+    /// onto the record's identity. RESULTS ARE EVENTS: each problem is one @Unwoven { loom, record, why }, in the
+    /// order found; then @Woven { loom, count }. Both queue (RULES 21), so @Woven is handled after this event
+    /// commits — when a `target` can see what was woven.
     /// </remarks>
     private void ExecWeave(IrWeave w, Instance self, Dictionary<string, object?> locals)
     {
         string text = Str(Eval(w.Source, self, locals));
-        var problems = new List<(string Record, string Why)>();
-
-        // A NAME LIVES AS LONG AS ITS IDENTITY. Opening a second file after discarding the first wove the same
-        // names again, and every record was refused as "already woven" — by identities that no longer existed.
-        foreach (var (gone, _) in _wovenNames.Where(kv => kv.Value is long id && !_store.IsAlive(id)).ToList())
-        {
-            _wovenNames.Remove(gone);
-            _ambiguousNames.Remove(gone);
-        }
-        void Problem(string record, string what) => problems.Add((record, $"\"{record}\": {what}"));
-
-        // ---- pass 1: read, name, spawn ----
-        //
-        // A NAME MATTERS ONLY TO A RECORD THAT NAMES OTHERS. Names exist so `S1=9811:S4` can reach S4, so a loom
-        // whose records refer to others (an `Entity` or `list<Entity>` field) refuses a name twice — which S4
-        // would a reference mean? A loom whose records refer to nothing keeps them all: a JSON list of tasks
-        // repeats its first field ("group": "Shopping") on every task of a group, and refusing those dropped the
-        // data. The repeated name is remembered as ambiguous, so a LATER reference to it is said, not guessed.
-        bool refers = w.Params.Any(p => p.RefersByName);
-        var woven = new List<(WovenRecord Record, long Identity)>();
-        var ignored = new SortedSet<string>(StringComparer.Ordinal);   // keys no parameter took, said once in @Woven
-        foreach (var record in Weave.ReadAll(text, w.Format, w.Params))
-        {
-            if (record.Problem is not null) { Problem(record.Text, record.Problem); continue; }
-            ignored.UnionWith(record.Ignored);
-            if (record.Name is { Length: > 0 } name && _wovenNames.ContainsKey(name))
+        var result = _weaver.Weave(text, w.Format, w.Params,
+            spawn: () => _store.Spawn(),
+            isAlive: id => _store.IsAlive(id),
+            destroyLater: id => _commands.Add(() => _store.Destroy(id)),
+            bring: (identity, values) =>
             {
-                if (refers)
+                foreach (var (name, v) in values)
                 {
-                    Problem(record.Text, $"a record named \"{name}\" was already woven");
-                    continue;
+                    locals["__wm_" + name] = v.Missing;
+                    locals["__wv_" + name] = v.Read;
                 }
-                _ambiguousNames.Add(name);
-            }
-            long identity = _store.Spawn();
-            if (record.Name is { Length: > 0 } n && !_wovenNames.ContainsKey(n)) _wovenNames[n] = identity;
-            woven.Add((record, identity));
-        }
+                locals["__wpre"] = identity;
+                Exec(w.Record, self, locals);   // a loom's generated bring: it holds no return, break or continue
+            });
 
-        // ---- pass 2: resolve names, then bring each record onto its identity ----
-        int count = 0;
-        long? brought = null;
-        foreach (var (record, identity) in woven)
-        {
-            bool ok = true;
-            foreach (var p in w.Params)
-            {
-                if (record.Missing.Contains(p.Name))
-                {
-                    locals["__wm_" + p.Name] = true;
-                    locals["__wv_" + p.Name] = null;
-                    continue;
-                }
-                object? value = record.Values[p.Name];
-
-                if (p.Type == "Entity")
-                {
-                    if (_ambiguousNames.Contains(Str(value)))
-                    {
-                        Problem(record.Text, $"`{p.Name}`: more than one record is named \"{Str(value)}\"");
-                        if (!p.HasDefault) { ok = false; break; }
-                        locals["__wm_" + p.Name] = true;
-                        locals["__wv_" + p.Name] = null;
-                        continue;
-                    }
-                    if (_wovenNames.TryGetValue(Str(value), out object? target)) value = target;
-                    else
-                    {
-                        Problem(record.Text, $"`{p.Name}`: no record named \"{Str(value)}\"");
-                        if (!p.HasDefault) { ok = false; break; }
-                        locals["__wm_" + p.Name] = true;
-                        locals["__wv_" + p.Name] = null;
-                        continue;
-                    }
-                }
-                else if (p.IsList && p.Element == "Entity" && value is List<object?> names)
-                {
-                    // An unknown element is dropped — one problem says which — and the rest are linked.
-                    var linked = new List<object?>();
-                    foreach (var element in names)
-                        if (_ambiguousNames.Contains(Str(element))) Problem(record.Text, $"`{p.Name}`: more than one record is named \"{Str(element)}\"");
-                        else if (_wovenNames.TryGetValue(Str(element), out object? target)) linked.Add(target);
-                        else Problem(record.Text, $"`{p.Name}`: no record named \"{Str(element)}\"");
-                    value = linked;
-                }
-
-                // A `~<set>` holds each value once (D24). A repeat in the TEXT is said, then folded away — the
-                // runtime would fold it silently, and a typo'd duplicate is worth hearing about.
-                if (p.Kind == "set" && value is List<object?> items)
-                {
-                    var once = new List<object?>();
-                    foreach (var item in items)
-                        if (once.Any(o => LooseEq(o, item)))
-                        {
-                            string shown = item is long id && _wovenNames.FirstOrDefault(kv => Equals(kv.Value, id)).Key is { } n ? n : Str(item);
-                            Problem(record.Text, $"`{p.Name}`: \"{shown}\" is listed twice");
-                        }
-                        else once.Add(item);
-                    value = once;
-                }
-                locals["__wm_" + p.Name] = false;
-                locals["__wv_" + p.Name] = value;
-            }
-
-            if (!ok)
-            {
-                // Its identity was spawned in pass 1; take it back, at the commit, like any `destroy`.
-                _commands.Add(() => _store.Destroy(identity));
-                if (record.Name is { Length: > 0 } n && _wovenNames.TryGetValue(n, out var mine) && Equals(mine, identity)) _wovenNames.Remove(n);
-                continue;
-            }
-
-            locals["__wpre"] = identity;
-            Exec(w.Record, self, locals);   // a loom's generated bring: it holds no return, break or continue
-            count++;
-            brought = identity;
-        }
-
+        var problems = result.Problems.ToList();
         // `as x` names THE identity — so it means something only when the text held exactly one record.
         if (w.Bind is not null)
         {
-            locals[w.Bind] = count == 1 ? brought : null;
-            if (count != 1) problems.Add(("", $"`as {w.Bind}`: the text holds {count} records, so `{w.Bind}` names none of them"));
+            locals[w.Bind] = result.Count == 1 ? result.Brought : null;
+            if (result.Count != 1) problems.Add(("", $"`as {w.Bind}`: the text holds {result.Count} records, so `{w.Bind}` names none of them"));
         }
 
         foreach (var (record, why) in problems)
@@ -2372,7 +2259,7 @@ public sealed class Interp
                 ["loom"] = w.Loom, ["record"] = record, ["why"] = why,
             });
         Emit("Woven", new Dictionary<string, object?>(StringComparer.Ordinal)
-            { ["loom"] = w.Loom, ["count"] = (long)count, ["ignored"] = string.Join(", ", ignored) });
+            { ["loom"] = w.Loom, ["count"] = (long)result.Count, ["ignored"] = result.Ignored });
     }
 
     /// <summary>`toText<Format>(Loom)` (D23, the way out): every identity the loom would make, as text.</summary>

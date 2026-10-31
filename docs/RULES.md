@@ -455,7 +455,8 @@ lists what is exported. The one exception is a SHARD in an `audience` (17e): `*y
 Ledger. `not` works in front of `$`/`#` too: `audience $Session not #Banned`. Required `$`/`#` must ALL be
 carried, but listed `!` shards are ANY OF (a sender is one shard). A bare `!Name` is this bundle's shard,
 checked like `mute` (**VS0352**); another bundle's is `*Author.Bundle.!Name`, checked when the app links
-(**VS0353**). The C# backend does not enforce `audience` and notes it. SYNTAX-DECISIONS D19.
+(**VS0353**). The C# backend enforces an audience of `!Shard`s (the compiled `from` carries the sender's shard key) and
+notes one that asks for the sender's marks or shapes, which the compiled `from` does not carry. SYNTAX-DECISIONS D19.
 
 **17f. `x carries #M` is how a body asks what a sender or an entity carries.** `if d.from carries #Trusted`
 branches where an `audience` could only refuse; `if u carries #Boss` tests an entity outside a `target #Boss`

@@ -1,0 +1,45 @@
+// audience_shards.vein — an `audience` that names SHARDS, enforced by both runtimes (D19).
+//
+// `audience !Ledger` admits only what Ledger emits; `audience not !Ledger not !Spammer` admits everyone
+// else. The compiled `from` carries the sender's shard key, so the C# backend checks these exactly as the
+// interpreter does. (An audience that asks about the sender's marks or shapes — `audience not #Banned`,
+// samples/audience_not.vein — is still checked by the interpreter only.)
+//
+//   veinc run samples/audience_shards.vein --ticks 1
+//   bash tools/check-backend.sh
+
+bundle AudienceShards by you {
+    need "Vein.Console"
+
+    event @Chat { text: string }
+
+    shard Ledger  { run once { emit @Chat { text: "hi from Ledger" } } }
+    shard Billing { run once { emit @Chat { text: "hi from Billing" } } }
+    shard Spammer { run once { emit @Chat { text: "hi from Spammer" } } }
+
+    shard AllBut {
+        hear @Chat as c audience not !Ledger not !Spammer {
+            emit *Vein.Console.Io.@Print { text: "all-but: " + c.text }
+        }
+    }
+
+    shard OnlyLedger {
+        hear @Chat as c audience !Ledger {
+            emit *Vein.Console.Io.@Print { text: "only-ledger: " + c.text }
+        }
+    }
+
+    // Two named shards are ANY OF: a sender is one shard.
+    shard Finance {
+        hear @Chat as c audience !Ledger !Billing {
+            emit *Vein.Console.Io.@Print { text: "finance: " + c.text }
+        }
+    }
+
+    // A runtime event has no shard key: a shard-named audience refuses it.
+    shard Clock {
+        hear *Vein.Time.Clock.@Ticked as t audience !Ledger {
+            emit *Vein.Console.Io.@Print { text: "never: a tick is no shard" }
+        }
+    }
+}

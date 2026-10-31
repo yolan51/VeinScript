@@ -711,12 +711,14 @@ principal.
 - **Compiled** — C# on an ECS runtime (`veinc emit`, or JIT-compiled in a host), ~14–25× faster. The
   backend never emits silently-wrong code: anything it cannot compile is a **note**, and a host then
   runs the program on the interpreter (`game.RuntimeNote` says why). **Not compiled yet**: `every N`,
-  `audience`, `carries` on a sender's `from`, `@Fetch` and `@Console` (`@Listen`/`@Link`/`@Send` DO compile,
+  `audience` on the sender's marks or shapes (an audience of `!Shard`s IS checked), `carries` on a sender's `from`, `@Fetch` and `@Console` (`@Listen`/`@Link`/`@Send` DO compile,
   carried out by the host), list element assignment and list growth, `target` with more than 3 marks, and the built-ins `here pick
   toJson fromJson args now sort remove slice env`.
 - Both are held equal by `tools/check-backend.sh` (diffs program output) and parity tests.
 - Compiled DOES carry: a needed library's events (linked into one program, both ways), `@Print`,
   `@PlaySound`, `@Quit` and the files (`@ReadFile`/`@WriteFile` → `@FileLoaded`/`@FileWritten`/`@FileMissing`).
+- Compiled `weave` and `toText` (D23) run through the interpreter's own Weaver and writer, so reading, naming,
+  links and `@Woven`/`@Unwoven` are one implementation (`samples/weave_links.vein`, `weave_formats.vein`).
 - Known difference: compiled `@Print` happens when its handler runs; the interpreter's when the queue
   drains (same lines, possibly different interleaving with other events).
 

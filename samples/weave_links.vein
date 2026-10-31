@@ -1,0 +1,73 @@
+// weave_links.vein — out and back in: `toText` writes a link as a NAME, `weave` reads it back as a link (D23).
+//
+// The kinds are woven from text. A planting points at one of them (`kind: Entity`). Written with
+// `toText<Json>`, that link becomes the kind's name — the first field of its loomed shape — and woven back,
+// the name finds the kind again: the new planting points at the same identity the first one did.
+//
+// Both runtimes weave through the same Vein.Compiler.Ir.Weaver, so check-backend holds them to one answer.
+//
+//   veinc run samples/weave_links.vein --ticks 3
+//   bash tools/check-backend.sh
+
+bundle WeaveLinks by you {
+    need "Vein.Console"
+
+    shape $Kind { name: string, price: int }
+    shape $Planting { plot: int, kind: Entity = 0, growth: float = 0.0 }
+    mark #Kind
+    mark #Planted
+
+    loom<Json> Kinds { $Kind   mark #Kind }
+    loom<Json> Plantings { $Planting   mark #Planted }
+
+    shard Farm {
+        var step = 0
+
+        run once {
+            weave Kinds("[{\"name\": \"Wheat\", \"price\": 3}, {\"name\": \"Carrot\", \"price\": 6}]")
+        }
+
+        hear @Woven as w {
+            emit *Vein.Console.Io.@Print { text: "woven " + w.loom + ": " + w.count }
+            // The kinds exist now: plant a carrot.
+            if w.loom == "Kinds" {
+                target $Kind as k {
+                    if k.Kind.name == "Carrot" {
+                        let p = spawn()
+                        attach $Planting to p { plot: 4, kind: k, growth: 2.5 }
+                        mark p #Planted
+                    }
+                }
+            }
+        }
+
+        hear @Unwoven as u {
+            emit *Vein.Console.Io.@Print { text: "unwoven " + u.loom + ": " + u.why }
+        }
+
+        each tick {
+            step += 1
+            // Out as text, and straight back in: a second planting, linked to the same kind.
+            if step == 1 {
+                let saved = toText<Json>(Plantings)
+                emit *Vein.Console.Io.@Print { text: "saved " + saved }
+                weave Plantings(saved)
+            }
+            // A link to a name nobody wove is said. `kind` has a default, so the record is still woven — with none.
+            if step == 2 { weave Plantings("[{\"plot\": 9, \"kind\": \"Turnip\"}]") }
+        }
+
+        settled {
+            if step == 3 {
+                target $Planting #Planted as p {
+                    let k = p.Planting.kind
+                    if k == 0 {
+                        emit *Vein.Console.Io.@Print { text: "plot " + p.Planting.plot + " grows nothing" }
+                    } else {
+                        emit *Vein.Console.Io.@Print { text: "plot " + p.Planting.plot + " grows " + k.Kind.name + " (" + k.Kind.price + "c) at " + p.Planting.growth }
+                    }
+                }
+            }
+        }
+    }
+}

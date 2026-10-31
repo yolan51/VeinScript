@@ -19,7 +19,7 @@ namespace Vein.Compiler.Backends;
 ///
 /// Anything outside that subset produces a NOTE rather than silently wrong code — Degrade Explicitly,
 /// rule 4 of the contract.
-public sealed class CSharpBackend : IVeinBackend
+public sealed partial class CSharpBackend : IVeinBackend
 {
     public string Name => "csharp";
     public string OutputExtension => ".g.cs";
@@ -208,6 +208,16 @@ public sealed class CSharpBackend : IVeinBackend
         sb.AppendLine($"namespace Vein.Generated.{Ident(module.Name)};");
         sb.AppendLine();
 
+        // D23: @Woven and @Unwoven are the interpreter's own events, declared by no bundle a program needs. A
+        // program that weaves, writes with `toText`, or hears either gets their payloads here — or its
+        // `hear @Woven` would be dropped and a woven farm would never be dressed.
+        _weaving.Clear();
+        _weavingEvents.Clear();
+        _weaveCount = 0;
+        if (UsesWeaving(module))
+            foreach (var t in WeavingEvents())
+                if (!_events.Contains(t.Name)) { _events.Add(t.Name); _eventTypes[t.Name] = t; _weavingEvents.Add(t); }
+
         foreach (var t in module.Types) EmitType(sb, t);
         EmitEvents(sb, module);
         EmitMarks(sb, module);
@@ -215,6 +225,7 @@ public sealed class CSharpBackend : IVeinBackend
         foreach (var s in module.Shards) EmitShard(sb, s);
 
         EmitEntryPoint(sb, module);
+        EmitWeaving(sb);
 
         // The comparer for `ordered by`, emitted only when used and identical to the interpreter's
         // EntityStore.OrderKey: numbers numerically, strings ORDINALLY — never by culture, or the two
@@ -516,6 +527,9 @@ public sealed class CSharpBackend : IVeinBackend
                 sb.AppendLine($"public sealed class {Ident(t.Name)}");
                 sb.AppendLine("{");
                 foreach (var f in t.Fields) sb.AppendLine($"    public {Cs(f.Type)} {Ident(f.Name)};");
+                // The sender's shard KEY — what an `audience !Shard` matches, as Interp.FromOf carries it. Not in
+                // the IR type (programs read `name` and `kind`); only this runtime's barrier reads it.
+                if (t.Name == Lower.ProvenanceType) sb.AppendLine("    public string key;");
                 sb.AppendLine("}");
                 sb.AppendLine();
                 break;
@@ -547,7 +561,7 @@ public sealed class CSharpBackend : IVeinBackend
     /// rather than null (Interp.Default), so a bare `string` would be null here and "" there.
     private void EmitEvents(StringBuilder sb, IrModule module)
     {
-        var events = module.Types.Where(t => t.Kind == IrTypeKind.Message && _events.Contains(t.Name)).ToList();
+        var events = module.Types.Where(t => t.Kind == IrTypeKind.Message && _events.Contains(t.Name)).Concat(_weavingEvents).ToList();
         if (events.Count == 0) return;
 
         sb.AppendLine("/// The module's `@Event` payloads.");
@@ -858,19 +872,47 @@ public sealed class CSharpBackend : IVeinBackend
             sb.AppendLine("    {");
             foreach (var (m, ev) in hears)
             {
-                sb.AppendLine($"        World.On(\"{ev}\", this, p => {handlerNames[m]}(({EventType(ev!)})p));");
-                // Not enforced here: the compiled `from` has no carried shapes/marks or shard key to
-                // check. Said out loud (BACKEND-CONTRACT rule 4), because the handler compiles and simply
-                // hears everything — a barrier that silently admits all is the worst way to be missing.
-                if (m.Attrs.Any(a => a.Name == "audience"))
+                // `audience !Barn` / `audience not !Hud` — shards only — is enforced: the compiled `from`
+                // carries the sender's shard key, as the interpreter's does. An audience that asks for the
+                // sender's shapes or marks is not: the compiled `from` carries neither. Said out loud
+                // (BACKEND-CONTRACT rule 4), because the handler compiles and simply hears everything — a
+                // barrier that silently admits all is the worst way to be missing.
+                string? gate = m.Attrs.FirstOrDefault(a => a.Name == "audience") is { } aud ? ShardGate(aud, ev!) : null;
+                if (gate is not null)
+                    sb.AppendLine($"        World.On(\"{ev}\", this, p => {{ var __f = (({EventType(ev!)})p).from; if ({gate}) {handlerNames[m]}(({EventType(ev!)})p); }});");
+                else
+                    sb.AppendLine($"        World.On(\"{ev}\", this, p => {handlerNames[m]}(({EventType(ev!)})p));");
+                if (m.Attrs.Any(a => a.Name == "audience") && gate is null)
                     _notes.Add($"{shard.Name}.{m.Name}: `audience` not enforced — the C# backend delivers " +
-                               "this event from every sender.");
+                               "this event from every sender (only an audience of `!Shard`s is checked compiled).");
             }
             sb.AppendLine("    }");
         }
 
         sb.AppendLine("}");
         sb.AppendLine();
+    }
+
+    /// The C# condition for an `audience` that names only shards (D19), over `__f`, the payload's `from`:
+    /// one of the named keys when any are named, none of the excluded ones. Null when the audience also
+    /// asks about shapes or marks, or when the event declares a `from` of its own — not checkable here.
+    private string? ShardGate(IrAttr aud, string ev)
+    {
+        IReadOnlyList<string> Arg(int i) => aud.Args.Count > i ? aud.Args[i] as IReadOnlyList<string> ?? Array.Empty<string>() : Array.Empty<string>();
+        if (Arg(0).Count + Arg(1).Count + Arg(2).Count + Arg(3).Count > 0) return null;
+        var shards = Arg(4);
+        var notShards = Arg(5);
+        if (shards.Count + notShards.Count == 0) return null;
+        if (_eventTypes.TryGetValue(ev, out var type)
+            && type.Fields.FirstOrDefault(f => f.Name == "from") is { } own && own.Type.Name != Lower.ProvenanceType)
+            return null;
+
+        string AnyOf(IReadOnlyList<string> keys) =>
+            "(__f != null && (" + string.Join(" || ", keys.Select(k => $"__f.key == \"{Escape(k)}\"")) + "))";
+        var parts = new List<string>();
+        if (shards.Count > 0) parts.Add(AnyOf(shards));
+        if (notShards.Count > 0) parts.Add("!" + AnyOf(notShards));
+        return string.Join(" && ", parts);
     }
 
     // ---- the failure is a message: one guard per unit of work (Interp.RunGuarded) ----------------------
@@ -1127,11 +1169,10 @@ public sealed class CSharpBackend : IVeinBackend
                 break;
             }
 
-            // D23: reading records out of text at run time needs the weave reader, which only the
-            // interpreter has. Said, not approximated — like `fromJson`.
+            // D23: through the same Weaver the interpreter uses (Vein.Compiler.Ir.Weaver), so reading, naming
+            // and linking are one implementation; the record's bring is the loom's own IR, emitted here.
             case IrWeave w:
-                _notes.Add($"`weave {w.Loom}(…)` is interpreter-only — not emitted; keep this program on `veinc run`.");
-                sb.AppendLine($"{pad}// not emitted: weave {w.Loom} (interpreter-only)");
+                EmitWeave(sb, w, depth);
                 break;
 
             default:
@@ -1543,7 +1584,7 @@ public sealed class CSharpBackend : IVeinBackend
         IrCall c => $"{Expr(c.Callee)}({string.Join(", ", c.Args.Select(Expr))})",
         IrList l => ListLiteral(l),
         // D23's way out writes through the weave reader's formats, which only the interpreter has — said, like `weave`.
-        IrToText tt => InterpreterOnly($"`toText<{tt.Format.Name}>({tt.Loom})`"),
+        IrToText tt => ToText(tt),
         _ => Unsupported(e)
     };
 
@@ -1925,6 +1966,7 @@ public sealed class CSharpBackend : IVeinBackend
                             {
                                 ("name", (IrExpr)new IrLiteral(_currentShard ?? "", IrLiteralKind.String)),
                                 ("kind", (IrExpr)new IrLiteral("Shard", IrLiteralKind.String)),
+                                ("key", (IrExpr)new IrLiteral(_currentShardIr is { } cs ? ShardKey(cs) : "", IrLiteralKind.String)),
                             })))
                             .ToList(),
                     };

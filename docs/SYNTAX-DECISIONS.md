@@ -696,8 +696,9 @@ hear @Unwoven as u { do print("! " + u.why) }
 **A woven record means exactly the bring a person would write.** `S1=9811:S2` is
 `bring Server("S1", "", 9811, [s2])` once S2 exists. It is LOWERED as that bring —
 `bring Server(__wv_name, __wv_host, __wv_port, __wv_peers) as __wself`, once — landing on an identity the
-weave spawned in its first pass; the interpreter sets the locals per record. So the two cannot drift: the
-same attaches, marks, defaults and vein.lock lines.
+weave spawned in its first pass; the runtime sets the locals per record. So the two cannot drift: the
+same attaches, marks, defaults and vein.lock lines. Both runtimes weave through one `Vein.Compiler.Ir.Weaver`
+(read, name, link); the C# backend emits only the bring (2026-10-31).
 
 *Why the syntax is NAMED.* A loom says which format its records are in, `loom<MeshList>`, so a reader knows
 what comes in without reading a parser — and the format is one declaration every loom and every program
@@ -770,7 +771,8 @@ to the language.
   same (a separator inside a value with no `quotes`) is left out with one `@Unwoven`, and the rest are written.
   So the writer cannot drift from the reader: the reader decides.
 
-`toJson(shape)` stays: it writes one shape's JSON, for a reply or a payload. Interpreter-only, like `weave`.
+`toJson(shape)` stays: it writes one shape's JSON, for a reply or a payload. (`weave` and `toText` compile, through
+the same Weaver and `Weave.WriteAll` the interpreter uses.)
 
 ### D23, nested JSON — `records "a.b"` and `owner "x"` (DECIDED 2026-10-30)
 
