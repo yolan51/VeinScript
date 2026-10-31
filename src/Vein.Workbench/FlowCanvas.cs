@@ -38,6 +38,10 @@ internal sealed class FlowCanvas : Control
     private sealed class BundleBox
     {
         public required FlowBundle Bundle;
+        /// The one shard this box shows, when bundles are split into their shards (Explode); null: the whole bundle.
+        public string? Part;
+        /// What a drag is remembered by: the bundle, or the bundle and its shard.
+        public string Key => Part is null ? Bundle.Name : Bundle.Name + "." + Part;
         public Point Pos;
         public double H;
         public int Col;
@@ -103,6 +107,7 @@ internal sealed class FlowCanvas : Control
     private object? _pinned;
     private string _filter = "";
     private bool _showStdlib;
+    private bool _explode;
 
     private Point _press;
     private bool _dragging, _moved_;
@@ -136,6 +141,14 @@ internal sealed class FlowCanvas : Control
     {
         get => _showStdlib;
         set { _showStdlib = value; Rebuild(keepView: true); }
+    }
+
+    /// Each shard its own box, laid out by the same event flow — a bundle of a hundred shards uses the width of
+    /// the view instead of one column as tall as all of them.
+    public bool Explode
+    {
+        get => _explode;
+        set { _explode = value; Rebuild(keepView: false); }
     }
 
     public string Filter
@@ -190,10 +203,25 @@ internal sealed class FlowCanvas : Control
             var box = new BundleBox { Bundle = b };
             double y = BundleHead;
 
+            // Split: the box so far is finished, and the next shard starts one of its own — so the layout
+            // places each shard by the events it sends and hears, across the width of the view.
+            void NextBox(string part)
+            {
+                if (!_explode) return;
+                if (box.Shards.Count > 0)
+                {
+                    box.H = Math.Max(y + Pad - ShardGap, BundleHead + 24);
+                    _bundles.Add(box);
+                }
+                box = new BundleBox { Bundle = b, Part = part };
+                y = BundleHead;
+            }
+
             // The boot event, as a row of its own at the top of the principal: it is the one emit no
             // shard makes, and without it the map has no visible beginning.
             if (b.IsPrincipal && _flow.Start is { } start)
             {
+                NextBox("start");
                 var boot = new ShardBox { Owner = box, Name = "start", Kind = "boot", At = start.At, Top = y };
                 var row = new UnitRow
                 {
@@ -208,6 +236,7 @@ internal sealed class FlowCanvas : Control
 
             foreach (var s in b.Shards)
             {
+                NextBox(s.Name);
                 var shard = new ShardBox { Owner = box, Name = s.Name, Kind = s.Kind, Carries = s.Carries, At = s.At, Top = y };
                 foreach (var u in s.Units)
                 {
@@ -311,7 +340,7 @@ internal sealed class FlowCanvas : Control
         }
 
         foreach (var box in _bundles)
-            if (_moved.TryGetValue(box.Bundle.Name, out var at)) box.Pos = at;
+            if (_moved.TryGetValue(box.Key, out var at)) box.Pos = at;
 
         PlacePills();
     }
@@ -472,7 +501,7 @@ internal sealed class FlowCanvas : Control
         ctx.DrawRectangle(Br(accent, 0.22), null, new Rect(b.Pos, new Size(BoxW, BundleHead)), 8, 8);
 
         string mark = b.Bundle.IsPrincipal ? "★ " : b.Bundle.Needed ? "◇ " : "■ ";
-        Text(ctx, mark + b.Bundle.Name, b.Pos + new Point(10, 7), 13, Palette.Ink, Ui, FontWeight.SemiBold);
+        Text(ctx, mark + b.Bundle.Name + (b.Part is null ? "" : " › " + b.Part), b.Pos + new Point(10, 7), 13, Palette.Ink, Ui, FontWeight.SemiBold);
         if (b.Bundle.Author is { } author)
             TextRight(ctx, author, new Point(b.Pos.X + BoxW - 10, b.Pos.Y + 9), 11, Palette.Muted, Ui);
 
@@ -766,7 +795,7 @@ internal sealed class FlowCanvas : Control
                 {
                     case BundleBox b:
                         b.Pos = _dragOrigin + delta;
-                        _moved[b.Bundle.Name] = b.Pos;
+                        _moved[b.Key] = b.Pos;
                         PlacePills();
                         break;
                     case Pill p:

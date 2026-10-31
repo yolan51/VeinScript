@@ -20,6 +20,7 @@ internal sealed class EventFlowPanel : UserControl
     private readonly TextBox _filter = new() { Width = 200, FontSize = 12, Watermark = "highlight: bundle, shard or @event" };
     private readonly CheckBox _stdlib = new() { Content = "Standard library", FontSize = 12 };
     private readonly CheckBox _author = new() { Content = "Every bundle by this author", FontSize = 12 };
+    private readonly CheckBox _split = new() { Content = "Split bundles into shards", FontSize = 12 };
     private string? _program;
 
     /// The project folder the explorer shows — where "Every bundle by this author" looks for the author's programs.
@@ -42,6 +43,9 @@ internal sealed class EventFlowPanel : UserControl
         _filter.TextChanged += (_, _) => _canvas.Filter = _filter.Text ?? "";
         // A project's tools are programs of their own, by the same author: drawn together, with what links them.
         _author.IsCheckedChanged += (_, _) => Update(_program);
+        // A bundle of a hundred shards is one column as tall as all of them; split, each shard is a box of its own,
+        // placed by the events it sends and hears, across the width of the view.
+        _split.IsCheckedChanged += (_, _) => _canvas.Explode = _split.IsChecked == true;
         _canvas.Status = s => _status.Text = s.Length > 0 ? s : Hint;
 
         var bar = new StackPanel
@@ -49,7 +53,7 @@ internal sealed class EventFlowPanel : UserControl
             Orientation = Orientation.Horizontal,
             Spacing = 8,
             Margin = new Avalonia.Thickness(8, 5),
-            Children = { _filter, _stdlib, _author, fit, reset, _summary },
+            Children = { _filter, _stdlib, _author, _split, fit, reset, _summary },
         };
 
         var root = new DockPanel();
