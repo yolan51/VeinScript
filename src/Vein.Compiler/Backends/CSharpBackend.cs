@@ -124,6 +124,8 @@ public sealed class CSharpBackend : IVeinBackend
     ///
     /// A map, so `d` and `c` in `target … as d { target … as c { d.Deck.title } }` name different things.
     private readonly Dictionary<string, string> _selfVars = new(StringComparer.Ordinal);
+    // Collection-loop bindings whose elements are identities (`target lane as e` over a `list<Entity>`).
+    private readonly HashSet<string> _identityElems = new(StringComparer.Ordinal);
 
     /// The component each binding's query named first, for the bare `self.hp` form where the shape is
     /// implied rather than written.
@@ -1231,9 +1233,15 @@ public sealed class CSharpBackend : IVeinBackend
                 // resolves to the enclosing loop rather than to this element.
                 _selfVars[loop.Var ?? "__x"] = elemVar;
                 sb.AppendLine($"{pad}long {_indexVar} = -1;");
-                _localCs[elemVar] = "object";
-                sb.AppendLine($"{pad}foreach (var {elemVar} in {Values}.Items({Expr(loop.Source)}))");
+                // `target lane as e` over a `list<Entity>`: the element is an identity, so it is an `int` the
+                // world calls take, and `e.Unit.name` reads the shape off the world (FieldAccess).
+                bool identities = loop.Source.ResolvedType is { Name: "list" or "set", Args: [{ Name: "Entity" }] };
+                if (identities) _identityElems.Add(loop.Var ?? "__x"); else _identityElems.Remove(loop.Var ?? "__x");
+                _localCs[elemVar] = identities ? "int" : "object";
+                string item = identities ? "__" + elemVar + "_item" : elemVar;
+                sb.AppendLine($"{pad}foreach (var {item} in {Values}.Items({Expr(loop.Source)}))");
                 sb.AppendLine(pad + "{");
+                if (identities) sb.AppendLine($"{pad}    int {elemVar} = {Convert(item, "object", "int")};");
                 sb.AppendLine($"{pad}    {_indexVar}++;");
                 foreach (var s in loop.Body.Statements) EmitStmt(sb, s, depth + 1);
                 sb.AppendLine(pad + "}");
@@ -1603,7 +1611,8 @@ public sealed class CSharpBackend : IVeinBackend
 
         // `e.Hit.action` with `e` an identity held anywhere — a parameter, a field, a list element — not a
         // `target` binding: the shape is read off the world, and a missing shape reads as its field's zero.
-        if (f.Receiver is IrFieldAccess { Receiver: var held and not IrSelfRef, Field: var comp } && _componentTypes.TryGetValue(comp, out var shape)
+        if (f.Receiver is IrFieldAccess { Receiver: var held, Field: var comp } && (held is not IrSelfRef || held is IrSelfRef { Bind: var eb } && _identityElems.Contains(eb))
+            && _componentTypes.TryGetValue(comp, out var shape)
             && CsOf(held) is "int" or "long" or "object" && shape.Fields.FirstOrDefault(x => x.Name == f.Field) is { } read)
         {
             string id = Ent(held);
@@ -1788,8 +1797,8 @@ public sealed class CSharpBackend : IVeinBackend
                     return $"carries({Expr(c.Args[0])}, \"{Escape(what.Name)}\")";
                 }
                 return shape
-                    ? $"World.Has<{Ident(what.Name)}>({Expr(c.Args[0])})"
-                    : $"World.MarkedAs<Marks.{Ident(what.Name)}>({Expr(c.Args[0])})";
+                    ? $"World.Has<{Ident(what.Name)}>({Ent(c.Args[0])})"
+                    : $"World.MarkedAs<Marks.{Ident(what.Name)}>({Ent(c.Args[0])})";
             }
 
             // `mute X` (D18): the key Lower resolved, which `Main` registered the system under. Deferred

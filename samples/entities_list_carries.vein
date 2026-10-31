@@ -1,0 +1,150 @@
+// entities_list_carries.vein — `e carries #Mark` asked of the identities in a `list<Entity>`.
+//
+// A `target #Guard` query finds every guard in the world. A list is a hand-picked few — a team, the units
+// in a lane, the cards a spell may hit — and `carries` is how a body asks each of them what it wears
+// (RULES 17f). The list holds identities, not copies, so a mark added or removed after the list was made
+// is the answer the next pass sees.
+//
+// Covered, each printed so the backends can be diffed:
+//   - a shard's `list<Entity>`, walked with `target xs as e`, tested with `carries #M` and `carries $Shape`
+//   - `not (e carries #M)` — the parentheses matter: `not e carries #M` negates `e` first (VS0008)
+//   - a shape field `list<Entity>` (a team's members), read through `target $Team as t` in another shard
+//   - fns that take a `list<Entity>` and answer from `carries`: a count, a filtered list, an "any"
+//   - mark / unmark after the list was built changes what `carries` answers — on the NEXT pass
+//   - a destroyed member: it is still in the list, and carries nothing
+//
+// The trap, shown once on purpose: `mark` and `attach` land at the commit point (RULES 11), so the body
+// that marks an identity still sees it unmarked. `spawn` is immediate, so the list itself is right at
+// once; what its members carry is right from the next phase on.
+//
+//   veinc run samples/entities_list_carries.vein --ticks 3
+//   bash tools/check-backend.sh          (the same program, emitted to C# and diffed against the above)
+
+bundle EntitiesListCarries by you {
+    need "Vein.Console"
+
+    mark #Guard
+    mark #Asleep
+    mark #Captain
+
+    shape $Unit { name: string }
+    shape $Health { hp: int }
+    shape $Team { members: list<Entity> }
+
+    fn unit(name: string) return Entity {
+        let e = spawn()
+        attach $Unit to e { name: name }
+        return e
+    }
+
+    // How many in the list wear the mark.
+    fn guards(xs: list<Entity>) return int {
+        var n = 0
+        target xs as e {
+            if e carries #Guard { n += 1 }
+        }
+        return n
+    }
+
+    // The ones awake: a list made from a list, by what each carries.
+    fn awake(xs: list<Entity>) return list<Entity> {
+        var out: list<Entity> = []
+        target xs as e {
+            if not (e carries #Asleep) { out += e }
+        }
+        return out
+    }
+
+    // Does any of them carry the shape?
+    fn anyHealth(xs: list<Entity>) return bool {
+        var found = false
+        target xs as e {
+            if e carries $Health { found = true }
+        }
+        return found
+    }
+
+    fn names(xs: list<Entity>) return string {
+        var s = ""
+        target xs as e {
+            if e carries $Unit {
+                if not (s == "") { s = s + "," }
+                s = s + e.Unit.name
+            }
+        }
+        if s == "" { return "-" }
+        return s
+    }
+
+    shard Lane {
+        var lane: list<Entity> = []
+        var turn = 0
+
+        run once {
+            let ann = unit("ann")
+            let bo = unit("bo")
+            let cy = unit("cy")
+            let di = unit("di")
+            mark ann #Guard
+            mark cy #Guard
+            mark bo #Asleep
+            attach $Health to cy { hp: 5 }
+            lane = [ann, bo, cy]
+
+            // Same body: the list has its three, but the marks have not landed yet (RULES 11).
+            emit *Vein.Console.Io.@Print { text: "same body: size=" + len(lane) + " guards=" + guards(lane) }
+
+            // A list kept in a shape: the team's members, read back by another shard.
+            let team = spawn()
+            attach $Team to team { members: [bo, di] }
+            mark di #Captain
+        }
+
+        each tick {
+            turn += 1
+            if turn == 1 {
+                emit *Vein.Console.Io.@Print { text: "lane guards=" + guards(lane) + " awake=" + names(awake(lane)) + " health=" + anyHealth(lane) }
+
+                // Each member, asked one by one.
+                target lane as e {
+                    let g = e carries #Guard
+                    emit *Vein.Console.Io.@Print { text: e.Unit.name + " guard=" + g + " asleep=" + (e carries #Asleep) + " health=" + (e carries $Health) }
+                }
+
+                // The list was made before these: it holds the identities, so the next pass sees them.
+                target lane as e {
+                    if e carries #Guard { unmark e #Guard } else { mark e #Guard }
+                    if e carries #Asleep { unmark e #Asleep }
+                }
+            }
+            if turn == 2 {
+                emit *Vein.Console.Io.@Print { text: "flipped guards=" + guards(lane) + " who=" + names(lane) + " awake=" + names(awake(lane)) }
+                target lane as e {
+                    if e carries #Guard { emit *Vein.Console.Io.@Print { text: "  guard: " + e.Unit.name } }
+                }
+            }
+        }
+    }
+
+    shard Roll {
+        var turn = 0
+
+        each tick {
+            turn += 1
+            target $Team as t {
+                var captains = 0
+                target t.Team.members as m {
+                    if m carries #Captain { captains += 1 }
+                }
+                emit *Vein.Console.Io.@Print { text: "tick " + turn + " team=" + names(t.Team.members) + " size=" + len(t.Team.members) + " captains=" + captains }
+
+                // A destroyed member stays in the list, and carries nothing any more.
+                if turn == 1 {
+                    target t.Team.members as m {
+                        if m carries #Captain { destroy m }
+                    }
+                }
+            }
+        }
+    }
+}
