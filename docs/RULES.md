@@ -237,6 +237,13 @@ Deriving a quantity fresh means zeroing it first; the fold will not. And a child
 component — `c.Parent.of.Deck.count += 1` — because an entity plus a component name is a handle, which
 is how `samples/entities_tree.vein` aggregates without the parent holding a list of children.
 
+**13e. A payload folds too: every hearer reads it as it was emitted, and `hear @E settled` reads the result.**
+`p.note = "x"` in one `hear` is that hearer's contribution, invisible to the other hearers of the event; when
+all have run, the field's fold combines them (`folds sum`, `join "+"`, `append`…; none written: `only`, one
+writer). Two shards writing one unfolded field is a conflict (VS0409 at `veinc check`, a diagnostic at run
+time) — give it a fold. To read what everyone wrote, `hear @E settled as p`; to change it afterwards, emit a
+new event. Registration order decides nothing (D31, PAYLOAD-FOLDS.md).
+
 **13c. `$Parent` makes a `$Position` LOCAL, and the runtime publishes `$World`.** An identity carrying
 `*Vein.Core.Relations.$Parent` has its position read as an offset from that parent; the runtime composes
 the chain — parents first, each chain once — and writes `*Vein.Transform.Spatial.$World`. A crate on a

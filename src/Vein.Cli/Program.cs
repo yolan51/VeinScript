@@ -296,8 +296,10 @@ switch (command)
             string[] programArgs = dashdash < 0 ? Array.Empty<string>() : args[(dashdash + 1)..];
             int flagsEnd = dashdash < 0 ? args.Length : dashdash;
             int drainCap = 10_000;
+            bool reverseHearers = false;   // docs/PAYLOAD-FOLDS.md: does an event's result depend on its hearers' order?
             for (int i = 2; i < flagsEnd; i++)
                 if (Ticks(args, ref i) is { } t) ticks = t;
+                else if (args[i] == "--reverse-hearers") reverseHearers = true;
                 else if (args[i] == "--drain-cap" && i + 1 < flagsEnd && int.TryParse(args[i + 1], out var cap)) { drainCap = Math.Max(1, cap); i++; }
 
             // A live run of a program that opens windows would otherwise sit there drawing nothing. With
@@ -312,7 +314,7 @@ switch (command)
                 // A relative `@WriteFile` path means the PROGRAM's folder, not the shell's — run the same
                 // program from two directories and its saves used to land in two places, neither beside
                 // the `.vein` that asked for them.
-                var appInterp = new Interp { Ticks = ticks, FrameRate = ticks > 0 ? 0 : 60, BaseDirectory = projectDir, Args = programArgs, ErrorOutput = Console.Error, DrainCap = drainCap };   // the live frame clock: see below
+                var appInterp = new Interp { Ticks = ticks, FrameRate = ticks > 0 ? 0 : 60, BaseDirectory = projectDir, Args = programArgs, ErrorOutput = Console.Error, DrainCap = drainCap, ReverseHearers = reverseHearers };   // the live frame clock: see below
                 appInterp
                     .Run(la.Module, Console.In, Console.Out, messaging: true);
                 programExit = appInterp.ExitCode;
@@ -338,7 +340,7 @@ switch (command)
                     // A live run has a frame clock, at the 60 a second a built .exe has (BuildCommand): `each tick`
                     // ran in the .exe and never under `veinc run`, so the same program behaved differently by how
                     // it was started. With `--ticks` the run steps its own frames and needs no clock.
-                    var interp = new Interp { Ticks = ticks, FrameRate = ticks > 0 ? 0 : 60, BaseDirectory = projectDir, Args = programArgs, ErrorOutput = Console.Error, DrainCap = drainCap };
+                    var interp = new Interp { Ticks = ticks, FrameRate = ticks > 0 ? 0 : 60, BaseDirectory = projectDir, Args = programArgs, ErrorOutput = Console.Error, DrainCap = drainCap, ReverseHearers = reverseHearers };
                     interp.Run(module, Console.In, Console.Out, messaging: true);
                     if (interp.ExitCode != 0) programExit = interp.ExitCode;
                     if (interp.Stopped) break;   // `@Quit` ends the program, not just this bundle

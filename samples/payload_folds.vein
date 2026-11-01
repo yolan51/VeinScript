@@ -1,0 +1,50 @@
+// payload_folds.vein — six shards hear one event and all write to it; the result does not depend on their order.
+//
+//   veinc run samples/payload_folds.vein --ticks 1
+//   veinc run samples/payload_folds.vein --ticks 1 --reverse-hearers     (the same lines)
+//
+// Every hearer reads the payload AS IT WAS EMITTED — never another hearer's write — and its writes are its own
+// contribution to each field. When all six have run, each field's fold combines them; then `hear … settled`
+// reads the result. Registration order decides nothing (docs/PAYLOAD-FOLDS.md):
+//
+//   H1 heard score 10, 1 tag
+//   … the same for H2 to H6: each reads what was sent
+//   settled: score 31        `folds sum`: 10 sent, + 1 + 2 + 3 + 4 + 5 + 6
+//   settled: best 6          `folds max`: the largest written
+//   settled: tags sent, H1, H2, H3, H4, H5, H6   `folds append`: additions in canonical order (by shard)
+//   settled: who H1+H2+H3+H4+H5+H6               `folds join "+"`: the strings written, in canonical order
+//   settled: ok true         `folds all`: every write agreed
+//   settled: note sent       no fold (`only`) and nobody wrote it: as sent
+
+bundle PayloadFolds by you {
+    need "Vein.Console"
+
+    event @Ping {
+        score: int folds sum,
+        best: int folds max,
+        tags: list<string> folds append,
+        who: string folds join "+",
+        ok: bool folds all,
+        note: string,
+    }
+
+    shard Sender { run once { emit @Ping { score: 10, best: 0, tags: ["sent"], who: "", ok: true, note: "sent" } } }
+
+    shard H1 { hear @Ping as p { do print("H1 heard score " + p.score + ", " + len(p.tags) + " tag")  p.score += 1  p.best = 1  p.tags += "H1"  p.who = "H1" } }
+    shard H2 { hear @Ping as p { do print("H2 heard score " + p.score + ", " + len(p.tags) + " tag")  p.score += 2  p.best = 2  p.tags += "H2"  p.who = "H2" } }
+    shard H3 { hear @Ping as p { do print("H3 heard score " + p.score + ", " + len(p.tags) + " tag")  p.score += 3  p.best = 3  p.tags += "H3"  p.who = "H3" } }
+    shard H4 { hear @Ping as p { do print("H4 heard score " + p.score + ", " + len(p.tags) + " tag")  p.score += 4  p.best = 4  p.tags += "H4"  p.who = "H4" } }
+    shard H5 { hear @Ping as p { do print("H5 heard score " + p.score + ", " + len(p.tags) + " tag")  p.score += 5  p.best = 5  p.tags += "H5"  p.who = "H5" } }
+    shard H6 { hear @Ping as p { do print("H6 heard score " + p.score + ", " + len(p.tags) + " tag")  p.score += 6  p.best = 6  p.tags += "H6"  p.who = "H6" } }
+
+    shard Result {
+        hear @Ping settled as p {
+            do print("settled: score " + p.score)
+            do print("settled: best " + p.best)
+            do print("settled: tags " + join(p.tags, ", "))
+            do print("settled: who " + p.who)
+            do print("settled: ok " + p.ok)
+            do print("settled: note " + p.note)
+        }
+    }
+}

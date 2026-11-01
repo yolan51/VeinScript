@@ -28,6 +28,8 @@ public sealed class Interp
         /// The marks it carries NOW: seeded from `shard X #M`, changed by `mark !X #M` at a commit (D20).
         /// What `audience`, `carries` and `mute #M` read — `Fc.CarriedMarks` is only where it started.
         public readonly HashSet<string> Marks = new(StringComparer.Ordinal);
+        /// Its `@key` (`Author.Bundle.Name`), or its name: what orders hearers canonically when a payload folds.
+        public string Key = "";
     }
 
     /// Each shard by the `@key` Lower stamped on it — `Author.Bundle.Name`, the name `mute` resolves to.
@@ -50,6 +52,12 @@ public sealed class Interp
     {
         /// Where the `hear` is written (Lower's `@at`), for a fault to say so.
         public SourceAt? At { get; init; }
+
+        /// `hear @E settled as p`: runs after the ordinary hearers, reading the folded payload (docs/PAYLOAD-FOLDS.md).
+        public bool Settled { get; init; }
+
+        /// Its place among every hearer, in the order they were written — canonical order within one shard.
+        public int Order { get; init; }
     }
 
     /// A unit's place in the source: the file name and the line it starts on.
@@ -72,6 +80,7 @@ public sealed class Interp
     }
 
     private readonly Dictionary<string, List<Handler>> _handlers = new(StringComparer.Ordinal);
+    private int _handlerCount;
 
     /// A behaviour block the CLOCK drives rather than an event: `once`/`tick`/`frame`/`settled`/`every`.
     /// `Seconds` is meaningful only for `every N`; the frame-counted kinds leave it 0.
@@ -481,6 +490,7 @@ public sealed class Interp
             var fc = _registry.Register(shard.Name, kind, carriedShapes, carriedMarks, key);
             var inst = new Instance { Name = shard.Name, Fc = fc };
             inst.Marks.UnionWith(carriedMarks);
+            inst.Key = key ?? shard.Name;
             if (key is not null) _byKey[key] = inst;
             foreach (var f in shard.State)
                 inst.State[f.Name] = f.Default is { } init ? Eval(init, inst, new Dictionary<string, object?>()) : Default(f.Type.Name);
@@ -501,7 +511,10 @@ public sealed class Interp
                 string ev = hear.Args.Count > 0 ? hear.Args[0]?.ToString() ?? "" : "";
                 string bind = m.Params.Count > 0 ? m.Params[0].Name : "_";
                 _handlers.TryAdd(ev, new List<Handler>());
-                _handlers[ev].Add(new Handler(inst, bind, m.Body, AudienceOf(m.Attrs)) { At = AtOf(m.Attrs) });
+                _handlers[ev].Add(new Handler(inst, bind, m.Body, AudienceOf(m.Attrs))
+                {
+                    At = AtOf(m.Attrs), Settled = m.Attrs.Any(a => a.Name == "settled"), Order = _handlerCount++,
+                });
             }
         }
     }
@@ -1693,6 +1706,36 @@ public sealed class Interp
         }
     }
 
+    /// The payload after every ordinary hearer of one event: each declared field folded from what each hearer's copy
+    /// holds, in canonical order (shard key, then where the hearer is written). A conflict is raised as a fault of
+    /// the second writer's hearer would be, and the field keeps its emitted value (docs/PAYLOAD-FOLDS.md).
+    private Dictionary<string, object?> FoldPayload(string ev, Dictionary<string, object?> emitted,
+                                                     List<(Handler H, Dictionary<string, object?> Copy)> copies)
+    {
+        var result = (Dictionary<string, object?>)PayloadFold.Copy(emitted)!;
+        if (!_events.TryGetValue(ev, out var type)) return result;
+        var ordered = copies.OrderBy(c => c.H.Owner.Key, StringComparer.Ordinal).ThenBy(c => c.H.Order).ToList();
+        foreach (var f in type.Fields)
+        {
+            if (IsTail(f)) continue;   // `from`, `origin`, `source`: the runtime's, never a hearer's to fold
+            var values = ordered.Select(c => (c.H.Owner.Name, c.Copy.GetValueOrDefault(f.Name))).ToList();
+            result[f.Name] = PayloadFold.Combine(f.Name, f.Fold ?? FoldReducer.Only, f.FoldText, emitted.GetValueOrDefault(f.Name),
+                                                  values, out var conflict);
+            if (conflict is null) continue;
+            var second = ordered.First(c => c.H.Owner.Name == conflict.SecondWriter).H;
+            string phase = "hear @" + EventName(ev);
+            string message = $"{Where(second.Owner.Name, phase, second.At)}: {PayloadFold.Describe(EventName(ev), conflict)}";
+            if (ev == "DiagnosticRaised") { _faulted = true; Err?.WriteLine($"(error: {message})"); continue; }
+            Emit("DiagnosticRaised", new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["severity"] = 2L, ["message"] = message,
+                ["shard"] = second.Owner.Name, ["phase"] = phase, ["file"] = second.At?.File ?? "", ["line"] = second.At?.Line ?? 0L,
+                ["origin"] = null, ["bundle"] = _bundle,
+            });
+        }
+        return result;
+    }
+
     /// A diagnostic as the console shows it: the message, and where — unless the message already says
     /// (a fault's does: "Compute (once) at f.vein:88: …").
     private static string DiagnosticText(Dictionary<string, object?> payload)
@@ -1945,19 +1988,51 @@ public sealed class Interp
             }
 
             if (!_handlers.TryGetValue(name, out var hs)) continue;
-            foreach (var h in hs)
+            var hearers = ReverseHearers ? Enumerable.Reverse(hs).ToList() : hs;
+
+            // PAYLOAD FOLDS (docs/PAYLOAD-FOLDS.md). With more than one ordinary hearer, or a `settled` one, each
+            // hearer gets its OWN copy of the payload as it was emitted: it reads its own writes and never another
+            // hearer's. When all have run, each field's fold combines what they left (PayloadFold, canonical
+            // order), and the `settled` hearers read that. One hearer and no `settled`: nobody else could see its
+            // writes, so it hears the emitted payload itself, at no cost.
+            bool folding = hearers.Count(h => !h.Settled && Hears(h)) > 1 || hearers.Any(h => h.Settled && Hears(h));
+            var copies = folding ? new List<(Handler H, Dictionary<string, object?> Copy)>() : null;
+            foreach (var h in hearers)
+            {
+                if (h.Settled || !Admits(h)) continue;
+                var mine = folding ? (Dictionary<string, object?>)PayloadFold.Copy(payload)! : payload;
+                copies?.Add((h, mine));
+                Hear(h, mine);
+            }
+            if (folding)
+            {
+                var combined = FoldPayload(name, payload, copies!);
+                foreach (var h in hearers)
+                    if (h.Settled && Admits(h)) Hear(h, (Dictionary<string, object?>)PayloadFold.Copy(combined)!);
+            }
+
+            // Whether `h` hears this event — the same test Admits makes, without saying why not.
+            bool Hears(Handler h) => !IsMuted(h.Owner) && AudiencePermits(h, queued.Sender);
+
+            bool Admits(Handler h)
             {
                 // Muted: the event is DROPPED for it, not held — `unmute` does not replay what it missed.
-                if (IsMuted(h.Owner)) { _log.Add($"{h.Owner.Fc} MUTED @{name}"); continue; }
+                if (IsMuted(h.Owner)) { _log.Add($"{h.Owner.Fc} MUTED @{name}"); return false; }
                 // The SENDER the runtime recorded, not the payload's `from`: an event may declare a `from` of
                 // its own, and a barrier that read that one would test whatever the emit wrote.
                 if (!AudiencePermits(h, queued.Sender))
                 {
                     var f = queued.Sender as Dictionary<string, object?>;
                     _log.Add($"{h.Owner.Fc} BLOCKS @{name} (audience) from {f?.GetValueOrDefault("kind")}.{f?.GetValueOrDefault("name")}");
-                    continue;
+                    return false;
                 }
-                var locals = new Dictionary<string, object?> { [h.BindName] = payload };
+                return true;
+            }
+
+            void Hear(Handler h, Dictionary<string, object?> p)
+            {
+                _current = p;   // an emit inside it fills omitted fields from what IT sees: its own writes, no one else's
+                var locals = new Dictionary<string, object?> { [h.BindName] = p };
                 RunGuarded(h.Body, h.Owner, locals, "hear @" + EventName(name), at: h.At,
                            canRaise: name != "DiagnosticRaised");
             }
@@ -1994,6 +2069,11 @@ public sealed class Interp
     /// other forever. A simulation that legitimately sends more raises it: `veinc run --drain-cap N`, or the host's
     /// `VeinGame.DrainCap`. docs/PERF.md.
     public int DrainCap { get; set; } = 10_000;
+
+    /// Run each event's hearers in REVERSE registration order (`veinc run --reverse-hearers`). A program whose output
+    /// changes with it has a payload whose result depends on which shard was registered first — what payload
+    /// folds (docs/PAYLOAD-FOLDS.md) remove. A measuring tool, never a mode a program runs in.
+    public bool ReverseHearers { get; set; }
 
     private void DrainCapped()
     {
@@ -2110,6 +2190,9 @@ public sealed class Interp
     /// declares a `from` of its own, when the emit site passes the real one.
     private void Emit(string ev, Dictionary<string, object?> payload, object? sender = null)
     {
+        // The payload AS EMITTED (docs/PAYLOAD-FOLDS.md): a list the sender goes on changing after the emit is its
+        // own, not the hearers'. `xs[0] = 42` after `emit @Ping { items: xs }` used to reach every hearer.
+        foreach (var field in payload.Keys.ToList()) payload[field] = PayloadFold.Copy(payload[field]);
         if (ev == "DiagnosticRaised") Stamp(payload);
         // Every event gets its own id (not an entity id) and a causation chain, kept in the queue entry so the
         // chain is the runtime's whatever the payload says. The payload gets them too — `e.id`, `e.cause`,

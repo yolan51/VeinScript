@@ -578,7 +578,8 @@ public sealed partial class CSharpBackend : IVeinBackend
         sb.AppendLine("{");
         foreach (var e in events)
         {
-            sb.AppendLine($"    public sealed class {Ident(e.Name)}");
+            string cls = Ident(e.Name);
+            sb.AppendLine($"    public sealed class {cls} : IVeinPayload");
             sb.AppendLine("    {");
             // The DECLARED default when there is one: `emit @Shake { }` against `strength: int = 3` must carry
             // 3, as the interpreter's Emit fills it — it carried 0 here, and no sample read a defaulted
@@ -586,11 +587,45 @@ public sealed partial class CSharpBackend : IVeinBackend
             // An `emit` that names the field still overrides it, in the object initialiser.
             foreach (var f in e.Fields)
                 sb.AppendLine($"        public {Cs(f.Type)} {Ident(f.Name)} = {(f.Default is { } d ? Convert(Expr(d), CsOf(d), Cs(f.Type)) : ZeroOf(f.Type))};");
+
+            // Payload folds (docs/PAYLOAD-FOLDS.md): a copy all the way down — a value is copied by assignment, a
+            // list, map or record through PayloadFold.Copy — and each field folded by the interpreter's own rule.
+            const string Fold = "Vein.Compiler.Ir.PayloadFold";
+            string CopyOf(IrField f) => IsPlainValue(f.Type)
+                ? Ident(f.Name)
+                : $"{Fold}.To<{Cs(f.Type)}>({Fold}.Copy({Ident(f.Name)}))";
+            sb.AppendLine($"        public IVeinPayload CopyPayload() => new {cls} {{ {string.Join(", ", e.Fields.Select(f => $"{Ident(f.Name)} = {CopyOf(f)}"))} }};");
+            sb.AppendLine("        public IVeinPayload FoldPayload(IReadOnlyList<(string Hearer, IVeinPayload Copy)> hearers, List<Vein.Compiler.Ir.PayloadFold.Conflict> conflicts)");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            var r = ({cls})CopyPayload();");
+            foreach (var f in e.Fields.Where(f => !IsPayloadTail(f)))
+            {
+                string n = Ident(f.Name);
+                string text = f.FoldText is { } t ? "\"" + Escape(t) + "\"" : "null";
+                sb.AppendLine($"            {{ var v = {Fold}.Combine(\"{Escape(f.Name)}\", Vein.Compiler.Ir.FoldReducer.{f.Fold ?? FoldReducer.Only}, {text}, {n}, " +
+                              $"hearers.Select(h => (h.Hearer, (object?)(({cls})h.Copy).{n})).ToList(), out var k); r.{n} = {Fold}.To<{Cs(f.Type)}>(v); if (k is not null) conflicts.Add(k); }}");
+            }
+            sb.AppendLine("            return r;");
+            sb.AppendLine("        }");
             sb.AppendLine("    }");
         }
         sb.AppendLine("}");
         sb.AppendLine();
     }
+
+    /// A value no hearer can change in place — a number, text, a bool, an identity, an enum, the provenance — so a
+    /// copy of the payload copies it by assignment. Lists, maps, sets and records are copied all the way down.
+    private bool IsPlainValue(IrTypeRef t) =>
+        t.Name is "int" or "float" or "bool" or "string" or "Entity" || t.Name == Lower.ProvenanceType || _enumNames.Contains(t.Name);
+
+    /// `from`, `origin`, `source` as Lower's AddPayloadTail adds them: the runtime's, never a hearer's to fold
+    /// (Interp.IsTail, the same test).
+    private static bool IsPayloadTail(IrField f) => f.Name switch
+    {
+        "from" => f.Type.Name == Lower.ProvenanceType,
+        "origin" or "source" => f.Type.Name == "Entity",
+        _ => false,
+    };
 
     /// How an event payload type is written at a use site.
     private static string EventType(string name) => "Events." + Ident(name);
@@ -791,6 +826,7 @@ public sealed partial class CSharpBackend : IVeinBackend
         // One C# method per `hear`, even when a shard hears an event twice — with two audiences, say
         // (samples/patterns/06). Both were `hear_Damage`, and C# refused the second (CS0111).
         var handlerNames = new Dictionary<IrFunction, string>(ReferenceEqualityComparer.Instance);
+        var hearUnits = new Dictionary<IrFunction, string>(ReferenceEqualityComparer.Instance);   // each `hear`'s unit field
         var everies = new List<string>();   // `World.Every(this, N, every_k);` — registered in Subscribe, in declaration order
         var taken = new HashSet<string>(StringComparer.Ordinal);
         foreach (var m in shard.Methods.Where(x => x.Attrs.Any(a => a.Name == "hear")))
@@ -864,6 +900,7 @@ public sealed partial class CSharpBackend : IVeinBackend
                 _bound.Add(p?.Name ?? "e");
                 _localCs[Ident(p?.Name ?? "e")] = EventType(ev);   // a payload is its event's class, not a record
                 string unit = Unit(sb, shard, m, "hear @" + Interp.EventName(ev));
+                hearUnits[m] = unit;
                 sb.AppendLine($"    private void {handlerNames[m]}({EventType(ev)} {Ident(p?.Name ?? "e")})");
                 sb.AppendLine("    {");
                 GuardOpen(sb, unit);
@@ -948,15 +985,17 @@ public sealed partial class CSharpBackend : IVeinBackend
                 var (access, alone) = _lanes.AccessOf(shard, m);
                 static string Names(IReadOnlyList<string> names) =>
                     names.Count == 0 ? "System.Array.Empty<string>()" : "new[] { " + string.Join(", ", names.Select(n => "\"" + Escape(n) + "\"")) + " }";
-                string lane = serial is not null ? ""
-                    : access is null ? ", true"
+                string lane = serial is not null ? ", false, null"
+                    : access is null ? ", true, null"
                     : $", true, new VeinAccess({Names(access.Reads)}, {Names(access.Writes)}, {Names(access.Adds)})";
                 if (serial is not null) sb.AppendLine($"        // hear @{Interp.EventName(ev!)}: serial lane — {serial}");
                 else if (access is null) sb.AppendLine($"        // hear @{Interp.EventName(ev!)}: handled alone — {alone}");
-                if (gate is not null)
-                    sb.AppendLine($"        World.On(\"{ev}\", this, p => {{ var __f = (({EventType(ev!)})p).from; if ({gate}) {handlerNames[m]}(({EventType(ev!)})p); }}{lane});");
-                else
-                    sb.AppendLine($"        World.On(\"{ev}\", this, p => {handlerNames[m]}(({EventType(ev!)})p){lane});");
+                // Its unit names its shard when its payload write conflicts; `settled` and the audience go to the
+                // drain, which must know who hears an event before any of them runs (docs/PAYLOAD-FOLDS.md).
+                string more = $", unit: {hearUnits[m]}"
+                    + (m.Attrs.Any(a => a.Name == "settled") ? ", settled: true" : "")
+                    + (gate is not null ? $", gate: p => {{ var __f = (({EventType(ev!)})p).from; return {gate}; }}" : "");
+                sb.AppendLine($"        World.On(\"{ev}\", this, p => {handlerNames[m]}(({EventType(ev!)})p){lane}{more});");
                 if (m.Attrs.Any(a => a.Name == "audience") && gate is null)
                     _notes.Add($"{shard.Name}.{m.Name}: `audience` not enforced — the C# backend delivers " +
                                "this event from every sender (the event declares its own `from`).");

@@ -18,7 +18,10 @@ public sealed record IrTypeRef(string Name, IReadOnlyList<IrTypeRef> Args, bool 
 }
 
 public enum IrTypeKind { Struct, Enum, Component, Message, Tag }
-public enum FoldReducer { Sum, Min, Max, Replace, First, All, Any }
+/// How contributions to one field combine. The last six are PAYLOAD folds (docs/PAYLOAD-FOLDS.md): `Only` — at most
+/// one value may be written, the default; `Append` / `AppendSorted` — a list's additions and removals; `Join` — the
+/// strings written, joined by IrField.FoldText; `Union` — a set; `Merge` — a map.
+public enum FoldReducer { Sum, Min, Max, Replace, First, All, Any, Only, Append, AppendSorted, Join, Union, Merge }
 
 public sealed record IrField(string Name, IrTypeRef Type, FoldReducer? Fold, IrExpr? Default = null)
 {
@@ -29,6 +32,9 @@ public sealed record IrField(string Name, IrTypeRef Type, FoldReducer? Fold, IrE
     /// A `~` collection field (D24): what the runtime keeps true when it changes — a set's uniqueness, a
     /// ring's size — and the element type `add` checks. The field's Type is `list<Element>`. Null otherwise.
     public IrCollection? Collection { get; init; }
+
+    /// `folds join ", "` on a payload field: the text between the joined strings. Null otherwise.
+    public string? FoldText { get; init; }
 }
 
 /// A collection's kind (`list`, `set`, `ring`), a ring's size, and the declared element type (D24) — with

@@ -669,6 +669,11 @@ public class SilentRuntimeTests : IDisposable
         // Vein Cards #15, as reported: the second handler's write was said to land on the placeholder. It
         // lands on the record the first handler assigned — handlers of one event run in declaration order,
         // each seeing the shard's state as the one before left it.
+        //
+        // The EVENT does not change with it (docs/PAYLOAD-FOLDS.md): each hearer reads the payload as it was emitted,
+        // on a copy of its own, so the record the first handler kept is its copy, and the third hearer's `r3.db` is
+        // still what Boot sent. It used to print `event {"name":"real","x":1}` — a hearer reaching into what the
+        // next one hears.
         var (output, _, _) = Run("""
             bundle T by you {
                 event @Ready { db: string }
@@ -687,6 +692,6 @@ public class SilentRuntimeTests : IDisposable
             }
             """);
 
-        Assert.Contains("engine {\"name\":\"real\",\"x\":1} | event {\"name\":\"real\",\"x\":1}", output);
+        Assert.Contains("engine {\"name\":\"real\",\"x\":1} | event {\"name\":\"real\"}", output);
     }
 }

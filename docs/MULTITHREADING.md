@@ -87,11 +87,12 @@ A unit is **serial** when it:
   happens at the call, and a later shard may read what an earlier one wrote;
 - uses `weave` / `toText` — they spawn, and woven names are one table;
 - reads another shard's setting live (`!S.x`), or belongs to a shard whose settings are read live;
-- changes a list or a record IN PLACE (`xs[0] = v`, `p.note = v`, `p.trail += x`). A list in a payload is the
-  sender's own, shared by every hearer, not a copy — the repro programs ping_six, ping_alias and ping_after
-  show a hearer's change reaching the hearers after it, and a sender's change after `emit` reaching the
-  hearers. Who sees such a change depends on who runs first, so it stays in order. (`xs += v` on a variable
-  makes a new list, and a shape's field is a value each unit copies: neither counts.)
+- changes a list or a record IN PLACE (`xs[0] = v`, `r.note = v`) kept in a shard `var` or a shape field, which
+  other units may read too: who sees the change depends on who runs first, so it stays in order. (`xs += v` on
+  a variable makes a new list, and a shape's field value is copied into each unit: neither counts.) A hearer's
+  OWN payload does not count either since payload folds (D31): a payload is copied at `emit` and per hearer, so
+  `p.items[0] = v` reaches no one else — before, a payload's list was the sender's own, shared by every hearer
+  (the ping_six, ping_alias and ping_after repros).
 
 The emitted C# says it on each shard, with the reason:
 

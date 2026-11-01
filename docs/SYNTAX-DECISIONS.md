@@ -1187,6 +1187,37 @@ and one step at a time takes the next of them (`target $Ability #Pending ordered
 marks its own work ahead of what is waiting, in that order. No second queue discipline, and no existing
 program changes order.
 
+## D31 — Payload folds: every hearer reads the payload as emitted; `hear @E settled` {#payload-folds}
+
+**ADOPTED (the user, 2026-11-01).** Proposal and full table: [PAYLOAD-FOLDS.md](PAYLOAD-FOLDS.md).
+
+Hearers of one event ran in registration order, and a hearer that wrote `p.note` changed what every hearer after
+it read — a payload's list was even the sender's own (`ping_six`, `ping_alias`, `ping_after`). Which shard was
+registered first decided the numbers; adding a bundle changed them silently.
+
+Now, as `folds` did for shape fields (D4, RULES 13):
+
+```
+event @Ping { score: int folds sum, tags: list<string> folds append, who: string folds join "+", note: string }
+shard A { hear @Ping as p { p.score += 5   p.tags += "A" } }
+shard Z { hear @Ping settled as p { do print(p.score) } }      // emitted + every hearer's amount, any order
+```
+
+- A payload is copied at `emit`; with two or more hearers (or a `settled` one) each hearer gets its own copy and
+  reads its own writes, never another's.
+- After the ordinary hearers, each field FOLDS what they wrote, in canonical order (the shard's key, then
+  where the `hear` is written). `hear @E settled` hearers then read the result, and may not write it (VS0407).
+- Folds: `sum`, `min`, `max`, `all`, `any`, `join "sep"`, `append`, `append sorted`, `union`, `merge`; none
+  written means `only` — at most one value — except a `set` (`union`) and a `map` (`merge`). `first` and
+  `replace` are refused on a payload (VS0405): they mean "order decides".
+- Two different values in an `only` field are a conflict: raised as `@DiagnosticRaised`, the field keeps the
+  value it was sent with, the run goes on. `veinc check` warns first when two hearers in one bundle write such a
+  field (VS0409).
+
+The user's choices on the open questions: a conflict keeps the emitted value; `set`/`map` default to
+`union`/`merge`; a hearer's emit built from `p` carries its own writes. One implementation for both runtimes
+(`Ir/PayloadFold.cs`). For threads, a hearer's write into its own payload no longer keeps it on the serial lane.
+
 ## Reserved-word disposition
 
 Every keyword currently in [Lexer.cs](../src/Vein.Compiler/Lexing/Lexer.cs) `Keywords`, classified.

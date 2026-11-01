@@ -595,6 +595,20 @@ public sealed class Parser
     /// `folds count` is an unknown reducer — said in Lower's own words — rather than a reserved name to rename.
     private string ExpectReducer()
     {
+        // Two payload folds take a word after them (docs/PAYLOAD-FOLDS.md): `join "sep"` — kept as `join:sep` —
+        // and `append sorted`.
+        if (Check(TokenKind.Ident) && Cur.Text == "join")
+        {
+            Advance();
+            return "join:" + (Check(TokenKind.String) ? Advance().Value as string ?? "" : Expect(TokenKind.String, "the text between the joined strings, `join \", \"`").Text);
+        }
+        if (Check(TokenKind.Ident) && Cur.Text == "append")
+        {
+            Advance();
+            if (!(Check(TokenKind.Ident) && Cur.Text == "sorted")) return "append";
+            Advance();
+            return "append sorted";
+        }
         if (Check(TokenKind.Ident)) return Advance().Text;
         if (!IsReservedWord(Cur.Kind)) return Expect(TokenKind.Ident, "fold reducer").Text;
         _diag.Error("VS0200", $"Unknown fold reducer '{Cur.Text}'. Use sum/min/max/replace/first/all/any.", Here);
@@ -1178,6 +1192,8 @@ public sealed class Parser
     {
         var s = Here; Advance();
         var (evPath, ev) = ParseEventRef("@EventName");
+        // `hear @E settled as p` (docs/PAYLOAD-FOLDS.md): runs after every ordinary hearer, with the folded payload.
+        bool settled = Match(TokenKind.KwSettled);
         Expect(TokenKind.KwAs, "'as'");
         string bind = Expect(TokenKind.Ident, "binding").Text;
         // Optional audience barrier: only react to emitters carrying these shapes/marks, or sent by these
@@ -1207,6 +1223,7 @@ public sealed class Parser
         return new HearBlock(ev, bind, audShapes, audMarks, ParseBlock(), s)
         {
             EventPath = evPath, ExcludedShapes = notShapes, ExcludedMarks = notMarks, AudienceShards = shards,
+            Settled = settled,
         };
     }
 

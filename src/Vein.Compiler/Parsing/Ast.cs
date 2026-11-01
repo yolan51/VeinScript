@@ -285,6 +285,10 @@ public sealed record HearBlock(
 
     /// `audience !Ledger not *you.Billing.!Invoicer` — senders named by shard (D19).
     public IReadOnlyList<AudienceShard> AudienceShards { get; init; } = Array.Empty<AudienceShard>();
+
+    /// `hear @E settled as p` — after every ordinary hearer of the event, reading the payload as its fields' folds
+    /// combined what they wrote. Read-only (docs/PAYLOAD-FOLDS.md).
+    public bool Settled { get; init; }
 }
 
 /// One `!Shard` in an `audience` list. `Path` is empty for a shard of this bundle, else `Author.Bundle`.

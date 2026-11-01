@@ -415,6 +415,7 @@ public sealed partial class Lower
         CheckEnumArms();
         CheckRecordsInTypedFields(module);
         CheckStatesAsText(module);
+        CheckPayloadWriters();
         return module;
     }
 
@@ -2014,12 +2015,76 @@ public sealed partial class Lower
     {
         UseTypes(e.Members);
         foreach (var m in e.Members.OfType<FieldDecl>()) CheckMoneyFloat("@" + e.Name + "." + m.Name, m.Name, m.Type, m.Default, m.Span);
+        // A field's fold is written on the event's own field; an included shape's field takes its type's default.
+        var declared = e.Members.OfType<FieldDecl>().Where(f => f.Fold is not null).GroupBy(f => f.Name).ToDictionary(g => g.Key, g => g.First());
         var fields = ExpandMembers(e.Members)
-            .Select(m => new IrField(m.Name, Ty(m.Type), null, LowerDefault(m.Default))).ToList();
+            .Select(m => PayloadField(e.Name, m.Name, Ty(m.Type), declared.GetValueOrDefault(m.Name), LowerDefault(m.Default))).ToList();
+        _payloadFolds[EventKey(Array.Empty<string>(), e.Name)] = fields.GroupBy(f => f.Name).ToDictionary(g => g.Key, g => g.First().Fold);
         // Every event carries its emitter's identity and its provenance — see AddPayloadTail.
         AddPayloadTail(fields);
         return new IrType(EventKey(Array.Empty<string>(), e.Name), IrTypeKind.Message, fields, Array.Empty<IrEnumCase>(), e.Doc,
             new[] { IrAttr.Of("message"), IrAttr.Of("origin", "auto") });
+    }
+
+    /// A payload field and its FOLD (docs/PAYLOAD-FOLDS.md): every hearer of one event reads the payload as it was
+    /// emitted, a write is that hearer's contribution, and once all have run the field's fold combines them — so
+    /// which shard was registered first decides nothing. With no `folds`: `union` for a set, `merge` for a map,
+    /// `only` for everything else (at most one value may be written; two different ones are a conflict).
+    private IrField PayloadField(string ev, string name, IrTypeRef type, FieldDecl? decl, IrExpr? def)
+    {
+        string kind = type.Name;
+        FoldReducer fold = kind == "set" ? FoldReducer.Union : kind == "map" ? FoldReducer.Merge : FoldReducer.Only;
+        string? text = null;
+        if (decl?.Fold is { } written)
+        {
+            FoldReducer? chosen = written switch
+            {
+                "sum" => FoldReducer.Sum, "min" => FoldReducer.Min, "max" => FoldReducer.Max,
+                "all" => FoldReducer.All, "any" => FoldReducer.Any, "only" => FoldReducer.Only,
+                "append" => FoldReducer.Append, "append sorted" => FoldReducer.AppendSorted,
+                "union" => FoldReducer.Union, "merge" => FoldReducer.Merge,
+                _ when written.StartsWith("join:", StringComparison.Ordinal) => FoldReducer.Join,
+                _ => null,
+            };
+            if (written is "first" or "replace")
+                _diag.Error("VS0405", $"`@{ev}.{name} folds {written}`: on a payload, `{written}` means the hearer registered " +
+                    "first (or last) wins — the order this fold exists to remove. A payload field takes `only` (the default: one " +
+                    "writer), `sum`, `min`, `max`, `all`, `any`, `join \"…\"`, `append`, `union` or `merge`.", decl.Span);
+            else if (chosen is null)
+                _diag.Error("VS0200", $"Unknown payload fold '{written}' on `@{ev}.{name}`. Use only/sum/min/max/all/any/join \"…\"/" +
+                    "append/append sorted/union/merge.", decl.Span);
+            else if (!PayloadFoldFits(chosen.Value, kind))
+                _diag.Error("VS0406", $"`@{ev}.{name}: {type} folds {written.Replace("join:", "join ")}` — {FoldNeeds(chosen.Value)}.", decl.Span);
+            else
+            {
+                fold = chosen.Value;
+                if (fold == FoldReducer.Join) text = written["join:".Length..];
+            }
+        }
+        return new IrField(name, type, fold, def) { FoldText = text };
+
+        // An undeclared type (`infer`) is not refused: what it holds is only known at run time.
+        static bool PayloadFoldFits(FoldReducer f, string kind) => kind == "infer" || f switch
+        {
+            FoldReducer.Sum => kind is "int" or "float",
+            FoldReducer.Min or FoldReducer.Max => kind is "int" or "float" or "string",
+            FoldReducer.All or FoldReducer.Any => kind == "bool",
+            FoldReducer.Join => kind == "string",
+            FoldReducer.Append or FoldReducer.AppendSorted => kind == "list",
+            FoldReducer.Union => kind == "set",
+            FoldReducer.Merge => kind == "map",
+            _ => true,
+        };
+        static string FoldNeeds(FoldReducer f) => f switch
+        {
+            FoldReducer.Sum => "`sum` adds numbers: an int or a float",
+            FoldReducer.Min or FoldReducer.Max => "`min`/`max` compare numbers or strings",
+            FoldReducer.All or FoldReducer.Any => "`all`/`any` combine bools",
+            FoldReducer.Join => "`join` joins strings",
+            FoldReducer.Append or FoldReducer.AppendSorted => "`append` adds to a list",
+            FoldReducer.Union => "`union` combines sets",
+            _ => "`merge` combines maps",
+        };
     }
 
     private IrType LowerEnum(EnumDecl e, string? scope)
@@ -2567,10 +2632,89 @@ public sealed partial class Lower
         using (HearReads(hb))
         using (BodyNames(new[] { hb.Bind }))
             body = LowerBlock(hb.Body);
+        if (hb.Settled) attrs.Add(IrAttr.Of("settled"));
+        CheckPayloadWrites(hb, EventKey(hb.EventPath, hb.Event), body);
         return new IrFunction(
             $"hear_{hb.Event}",
             new[] { new IrParam(hb.Bind, IrTypeRef.Of(EventKey(hb.EventPath, hb.Event))) },
             IrTypeRef.Of("void"), body, false, null, attrs);
+    }
+
+    /// Each event's payload folds, by field, as LowerEvent decided them — for the checks on a hearer's writes.
+    private readonly Dictionary<string, Dictionary<string, FoldReducer?>> _payloadFolds = new(StringComparer.Ordinal);
+
+    /// Who writes each payload field — the shard and its `hear` — for VS0409.
+    private readonly Dictionary<(string Event, string Field), List<(string Shard, HearBlock Hear)>> _payloadWriters = new();
+
+    /// VS0409, a warning: two hearers write one payload field that has no fold. At run time two different values
+    /// there are a conflict, raised, and the field keeps what was sent — said here, before the program runs. Within
+    /// this bundle; hearers in other bundles meet only when an app links them, and the run-time conflict says it.
+    private void CheckPayloadWriters()
+    {
+        foreach (var ((ev, field), writers) in _payloadWriters)
+        {
+            if (writers.Count < 2 || _payloadFolds.GetValueOrDefault(ev)?.GetValueOrDefault(field) is not FoldReducer.Only) continue;
+            string name = ev[(ev.LastIndexOf('.') + 1)..];
+            _diag.Warning("VS0409", $"`@{name}.{field}` has no fold and is written by {writers[0].Shard} and {writers[1].Shard}" +
+                (writers.Count > 2 ? $" (and {writers.Count - 2} more)" : "") + ": two different values there are a conflict, and the " +
+                $"field keeps what was sent. Give it a fold — `{field}: … folds sum`, `folds join \", \"`, `folds append` — or let one shard write it.",
+                writers[1].Hear.Span);
+        }
+    }
+
+    /// docs/PAYLOAD-FOLDS.md. A `settled` hearer reads the payload as the folds combined it, after everyone wrote:
+    /// a write there has no later round to combine with (VS0407). And `p.list[i] = v` on a list that folds by
+    /// `append` depends on what the other hearers added before index i (VS0408).
+    private void CheckPayloadWrites(HearBlock hb, string eventKey, IrBlock body)
+    {
+        var folds = _payloadFolds.GetValueOrDefault(eventKey);
+        Walk(body, s =>
+        {
+            if (s is not IrAssign { Target: var target } || RootName(target) != hb.Bind) return;
+            if (hb.Settled)
+                _diag.Error("VS0407", $"A `hear @{hb.Event} settled` reads the payload as every hearer's writes combined, so it " +
+                    $"cannot write `{hb.Bind}` — there is no later round for the write to join. To change something, emit a new event.", hb.Span);
+            else if (target is IrIndex { Receiver: IrFieldAccess { Receiver: IrLocalRef, Field: var field } } && folds is not null
+                     && folds.GetValueOrDefault(field) is FoldReducer.Append or FoldReducer.AppendSorted)
+                _diag.Error("VS0408", $"`{hb.Bind}.{field}[…] = …`: `@{hb.Event}.{field}` folds by `append`, and which element is at " +
+                    $"an index depends on what the other hearers added. Add with `{hb.Bind}.{field} += x`, remove with `-= x`.", hb.Span);
+            if (!hb.Settled && PayloadField(target) is { } written)
+            {
+                var writers = _payloadWriters.TryGetValue((eventKey, written), out var w) ? w : _payloadWriters[(eventKey, written)] = new();
+                if (!writers.Any(x => ReferenceEquals(x.Hear, hb))) writers.Add((_unit?.Split(':')[0] ?? "", hb));
+            }
+        });
+
+        // The payload field a write lands in: `p.note`, `p.tags[0]`, `p.pos.x` all write a field of `p`.
+        string? PayloadField(IrExpr e) => e switch
+        {
+            IrFieldAccess { Receiver: IrLocalRef l, Field: var f } when l.Name == hb.Bind => f,
+            IrFieldAccess f => PayloadField(f.Receiver),
+            IrIndex i => PayloadField(i.Receiver),
+            _ => null,
+        };
+
+        static string? RootName(IrExpr e) => e switch
+        {
+            IrLocalRef l => l.Name,
+            IrFieldAccess f => RootName(f.Receiver),
+            IrIndex i => RootName(i.Receiver),
+            _ => null,
+        };
+        static void Walk(IrStmt? s, Action<IrStmt> visit)
+        {
+            if (s is null) return;
+            visit(s);
+            switch (s)
+            {
+                case IrBlock b: foreach (var x in b.Statements) Walk(x, visit); break;
+                case IrIf i: Walk(i.Then, visit); Walk(i.Else, visit); break;
+                case IrLoop l: Walk(l.Body, visit); break;
+                case IrMatch m: foreach (var a in m.Arms) Walk(a.Body, visit); Walk(m.Else, visit); break;
+                case IrOrdered o: Walk(o.Collect, visit); break;
+                case IrOrderedBring ob: Walk(ob.Body, visit); break;
+            }
+        }
     }
 
     // ---- statements -----------------------------------------------------

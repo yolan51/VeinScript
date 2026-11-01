@@ -232,9 +232,10 @@ public class CSharpBackendTests
         // The two runtimes agreeing on it is the whole point; check-backend.sh catches them drifting.
         Assert.Contains("private void hear_Ping(Events.me_T_Ping p)", code);
         // `, true`: its lane (Ir/Lanes.cs) — a print is held on a tray, so it may share the event with other hearers;
-        // and its access (P6), empty: it touches nothing in the world, so a @Ping may join any batch.
+        // its access (P6), empty: it touches nothing in the world, so a @Ping may join any batch; and its unit, which
+        // names its shard if its payload write conflicts with another hearer's (docs/PAYLOAD-FOLDS.md).
         Assert.Contains("World.On(\"me.T.Ping\", this, p => hear_Ping((Events.me_T_Ping)p), true, " +
-                        "new VeinAccess(System.Array.Empty<string>(), System.Array.Empty<string>(), System.Array.Empty<string>()));", code);
+                        "new VeinAccess(System.Array.Empty<string>(), System.Array.Empty<string>(), System.Array.Empty<string>()), unit: __unit", code);
         Assert.DoesNotContain(notes, n => n.Contains("hear"));
     }
 

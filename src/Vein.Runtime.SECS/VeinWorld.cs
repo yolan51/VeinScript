@@ -525,12 +525,9 @@ public sealed class VeinWorld
     private readonly List<Tray> _trays = new();
     /// Trays handed out and not yet emptied — those from `mark` up belong to the phase or event in progress.
     private int _trayCount;
-    /// Above 0 while a phase or drain runs INSIDE a unit (a host hook that drives the world): trays are off.
-    private int _traysOff;
 
     /// Where the trays of a phase or an event start. A phase that starts inside a running unit — only a host
-    /// hook can do that — first empties every tray so far, in order, and then runs with trays off: exactly what
-    /// it did before there were trays.
+    /// hook can do that — first empties every tray so far, in order: what it did before there were trays.
     private int BeginTrays(out Tray? suspended)
     {
         suspended = TrayNow;
@@ -538,7 +535,6 @@ public sealed class VeinWorld
         {
             for (int i = 0; i < _trayCount; i++) _trays[i].Replay(this);
             TrayNow = null;
-            _traysOff++;
         }
         return _trayCount;
     }
@@ -547,16 +543,7 @@ public sealed class VeinWorld
     {
         for (int i = mark; i < _trayCount; i++) _trays[i].Replay(this);
         _trayCount = mark;
-        if (suspended is not null) { _traysOff--; TrayNow = suspended; }
-    }
-
-    /// A fresh tray for the unit about to run. Returns the one to put back after it.
-    private Tray? OpenTray()
-    {
-        var outer = TrayNow;
-        if (_traysOff > 0) return outer;
-        TrayNow = NextTray();
-        return outer;
+        if (suspended is not null) TrayNow = suspended;
     }
 
     private Tray NextTray()
@@ -699,24 +686,6 @@ public sealed class VeinWorld
             }
             finally { _shared = false; }
         }
-    }
-
-    /// `units` cut into Threads runs of neighbours, each run on its own tray, the trays emptied in run order.
-    private void InRuns<T>(List<T> units, Action<T> run)
-    {
-        int mark = BeginTrays(out var suspended);
-        try
-        {
-            int runs = Math.Min(Threads, units.Count);
-            for (int r = 0; r < runs; r++)
-            {
-                int from = units.Count * r / runs, to = units.Count * (r + 1) / runs;
-                var outer = OpenTray();
-                try { for (int i = from; i < to; i++) run(units[i]); }
-                finally { TrayNow = outer; }
-            }
-        }
-        finally { EndTrays(mark, suspended); }
     }
 
     /// What a tray holds, put where it would have gone at once.
@@ -1215,7 +1184,26 @@ public sealed class VeinWorld
 
     /// Each queued event with where it was emitted — the unit and its line — for DrainCapped to name.
     private readonly Queue<(string Name, object Payload, VeinUnit? Site, long Line)> _events = new();
-    private readonly Dictionary<string, List<(VeinSystem? Owner, Action<object> Handler, bool Shareable, Touches? Access)>> _handlers = new(StringComparer.Ordinal);
+    /// One `hear`: who owns it, what it runs, and what the drain must know before running it.
+    private sealed class Hearer(VeinSystem? owner, Action<object> handler)
+    {
+        public readonly VeinSystem? Owner = owner;
+        public readonly Action<object> Handler = handler;
+        /// Its lane (Ir/Lanes.cs), and what it reads, writes and adds to (P6) — null: the event it hears goes alone.
+        public bool Shareable;
+        public Touches? Access;
+        /// `hear @E settled`: after the ordinary hearers, reading the folded payload (docs/PAYLOAD-FOLDS.md).
+        public bool Settled;
+        /// Its unit — the shard a conflict names as a writer. Null for a host's handler.
+        public VeinUnit? Unit;
+        /// Its `audience` (D19), asked of the payload before it runs; null admits every sender.
+        public Func<object, bool>? Gate;
+        /// The order hearers were registered in: canonical order among one shard's hearers, as Interp's.
+        public int Order;
+    }
+
+    private readonly Dictionary<string, List<Hearer>> _handlers = new(StringComparer.Ordinal);
+    private int _hearerCount;
 
     /// Register a `hear` handler. Called from a system's `Subscribe`, before the first phase runs, so a
     /// `run once` that emits is never racing a handler that has not subscribed yet.
@@ -1225,12 +1213,18 @@ public sealed class VeinWorld
     /// it rather than held — Interp's rule.
     public void On(string @event, VeinSystem? owner, Action<object> handler) => On(@event, owner, handler, false);
 
-    /// The same, with its lane (Ir/Lanes.cs): `shareable` lets it run on a worker beside the event's other hearers;
-    /// `access`, what it reads, writes and adds to, lets the event it hears join a batch (P6). No access: alone.
-    public void On(string @event, VeinSystem? owner, Action<object> handler, bool shareable, VeinAccess? access = null)
+    /// The same, with its lane (Ir/Lanes.cs): `shareable` lets it run on a worker; `access`, what it reads, writes
+    /// and adds to, lets the event it hears join a batch (P6) — no access: alone. `settled`, `unit` and `gate`: a
+    /// `hear … settled`, the hearer's unit, and its audience (docs/PAYLOAD-FOLDS.md).
+    public void On(string @event, VeinSystem? owner, Action<object> handler, bool shareable, VeinAccess? access = null,
+                   bool settled = false, VeinUnit? unit = null, Func<object, bool>? gate = null)
     {
         if (!_handlers.TryGetValue(@event, out var list)) _handlers[@event] = list = new();
-        list.Add((owner, handler, shareable, shareable && access is not null ? Intern(access) : null));
+        list.Add(new Hearer(owner, handler)
+        {
+            Shareable = shareable, Access = shareable && access is not null ? Intern(access) : null,
+            Settled = settled, Unit = unit, Gate = gate, Order = _hearerCount++,
+        });
         _muteVersion++;   // who hears it changed: the event's batch plan is stale
     }
 
@@ -1239,6 +1233,8 @@ public sealed class VeinWorld
     /// recursing into itself.
     public void Emit(string @event, object payload)
     {
+        // The payload AS EMITTED (docs/PAYLOAD-FOLDS.md, Interp.Emit): a list the sender goes on changing is its own.
+        if (payload is IVeinPayload sent) payload = sent.CopyPayload();
         // A diagnostic raised inside a unit — `do warn(…)` — says where, as Interp.Stamp makes it.
         if (@event == "DiagnosticRaised" && Unit is { } unit) StampDiagnostic?.Invoke(payload, unit);
         if (TrayNow is { } tray) tray.Ops.Add(new TrayOp(OpKind.Emit, @event, payload, Unit, Line));
@@ -1273,25 +1269,55 @@ public sealed class VeinWorld
             {
                 string? outer = _draining;
                 _draining = name;
-                try
-                {
-                    if (Threads <= 1 || hs.Count < Math.Max(2, ShareFrom))
-                    {
-                        foreach (var (owner, h, _, _) in hs)
-                            if (owner is null || !IsMuted(owner)) h(payload);
-                    }
-                    else
-                    {
-                        // Shared like a phase: runs of neighbouring handlers, the trays emptied in the order they subscribed.
-                        var heard = new List<Action<object>>(hs.Count);
-                        foreach (var (owner, h, _, _) in hs) if (owner is null || !IsMuted(owner)) heard.Add(h);
-                        InRuns(heard, h => h(payload));
-                    }
-                }
+                try { HearEvent(name, payload, hs); }
                 finally { _draining = outer; }
             }
             Commit();
         }
+    }
+
+    /// One event's hearers — Interp.Drain's rule, line for line (docs/PAYLOAD-FOLDS.md). With more than one
+    /// ordinary hearer, or a `settled` one, each hearer gets its OWN copy of the payload as emitted: it reads its own
+    /// writes, never another's. When all have run, the payload's fields fold what they left, in canonical order (the
+    /// shard's key, then registration), a conflict reported as a fault of the second writer; then the `settled`
+    /// hearers read the result. One hearer and no `settled`: it hears the emitted payload itself, at no cost.
+    private void HearEvent(string name, object payload, List<Hearer> hs)
+    {
+        bool Admits(Hearer h) => (h.Owner is null || !IsMuted(h.Owner)) && (h.Gate is null || h.Gate(payload));
+        int ordinary = 0;
+        bool settled = false;
+        foreach (var h in hs)
+            if (Admits(h)) { if (h.Settled) settled = true; else ordinary++; }
+
+        if ((ordinary < 2 && !settled) || payload is not IVeinPayload emitted)
+        {
+            foreach (var h in hs) if (!h.Settled && Admits(h)) h.Handler(payload);
+            foreach (var h in hs) if (h.Settled && Admits(h)) h.Handler(payload);
+            return;
+        }
+
+        var copies = new List<(Hearer H, IVeinPayload Copy)>();
+        foreach (var h in hs)
+        {
+            if (h.Settled || !Admits(h)) continue;
+            var mine = emitted.CopyPayload();
+            copies.Add((h, mine));
+            h.Handler(mine);
+        }
+        var ordered = copies.OrderBy(c => c.H.Owner?.Key ?? "", StringComparer.Ordinal).ThenBy(c => c.H.Order).ToList();
+        var conflicts = new List<Vein.Compiler.Ir.PayloadFold.Conflict>();
+        var combined = emitted.FoldPayload(ordered.Select(c => (c.H.Unit?.Shard ?? "", c.Copy)).ToList(), conflicts);
+        string ev = name[(name.LastIndexOf('.') + 1)..];
+        foreach (var c in conflicts)
+        {
+            var second = ordered.First(x => (x.H.Unit?.Shard ?? "") == c.SecondWriter).H;
+            var unit = second.Unit ?? new VeinUnit("", "hear @" + ev, "", 0);
+            string message = Vein.Compiler.Ir.PayloadFold.Describe(ev, c);
+            if (name == "DiagnosticRaised") { Faulted = true; ErrLine($"(error: {unit.Where}: {message})"); }
+            else Fault(unit, new InvalidOperationException(message));
+        }
+        foreach (var h in hs)
+            if (h.Settled && Admits(h)) h.Handler(combined.CopyPayload());
     }
 
     // ---- batches of events (the multithreading plan, P6) ---------------------------------------------------
@@ -1326,7 +1352,7 @@ public sealed class VeinWorld
     {
         public int At = -1;
         public bool Alone;
-        public Action<object>[] Heard = Array.Empty<Action<object>>();
+        public List<Hearer>? Hearers;   // HearEvent decides who hears each payload: mutes, audiences, folds
         public int[] Reads = Array.Empty<int>(), Writes = Array.Empty<int>(), Adds = Array.Empty<int>();
     }
 
@@ -1338,19 +1364,17 @@ public sealed class VeinWorld
         if (plan.At == _muteVersion) return plan;
         plan.At = _muteVersion;
         plan.Alone = name == "DiagnosticRaised";
-        var heard = new List<Action<object>>();
         var reads = new List<int>();
         var writes = new List<int>();
         var adds = new List<int>();
         if (_handlers.TryGetValue(name, out var hs))
-            foreach (var (owner, h, _, access) in hs)
+            foreach (var h in hs)
             {
-                if (owner is not null && IsMuted(owner)) continue;
-                if (access is null) plan.Alone = true;
+                if (h.Owner is not null && IsMuted(h.Owner)) continue;
+                if (h.Access is not { } access) plan.Alone = true;
                 else { reads.AddRange(access.Reads); writes.AddRange(access.Writes); adds.AddRange(access.Adds); }
-                heard.Add(h);
             }
-        plan.Heard = heard.ToArray();
+        plan.Hearers = hs;
         plan.Reads = reads.ToArray();
         plan.Writes = writes.ToArray();
         plan.Adds = adds.ToArray();
@@ -1435,7 +1459,7 @@ public sealed class VeinWorld
                             var (name, payload, plan) = batch[i];
                             // What a host observes goes on the tray too, so it stays ahead of what the handlers print.
                             if (Observed is not null) lane.Tray.Ops.Add(new TrayOp(OpKind.Observe, name, payload, null, 0));
-                            foreach (var h in plan.Heard) h(payload);
+                            if (plan.Hearers is { } hs) HearEvent(name, payload, hs);
                         }
                     }
                     finally { t_lane = outerLane; lane.Tray = null; }
@@ -1675,3 +1699,13 @@ public interface IVeinCollectionHost : Vein.Compiler.Ir.ICollectionHost
 /// What one `hear` handler reads, writes and adds to (an int `folds sum` field it only adds to), by name — written
 /// by the compiler (Ir/Lanes.cs) so the drain can handle events that do not collide in one batch (P6).
 public sealed record VeinAccess(string[] Reads, string[] Writes, string[] Adds);
+
+/// What a generated event payload gives the drain for payload folds (docs/PAYLOAD-FOLDS.md): a copy all the way
+/// down, for each hearer and for the payload as emitted; and its fields folded from each ordinary hearer's copy —
+/// through Vein.Compiler.Ir.PayloadFold, the interpreter's own rule. `hearers` come in canonical order, each with
+/// its shard's name; a conflict is added to `conflicts`, and its field keeps the value this payload holds.
+public interface IVeinPayload
+{
+    IVeinPayload CopyPayload();
+    IVeinPayload FoldPayload(IReadOnlyList<(string Hearer, IVeinPayload Copy)> hearers, List<Vein.Compiler.Ir.PayloadFold.Conflict> conflicts);
+}
