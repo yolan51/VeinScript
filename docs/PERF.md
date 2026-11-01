@@ -111,6 +111,31 @@ checksum at every thread count; check-backend's 60 programs print the same at fo
   using a core while idle), 93% by the end, and the same one-thread run read 11 to 32 ms. The numbers above were
   taken between those; the gain at eight threads needs re-measuring on a quiet machine before it is quoted.
 
+## Batches of messages (P6), and when one thread is better (2026-11-01)
+
+The drain hands events that do not collide to the workers together and commits once (docs/MULTITHREADING.md,
+P6). Every size below prints the same checksum at one thread and at eight. Default `ShareFrom` (64): a phase
+with fewer shareable shards, or a batch of fewer events, runs straight through.
+
+| size | ticks, 1 → 8 threads | messages, 1 → 8 threads |
+|---|---|---|
+| 10 × 10 (100 shards) | 0.30 → 0.52 ms — slower | 0.28 → 0.41 ms — slower |
+| 30 × 10 (300) | 0.73 → 0.73 — even | 0.64 → 0.71 — even |
+| 30 × 30 (900) | 1.44 → 1.05 | 2.07 → 1.20 (1.7×) |
+| 100 × 10 (1,000) | 2.52 → 2.24 | 3.80 → 2.11 (1.8×) |
+| 100 × 30 (3,000) | 5.68 → 3.27 (1.7×) | 8.32 → 6.56 (1.3×) |
+| 100 × 100 (10,000) | 14.2 → 6.4 (2.2×) | 25.9 → 22.4 (1.15×) |
+
+- **Below ~300 shards, stay on one thread.** A frame there is a fraction of a millisecond; waking the workers
+  costs more than they save. VeinFarm (a dozen shards, 0.5 ms a frame) is the same: correct at 4 and 8 threads,
+  not faster.
+- **From ~1,000 shards, threads pay**: up to 2.2× on ticks, 1.8× on messages.
+- **Messages gain less as the program grows** (1.8× at 1,000 shards, 1.15× at 10,000) — not profiled yet. The
+  suspects: 10,000 emits a frame, each a payload and a `from`, made on the workers but queued on the main thread;
+  and the fold commit, which does not yet get faster on workers (above).
+- The machine was busy with other programs throughout (above); the shape of the table is solid, the exact
+  numbers are not.
+
 ## Reproduce
 
 ```

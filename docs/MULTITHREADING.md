@@ -11,8 +11,8 @@ The plan (P0–P7), why each step is there, and where it stands. Numbers live in
 | P2 | Trays: each run of shards writes to its own buffer, merged in order | done — 0b43707 |
 | P3 | The compiler marks each unit's lane: may it share a phase, and if not, why | compiler part done (`src/Vein.Compiler/Ir/Lanes.cs`); showing it in `veinc exec` / Workbench not yet |
 | P4 | Parallel phases: `each tick`, `settled`, `run once` on worker threads | working: `--threads N` on an emitted program, `VeinGame.Threads` for a host; tick phase 11.1 → 5.3 ms at 8 threads (PERF.md). Open: the fold commit does not gain yet; a Godot setting; a quiet-machine benchmark |
-| P5 | Parallel handlers of one event | not started (handlers use trays, still one after another) |
-| P6 | Batches of messages — the 100-bundle scenario | not started |
+| P5 | Parallel handlers of one event | folded into P6: a batch runs the handlers of many events at once, whoever hears them |
+| P6 | Batches of messages — the 100-bundle scenario | working: messages 1.8× at 1,000 shards, 1.15× at 10,000 (PERF.md); why it gains less at 10,000 is open |
 | P7 | On by default, and documented in RUNTIME.md / HOSTING.md / RULES.md | not started |
 
 ## The rule every step is tested against
@@ -132,10 +132,29 @@ them there, so the queue stays first in, first out.
 *Why only "a later event reads what an earlier one writes" breaks a batch:*
 - Run one by one, a later message sees the earlier one's changes; in a batch it would see the old values.
 - If the earlier one reads what the later one writes, it read the old value either way.
-- If both write the same thing, the trays merge in order, so the last writer wins, as before.
+- If both WRITE the same field, they collide after all — the plan first said "last writer wins", and that is
+  wrong: a fold compares each write with the value its writer saw, and `folds first` keeps only the first
+  writer of a commit. Two writes, or a write and an add, of one field split the batch.
+- If both only ADD to an int `folds sum` field (`t.Total.n += 1`), they go together: each adds its amount to the
+  same old total, the fold sums the amounts, and the total is the one one-by-one gives — exactly, because it is
+  an int (a float's rounding would differ, so a float `+=` counts as a read and a write).
 
 *What it gives:* 100 bundles that each change their own shapes and send data onward run as 100 parallel lanes
 of messages. A true chain stays a chain.
+*Built:* `Ir/Lanes.cs` writes each `hear`'s ACCESS — `$Shape`/`#Mark` (who carries it), `Shape.field`, `!Shard`
+(its `var`s), and the int sums it only adds to — on its `World.On(…)`, or says why it is always handled alone
+(`// hear @Recruit: handled alone — changes a ~ collection`). The drain (VeinWorld `TryBatch`) cuts runs by
+EVENT, so one event's handlers stay together on one worker. What a host observes rides on the trays, ahead of
+what the handlers print. `samples/batch_events.vein` queues events that must not share a batch (a read after a
+write, two `folds first` writes, a mark then a query) beside ones that may (adds): with the collision test
+switched off on purpose, every line it prints goes wrong; switched on, all four match one thread.
+
+### When to stay on one thread
+Measured (PERF.md): **below about 300 shards, one thread is faster** — a frame is a fraction of a millisecond,
+and waking the workers costs more than they save. At about 300 the two are even; **from about 1,000 shards,
+threads pay** (1.7–2.2×).
+`ShareFrom` (64 by default) already keeps a small phase or batch on one thread, so turning threads on in a
+small game costs little — VeinFarm, a dozen shards, plays identically at 4 and 8 threads and at the same speed.
 
 ### P7 — Turn it on, and explain it
 Default on (threads = the number of cores) once P4–P6 pass check-backend in both modes and the benchmarks

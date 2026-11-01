@@ -448,7 +448,7 @@ public sealed class VeinWorld
     // from these lists, so holding its writes until the phase ends is invisible to it (RULES 11–13: no unit
     // sees another's changes before the commit anyway).
 
-    private enum OpKind : byte { Defer, Emit, Out, Err, Quit, Sound }
+    private enum OpKind : byte { Defer, Emit, Out, Err, Quit, Sound, Observe }
 
     /// One thing a unit sent out, in the order it sent it. `Payload` is the command, the event's payload, or the
     /// quit's code; `Line` the emitting statement's line (or a sound's volume, as bits).
@@ -572,6 +572,12 @@ public sealed class VeinWorld
     /// 100,000 activations through a tray of its own made a frame 40% slower — docs/PERF.md.)
     public int Threads { get; set; } = 1;
 
+    /// The fewest shareable shards a phase, or events a batch, needs before it goes to the workers. Starting
+    /// them costs tens of microseconds; a phase of a dozen shards is done sooner on one thread (VeinFarm ran
+    /// 10% slower at eight threads than at one). Below it, the phase runs straight through, the events one by
+    /// one — the same answers either way. check-backend sets it to 1, so small programs still test the workers.
+    public int ShareFrom { get; set; } = 64;
+
     /// The systems that have a block in one phase, in registration order, and how a shared phase is cut into runs
     /// — worked out once and kept until a mute changes or Threads does, not every frame: walking 10,000 shards to
     /// ask each its mute and its lane cost 3 ms a frame in cache misses alone (docs/PERF.md).
@@ -584,6 +590,7 @@ public sealed class VeinWorld
         public VeinSystem[] Units = Array.Empty<VeinSystem>();
         public (int From, int To, bool Shared)[] Runs = Array.Empty<(int, int, bool)>();
         public int[] SharedRuns = Array.Empty<int>();
+        public int SharedUnits;
     }
 
     /// Moves whenever who is muted might have changed — a system muted by name, a mark muted, a system's marks.
@@ -609,6 +616,7 @@ public sealed class VeinWorld
         phase.Units = units.ToArray();
         phase.Runs = runs.ToArray();
         phase.SharedRuns = Enumerable.Range(0, runs.Count).Where(k => runs[k].Shared).ToArray();
+        phase.SharedUnits = shared;
         phase.PlannedAt = _muteVersion;
         phase.PlannedFor = Threads;
     }
@@ -632,6 +640,11 @@ public sealed class VeinWorld
         var units = phase.Units;
         var runs = phase.Runs;
         var shared = phase.SharedRuns;
+        if (phase.SharedUnits < ShareFrom)   // too little to share: straight through, as at one thread
+        {
+            foreach (var s in units) run(s);
+            return;
+        }
 
         int mark = BeginTrays(out var suspended);
         try
@@ -704,6 +717,7 @@ public sealed class VeinWorld
             case OpKind.Err: Err.WriteLine(op.Text); break;
             case OpKind.Quit: QuitNow((int)op.Line, op.Text!); break;
             case OpKind.Sound: Sound?.Invoke(op.Text!, BitConverter.Int64BitsToDouble(op.Line)); break;
+            case OpKind.Observe: Observed?.Invoke(op.Text!, op.Payload!); break;
         }
     }
 
@@ -1188,7 +1202,7 @@ public sealed class VeinWorld
 
     /// Each queued event with where it was emitted — the unit and its line — for DrainCapped to name.
     private readonly Queue<(string Name, object Payload, VeinUnit? Site, long Line)> _events = new();
-    private readonly Dictionary<string, List<(VeinSystem? Owner, Action<object> Handler, bool Shareable)>> _handlers = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<(VeinSystem? Owner, Action<object> Handler, bool Shareable, Touches? Access)>> _handlers = new(StringComparer.Ordinal);
 
     /// Register a `hear` handler. Called from a system's `Subscribe`, before the first phase runs, so a
     /// `run once` that emits is never racing a handler that has not subscribed yet.
@@ -1198,11 +1212,13 @@ public sealed class VeinWorld
     /// it rather than held — Interp's rule.
     public void On(string @event, VeinSystem? owner, Action<object> handler) => On(@event, owner, handler, false);
 
-    /// The same, with its lane (Ir/Lanes.cs): `shareable` lets it run on a worker beside the event's other hearers.
-    public void On(string @event, VeinSystem? owner, Action<object> handler, bool shareable)
+    /// The same, with its lane (Ir/Lanes.cs): `shareable` lets it run on a worker beside the event's other hearers;
+    /// `access`, what it reads, writes and adds to, lets the event it hears join a batch (P6). No access: alone.
+    public void On(string @event, VeinSystem? owner, Action<object> handler, bool shareable, VeinAccess? access = null)
     {
         if (!_handlers.TryGetValue(@event, out var list)) _handlers[@event] = list = new();
-        list.Add((owner, handler, shareable));
+        list.Add((owner, handler, shareable, shareable && access is not null ? Intern(access) : null));
+        _muteVersion++;   // who hears it changed: the event's batch plan is stale
     }
 
     /// `emit @E { … }`. Queued rather than dispatched, so an emit inside a handler is handled AFTER the
@@ -1225,6 +1241,7 @@ public sealed class VeinWorld
         while (_events.Count > 0)
         {
             if (guard++ >= DrainCap) { DrainCapped(); break; }
+            if (Threads > 1 && TryBatch(ref guard)) continue;   // two or more events handled at once (P6)
             var (name, payload, _, _) = _events.Dequeue();
             Observed?.Invoke(name, payload);
             _handlers.TryGetValue(name, out var hs);
@@ -1245,16 +1262,16 @@ public sealed class VeinWorld
                 _draining = name;
                 try
                 {
-                    if (Threads <= 1 || hs.Count == 1)
+                    if (Threads <= 1 || hs.Count < Math.Max(2, ShareFrom))
                     {
-                        foreach (var (owner, h, _) in hs)
+                        foreach (var (owner, h, _, _) in hs)
                             if (owner is null || !IsMuted(owner)) h(payload);
                     }
                     else
                     {
                         // Shared like a phase: runs of neighbouring handlers, the trays emptied in the order they subscribed.
                         var heard = new List<Action<object>>(hs.Count);
-                        foreach (var (owner, h, _) in hs) if (owner is null || !IsMuted(owner)) heard.Add(h);
+                        foreach (var (owner, h, _, _) in hs) if (owner is null || !IsMuted(owner)) heard.Add(h);
                         InRuns(heard, h => h(payload));
                     }
                 }
@@ -1262,6 +1279,158 @@ public sealed class VeinWorld
             }
             Commit();
         }
+    }
+
+    // ---- batches of events (the multithreading plan, P6) ---------------------------------------------------
+    //
+    // One event at a time, each followed by its commit, is what makes "change it in one event, read it in the
+    // next" work (RULES 12b) — and what kept 10,000 messages a frame on one core. A batch takes events from the
+    // FRONT of the queue for as long as none of them reads what an earlier one in the batch changes (the access
+    // the compiler wrote on each handler, Ir/Lanes.cs). Their handlers run on the workers, runs of neighbouring
+    // EVENTS each on a tray; the trays empty in event order and one commit covers the batch. So:
+    //
+    //   * an event that would have read an earlier one's change is not in its batch — it starts the next one;
+    //   * what the batch's handlers emit lands in the queue in exactly the order one at a time would put it;
+    //   * an earlier event reading what a later one writes read the old value either way;
+    //   * two writes of one value would land in event order — but a fold compares each write with what its
+    //     writer saw, so that is not the same; two writes collide. Two ADDS to an int `folds sum` do not.
+    //
+    // An event with a handler the compiler could not measure, a serial one, or a @DiagnosticRaised, is handled
+    // alone, as before.
+
+    /// The name of something a handler touches, as a number, for the collision test.
+    private sealed class Touches(int[] reads, int[] writes, int[] adds)
+    {
+        public readonly int[] Reads = reads, Writes = writes, Adds = adds;
+    }
+
+    private readonly Dictionary<string, int> _touchIds = new(StringComparer.Ordinal);
+    private int TouchId(string name) => _touchIds.TryGetValue(name, out int id) ? id : _touchIds[name] = _touchIds.Count;
+    private Touches Intern(VeinAccess a) => new(a.Reads.Select(TouchId).ToArray(), a.Writes.Select(TouchId).ToArray(), a.Adds.Select(TouchId).ToArray());
+
+    /// Who hears one event now and what they touch together — kept until a mute or a subscription changes.
+    private sealed class EventPlan
+    {
+        public int At = -1;
+        public bool Alone;
+        public Action<object>[] Heard = Array.Empty<Action<object>>();
+        public int[] Reads = Array.Empty<int>(), Writes = Array.Empty<int>(), Adds = Array.Empty<int>();
+    }
+
+    private readonly Dictionary<string, EventPlan> _eventPlans = new(StringComparer.Ordinal);
+
+    private EventPlan PlanOf(string name)
+    {
+        if (!_eventPlans.TryGetValue(name, out var plan)) _eventPlans[name] = plan = new EventPlan();
+        if (plan.At == _muteVersion) return plan;
+        plan.At = _muteVersion;
+        plan.Alone = name == "DiagnosticRaised";
+        var heard = new List<Action<object>>();
+        var reads = new List<int>();
+        var writes = new List<int>();
+        var adds = new List<int>();
+        if (_handlers.TryGetValue(name, out var hs))
+            foreach (var (owner, h, _, access) in hs)
+            {
+                if (owner is not null && IsMuted(owner)) continue;
+                if (access is null) plan.Alone = true;
+                else { reads.AddRange(access.Reads); writes.AddRange(access.Writes); adds.AddRange(access.Adds); }
+                heard.Add(h);
+            }
+        plan.Heard = heard.ToArray();
+        plan.Reads = reads.ToArray();
+        plan.Writes = writes.ToArray();
+        plan.Adds = adds.ToArray();
+        return plan;
+    }
+
+    /// The most events one batch takes.
+    private const int MaxBatch = 4096;
+
+    /// For the collision test: the batch that last wrote, or added to, each name.
+    private int[] _writtenIn = Array.Empty<int>(), _addedIn = Array.Empty<int>();
+    private int _batchNo;
+
+    /// Handle the events at the front of the queue as one batch, when two or more go together. `guard` already
+    /// counts the first; the batch never takes more than the drain cap leaves.
+    private bool TryBatch(ref int guard)
+    {
+        int limit = Math.Min(MaxBatch, DrainCap - guard + 1);
+        if (limit < 2) return false;
+        if (_writtenIn.Length < _touchIds.Count)
+        {
+            Array.Resize(ref _writtenIn, _touchIds.Count * 2);
+            Array.Resize(ref _addedIn, _touchIds.Count * 2);
+        }
+        int b = ++_batchNo;
+        var batch = new List<(string Name, object Payload, EventPlan Plan)>();
+        foreach (var (name, payload, _, _) in _events)
+        {
+            if (batch.Count == limit) break;
+            var plan = PlanOf(name);
+            if (plan.Alone || Collides(plan, b)) break;
+            foreach (int w in plan.Writes) _writtenIn[w] = b;
+            foreach (int a in plan.Adds) _addedIn[a] = b;
+            batch.Add((name, payload, plan));
+        }
+        if (batch.Count < Math.Max(2, ShareFrom)) return false;   // too few to be worth the workers: one by one
+
+        for (int i = 0; i < batch.Count; i++) _events.Dequeue();
+        guard += batch.Count - 1;
+        string? outer = _draining;
+        _draining = batch[0].Name;   // never @DiagnosticRaised: a fault in the batch becomes one, as it would alone
+        try { RunBatch(batch); }
+        finally { _draining = outer; }
+        Commit();
+        return true;
+    }
+
+    /// Would this event read, or overwrite, what an event already in batch `b` changes?
+    private bool Collides(EventPlan plan, int b)
+    {
+        foreach (int r in plan.Reads) if (_writtenIn[r] == b || _addedIn[r] == b) return true;
+        foreach (int w in plan.Writes) if (_writtenIn[w] == b || _addedIn[w] == b) return true;
+        foreach (int a in plan.Adds) if (_writtenIn[a] == b) return true;
+        return false;
+    }
+
+    private void RunBatch(List<(string Name, object Payload, EventPlan Plan)> batch)
+    {
+        int mark = BeginTrays(out var suspended);
+        try
+        {
+            // Runs of neighbouring EVENTS — an event's handlers stay together, in the order they subscribed, so two
+            // of one shard never run at once — about four per worker; every run its tray, in event order.
+            int size = Math.Max(1, (batch.Count + Threads * 4 - 1) / (Threads * 4));
+            int runs = (batch.Count + size - 1) / size;
+            var trays = new Tray[runs];
+            for (int k = 0; k < runs; k++) trays[k] = NextTray();
+            while (_workerLanes.Count < runs) _workerLanes.Add(new Lane());
+            _shared = true;
+            try
+            {
+                Parallel.For(0, runs, new ParallelOptions { MaxDegreeOfParallelism = Threads }, k =>
+                {
+                    var lane = _workerLanes[k];
+                    lane.Tray = trays[k];
+                    var outerLane = t_lane;
+                    t_lane = lane;
+                    try
+                    {
+                        for (int i = k * size, to = Math.Min(batch.Count, i + size); i < to; i++)
+                        {
+                            var (name, payload, plan) = batch[i];
+                            // What a host observes goes on the tray too, so it stays ahead of what the handlers print.
+                            if (Observed is not null) lane.Tray.Ops.Add(new TrayOp(OpKind.Observe, name, payload, null, 0));
+                            foreach (var h in plan.Heard) h(payload);
+                        }
+                    }
+                    finally { t_lane = outerLane; lane.Tray = null; }
+                });
+            }
+            finally { _shared = false; }
+        }
+        finally { EndTrays(mark, suspended); }
     }
 
     // ---- faults: the failure is a message (Interp.RunGuarded, line for line) --------------------------
@@ -1489,3 +1658,7 @@ public interface IVeinCollectionHost : Vein.Compiler.Ir.ICollectionHost
 {
     string? ShapeOf(Type component);
 }
+
+/// What one `hear` handler reads, writes and adds to (an int `folds sum` field it only adds to), by name — written
+/// by the compiler (Ir/Lanes.cs) so the drain can handle events that do not collide in one batch (P6).
+public sealed record VeinAccess(string[] Reads, string[] Writes, string[] Adds);

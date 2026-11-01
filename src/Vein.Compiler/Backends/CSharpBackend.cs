@@ -941,10 +941,18 @@ public sealed partial class CSharpBackend : IVeinBackend
                 // key, marks and shapes. When it cannot be checked it is SAID (BACKEND-CONTRACT rule 4) — a barrier
                 // that silently admits all is the worst way to be missing.
                 string? gate = m.Attrs.FirstOrDefault(a => a.Name == "audience") is { } aud ? AudienceGate(aud, ev!) : null;
-                // Its lane (P3): `true` lets it share the event with the other hearers' handlers.
+                // Its lane (P3): `true` lets it share the event with the other hearers' handlers; and its access
+                // (P6): what it reads, writes and adds to, so the drain can hand events that do not collide to the
+                // workers together. No access: the event it hears is always handled alone, and the comment says why.
                 string? serial = _lanes.SerialReason(shard, m);
-                string lane = serial is null ? ", true" : "";
+                var (access, alone) = _lanes.AccessOf(shard, m);
+                static string Names(IReadOnlyList<string> names) =>
+                    names.Count == 0 ? "System.Array.Empty<string>()" : "new[] { " + string.Join(", ", names.Select(n => "\"" + Escape(n) + "\"")) + " }";
+                string lane = serial is not null ? ""
+                    : access is null ? ", true"
+                    : $", true, new VeinAccess({Names(access.Reads)}, {Names(access.Writes)}, {Names(access.Adds)})";
                 if (serial is not null) sb.AppendLine($"        // hear @{Interp.EventName(ev!)}: serial lane — {serial}");
+                else if (access is null) sb.AppendLine($"        // hear @{Interp.EventName(ev!)}: handled alone — {alone}");
                 if (gate is not null)
                     sb.AppendLine($"        World.On(\"{ev}\", this, p => {{ var __f = (({EventType(ev!)})p).from; if ({gate}) {handlerNames[m]}(({EventType(ev!)})p); }}{lane});");
                 else
@@ -2360,7 +2368,8 @@ public sealed partial class CSharpBackend : IVeinBackend
         // What follows `--` is the program's own, as `veinc run file -- …` hands it to `args()`.
         // `--drain-cap N` as `veinc run` takes it: how many events one drain may handle (VeinWorld.DrainCap).
         // `--threads N`: how many workers a phase is shared across (VeinWorld.Threads; one is the default).
-        sb.AppendLine("        int ticks = 0, drainCap = 10_000, threads = 1;");
+        // `--share-from N`: the fewest units worth the workers (VeinWorld.ShareFrom) — check-backend uses 1.
+        sb.AppendLine("        int ticks = 0, drainCap = 10_000, threads = 1, shareFrom = 0;");
         sb.AppendLine("        var programArgs = new List<string>();");
         sb.AppendLine("        for (int i = 0; i < args.Length; i++)");
         sb.AppendLine("            if (args[i] == \"--\") { programArgs.AddRange(args.Skip(i + 1)); break; }");
@@ -2368,11 +2377,13 @@ public sealed partial class CSharpBackend : IVeinBackend
         sb.AppendLine("            else if (args[i].StartsWith(\"--ticks=\")) int.TryParse(args[i].Substring(8), out ticks);");
         sb.AppendLine("            else if (args[i] == \"--drain-cap\" && i + 1 < args.Length) int.TryParse(args[++i], out drainCap);");
         sb.AppendLine("            else if (args[i] == \"--threads\" && i + 1 < args.Length) int.TryParse(args[++i], out threads);");
+        sb.AppendLine("            else if (args[i] == \"--share-from\" && i + 1 < args.Length) int.TryParse(args[++i], out shareFrom);");
         sb.AppendLine();
         sb.AppendLine("        var world = Create();");
         sb.AppendLine("        world.Args = programArgs;");
         sb.AppendLine("        world.DrainCap = Math.Max(1, drainCap);");
         sb.AppendLine("        world.Threads = Math.Max(1, threads);");
+        sb.AppendLine("        if (shareFrom > 0) world.ShareFrom = shareFrom;");
         // `start @Boot { … }` (VS0219): the boot event, as `veinc run` fires it — a host raises its own.
         if (module.Start is { } st && _events.Contains(st.Event))
         {

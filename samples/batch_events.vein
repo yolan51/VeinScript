@@ -1,0 +1,72 @@
+// batch_events.vein — events that may, and may not, be handled together (docs/MULTITHREADING.md, P6).
+//
+//   veinc run samples/batch_events.vein --ticks 1
+//   bash tools/check-backend.sh        (compiled at four threads, in batches, must print the same)
+//
+// One at a time, every event is followed by its commit, so an event reads what the one before it changed.
+// Compiled with `--threads N`, the drain hands events that do not collide to the workers together and commits
+// once. This program queues events of each kind, and prints what only one-at-a-time order gives:
+//
+//   total 15       five @Add, each heard twice, only ADD to an int `folds sum` — one batch, the same total
+//   score 123      each @Digit READS the score the last one wrote — never two in one batch
+//   picked cat     `folds first`: in one commit the first writer wins, so two @Claim in one batch would pick
+//                  ann; one at a time, each claim is the only one in its commit — two writes collide
+//   seen at 7      @See marks the ledger #Seen; @CountSeen asks for #Seen — a mark is a write, a query a read
+
+bundle BatchEvents by you {
+    need "Vein.Console"
+
+    mark #Ledger
+    mark #Seen
+
+    shape $Total { n: int folds sum }
+    shape $Score { digits: int }
+    shape $Pick { who: string folds first }
+    shape $Spot { at: int }
+
+    event @Add { n: int }
+    event @ShowTotal { }
+    event @Digit { d: int }
+    event @ShowScore { }
+    event @Claim { who: string }
+    event @ShowPick { }
+    event @See { }
+    event @CountSeen { }
+
+    shard Seed { run once {
+        let e = spawn()
+        attach $Total to e { n: 0 }
+        attach $Score to e { digits: 0 }
+        attach $Pick to e { who: "" }
+        attach $Spot to e { at: 7 }
+        mark e #Ledger
+    } }
+
+    shard Driver { run once {
+        repeat 5 { emit @Add { n: 2 } }
+        emit @ShowTotal { }
+        emit @Digit { d: 1 }
+        emit @Digit { d: 2 }
+        emit @Digit { d: 3 }
+        emit @ShowScore { }
+        emit @Claim { who: "ann" }
+        emit @Claim { who: "bob" }
+        emit @Claim { who: "cat" }
+        emit @ShowPick { }
+        emit @See { }
+        emit @CountSeen { }
+    } }
+
+    shard Adder { hear @Add as a { target $Total as t { t.Total.n += a.n } } }
+    shard AlsoAdder { hear @Add as a { target $Total as t { t.Total.n += 1 } } }
+    shard TotalTeller { hear @ShowTotal as s { target $Total as t { do print("total " + t.Total.n) } } }
+
+    shard Scorer { hear @Digit as g { target $Score as t { t.Score.digits = t.Score.digits * 10 + g.d } } }
+    shard ScoreTeller { hear @ShowScore as s { target $Score as t { do print("score " + t.Score.digits) } } }
+
+    shard Claimer { hear @Claim as c { target $Pick as t { t.Pick.who = c.who } } }
+    shard PickTeller { hear @ShowPick as s { target $Pick as t { do print("picked " + t.Pick.who) } } }
+
+    shard Spotter { hear @See as s { target $Spot #Ledger as t { mark t #Seen } } }
+    shard SeenTeller { hear @CountSeen as s { target $Spot #Seen as t { do print("seen at " + t.Spot.at) } } }
+}
