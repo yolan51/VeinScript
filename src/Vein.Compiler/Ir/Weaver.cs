@@ -61,7 +61,7 @@ public sealed class Weaver
         foreach (var record in Ir.Weave.ReadAll(text, format, prms))
         {
             if (record.Problem is not null) { Problem(record.Text, record.Problem); continue; }
-            ignored.UnionWith(record.Ignored);
+            ignored.UnionWith(record.IgnoredSoFar);
             if (record.Name is { Length: > 0 } name && _names.ContainsKey(name))
             {
                 if (refers)
@@ -85,7 +85,7 @@ public sealed class Weaver
             var values = new Dictionary<string, Value>(StringComparer.Ordinal);
             foreach (var p in prms)
             {
-                if (record.Missing.Contains(p.Name))
+                if (record.IsMissing(p.Name))
                 {
                     values[p.Name] = new Value(true, null);
                     continue;

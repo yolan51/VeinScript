@@ -136,6 +136,26 @@ with fewer shareable shards, or a batch of fewer events, runs straight through.
 - The machine was busy with other programs throughout (above); the shape of the table is solid, the exact
   numbers are not.
 
+## Weaving a large file (2026-11-01)
+
+`weave JsonItem(f.text)` of a generated JSON file, `$Item { name, qty, weight }` per record, on the main thread
+(the machine busy throughout, so roughly):
+
+| records | file read | weave, interpreter | weave, compiled |
+|---|---|---|---|
+| 10,000 (0.5 MB) | a few ms | 290 → 294 ms | 260 → 180 ms |
+| 100,000 (4.8 MB) | a few ms | 3,780 → 3,204 ms | 2,362 → 1,642 ms |
+
+- **Reading the file is not the cost; the weave is.** At 100,000 records the frame froze for 2–4 s.
+- **Cut, no language change:** each record was written back to JSON text up front, only in case a problem had
+  to quote it (600 ms of the weave) — now written when asked; a flat object is its own values, not a copy; the
+  parameter names are gathered once, not per record; a record's `Missing` and `Ignored` are made at first use;
+  the JSON values are built with loops, not LINQ. (A JSON object with a key twice now keeps the last value; it
+  used to throw.)
+- **What is left, compiled, 100,000 records:** parse 446 ms, turning objects into records ~440 ms, spawn 271 ms,
+  bring 299 ms. Further: a streaming reader (records straight from the JSON, no dictionaries in between), or
+  the parse on a worker — both noted, not built.
+
 ## Reproduce
 
 ```

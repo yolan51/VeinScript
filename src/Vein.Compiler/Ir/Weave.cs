@@ -38,18 +38,28 @@ public sealed record FormatInfo(Parsing.FormatDecl Decl, WeaveFormat? Flat);
 /// every record has one. <see cref="Problem"/> is set when the record cannot be woven.</summary>
 public sealed class WovenRecord
 {
-    public required string Text { get; init; }
+    /// The record as a problem quotes it. BUILT ONLY WHEN ASKED (TextOf): writing each of 100,000 JSON records back
+    /// out as text, in case one had a problem, was 600 ms of a 2-second weave.
+    public string Text { get => _text ??= _textOf?.Invoke() ?? ""; init => _text = value; }
+    public Func<string>? TextOf { init => _textOf = value; }
+    private string? _text;
+    private Func<string>? _textOf;
+
     public string? Name { get; set; }
     public Dictionary<string, object?> Values { get; } = new(StringComparer.Ordinal);
 
-    /// Parameters the text left out; each takes its default.
-    public HashSet<string> Missing { get; } = new(StringComparer.Ordinal);
+    /// Parameters the text left out; each takes its default. Made at the first one — most records leave none out.
+    public HashSet<string> Missing => _missing ??= new(StringComparer.Ordinal);
+    public bool IsMissing(string name) => _missing?.Contains(name) == true;
+    private HashSet<string>? _missing;
 
     public string? Problem { get; set; }
 
     /// Keys of the record no parameter took — a nested object none of whose keys were taken is named once.
     /// Said in @Woven (`ignored`), so data left behind is not mistaken for data that was never there.
-    public List<string> Ignored { get; } = new();
+    public List<string> Ignored => _ignored ??= new();
+    public IReadOnlyList<string> IgnoredSoFar => (IReadOnlyList<string>?)_ignored ?? Array.Empty<string>();
+    private List<string>? _ignored;
 }
 
 /// <summary>The reading half of `weave` (D23): records out of a text, values out of a record.</summary>
@@ -114,18 +124,23 @@ public static class Weave
         else if (!Gather(parsed, path.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), 0, null, found))
             return new List<WovenRecord> { new() { Text = Short(text), Problem = $"it has no `{path}`" } };
 
-        var records = new List<WovenRecord>();
+        var records = new List<WovenRecord>(found.Count);
+        var taken = prms.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
         foreach (var (item, holder) in found)
         {
-            var record = new WovenRecord { Text = Short(Json.Write(item)) };
+            var record = new WovenRecord { TextOf = () => Short(Json.Write(item)) };
             records.Add(record);
             if (item is not Dictionary<string, object?> obj) { record.Problem = "it is not an object"; continue; }
-            var byName = new Dictionary<string, object?>(StringComparer.Ordinal);
-            Flatten(obj, "", byName);
-            if (owner is not null) byName[owner] = holder;
+            // A flat object already is its values by name; only a nested one, or an owner, needs a copy.
+            var byName = obj;
+            if (owner is not null || HasObject(obj))
+            {
+                byName = new Dictionary<string, object?>(StringComparer.Ordinal);
+                Flatten(obj, "", byName);
+                if (owner is not null) byName[owner] = holder;
+            }
             Fill(record, byName, prms, format);
-            var taken = prms.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
-            Unused(obj, "", taken, record.Ignored);
+            Unused(obj, "", taken, record);
         }
         return records;
     }
@@ -134,6 +149,12 @@ public static class Weave
     /// {"keyword": "Swarm"}` fills `filter_keyword`. An ability's filter and its condition are one small
     /// object each in Vein Cards' cards, and no field could take an object, so they were dropped without a
     /// word. A list of objects is records of their own, through a loom with `owner`.
+    private static bool HasObject(Dictionary<string, object?> obj)
+    {
+        foreach (var v in obj.Values) if (v is Dictionary<string, object?>) return true;
+        return false;
+    }
+
     private static void Flatten(Dictionary<string, object?> obj, string prefix, Dictionary<string, object?> byName)
     {
         foreach (var (k, v) in obj)
@@ -144,14 +165,14 @@ public static class Weave
     }
 
     /// The keys no parameter took; an object none of whose keys were taken is one key, not each of its own.
-    private static void Unused(Dictionary<string, object?> obj, string prefix, HashSet<string> taken, List<string> ignored)
+    private static void Unused(Dictionary<string, object?> obj, string prefix, HashSet<string> taken, WovenRecord record)
     {
         foreach (var (k, v) in obj)
         {
             string name = prefix + k;
             if (taken.Contains(name)) continue;
-            if (v is Dictionary<string, object?> inner && AnyTaken(inner, name + "_", taken)) Unused(inner, name + "_", taken, ignored);
-            else ignored.Add(name);
+            if (v is Dictionary<string, object?> inner && AnyTaken(inner, name + "_", taken)) Unused(inner, name + "_", taken, record);
+            else record.Ignored.Add(name);
         }
     }
 
@@ -633,12 +654,12 @@ public static class Weave
         {
             var prm = prms[i];
             object? wrote = values.GetValueOrDefault(prm.Name);
-            object? back = read[0].Missing.Contains(prm.Name) ? defaults[i] : read[0].Values.GetValueOrDefault(prm.Name);
-            if (read[0].Missing.Contains(prm.Name) && defaults[i] is null && !Blank(wrote))
+            object? back = read[0].IsMissing(prm.Name) ? defaults[i] : read[0].Values.GetValueOrDefault(prm.Name);
+            if (read[0].IsMissing(prm.Name) && defaults[i] is null && !Blank(wrote))
             {
                 problem = $"`{prm.Name}` would read back as its default"; return false;
             }
-            if (!read[0].Missing.Contains(prm.Name) && !Same(wrote, back))
+            if (!read[0].IsMissing(prm.Name) && !Same(wrote, back))
             {
                 problem = $"`{prm.Name}` would read back as \"{Plain(back, format)}\", not \"{Plain(wrote, format)}\""; return false;
             }

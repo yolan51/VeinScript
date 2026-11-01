@@ -26,11 +26,12 @@ internal static class Json
         catch (JsonException) { return null; }   // malformed input is a null, not a crash
     }
 
+    /// Plain loops, not LINQ: a weave of 100,000 records builds 100,000 of these objects, and the enumerators,
+    /// closures and growing dictionaries of `ToDictionary` were a large part of reading the file.
     private static object? FromElement(JsonElement e) => e.ValueKind switch
     {
-        JsonValueKind.Object => e.EnumerateObject()
-            .ToDictionary(p => p.Name, p => FromElement(p.Value), StringComparer.Ordinal),
-        JsonValueKind.Array => e.EnumerateArray().Select(FromElement).ToList(),
+        JsonValueKind.Object => ObjectOf(e),
+        JsonValueKind.Array => ListOf(e),
         JsonValueKind.String => e.GetString(),
         JsonValueKind.True => true,
         JsonValueKind.False => false,
@@ -39,6 +40,20 @@ internal static class Json
         JsonValueKind.Number => e.TryGetInt64(out long l) ? (object)l : e.GetDouble(),
         _ => null,   // null, and the undefined kind
     };
+
+    private static Dictionary<string, object?> ObjectOf(JsonElement e)
+    {
+        var obj = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var p in e.EnumerateObject()) obj[p.Name] = FromElement(p.Value);
+        return obj;
+    }
+
+    private static List<object?> ListOf(JsonElement e)
+    {
+        var list = new List<object?>(e.GetArrayLength());
+        foreach (var item in e.EnumerateArray()) list.Add(FromElement(item));
+        return list;
+    }
 
     /// Writes the same value shapes back out. Deterministic: a dictionary keeps insertion order, so a
     /// round trip preserves field order and two runs can be compared byte for byte.
