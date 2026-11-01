@@ -12,6 +12,9 @@
 //   picked cat     `folds first`: in one commit the first writer wins, so two @Claim in one batch would pick
 //                  ann; one at a time, each claim is the only one in its commit — two writes collide
 //   seen at 7      @See marks the ledger #Seen; @CountSeen asks for #Seen — a mark is a write, a query a read
+//   looked at 99   @Hand and @Look carry the SAME list (a payload's list is the sender's own, not a copy); @Hand's
+//                  hearer changes it in place, so @Look's hearer must run after it — a change in place keeps a
+//                  unit in order (the serial lane), and the event it hears is handled alone
 
 bundle BatchEvents by you {
     need "Vein.Console"
@@ -32,6 +35,8 @@ bundle BatchEvents by you {
     event @ShowPick { }
     event @See { }
     event @CountSeen { }
+    event @Hand { items: list<int> }
+    event @Look { items: list<int> }
 
     shard Seed { run once {
         let e = spawn()
@@ -55,6 +60,9 @@ bundle BatchEvents by you {
         emit @ShowPick { }
         emit @See { }
         emit @CountSeen { }
+        let xs = [1, 2, 3]
+        emit @Hand { items: xs }
+        emit @Look { items: xs }
     } }
 
     shard Adder { hear @Add as a { target $Total as t { t.Total.n += a.n } } }
@@ -69,4 +77,7 @@ bundle BatchEvents by you {
 
     shard Spotter { hear @See as s { target $Spot #Ledger as t { mark t #Seen } } }
     shard SeenTeller { hear @CountSeen as s { target $Spot #Seen as t { do print("seen at " + t.Spot.at) } } }
+
+    shard Changer { hear @Hand as h { h.items[0] = 99 } }
+    shard Looker { hear @Look as l { do print("looked at " + l.items[0]) } }
 }

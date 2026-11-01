@@ -12,7 +12,7 @@ The plan (P0–P7), why each step is there, and where it stands. Numbers live in
 | P3 | The compiler marks each unit's lane: may it share a phase, and if not, why | compiler part done (`src/Vein.Compiler/Ir/Lanes.cs`); showing it in `veinc exec` / Workbench not yet |
 | P4 | Parallel phases: `each tick`, `settled`, `run once` on worker threads | working: `--threads N` on an emitted program, `VeinGame.Threads` for a host; tick phase 11.1 → 5.3 ms at 8 threads (PERF.md). Open: the fold commit does not gain yet; a Godot setting; a quiet-machine benchmark |
 | P5 | Parallel handlers of one event | folded into P6: a batch runs the handlers of many events at once, whoever hears them |
-| P6 | Batches of messages — the 100-bundle scenario | working: messages 1.8× at 1,000 shards, 1.15× at 10,000 (PERF.md); why it gains less at 10,000 is open |
+| P6 | Batches of messages — the 100-bundle scenario | working: messages 1.8× at 1,000 shards, 1.15× at 10,000 (PERF.md); why it gains less at 10,000 is open — a hearer that changes a list or record in place is handled alone |
 | P7 | On by default, and documented in RUNTIME.md / HOSTING.md / RULES.md | not started |
 
 ## The rule every step is tested against
@@ -86,7 +86,12 @@ A unit is **serial** when it:
 - asks for a file or the network (`@ReadFile`, `@WriteFile`, `@Fetch`, `@Listen`, `@Link`, `@Send`) — it
   happens at the call, and a later shard may read what an earlier one wrote;
 - uses `weave` / `toText` — they spawn, and woven names are one table;
-- reads another shard's setting live (`!S.x`), or belongs to a shard whose settings are read live.
+- reads another shard's setting live (`!S.x`), or belongs to a shard whose settings are read live;
+- changes a list or a record IN PLACE (`xs[0] = v`, `p.note = v`, `p.trail += x`). A list in a payload is the
+  sender's own, shared by every hearer, not a copy — the repro programs ping_six, ping_alias and ping_after
+  show a hearer's change reaching the hearers after it, and a sender's change after `emit` reaching the
+  hearers. Who sees such a change depends on who runs first, so it stays in order. (`xs += v` on a variable
+  makes a new list, and a shape's field is a value each unit copies: neither counts.)
 
 The emitted C# says it on each shard, with the reason:
 
@@ -102,13 +107,14 @@ free a shard (for example, move the `spawn` into its own small shard).
 
 ### P4 — Parallel phases (the cheap big win)
 In `each tick`, `settled` and `run once`, shards on the parallel lane run together on worker threads, each run
-with its tray. Then the serial shards run on the main thread, in order. All trays merge in shard order.
+with its tray, and each serial shard runs on the main thread IN ITS PLACE — after every shard before it has
+finished, before any after it starts. All trays merge in shard order.
 *Why no conflict analysis is needed here:* inside one phase, no shard can see another's changes until the
 commit (RULES 11–13). That's already the language's rule, so phases are parallel-safe by design. Only the
 order of the trays mattered, and P2 fixed that.
-*Why the serial shards can wait until the workers finish:* what makes a shard serial is nothing a parallel
-shard can see within the phase. A spawned identity has no shape until the commit, and the dice, files and
-settings are touched only by serial shards.
+*Why in its place, not after the workers (as first built):* a serial shard may change a shared list that a later
+shard reads; run after the workers, that reader would have read it before the change one thread makes first.
+In its place, every shard sees exactly what it sees on one thread.
 *Made thread-safe:* each worker has its own **lane** (its tray, and the unit, line and sender it is running),
 so a fault names the right line. The query cache and the fold buckets became concurrent dictionaries.
 *Hosts:* `VeinGame.Threads` (the interpreter ignores it — it stays the reference).

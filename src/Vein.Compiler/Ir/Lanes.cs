@@ -14,6 +14,8 @@ namespace Vein.Compiler.Ir;
 ///   * `weave` / `toText` — they spawn, and woven names are one table;
 ///   * a live `!S.setting` — another shard's own field, which that shard writes as it runs — and so also every
 ///     unit of S itself, the shard whose settings something reads live.
+///   * a change made IN PLACE to a list or a record (`xs[0] = v`, `p.note = v`) — a list in a payload is shared by
+///     the sender and every hearer, so who sees the change depends on who runs first.
 ///
 /// Such a unit runs on the SERIAL lane: on the main thread, one at a time, in its usual order. A unit that calls
 /// a function is judged by what the function does, through any number of calls. Anything not understood here
@@ -58,10 +60,26 @@ public sealed class Lanes
         // "free" there would be wrong for every function on the cycle.
         if (!_judging.Add(f)) return "calls itself back";
         string? why = null;
-        Lower.WalkBody(f.Body, (e, _) => why ??= ReasonOf(e), (s, _) => why ??= s is IrWeave ? "weaves" : null);
+        Lower.WalkBody(f.Body, (e, _) => why ??= ReasonOf(e), (s, _) => why ??= ReasonOf(s));
         _judging.Remove(f);
         return _reasons[f] = why;
     }
+
+    private string? ReasonOf(IrStmt s) => s switch
+    {
+        IrWeave => "weaves",
+        // IN PLACE: `xs[0] = v`, `p.note = v`, `p.trail += x` change a list or record that other units may hold
+        // too — a list in a payload is the sender's own, shared by every hearer, not a copy (`let xs = p.items`
+        // is the same list again). Who sees the change depends on who runs first, so it stays in order. A shape
+        // field is a value, copied into each unit, and `xs += v` on a variable makes a new list: neither counts.
+        IrAssign { Target: IrIndex } => "changes a list in place",
+        IrAssign { Target: IrFieldAccess t } when !IsShapeStep(t) => "changes a record in place",
+        _ => null,
+    };
+
+    /// `x.Shape.field`, or `x.Shape` itself — a shape's value, which each unit has its own copy of.
+    private bool IsShapeStep(IrFieldAccess t) =>
+        _components.ContainsKey(t.Field) || t.Receiver is IrFieldAccess { Field: var shape } && _components.ContainsKey(shape);
 
     private string? ReasonOf(IrExpr e) => e switch
     {

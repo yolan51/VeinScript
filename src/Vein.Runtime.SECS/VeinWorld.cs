@@ -589,7 +589,6 @@ public sealed class VeinWorld
         /// system is a run of its own, on this thread.
         public VeinSystem[] Units = Array.Empty<VeinSystem>();
         public (int From, int To, bool Shared)[] Runs = Array.Empty<(int, int, bool)>();
-        public int[] SharedRuns = Array.Empty<int>();
         public int SharedUnits;
     }
 
@@ -600,34 +599,34 @@ public sealed class VeinWorld
     {
         var units = new List<VeinSystem>(phase.Systems.Count);
         foreach (var s in phase.Systems) if (!IsMuted(s)) units.Add(s);
-        // Runs of neighbours that may share, cut so each worker gets about four (a slow run then does not hold the
-        // others up), and each serial system a run of its own.
+        // Each stretch of neighbours that may share is cut so each worker gets about four runs of it (a slow run
+        // then does not hold the others up); each serial system is a run of its own.
         int shared = 0;
-        foreach (var s in units) if (shareable(s)) shared++;
-        int size = Math.Max(1, (shared + Threads * 4 - 1) / (Threads * 4));
         var runs = new List<(int From, int To, bool Shared)>();
         for (int i = 0; i < units.Count;)
         {
-            int from = i;
-            if (!shareable(units[i])) { runs.Add((from, ++i, false)); continue; }
-            while (i < units.Count && i - from < size && shareable(units[i])) i++;
-            runs.Add((from, i, true));
+            if (!shareable(units[i])) { runs.Add((i, i + 1, false)); i++; continue; }
+            int end = i;
+            while (end < units.Count && shareable(units[end])) end++;
+            shared += end - i;
+            int size = Math.Max(1, (end - i + Threads * 4 - 1) / (Threads * 4));
+            for (; i < end; i += size) runs.Add((i, Math.Min(end, i + size), true));
         }
         phase.Units = units.ToArray();
         phase.Runs = runs.ToArray();
-        phase.SharedRuns = Enumerable.Range(0, runs.Count).Where(k => runs[k].Shared).ToArray();
         phase.SharedUnits = shared;
         phase.PlannedAt = _muteVersion;
         phase.PlannedFor = Threads;
     }
 
-    /// One phase of every unmuted system, in registration order — at one thread, straight through; above, the
-    /// systems that may share it (`shareable`, the compiler's lane, Ir/Lanes.cs) on workers, the rest after them
-    /// on this thread, one at a time and in order. Every run has its tray, and the trays empty in system order.
+    /// One phase of every unmuted system, in registration order — at one thread, straight through; above, each
+    /// stretch of systems that may share it (`shareable`, the compiler's lane, Ir/Lanes.cs) on the workers
+    /// together, and each serial system here, alone, IN ITS PLACE: after every system before it has finished and
+    /// before any after it starts. Every run has its tray, and the trays empty in system order.
     ///
-    /// Why the serial ones may wait until the workers are done: what makes a unit serial (spawn, random, a file,
-    /// weave, a live setting) is nothing a shareable unit can see within the phase — a spawned identity carries
-    /// no shape until the commit, and the rest only serial units touch. Among themselves they keep their order.
+    /// In its place, not after the workers: a serial system may change a list in place that a later one reads
+    /// (a list in a payload is shared by the sender and every hearer), and run after the workers, the reader would
+    /// have read it before the change that one thread makes first.
     private void Phase(PhaseSystems phase, Func<VeinSystem, bool> shareable, Action<VeinSystem> run)
     {
         if (Threads <= 1)
@@ -639,13 +638,13 @@ public sealed class VeinWorld
         if (phase.PlannedAt != _muteVersion || phase.PlannedFor != Threads) Plan(phase, shareable);
         var units = phase.Units;
         var runs = phase.Runs;
-        var shared = phase.SharedRuns;
         if (phase.SharedUnits < ShareFrom)   // too little to share: straight through, as at one thread
         {
             foreach (var s in units) run(s);
             return;
         }
 
+        var trays = Array.Empty<Tray>();
         int mark = BeginTrays(out var suspended);
         try
         {
@@ -654,38 +653,52 @@ public sealed class VeinWorld
                 foreach (var s in units) run(s);
                 return;
             }
-            var trays = new Tray[runs.Length];
+            trays = new Tray[runs.Length];
             for (int k = 0; k < runs.Length; k++) trays[k] = NextTray();   // handed out in system order
 
-            if (shared.Length > 0)
+            for (int k = 0; k < runs.Length;)
             {
-                while (_workerLanes.Count < shared.Length) _workerLanes.Add(new Lane());
-                _shared = true;
-                try
+                if (!runs[k].Shared)
                 {
-                    Parallel.For(0, shared.Length, new ParallelOptions { MaxDegreeOfParallelism = Threads }, j =>
-                    {
-                        int k = shared[j];
-                        var lane = _workerLanes[j];
-                        lane.Tray = trays[k];
-                        var outer = t_lane;
-                        t_lane = lane;
-                        try { for (int i = runs[k].From; i < runs[k].To; i++) run(units[i]); }
-                        finally { t_lane = outer; lane.Tray = null; }
-                    });
+                    RunHere(k);
+                    k++;
+                    continue;
                 }
-                finally { _shared = false; }
-            }
-            for (int k = 0; k < runs.Length; k++)
-            {
-                if (runs[k].Shared) continue;
-                var outer = TrayNow;
-                TrayNow = trays[k];
-                try { for (int i = runs[k].From; i < runs[k].To; i++) run(units[i]); }
-                finally { TrayNow = outer; }
+                int end = k, count = 0;
+                for (; end < runs.Length && runs[end].Shared; end++) count += runs[end].To - runs[end].From;
+                if (count < ShareFrom) for (int r = k; r < end; r++) RunHere(r);   // a short stretch: here
+                else Share(k, end);
+                k = end;
             }
         }
         finally { EndTrays(mark, suspended); }
+
+        void RunHere(int k)
+        {
+            var outer = TrayNow;
+            TrayNow = trays[k];
+            try { for (int i = runs[k].From; i < runs[k].To; i++) run(units[i]); }
+            finally { TrayNow = outer; }
+        }
+
+        void Share(int from, int to)
+        {
+            while (_workerLanes.Count < to - from) _workerLanes.Add(new Lane());
+            _shared = true;
+            try
+            {
+                Parallel.For(from, to, new ParallelOptions { MaxDegreeOfParallelism = Threads }, k =>
+                {
+                    var lane = _workerLanes[k - from];
+                    lane.Tray = trays[k];
+                    var outer = t_lane;
+                    t_lane = lane;
+                    try { for (int i = runs[k].From; i < runs[k].To; i++) run(units[i]); }
+                    finally { t_lane = outer; lane.Tray = null; }
+                });
+            }
+            finally { _shared = false; }
+        }
     }
 
     /// `units` cut into Threads runs of neighbours, each run on its own tray, the trays emptied in run order.
