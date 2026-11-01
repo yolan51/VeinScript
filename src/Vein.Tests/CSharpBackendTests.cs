@@ -231,7 +231,8 @@ public class CSharpBackendTests
         // handed to `World.On` is the routing key itself.
         // The two runtimes agreeing on it is the whole point; check-backend.sh catches them drifting.
         Assert.Contains("private void hear_Ping(Events.me_T_Ping p)", code);
-        Assert.Contains("World.On(\"me.T.Ping\", this, p => hear_Ping((Events.me_T_Ping)p));", code);
+        // `, true`: its lane (Ir/Lanes.cs) — a print is held on a tray, so it may share the event with other hearers.
+        Assert.Contains("World.On(\"me.T.Ping\", this, p => hear_Ping((Events.me_T_Ping)p), true);", code);
         Assert.DoesNotContain(notes, n => n.Contains("hear"));
     }
 

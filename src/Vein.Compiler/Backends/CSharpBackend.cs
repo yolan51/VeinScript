@@ -222,6 +222,7 @@ public sealed partial class CSharpBackend : IVeinBackend
         EmitEvents(sb, module);
         EmitMarks(sb, module);
         EmitFunctions(sb, module);
+        _lanes = new Lanes(module);
         foreach (var s in module.Shards) EmitShard(sb, s);
 
         EmitEntryPoint(sb, module);
@@ -711,6 +712,9 @@ public sealed partial class CSharpBackend : IVeinBackend
     private string? _currentShard;
     private IrShard? _currentShardIr;
 
+    /// Which units may share a phase across workers (Ir/Lanes.cs, the multithreading plan P3).
+    private Lanes _lanes = null!;
+
     /// The declared return type of the fn being emitted. `return found` from `var found = 0` is a C# `long`
     /// where an `Entity` fn returns `int`, and a list element is an `object?` where a `string` fn returns one
     /// — the interpreter returns either without a word, and C# refused both (CS0266).
@@ -916,6 +920,15 @@ public sealed partial class CSharpBackend : IVeinBackend
             sb.AppendLine("    }");
         }
 
+        // Its lane in each phase (P3): may it share the phase across workers, and if not, why.
+        foreach (var phase in phaseCount.Keys)
+        {
+            string? why = shard.Methods.Where(m => PhaseOf(m) == phase).Select(m => _lanes.SerialReason(shard, m)).FirstOrDefault(r => r is not null);
+            sb.AppendLine(why is null
+                ? $"    public override bool Parallel{phase} => true;"
+                : $"    // {phase}: serial lane — {why}");
+        }
+
         if (hears.Count > 0 || everies.Count > 0)
         {
             sb.AppendLine();
@@ -928,10 +941,14 @@ public sealed partial class CSharpBackend : IVeinBackend
                 // key, marks and shapes. When it cannot be checked it is SAID (BACKEND-CONTRACT rule 4) — a barrier
                 // that silently admits all is the worst way to be missing.
                 string? gate = m.Attrs.FirstOrDefault(a => a.Name == "audience") is { } aud ? AudienceGate(aud, ev!) : null;
+                // Its lane (P3): `true` lets it share the event with the other hearers' handlers.
+                string? serial = _lanes.SerialReason(shard, m);
+                string lane = serial is null ? ", true" : "";
+                if (serial is not null) sb.AppendLine($"        // hear @{Interp.EventName(ev!)}: serial lane — {serial}");
                 if (gate is not null)
-                    sb.AppendLine($"        World.On(\"{ev}\", this, p => {{ var __f = (({EventType(ev!)})p).from; if ({gate}) {handlerNames[m]}(({EventType(ev!)})p); }});");
+                    sb.AppendLine($"        World.On(\"{ev}\", this, p => {{ var __f = (({EventType(ev!)})p).from; if ({gate}) {handlerNames[m]}(({EventType(ev!)})p); }}{lane});");
                 else
-                    sb.AppendLine($"        World.On(\"{ev}\", this, p => {handlerNames[m]}(({EventType(ev!)})p));");
+                    sb.AppendLine($"        World.On(\"{ev}\", this, p => {handlerNames[m]}(({EventType(ev!)})p){lane});");
                 if (m.Attrs.Any(a => a.Name == "audience") && gate is null)
                     _notes.Add($"{shard.Name}.{m.Name}: `audience` not enforced — the C# backend delivers " +
                                "this event from every sender (the event declares its own `from`).");

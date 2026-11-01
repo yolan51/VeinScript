@@ -76,6 +76,22 @@ is already in unit order, so one tray per worker gives the same order; and at on
 all. After: one thread 17.4 ms (ticks) and 22.6 ms (messages); four runs, still one after another, 17.1 ms
 (ticks).
 
+## Parallel phases (P4) — first numbers (2026-10-31)
+
+Shards on the parallel lane (Ir/Lanes.cs) run a phase on worker threads; serial ones after, in order. Same
+checksum at every thread count; check-backend's 60 programs print the same at four threads as at one.
+
+| program | 1 thread | 4 threads | 8 threads |
+|---|---|---|---|
+| 100 × 100, ticks | 16.2 ms | 11.5 ms | 9.9 ms (1.65×) |
+| 100 × 100, messages | 24.1 ms | 24.8 ms | 22.9 ms |
+
+- **Ticks gain, but not 8×.** The workers run the shard bodies; the main thread still empties every tray and
+  folds 100,000 contributions in the commit, alone. That serial tail is the next thing to cut (fold commits
+  per component type on workers — each bucket is independent).
+- **Messages do not gain, as expected.** Their time is the drain: 10,000 events handled one at a time, each
+  with its own commit. That is P6 (batches), not P4.
+
 ## Reproduce
 
 ```

@@ -476,10 +476,21 @@ public sealed partial class Lower
     private static void Walk(IrModule module, Action<IrExpr, IrLine?, IrShard?> onExpr, Action<IrStmt, IrLine?>? onStmt = null)
     {
         IrShard? owner = null;
+        foreach (var f in module.Functions) WalkBody(f.Body, (e, at) => onExpr(e, at, owner), onStmt);
+        foreach (var s in module.Shards)
+        {
+            owner = s;
+            foreach (var m in s.Methods) WalkBody(m.Body, (e, at) => onExpr(e, at, owner), onStmt);
+        }
+    }
+
+    /// Every statement and expression of one body — Walk's, and Lanes' (which units may share a phase).
+    internal static void WalkBody(IrStmt? body, Action<IrExpr, IrLine?> onExpr, Action<IrStmt, IrLine?>? onStmt = null)
+    {
         void Expr(IrExpr? e, IrLine? at)
         {
             if (e is null) return;
-            onExpr(e, at, owner);
+            onExpr(e, at);
             switch (e)
             {
                 case IrStructInit si: foreach (var (_, v) in si.Fields) Expr(v, at); break;
@@ -511,12 +522,7 @@ public sealed partial class Lower
                 case IrWeave w: Expr(w.Source, at); Stmt(w.Record, at); break;
             }
         }
-        foreach (var f in module.Functions) Stmt(f.Body, null);
-        foreach (var s in module.Shards)
-        {
-            owner = s;
-            foreach (var m in s.Methods) Stmt(m.Body, null);
-        }
+        Stmt(body, null);
     }
 
     /// VS0404, a warning: MONEY in a float. A float is binary — `0.1 + 0.2` is 0.30000000000000004 — so a price, a

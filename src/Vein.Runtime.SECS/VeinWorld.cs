@@ -170,7 +170,7 @@ public sealed class VeinWorld
     /// world another unit had half-changed.
     public void Defer(Action change)
     {
-        if (_tray is { } tray) tray.Ops.Add(new TrayOp(OpKind.Defer, null, change, null, 0));
+        if (TrayNow is { } tray) tray.Ops.Add(new TrayOp(OpKind.Defer, null, change, null, 0));
         else _commands.Add(change);
     }
 
@@ -232,7 +232,8 @@ public sealed class VeinWorld
 
     // ---- queries ---------------------------------------------------------
 
-    private readonly Dictionary<(Type, string), (int Version, int[] Ids)> _queryCache = new();
+    /// Concurrent: workers sharing a phase ask for queries at once (P4).
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<(Type, string), (int Version, int[] Ids)> _queryCache = new();
 
     /// Every entity carrying component T and all of `marks`, ascending by id.
     ///
@@ -352,7 +353,8 @@ public sealed class VeinWorld
         }
     }
 
-    private readonly Dictionary<Type, IBucket> _buckets = new();
+    /// Concurrent: a worker's first contribution to a type makes its bucket (P4).
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Type, IBucket> _buckets = new();
 
     /// The buckets contributed to since the last commit — the only ones a commit visits. A commit runs after EVERY
     /// event, and visiting every component type each time made a message cost more the bigger the program: with
@@ -361,7 +363,7 @@ public sealed class VeinWorld
 
     private Bucket<T> Of<T>() where T : struct, IVeinComponent<T>
     {
-        if (!_buckets.TryGetValue(typeof(T), out var b)) _buckets[typeof(T)] = b = new Bucket<T>(this);
+        if (!_buckets.TryGetValue(typeof(T), out var b)) b = _buckets.GetOrAdd(typeof(T), static (_, w) => new Bucket<T>(w), this);
         return (Bucket<T>)b;
     }
 
@@ -370,7 +372,7 @@ public sealed class VeinWorld
     /// absolute value — the distinction that makes `hp -= 1` from two shards mean `hp − 2`, not `2·hp − 2`.
     public void Contribute<T>(int entity, T snapshot, T current) where T : struct, IVeinComponent<T>
     {
-        if (_tray is { } tray) tray.StagedFor(Of<T>()).Items.Add((entity, snapshot, current));
+        if (TrayNow is { } tray) tray.StagedFor(Of<T>()).Items.Add((entity, snapshot, current));
         else Of<T>().Add(entity, snapshot, current);
     }
 
@@ -439,9 +441,33 @@ public sealed class VeinWorld
         }
     }
 
-    /// The tray of the unit running now; null outside a unit (a host's call, a commit), where everything goes
-    /// straight through as before.
-    private Tray? _tray;
+    // ---- lanes: what each worker keeps of its own (P4) ----------------------------------------------------
+    //
+    // A unit's code reads and writes a few things about ITSELF as it runs: its tray, which unit it is, the line
+    // it is on, the shard it sends from, and those of the units outside it. One lane holds them for the main
+    // thread; while a phase is shared, each worker has its own, and `Unit`, `Line` and `Sender` answer from the
+    // lane of the thread asking. Two workers writing one `Line` would make a fault name another unit's line.
+
+    private sealed class Lane
+    {
+        public Tray? Tray;
+        public VeinUnit? Unit;
+        public long Line;
+        public VeinSystem? Sender;
+        public readonly Stack<VeinSystem?> OuterSystems = new();
+        public readonly Stack<long> OuterLines = new();
+    }
+
+    private readonly Lane _main = new();
+    private readonly List<Lane> _workerLanes = new();
+    [ThreadStatic] private static Lane? t_lane;
+    /// True while workers run a phase: the lane is then the asking thread's own.
+    private volatile bool _shared;
+    private Lane L => _shared && t_lane is { } lane ? lane : _main;
+
+    /// The tray of the run in progress on this thread; null outside one (one thread, a host's call, a commit),
+    /// where everything goes straight through.
+    private Tray? TrayNow { get => L.Tray; set => L.Tray = value; }
     private readonly List<Tray> _trays = new();
     /// Trays handed out and not yet emptied — those from `mark` up belong to the phase or event in progress.
     private int _trayCount;
@@ -453,11 +479,11 @@ public sealed class VeinWorld
     /// it did before there were trays.
     private int BeginTrays(out Tray? suspended)
     {
-        suspended = _tray;
+        suspended = TrayNow;
         if (suspended is not null)
         {
             for (int i = 0; i < _trayCount; i++) _trays[i].Replay(this);
-            _tray = null;
+            TrayNow = null;
             _traysOff++;
         }
         return _trayCount;
@@ -467,17 +493,22 @@ public sealed class VeinWorld
     {
         for (int i = mark; i < _trayCount; i++) _trays[i].Replay(this);
         _trayCount = mark;
-        if (suspended is not null) { _traysOff--; _tray = suspended; }
+        if (suspended is not null) { _traysOff--; TrayNow = suspended; }
     }
 
     /// A fresh tray for the unit about to run. Returns the one to put back after it.
     private Tray? OpenTray()
     {
-        var outer = _tray;
+        var outer = TrayNow;
         if (_traysOff > 0) return outer;
-        if (_trayCount == _trays.Count) _trays.Add(new Tray());
-        _tray = _trays[_trayCount++];
+        TrayNow = NextTray();
         return outer;
+    }
+
+    private Tray NextTray()
+    {
+        if (_trayCount == _trays.Count) _trays.Add(new Tray());
+        return _trays[_trayCount++];
     }
 
     /// How many workers a phase, or one event's handlers, is shared across. One — the default — runs every unit
@@ -487,8 +518,14 @@ public sealed class VeinWorld
     /// 100,000 activations through a tray of its own made a frame 40% slower — docs/PERF.md.)
     public int Threads { get; set; } = 1;
 
-    /// One phase of every unmuted system, in registration order.
-    private void Phase(Action<VeinSystem> run)
+    /// One phase of every unmuted system, in registration order — at one thread, straight through; above, the
+    /// systems that may share it (`shareable`, the compiler's lane, Ir/Lanes.cs) on workers, the rest after them
+    /// on this thread, one at a time and in order.
+    ///
+    /// Why the serial ones may wait until the workers are done: what makes a unit serial (spawn, random, a file,
+    /// weave, a live setting) is nothing a shareable unit can see within the phase — a spawned identity carries
+    /// no shape until the commit, and the rest only serial units touch. Among themselves they keep their order.
+    private void Phase(Func<VeinSystem, bool> shareable, Action<VeinSystem> run)
     {
         if (Threads <= 1)
         {
@@ -498,7 +535,58 @@ public sealed class VeinWorld
         // Mutes change only at a commit, so who runs is known before anyone does.
         var units = new List<VeinSystem>(_systems.Count);
         foreach (var s in _systems) if (!IsMuted(s)) units.Add(s);
-        InRuns(units, run);
+
+        int mark = BeginTrays(out var suspended);
+        try
+        {
+            if (suspended is not null)   // inside a unit (a host hook): straight through, as before trays
+            {
+                foreach (var s in units) run(s);
+                return;
+            }
+            // Runs of neighbours that may share, cut so each worker gets about four (a slow run then does not hold
+            // the others up), and each serial system a run of its own; every run its tray, in system order.
+            int shared = 0;
+            foreach (var s in units) if (shareable(s)) shared++;
+            int size = Math.Max(1, (shared + Threads * 4 - 1) / (Threads * 4));
+            var runs = new List<(int From, int To, Tray Tray)>();
+            var serial = new List<(int From, int To, Tray Tray)>();
+            for (int i = 0; i < units.Count;)
+            {
+                int from = i;
+                if (!shareable(units[i])) { serial.Add((from, ++i, NextTray())); continue; }
+                while (i < units.Count && i - from < size && shareable(units[i])) i++;
+                runs.Add((from, i, NextTray()));
+            }
+
+            if (runs.Count > 0)
+            {
+                while (_workerLanes.Count < runs.Count) _workerLanes.Add(new Lane());
+                _shared = true;
+                try
+                {
+                    Parallel.For(0, runs.Count, new ParallelOptions { MaxDegreeOfParallelism = Threads }, k =>
+                    {
+                        var (from, to, tray) = runs[k];
+                        var lane = _workerLanes[k];
+                        lane.Tray = tray;
+                        var outer = t_lane;
+                        t_lane = lane;
+                        try { for (int i = from; i < to; i++) run(units[i]); }
+                        finally { t_lane = outer; lane.Tray = null; }
+                    });
+                }
+                finally { _shared = false; }
+            }
+            foreach (var (from, to, tray) in serial)
+            {
+                var outer = TrayNow;
+                TrayNow = tray;
+                try { for (int i = from; i < to; i++) run(units[i]); }
+                finally { TrayNow = outer; }
+            }
+        }
+        finally { EndTrays(mark, suspended); }
     }
 
     /// `units` cut into Threads runs of neighbours, each run on its own tray, the trays emptied in run order.
@@ -513,7 +601,7 @@ public sealed class VeinWorld
                 int from = units.Count * r / runs, to = units.Count * (r + 1) / runs;
                 var outer = OpenTray();
                 try { for (int i = from; i < to; i++) run(units[i]); }
-                finally { _tray = outer; }
+                finally { TrayNow = outer; }
             }
         }
         finally { EndTrays(mark, suspended); }
@@ -536,7 +624,7 @@ public sealed class VeinWorld
     /// A line for Err — on the running unit's tray when there is one, so it stays in order with its prints.
     private void ErrLine(string text)
     {
-        if (_tray is { } tray) tray.Ops.Add(new TrayOp(OpKind.Err, text, null, null, 0));
+        if (TrayNow is { } tray) tray.Ops.Add(new TrayOp(OpKind.Err, text, null, null, 0));
         else Err.WriteLine(text);
     }
 
@@ -717,7 +805,7 @@ public sealed class VeinWorld
     /// FireBoot, Drain — so it is heard after what `run once` emitted and before anything that emitted in turn.
     public void Start(Action? boot = null)
     {
-        Phase(static s => s.Once());
+        Phase(static s => s.ParallelOnce, static s => s.Once());
         Commit();
         Compose?.Invoke();   // so the first `settled` reads a composed world
         boot?.Invoke();
@@ -735,10 +823,10 @@ public sealed class VeinWorld
     {
         if (TakeAnswers()) Drain();   // a request answered since the last frame is heard before this one
         Tick++;
-        Phase(static s => s.Tick());
+        Phase(static s => s.ParallelTick, static s => s.Tick());
         Commit();
         Compose?.Invoke();   // between the tick commit and `settled` — see the field
-        Phase(static s => s.Settled());
+        Phase(static s => s.ParallelSettled, static s => s.Settled());
         Commit();
         Drain();   // Interp.Frame: events from either phase are handled against a settled world
     }
@@ -812,7 +900,7 @@ public sealed class VeinWorld
 
     public void Print(string text)
     {
-        if (_tray is { } tray) tray.Ops.Add(new TrayOp(OpKind.Out, text, null, null, 0));
+        if (TrayNow is { } tray) tray.Ops.Add(new TrayOp(OpKind.Out, text, null, null, 0));
         else Out.WriteLine(text);
     }
 
@@ -828,7 +916,7 @@ public sealed class VeinWorld
     public void PlaySound(string source, double volume)
     {
         double v = Math.Clamp(double.IsFinite(volume) ? volume : 1.0, 0.0, 1.0);
-        if (_tray is { } tray) tray.Ops.Add(new TrayOp(OpKind.Sound, source, null, null, BitConverter.DoubleToInt64Bits(v)));
+        if (TrayNow is { } tray) tray.Ops.Add(new TrayOp(OpKind.Sound, source, null, null, BitConverter.DoubleToInt64Bits(v)));
         else Sound?.Invoke(source, v);
     }
 
@@ -956,7 +1044,7 @@ public sealed class VeinWorld
     {
         string by = Unit is { } u ? $"{u.Shard} ({u.Phase}) at {u.File}:{Line}" : "the host";
         // On a tray, the quit lands when the phase does — in unit order, so the first unit to quit still wins.
-        if (_tray is { } tray) tray.Ops.Add(new TrayOp(OpKind.Quit, by, null, null, code));
+        if (TrayNow is { } tray) tray.Ops.Add(new TrayOp(OpKind.Quit, by, null, null, code));
         else QuitNow(code, by);
     }
 
@@ -992,7 +1080,7 @@ public sealed class VeinWorld
 
     /// Each queued event with where it was emitted — the unit and its line — for DrainCapped to name.
     private readonly Queue<(string Name, object Payload, VeinUnit? Site, long Line)> _events = new();
-    private readonly Dictionary<string, List<(VeinSystem? Owner, Action<object> Handler)>> _handlers = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<(VeinSystem? Owner, Action<object> Handler, bool Shareable)>> _handlers = new(StringComparer.Ordinal);
 
     /// Register a `hear` handler. Called from a system's `Subscribe`, before the first phase runs, so a
     /// `run once` that emits is never racing a handler that has not subscribed yet.
@@ -1000,10 +1088,13 @@ public sealed class VeinWorld
 
     /// The same, owned by `owner`: while it is muted the handler is skipped, and the event is dropped for
     /// it rather than held — Interp's rule.
-    public void On(string @event, VeinSystem? owner, Action<object> handler)
+    public void On(string @event, VeinSystem? owner, Action<object> handler) => On(@event, owner, handler, false);
+
+    /// The same, with its lane (Ir/Lanes.cs): `shareable` lets it run on a worker beside the event's other hearers.
+    public void On(string @event, VeinSystem? owner, Action<object> handler, bool shareable)
     {
         if (!_handlers.TryGetValue(@event, out var list)) _handlers[@event] = list = new();
-        list.Add((owner, handler));
+        list.Add((owner, handler, shareable));
     }
 
     /// `emit @E { … }`. Queued rather than dispatched, so an emit inside a handler is handled AFTER the
@@ -1013,7 +1104,7 @@ public sealed class VeinWorld
     {
         // A diagnostic raised inside a unit — `do warn(…)` — says where, as Interp.Stamp makes it.
         if (@event == "DiagnosticRaised" && Unit is { } unit) StampDiagnostic?.Invoke(payload, unit);
-        if (_tray is { } tray) tray.Ops.Add(new TrayOp(OpKind.Emit, @event, payload, Unit, Line));
+        if (TrayNow is { } tray) tray.Ops.Add(new TrayOp(OpKind.Emit, @event, payload, Unit, Line));
         else _events.Enqueue((@event, payload, Unit, Line));
     }
 
@@ -1048,14 +1139,14 @@ public sealed class VeinWorld
                 {
                     if (Threads <= 1 || hs.Count == 1)
                     {
-                        foreach (var (owner, h) in hs)
+                        foreach (var (owner, h, _) in hs)
                             if (owner is null || !IsMuted(owner)) h(payload);
                     }
                     else
                     {
                         // Shared like a phase: runs of neighbouring handlers, the trays emptied in the order they subscribed.
                         var heard = new List<Action<object>>(hs.Count);
-                        foreach (var (owner, h) in hs) if (owner is null || !IsMuted(owner)) heard.Add(h);
+                        foreach (var (owner, h, _) in hs) if (owner is null || !IsMuted(owner)) heard.Add(h);
                         InRuns(heard, h => h(payload));
                     }
                 }
@@ -1074,14 +1165,14 @@ public sealed class VeinWorld
     // the failing one was skipped for the frame, with nothing for the program to hear.
 
     /// The unit running now, so a diagnostic raised inside it says where (StampDiagnostic).
-    public VeinUnit? Unit { get; private set; }
+    public VeinUnit? Unit { get => L.Unit; private set => L.Unit = value; }
 
     /// The line of the unit's statement running now — generated code sets it before each statement of a
     /// phase or `hear` body — so a fault names the line that failed, as Interp.RunUnit does; 0 before the
     /// first. A `fn`/`SF` body keeps no such bookkeeping, so a call stays as cheap as it was: a fault inside
     /// one is reported at the unit's statement that made the call, where the interpreter names the
     /// statement inside it and the calls between.
-    public long Line;
+    public long Line { get => L.Line; set => L.Line = value; }
 
     /// Set the line and go on: a `while` condition is asked again at its own line every turn.
     public bool Here(long line)
@@ -1092,32 +1183,32 @@ public sealed class VeinWorld
 
     /// The shard whose unit is running — what an `emit` is FROM, including one inside an SF it called (the
     /// interpreter's rule: what an SF emits, its caller emits). Null outside any shard (a host's event).
-    public VeinSystem? Sender { get; private set; }
-    private readonly Stack<VeinSystem?> _outerSystems = new();
+    public VeinSystem? Sender { get => L.Sender; private set => L.Sender = value; }
 
     /// The sender's marks as they stand NOW — snapshotted into the event, as Interp.FromOf does (D20): a later
     /// `mark !X #M` does not rewrite what X already sent.
     public string[] SenderMarks() => Sender is { } s ? s.Marks.ToArray() : Array.Empty<string>();
 
-    /// The lines of the units outside the running one — units nest when a handler's drain runs another.
-    private readonly Stack<long> _outerLines = new();
-
+    /// The lane keeps the senders and lines of the units outside the running one — units nest when a handler's
+    /// drain runs another.
     public VeinUnit? Enter(VeinUnit unit, VeinSystem? system = null)
     {
-        var outer = Unit;
-        Unit = unit;
-        _outerSystems.Push(Sender);
-        Sender = system ?? Sender;
-        _outerLines.Push(Line);
-        Line = 0;
+        var lane = L;
+        var outer = lane.Unit;
+        lane.Unit = unit;
+        lane.OuterSystems.Push(lane.Sender);
+        lane.Sender = system ?? lane.Sender;
+        lane.OuterLines.Push(lane.Line);
+        lane.Line = 0;
         return outer;
     }
 
     public void Leave(VeinUnit? outer)
     {
-        Unit = outer;
-        Sender = _outerSystems.Count > 0 ? _outerSystems.Pop() : null;
-        Line = _outerLines.Count > 0 ? _outerLines.Pop() : 0;
+        var lane = L;
+        lane.Unit = outer;
+        lane.Sender = lane.OuterSystems.Count > 0 ? lane.OuterSystems.Pop() : null;
+        lane.Line = lane.OuterLines.Count > 0 ? lane.OuterLines.Pop() : 0;
     }
 
     /// The event whose handlers are running, while they run: a fault in a @DiagnosticRaised handler cannot
@@ -1272,6 +1363,12 @@ public abstract class VeinSystem
     public virtual void Once() { }
     public virtual void Tick() { }
     public virtual void Settled() { }
+
+    /// Whether each phase may run on a worker beside other systems' (the compiler's lane, Ir/Lanes.cs). False —
+    /// the serial lane — unless the compiler found nothing in it whose order matters: always safe to leave false.
+    public virtual bool ParallelOnce => false;
+    public virtual bool ParallelTick => false;
+    public virtual bool ParallelSettled => false;
 
     /// `!Boards.hideDone` (D28): this system's settings by name. The emitter overrides both for a shard with any.
     public virtual object? GetSetting(string name) => null;
