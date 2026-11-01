@@ -284,7 +284,7 @@ public sealed class VeinWorld
 
     /// Contributions to one component type this phase. Fully typed: the tuples hold `T`, not an
     /// interface, so nothing boxes between an activation and the fold.
-    private sealed class Bucket<T> : IBucket where T : struct, IVeinComponent<T>
+    private sealed class Bucket<T>(VeinWorld world) : IBucket where T : struct, IVeinComponent<T>
     {
         private readonly List<(int Entity, T Snapshot, T Current)> _items = new();
         private readonly Dictionary<int, List<(T Snapshot, T Current)>> _byEntity = new();
@@ -293,7 +293,12 @@ public sealed class VeinWorld
         private readonly List<int> _dirty = new();
 
         public void Touch(int entity) { if (!_byEntity.ContainsKey(entity)) _byEntity[entity] = new(); }
-        public void Add(int entity, T snapshot, T current) => _items.Add((entity, snapshot, current));
+        public void Add(int entity, T snapshot, T current)
+        {
+            // The first contribution since the last commit puts this bucket on the world's touched list.
+            if (_items.Count == 0) world._touched.Add(this);
+            _items.Add((entity, snapshot, current));
+        }
 
         /// A destroyed entity's list goes with it.
         ///
@@ -345,9 +350,14 @@ public sealed class VeinWorld
 
     private readonly Dictionary<Type, IBucket> _buckets = new();
 
+    /// The buckets contributed to since the last commit — the only ones a commit visits. A commit runs after EVERY
+    /// event, and visiting every component type each time made a message cost more the bigger the program: with
+    /// 200 shapes and 10,000 messages a frame, two million visits to empty buckets (docs/PERF.md).
+    private readonly List<IBucket> _touched = new();
+
     private Bucket<T> Of<T>() where T : struct, IVeinComponent<T>
     {
-        if (!_buckets.TryGetValue(typeof(T), out var b)) _buckets[typeof(T)] = b = new Bucket<T>();
+        if (!_buckets.TryGetValue(typeof(T), out var b)) _buckets[typeof(T)] = b = new Bucket<T>(this);
         return (Bucket<T>)b;
     }
 
@@ -361,7 +371,12 @@ public sealed class VeinWorld
     /// the queued structural commands apply on top of the reconciled state.
     public void Commit()
     {
-        foreach (var b in _buckets.Values) b.Commit(this);
+        if (_touched.Count > 0)
+        {
+            var touched = _touched.ToArray();
+            _touched.Clear();
+            foreach (var b in touched) b.Commit(this);
+        }
 
         if (_commands.Count == 0) return;
         var pending = _commands.ToList();
@@ -819,7 +834,7 @@ public sealed class VeinWorld
         int guard = 0;
         while (_events.Count > 0)
         {
-            if (guard++ >= 10_000) { DrainCapped(); break; }
+            if (guard++ >= DrainCap) { DrainCapped(); break; }
             var (name, payload, _, _) = _events.Dequeue();
             Observed?.Invoke(name, payload);
             _handlers.TryGetValue(name, out var hs);
@@ -950,9 +965,14 @@ public sealed class VeinWorld
     /// Interp.DrainCapped: the queue handled 10,000 events in one drain. The drain still stops — a frame must
     /// end — and now says so, naming the event next in line and where it was emitted. The diagnostic is
     /// handled at once with the queued events set aside, which go back afterwards for the next drain.
+    /// How many events one drain may handle before it stops and says so — a guard against events that cause each
+    /// other forever. A simulation that legitimately sends more (10,000 shards each sending one a frame) raises it:
+    /// the host's `VeinGame.DrainCap`, `--drain-cap N` on a standalone run. docs/PERF.md.
+    public int DrainCap { get; set; } = 10_000;
+
     private void DrainCapped()
     {
-        const string what = "10,000 events in one drain";
+        string what = DrainCap.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) + " events in one drain";
         if (_reportingDrainCap)
         {
             Faulted = true;
@@ -967,7 +987,8 @@ public sealed class VeinWorld
         string message = $"{what} — @{next.Name[(next.Name.LastIndexOf('.') + 1)..]} is still being emitted, and the " +
                          "events still queued wait for the next drain. Events that cause each other never settle: give " +
                          "the cycle a condition that ends it. A batch that large is better walked with `target` than " +
-                         "sent as an event per item.";
+                         "sent as an event per item. A program that really sends that many raises the cap (`--drain-cap N`, " +
+                         "or the host's DrainCap).";
         if (Diagnose is { } raise) raise(2, message, site);
         else
         {

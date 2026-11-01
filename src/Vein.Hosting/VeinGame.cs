@@ -76,6 +76,20 @@ public sealed partial class VeinGame
     }
     private IReadOnlyList<string> _args = Array.Empty<string>();
 
+    /// How many events one drain may handle before it stops and reports (a runaway guard, 10,000 by default). A
+    /// simulation of thousands of shards each sending a message a frame raises it. Applies now and to every reload.
+    public int DrainCap
+    {
+        get => _drainCap;
+        set
+        {
+            _drainCap = Math.Max(1, value);
+            if (_runtime is not null) _runtime.DrainCap = _drainCap;
+            if (_pending is not null) _pending.DrainCap = _drainCap;
+        }
+    }
+    private int _drainCap = 10_000;
+
     /// What the last load or reload reported, warnings included. A failed `Reload` leaves the previous
     /// program running and puts its errors here.
     public IReadOnlyList<Diagnostic> Diagnostics { get; private set; } = Array.Empty<Diagnostic>();
@@ -705,6 +719,7 @@ public sealed partial class VeinGame
     {
         runtime.ReadFallback = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(Path));
         runtime.Args = _args;
+        runtime.DrainCap = _drainCap;
         return runtime;
     }
 

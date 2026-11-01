@@ -1,0 +1,37 @@
+// phases_twice.vein — one shard, several blocks of one phase: they run in the order they are written.
+//
+// `each tick` twice, `each frame` beside them, `settled` twice. Each block is its own unit (a fault in one
+// does not stop the next), and they run top to bottom — on the interpreter and compiled alike. The C# backend
+// once wrote one `Tick()` per block, two overrides in one class, and the program did not compile; the scale
+// benchmark (tools/gen-scale.sh `mixed`, a tick block for messages and one for work) found it.
+//
+//   veinc run samples/phases_twice.vein --ticks 2
+//   bash tools/check-backend.sh
+
+bundle PhasesTwice by you {
+    need "Vein.Console"
+
+    shape $Count { n: int = 0 }
+    mark #Counter
+
+    shard Seed { run once {
+        let c = spawn()
+        attach $Count to c { }
+        mark c #Counter
+    } }
+
+    shard Busy {
+        var frame = 0
+        each tick {
+            frame += 1
+            do print("frame " + frame + ": first tick block")
+        }
+        each tick {
+            do print("frame " + frame + ": second tick block")
+            target $Count #Counter as c { c.Count.n += 1 }
+        }
+        each frame { do print("frame " + frame + ": the frame block") }
+        settled { target $Count #Counter as c { do print("frame " + frame + ": first settled, n = " + c.Count.n) } }
+        settled { do print("frame " + frame + ": second settled") }
+    }
+}

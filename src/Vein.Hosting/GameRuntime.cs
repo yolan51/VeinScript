@@ -27,6 +27,9 @@ internal interface IGameRuntime
     string? ReadFallback { set; }
     /// The program's command-line arguments, what `args()` answers (VeinGame.Args).
     IReadOnlyList<string> Args { set; }
+
+    /// Events one drain may handle before it stops and reports (VeinGame.DrainCap).
+    int DrainCap { set; }
     bool Running { get; }
     int Tick { get; }
     IReadOnlyList<string> MutedMarks { get; }

@@ -1846,7 +1846,7 @@ public sealed class Interp
         int guard = 0;
         while (_queue.Count > 0)
         {
-            if (guard++ >= 10_000) { DrainCapped(); break; }
+            if (guard++ >= DrainCap) { DrainCapped(); break; }
             var queued = _queue.Dequeue();
             var (name, payload) = (queued.Name, queued.Payload);
             if (Pure && Purity.ReachesOutside(name))
@@ -1990,9 +1990,14 @@ public sealed class Interp
     /// The diagnostic is handled AT ONCE, with the events still queued set aside: in a live-lock it would
     /// otherwise wait behind them for ever, and a collector that prints it would print nothing. They go back
     /// afterwards, in order, and run at the next drain as they always did.
+    /// How many events one drain may handle before it stops and says so — a guard against events that cause each
+    /// other forever. A simulation that legitimately sends more raises it: `veinc run --drain-cap N`, or the host's
+    /// `VeinGame.DrainCap`. docs/PERF.md.
+    public int DrainCap { get; set; } = 10_000;
+
     private void DrainCapped()
     {
-        const string what = "10,000 events in one drain";
+        string what = DrainCap.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) + " events in one drain";
         if (Budget > 0) throw new OutOfGas(what);
         if (_reportingDrainCap)
         {
@@ -2011,7 +2016,8 @@ public sealed class Interp
             ["severity"] = 2L,
             ["message"] = $"{what} — @{EventName(next.Name)} is still being emitted, and the events still queued wait for " +
                           "the next drain. Events that cause each other never settle: give the cycle a condition that ends " +
-                          "it. A batch that large is better walked with `target` than sent as an event per item.",
+                          "it. A batch that large is better walked with `target` than sent as an event per item. A program that " +
+                          "really sends that many raises the cap (`--drain-cap N`, or the host's DrainCap).",
             ["shard"] = shard, ["phase"] = phase, ["file"] = place?.File ?? "", ["line"] = place?.Line ?? 0L,
             ["origin"] = null, ["bundle"] = _bundle,
         });

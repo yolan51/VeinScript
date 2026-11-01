@@ -120,6 +120,7 @@ internal sealed class CompiledRuntime : IGameRuntime
     public string? FilesRoot { set => _world.BaseDirectory = value; }
     public string? ReadFallback { set => _world.ReadFallback = value; }
     public IReadOnlyList<string> Args { set => _world.Args = value; }
+    public int DrainCap { set => _world.DrainCap = value; }
 
     public void Resume() => Guard(_world.Resume);
     public long SpawnAt(long id) => _world.SpawnAt((int)id);

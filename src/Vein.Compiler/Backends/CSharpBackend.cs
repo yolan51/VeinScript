@@ -796,23 +796,37 @@ public sealed partial class CSharpBackend : IVeinBackend
             handlerNames[m] = name;
         }
 
+        static string? PhaseOf(IrFunction m) => m.Attrs.FirstOrDefault(a => a.Name == "schedule")?.Args.FirstOrDefault()?.ToString() switch
+        {
+            "once" => "Once",
+            "tick" or "frame" => "Tick",
+            "settled" => "Settled",
+            _ => null
+        };
+        // A shard may hold two blocks of one phase (two `each tick`, or `each tick` and `each frame`): each becomes
+        // a method of its own, guarded as its own unit, and the phase calls them in the order they are written —
+        // the interpreter's order. One `Tick()` per block was two overrides in one class (CS0111).
+        var phaseCount = shard.Methods.Select(PhaseOf).Where(p => p is not null).GroupBy(p => p!).ToDictionary(g => g.Key, g => g.Count());
+        var phaseParts = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+
         foreach (var m in shard.Methods)
         {
             string? when = m.Attrs.FirstOrDefault(a => a.Name == "schedule")?.Args.FirstOrDefault()?.ToString();
-            string? phase = when switch
-            {
-                "once" => "Once",
-                "tick" or "frame" => "Tick",
-                "settled" => "Settled",
-                _ => null
-            };
+            string? phase = PhaseOf(m);
 
             if (phase is not null)
             {
                 _bound.Clear();
                 ResetLocals();
                 string unit = Unit(sb, shard, m, when!);
-                sb.AppendLine($"    public override void {phase}()");
+                if (phaseCount[phase] > 1)
+                {
+                    var parts = phaseParts.TryGetValue(phase, out var p) ? p : phaseParts[phase] = new List<string>();
+                    string part = $"{phase}_{parts.Count}";
+                    parts.Add(part);
+                    sb.AppendLine($"    private void {part}()");
+                }
+                else sb.AppendLine($"    public override void {phase}()");
                 sb.AppendLine("    {");
                 GuardOpen(sb, unit);
                 // `each tick as t` (D22): the clock of this frame, read from the world — the same two fields
@@ -892,6 +906,14 @@ public sealed partial class CSharpBackend : IVeinBackend
                 continue;
             }
             _notes.Add($"{shard.Name}.{m.Name}: '{when ?? "?"}' not emitted.");
+        }
+
+        foreach (var (phase, parts) in phaseParts)
+        {
+            sb.AppendLine($"    public override void {phase}()");
+            sb.AppendLine("    {");
+            foreach (var part in parts) sb.AppendLine($"        {part}();");
+            sb.AppendLine("    }");
         }
 
         if (hears.Count > 0 || everies.Count > 0)
@@ -2319,15 +2341,18 @@ public sealed partial class CSharpBackend : IVeinBackend
         // `print("…and behind it")` came out as ".and behind it" here and right there.
         sb.AppendLine("        try { Console.OutputEncoding = new System.Text.UTF8Encoding(false); } catch { }");
         // What follows `--` is the program's own, as `veinc run file -- …` hands it to `args()`.
-        sb.AppendLine("        int ticks = 0;");
+        // `--drain-cap N` as `veinc run` takes it: how many events one drain may handle (VeinWorld.DrainCap).
+        sb.AppendLine("        int ticks = 0, drainCap = 10_000;");
         sb.AppendLine("        var programArgs = new List<string>();");
         sb.AppendLine("        for (int i = 0; i < args.Length; i++)");
         sb.AppendLine("            if (args[i] == \"--\") { programArgs.AddRange(args.Skip(i + 1)); break; }");
         sb.AppendLine("            else if (args[i] == \"--ticks\" && i + 1 < args.Length) int.TryParse(args[++i], out ticks);");
         sb.AppendLine("            else if (args[i].StartsWith(\"--ticks=\")) int.TryParse(args[i].Substring(8), out ticks);");
+        sb.AppendLine("            else if (args[i] == \"--drain-cap\" && i + 1 < args.Length) int.TryParse(args[++i], out drainCap);");
         sb.AppendLine();
         sb.AppendLine("        var world = Create();");
         sb.AppendLine("        world.Args = programArgs;");
+        sb.AppendLine("        world.DrainCap = Math.Max(1, drainCap);");
         // `start @Boot { … }` (VS0219): the boot event, as `veinc run` fires it — a host raises its own.
         if (module.Start is { } st && _events.Contains(st.Event))
         {
