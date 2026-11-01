@@ -168,7 +168,11 @@ public sealed class VeinWorld
 
     /// Queue a structural change for the commit point — applied immediately, it would let one unit see a
     /// world another unit had half-changed.
-    public void Defer(Action change) => _commands.Add(change);
+    public void Defer(Action change)
+    {
+        if (_tray is { } tray) tray.Ops.Add(new TrayOp(OpKind.Defer, null, change, null, 0));
+        else _commands.Add(change);
+    }
 
     public void Destroy(int entity) => Defer(() => Unmake(entity));
 
@@ -364,8 +368,177 @@ public sealed class VeinWorld
     /// Record what one activation did to one component: the snapshot it copied on entry, and the value
     /// it mutated. Keeping both is what lets a `folds sum` field contribute its DELTA rather than its
     /// absolute value — the distinction that makes `hp -= 1` from two shards mean `hp − 2`, not `2·hp − 2`.
-    public void Contribute<T>(int entity, T snapshot, T current) where T : struct, IVeinComponent<T> =>
-        Of<T>().Add(entity, snapshot, current);
+    public void Contribute<T>(int entity, T snapshot, T current) where T : struct, IVeinComponent<T>
+    {
+        if (_tray is { } tray) tray.StagedFor(Of<T>()).Items.Add((entity, snapshot, current));
+        else Of<T>().Add(entity, snapshot, current);
+    }
+
+    // ---- trays (the multithreading plan, P2) ---------------------------------------------------------------
+    //
+    // With Threads above one, the units of a phase (or the handlers of one event) are cut into runs of
+    // neighbours, and everything a run sends OUT goes on its own tray instead of into the shared lists: fold
+    // contributions, deferred changes, emits, prints and error lines, a quit. When the phase is over the trays
+    // are emptied into the real lists in RUN order — which is unit order — and the commit runs as it always has.
+    //
+    // Run one after another, that changes nothing, and that is the point: it is the proof, made where a
+    // difference is easy to find, that the runs may go to workers at once (P4: phases, P5: one event's
+    // handlers) and still give the same world, the same queue and the same output, byte for byte —
+    // check-backend runs every program at one thread and at four and diffs them. Nothing a unit can READ comes
+    // from these lists, so holding its writes until the phase ends is invisible to it (RULES 11–13: no unit
+    // sees another's changes before the commit anyway).
+
+    private enum OpKind : byte { Defer, Emit, Out, Err, Quit, Sound }
+
+    /// One thing a unit sent out, in the order it sent it. `Payload` is the command, the event's payload, or the
+    /// quit's code; `Line` the emitting statement's line (or a sound's volume, as bits).
+    private readonly record struct TrayOp(OpKind Kind, string? Text, object? Payload, VeinUnit? Site, long Line);
+
+    private interface IStaged { void Replay(); }
+
+    /// One tray's contributions to one component type, kept typed so nothing boxes.
+    private sealed class Staged<T>(Bucket<T> bucket) : IStaged where T : struct, IVeinComponent<T>
+    {
+        public readonly List<(int Entity, T Snapshot, T Current)> Items = new();
+        public void Replay()
+        {
+            foreach (var (entity, snap, cur) in Items) bucket.Add(entity, snap, cur);
+            Items.Clear();
+        }
+    }
+
+    private sealed class Tray
+    {
+        public readonly List<TrayOp> Ops = new();
+        /// The component types contributed to, in the order first contributed — each staged list once.
+        private readonly List<IStaged> _staged = new();
+        private readonly Dictionary<object, IStaged> _byBucket = new(ReferenceEqualityComparer.Instance);
+        private object? _lastBucket;
+        private IStaged? _last;
+
+        public Staged<T> StagedFor<T>(Bucket<T> bucket) where T : struct, IVeinComponent<T>
+        {
+            // A unit writes one shape over and over, so the last one answers almost every time.
+            if (!ReferenceEquals(_lastBucket, bucket))
+            {
+                if (!_byBucket.TryGetValue(bucket, out var found)) _byBucket[bucket] = found = new Staged<T>(bucket);
+                _lastBucket = bucket;
+                _last = found;
+            }
+            var staged = (Staged<T>)_last!;
+            if (staged.Items.Count == 0) _staged.Add(staged);
+            return staged;
+        }
+
+        public void Replay(VeinWorld world)
+        {
+            foreach (var s in _staged) s.Replay();
+            _staged.Clear();
+            foreach (var op in Ops) world.Apply(op);
+            Ops.Clear();
+        }
+    }
+
+    /// The tray of the unit running now; null outside a unit (a host's call, a commit), where everything goes
+    /// straight through as before.
+    private Tray? _tray;
+    private readonly List<Tray> _trays = new();
+    /// Trays handed out and not yet emptied — those from `mark` up belong to the phase or event in progress.
+    private int _trayCount;
+    /// Above 0 while a phase or drain runs INSIDE a unit (a host hook that drives the world): trays are off.
+    private int _traysOff;
+
+    /// Where the trays of a phase or an event start. A phase that starts inside a running unit — only a host
+    /// hook can do that — first empties every tray so far, in order, and then runs with trays off: exactly what
+    /// it did before there were trays.
+    private int BeginTrays(out Tray? suspended)
+    {
+        suspended = _tray;
+        if (suspended is not null)
+        {
+            for (int i = 0; i < _trayCount; i++) _trays[i].Replay(this);
+            _tray = null;
+            _traysOff++;
+        }
+        return _trayCount;
+    }
+
+    private void EndTrays(int mark, Tray? suspended)
+    {
+        for (int i = mark; i < _trayCount; i++) _trays[i].Replay(this);
+        _trayCount = mark;
+        if (suspended is not null) { _traysOff--; _tray = suspended; }
+    }
+
+    /// A fresh tray for the unit about to run. Returns the one to put back after it.
+    private Tray? OpenTray()
+    {
+        var outer = _tray;
+        if (_traysOff > 0) return outer;
+        if (_trayCount == _trays.Count) _trays.Add(new Tray());
+        _tray = _trays[_trayCount++];
+        return outer;
+    }
+
+    /// How many workers a phase, or one event's handlers, is shared across. One — the default — runs every unit
+    /// straight through, as before trays, and costs nothing. Above one, the units are cut into that many runs of
+    /// NEIGHBOURS, each on its own tray: a run's tray is already in unit order, so emptying the trays in run order
+    /// is unit order, and one tray per worker is enough rather than one per unit. (Copying every contribution of
+    /// 100,000 activations through a tray of its own made a frame 40% slower — docs/PERF.md.)
+    public int Threads { get; set; } = 1;
+
+    /// One phase of every unmuted system, in registration order.
+    private void Phase(Action<VeinSystem> run)
+    {
+        if (Threads <= 1)
+        {
+            foreach (var s in _systems) if (!IsMuted(s)) run(s);
+            return;
+        }
+        // Mutes change only at a commit, so who runs is known before anyone does.
+        var units = new List<VeinSystem>(_systems.Count);
+        foreach (var s in _systems) if (!IsMuted(s)) units.Add(s);
+        InRuns(units, run);
+    }
+
+    /// `units` cut into Threads runs of neighbours, each run on its own tray, the trays emptied in run order.
+    private void InRuns<T>(List<T> units, Action<T> run)
+    {
+        int mark = BeginTrays(out var suspended);
+        try
+        {
+            int runs = Math.Min(Threads, units.Count);
+            for (int r = 0; r < runs; r++)
+            {
+                int from = units.Count * r / runs, to = units.Count * (r + 1) / runs;
+                var outer = OpenTray();
+                try { for (int i = from; i < to; i++) run(units[i]); }
+                finally { _tray = outer; }
+            }
+        }
+        finally { EndTrays(mark, suspended); }
+    }
+
+    /// What a tray holds, put where it would have gone at once.
+    private void Apply(in TrayOp op)
+    {
+        switch (op.Kind)
+        {
+            case OpKind.Defer: _commands.Add((Action)op.Payload!); break;
+            case OpKind.Emit: _events.Enqueue((op.Text!, op.Payload!, op.Site, op.Line)); break;
+            case OpKind.Out: Out.WriteLine(op.Text); break;
+            case OpKind.Err: Err.WriteLine(op.Text); break;
+            case OpKind.Quit: QuitNow((int)op.Line, op.Text!); break;
+            case OpKind.Sound: Sound?.Invoke(op.Text!, BitConverter.Int64BitsToDouble(op.Line)); break;
+        }
+    }
+
+    /// A line for Err — on the running unit's tray when there is one, so it stays in order with its prints.
+    private void ErrLine(string text)
+    {
+        if (_tray is { } tray) tray.Ops.Add(new TrayOp(OpKind.Err, text, null, null, 0));
+        else Err.WriteLine(text);
+    }
 
     /// The one point in a phase where the world changes: folds reconcile every contribution first, then
     /// the queued structural commands apply on top of the reconciled state.
@@ -544,7 +717,7 @@ public sealed class VeinWorld
     /// FireBoot, Drain — so it is heard after what `run once` emitted and before anything that emitted in turn.
     public void Start(Action? boot = null)
     {
-        foreach (var s in _systems) if (!IsMuted(s)) s.Once();
+        Phase(static s => s.Once());
         Commit();
         Compose?.Invoke();   // so the first `settled` reads a composed world
         boot?.Invoke();
@@ -562,10 +735,10 @@ public sealed class VeinWorld
     {
         if (TakeAnswers()) Drain();   // a request answered since the last frame is heard before this one
         Tick++;
-        foreach (var s in _systems) if (!IsMuted(s)) s.Tick();
+        Phase(static s => s.Tick());
         Commit();
         Compose?.Invoke();   // between the tick commit and `settled` — see the field
-        foreach (var s in _systems) if (!IsMuted(s)) s.Settled();
+        Phase(static s => s.Settled());
         Commit();
         Drain();   // Interp.Frame: events from either phase are handled against a settled world
     }
@@ -632,12 +805,16 @@ public sealed class VeinWorld
     {
         var (system, _, body) = _every[i];
         if (IsMuted(system)) return;
-        body();
+        body();   // one unit: nothing to share across workers, so no tray
         Commit();
         Drain();
     }
 
-    public void Print(string text) => Out.WriteLine(text);
+    public void Print(string text)
+    {
+        if (_tray is { } tray) tray.Ops.Add(new TrayOp(OpKind.Out, text, null, null, 0));
+        else Out.WriteLine(text);
+    }
 
     // ---- the host's side of the transport events (Interp.HostEvents) ------------------------------
     //
@@ -648,7 +825,12 @@ public sealed class VeinWorld
 
     /// `@PlaySound { source, volume }`. Null — a console run — drops it, as `veinc run` does.
     public Action<string, double>? Sound;
-    public void PlaySound(string source, double volume) => Sound?.Invoke(source, Math.Clamp(double.IsFinite(volume) ? volume : 1.0, 0.0, 1.0));
+    public void PlaySound(string source, double volume)
+    {
+        double v = Math.Clamp(double.IsFinite(volume) ? volume : 1.0, 0.0, 1.0);
+        if (_tray is { } tray) tray.Ops.Add(new TrayOp(OpKind.Sound, source, null, null, BitConverter.DoubleToInt64Bits(v)));
+        else Sound?.Invoke(source, v);
+    }
 
     // ---- files: `@ReadFile` / `@WriteFile` (Interp.DoReadFile / DoWriteFile, the same rules) -------------
     //
@@ -714,19 +896,19 @@ public sealed class VeinWorld
 
     public void Listen(string self, long port, string key)
     {
-        if (Listening is null) { Err.WriteLine("(@Listen failed: no network here — run this program in a host)"); return; }
+        if (Listening is null) { ErrLine("(@Listen failed: no network here — run this program in a host)"); return; }
         Listening(self, port, key);
     }
 
     public void Link(string name, string at, string key)
     {
-        if (Linking is null) { Err.WriteLine("(@Link failed: no network here — run this program in a host)"); return; }
+        if (Linking is null) { ErrLine("(@Link failed: no network here — run this program in a host)"); return; }
         Linking(name, at, key);
     }
 
     public void Send(string to, string text, bool fast)
     {
-        if (Sending is null) { Err.WriteLine("(@Send failed: no network here — run this program in a host)"); return; }
+        if (Sending is null) { ErrLine("(@Send failed: no network here — run this program in a host)"); return; }
         Sending(to, text, fast);
     }
 
@@ -764,7 +946,7 @@ public sealed class VeinWorld
 
     /// `@PrintError { text }` — stderr unless a host redirects it.
     public TextWriter Err { get; set; } = Console.Error;
-    public void PrintError(string text) => Err.WriteLine(text);
+    public void PrintError(string text) => ErrLine(text);
 
     /// `@Quit { code }`: the first code wins, as `Interp`'s `_quitCode ??=` does.
     public int? ExitCode { get; private set; }
@@ -772,9 +954,17 @@ public sealed class VeinWorld
     public Action<int>? Quitting;
     public void Quit(int code)
     {
+        string by = Unit is { } u ? $"{u.Shard} ({u.Phase}) at {u.File}:{Line}" : "the host";
+        // On a tray, the quit lands when the phase does — in unit order, so the first unit to quit still wins.
+        if (_tray is { } tray) tray.Ops.Add(new TrayOp(OpKind.Quit, by, null, null, code));
+        else QuitNow(code, by);
+    }
+
+    private void QuitNow(int code, string by)
+    {
         if (ExitCode is not null) return;
         ExitCode = code;
-        QuitBy = Unit is { } u ? $"{u.Shard} ({u.Phase}) at {u.File}:{Line}" : "the host";
+        QuitBy = by;
         // A game that closes itself says nothing — a quit is not an error — so finding WHICH `@Quit` closed
         // it (Vein Cards under Godot, compiled, in 5 runs of 7) meant guessing. Asked for, it is said.
         if (Environment.GetEnvironmentVariable("VEIN_TRACE_QUIT") is { Length: > 0 }) Err.WriteLine($"(quit {code} by {QuitBy}, frame {Tick})");
@@ -823,7 +1013,8 @@ public sealed class VeinWorld
     {
         // A diagnostic raised inside a unit — `do warn(…)` — says where, as Interp.Stamp makes it.
         if (@event == "DiagnosticRaised" && Unit is { } unit) StampDiagnostic?.Invoke(payload, unit);
-        _events.Enqueue((@event, payload, Unit, Line));
+        if (_tray is { } tray) tray.Ops.Add(new TrayOp(OpKind.Emit, @event, payload, Unit, Line));
+        else _events.Enqueue((@event, payload, Unit, Line));
     }
 
     /// The guard is the interpreter's, for the same reason: a pair of handlers that emit each other's
@@ -855,8 +1046,18 @@ public sealed class VeinWorld
                 _draining = name;
                 try
                 {
-                    foreach (var (owner, h) in hs)
-                        if (owner is null || !IsMuted(owner)) h(payload);
+                    if (Threads <= 1 || hs.Count == 1)
+                    {
+                        foreach (var (owner, h) in hs)
+                            if (owner is null || !IsMuted(owner)) h(payload);
+                    }
+                    else
+                    {
+                        // Shared like a phase: runs of neighbouring handlers, the trays emptied in the order they subscribed.
+                        var heard = new List<Action<object>>(hs.Count);
+                        foreach (var (owner, h) in hs) if (owner is null || !IsMuted(owner)) heard.Add(h);
+                        InRuns(heard, h => h(payload));
+                    }
                 }
                 finally { _draining = outer; }
             }
@@ -951,12 +1152,12 @@ public sealed class VeinWorld
         if (_draining == "DiagnosticRaised")
         {
             Faulted = true;
-            Err.WriteLine($"(error in {at.Where} while reporting: {ex.Message})");
+            ErrLine($"(error in {at.Where} while reporting: {ex.Message})");
             return;
         }
         string message = $"{at.Where}: {ex.Message}";
         if (Diagnose is { } raise) raise(2, message, at);
-        else { Faulted = true; Err.WriteLine($"(error: {message})"); }
+        else { Faulted = true; ErrLine($"(error: {message})"); }
     }
 
     /// Set while DrainCapped's own diagnostic is handled, so a runaway there cannot report itself again.
@@ -1011,7 +1212,7 @@ public sealed class VeinWorld
         if (severity >= 2) Faulted = true;
         var u = Unit;
         var d = new VeinDiagnostic(severity, message, u?.Shard ?? "", u?.Phase ?? "", u?.File ?? "", u?.Line ?? 0);
-        Err.WriteLine($"({(severity switch { 0 => "info", 1 => "warning", _ => "error" })}: {DiagnosticText(d)})");
+        ErrLine($"({(severity switch { 0 => "info", 1 => "warning", _ => "error" })}: {DiagnosticText(d)})");
     }
 
     /// Interp.DiagnosticText: the message, and where unless it already says.

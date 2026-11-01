@@ -36,7 +36,7 @@ ms() { echo $(( $(date +%s%N) / 1000000 )); }
 best() {   # best wall time (ms) of REPEATS runs of: dll ticks
     local dll="$1" ticks="$2" best=999999999 t0 t
     for ((r = 0; r < REPEATS; r++)); do
-        t0=$(ms); dotnet "$dll" --ticks "$ticks" ${THREADS:+-- --threads "$THREADS"} >/dev/null 2>&1; t=$(( $(ms) - t0 ))
+        t0=$(ms); dotnet "$dll" --ticks "$ticks" ${THREADS:+--threads "$THREADS"} >/dev/null 2>&1; t=$(( $(ms) - t0 ))
         (( t < best )) && best=$t
     done
     echo "$best"
@@ -70,7 +70,7 @@ XML
     build=$(( $(ms) - t0 ))
     dll="$out/bin/Release/net8.0/scale_gen.dll"
 
-    checksum=$(dotnet "$dll" --ticks 12 ${THREADS:+-- --threads "$THREADS"} 2>&1 | grep -o "checksum .*" | head -1)
+    checksum=$(dotnet "$dll" --ticks 12 ${THREADS:+--threads "$THREADS"} 2>&1 | grep -o "checksum .*" | head -1)
     # Enough frames that the run, not the process start, is what is timed: grow until the long run takes 2 s.
     lo=$SHORT; hi=$LONG
     while (( $(best "$dll" "$hi") < 2000 && hi < 200000 )); do lo=$((lo * 4)); hi=$((hi * 4)); done

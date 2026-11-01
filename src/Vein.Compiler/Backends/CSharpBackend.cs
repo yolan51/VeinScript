@@ -2342,17 +2342,20 @@ public sealed partial class CSharpBackend : IVeinBackend
         sb.AppendLine("        try { Console.OutputEncoding = new System.Text.UTF8Encoding(false); } catch { }");
         // What follows `--` is the program's own, as `veinc run file -- …` hands it to `args()`.
         // `--drain-cap N` as `veinc run` takes it: how many events one drain may handle (VeinWorld.DrainCap).
-        sb.AppendLine("        int ticks = 0, drainCap = 10_000;");
+        // `--threads N`: how many workers a phase is shared across (VeinWorld.Threads; one is the default).
+        sb.AppendLine("        int ticks = 0, drainCap = 10_000, threads = 1;");
         sb.AppendLine("        var programArgs = new List<string>();");
         sb.AppendLine("        for (int i = 0; i < args.Length; i++)");
         sb.AppendLine("            if (args[i] == \"--\") { programArgs.AddRange(args.Skip(i + 1)); break; }");
         sb.AppendLine("            else if (args[i] == \"--ticks\" && i + 1 < args.Length) int.TryParse(args[++i], out ticks);");
         sb.AppendLine("            else if (args[i].StartsWith(\"--ticks=\")) int.TryParse(args[i].Substring(8), out ticks);");
         sb.AppendLine("            else if (args[i] == \"--drain-cap\" && i + 1 < args.Length) int.TryParse(args[++i], out drainCap);");
+        sb.AppendLine("            else if (args[i] == \"--threads\" && i + 1 < args.Length) int.TryParse(args[++i], out threads);");
         sb.AppendLine();
         sb.AppendLine("        var world = Create();");
         sb.AppendLine("        world.Args = programArgs;");
         sb.AppendLine("        world.DrainCap = Math.Max(1, drainCap);");
+        sb.AppendLine("        world.Threads = Math.Max(1, threads);");
         // `start @Boot { … }` (VS0219): the boot event, as `veinc run` fires it — a host raises its own.
         if (module.Start is { } st && _events.Contains(st.Event))
         {

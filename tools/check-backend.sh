@@ -62,6 +62,15 @@ EOF
         fail=1
     fi
 
+    # The same program with each phase, and each event's handlers, shared across four workers' trays
+    # (VeinWorld.Threads, docs/PERF.md): it must print exactly what one thread prints, errors included.
+    dotnet "$out/bin/Debug/net8.0/${name}_gen.dll" --ticks "$ticks" --threads 4 >"$out/secs4.txt" 2>&1
+    if ! diff -q "$out/secs.txt" "$out/secs4.txt" >/dev/null; then
+        echo "FAIL: $name — four threads and one disagree:"
+        diff "$out/secs.txt" "$out/secs4.txt" | head -20
+        fail=1
+    fi
+
     # A sample that CHECKS ITSELF (math_trig.vein) prints `FAIL …` for a wrong answer. Both runtimes can
     # agree on a wrong answer, so the diff alone would pass it: any such line fails the check too.
     if grep -q '^FAIL' "$out/interp.txt" "$out/secs.txt"; then

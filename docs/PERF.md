@@ -62,6 +62,20 @@ What it costs to get there, at 100 × 100 (10,100 shards):
 - **Building and starting a 10,000-shard program is slow** (≈ 50 s from source to running). Worth its own work
   later: emitting one file per bundle, and registering shards lazily.
 
+## Trays (P2) — the ground the threads stand on
+
+With `--threads N` (VeinWorld.Threads; one is the default), a phase's units, and one event's handlers, are cut
+into N runs of neighbours, each writing to its own **tray**: its fold contributions, deferred changes, emits,
+prints, error lines and quit. The trays are emptied in run order, which is unit order, and the commit runs as
+before. P2 still runs the runs one after another; P4 gives them to workers. `tools/check-backend.sh` runs every
+program at one thread and at four and diffs them: 60 of 60 the same, and the same as the interpreter.
+
+**A tray per run, not per unit.** The first version gave every unit its own tray, at every thread count: 100 × 100
+ticks went from 18.8 to 26.3 ms a frame, every one of 100,000 contributions copied twice. A run of neighbours
+is already in unit order, so one tray per worker gives the same order; and at one thread there are no trays at
+all. After: one thread 17.4 ms (ticks) and 22.6 ms (messages); four runs, still one after another, 17.1 ms
+(ticks).
+
 ## Reproduce
 
 ```
