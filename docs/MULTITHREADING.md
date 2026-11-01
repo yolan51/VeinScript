@@ -10,7 +10,7 @@ The plan (P0–P7), why each step is there, and where it stands. Numbers live in
 | P1 | The drain cap becomes a setting (`--drain-cap N`, `VeinGame.DrainCap`) | done — 3bfce65 |
 | P2 | Trays: each run of shards writes to its own buffer, merged in order | done — 0b43707 |
 | P3 | The compiler marks each unit's lane: may it share a phase, and if not, why | compiler part done (`src/Vein.Compiler/Ir/Lanes.cs`); showing it in `veinc exec` / Workbench not yet |
-| P4 | Parallel phases: `each tick`, `settled`, `run once` on worker threads | working (`--threads N` on an emitted program): 100×100 ticks 16.2 → 9.9 ms at 8 threads; host setting (VeinGame, Godot) and a parallel fold commit not yet |
+| P4 | Parallel phases: `each tick`, `settled`, `run once` on worker threads | working: `--threads N` on an emitted program, `VeinGame.Threads` for a host; tick phase 11.1 → 5.3 ms at 8 threads (PERF.md). Open: the fold commit does not gain yet; a Godot setting; a quiet-machine benchmark |
 | P5 | Parallel handlers of one event | not started (handlers use trays, still one after another) |
 | P6 | Batches of messages — the 100-bundle scenario | not started |
 | P7 | On by default, and documented in RUNTIME.md / HOSTING.md / RULES.md | not started |
@@ -111,7 +111,11 @@ shard can see within the phase. A spawned identity has no shape until the commit
 settings are touched only by serial shards.
 *Made thread-safe:* each worker has its own **lane** (its tray, and the unit, line and sender it is running),
 so a fault names the right line. The query cache and the fold buckets became concurrent dictionaries.
-*Still to do:* a `Threads` setting for hosts (`VeinGame.Threads`, Godot), and the speed numbers in PERF.md.
+*Hosts:* `VeinGame.Threads` (the interpreter ignores it — it stays the reference).
+*Learned (PERF.md):* a shard with no block in a phase must not take part in it; the plan of runs is kept
+between frames; trays are handed over, not copied.
+*Still to do:* the fold commit, which runs on workers but does not get faster yet; a Godot `Threads` setting;
+a benchmark on a quiet machine.
 
 ### P5 — Parallel handlers of one event
 When one event has many hearers in different shards, they run together, each with its tray. Two handlers of

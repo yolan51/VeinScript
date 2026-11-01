@@ -31,6 +31,8 @@ internal sealed class InterpRuntime : IGameRuntime
     public string? ReadFallback { set => _interp.ReadFallback = value; }
     public IReadOnlyList<string> Args { set => _interp.Args = value; }
     public int DrainCap { set => _interp.DrainCap = value; }
+    /// The interpreter stays on one thread: it is the referee a parallel compiled run is checked against.
+    public int Threads { set { } }
     public bool Running => !_interp.Stopped;
     public int Tick => _interp.Tick;
     public IReadOnlyList<string> MutedMarks => _interp.MutedMarks.OrderBy(m => m, StringComparer.Ordinal).ToList();

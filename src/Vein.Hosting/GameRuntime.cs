@@ -30,6 +30,9 @@ internal interface IGameRuntime
 
     /// Events one drain may handle before it stops and reports (VeinGame.DrainCap).
     int DrainCap { set; }
+
+    /// How many workers a phase is shared across (VeinGame.Threads). The interpreter, the reference, ignores it.
+    int Threads { set; }
     bool Running { get; }
     int Tick { get; }
     IReadOnlyList<string> MutedMarks { get; }

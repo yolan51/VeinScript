@@ -638,13 +638,13 @@ public sealed partial class CSharpBackend : IVeinBackend
         // (a reader's delta is zero) which is exactly why every existing sample passed and this went
         // unseen: `samples/motion.vein` sums, and every other write in the suite happens in `each tick`,
         // where the phase boundary separates the writer from the reader anyway.
-        sb.AppendLine($"    public static {name} Fold({name} committed, List<({name} Snapshot, {name} Current)> contributions)");
+        sb.AppendLine($"    public static {name} Fold({name} committed, ReadOnlySpan<({name} Snapshot, {name} Current)> contributions)");
         sb.AppendLine("    {");
         // `First` means the first WRITER wins, so it cannot count loop iterations — a reader that
         // contributed nothing would otherwise take the slot by being index 0.
         foreach (var f in t.Fields)
             if (f.Fold == FoldReducer.First) sb.AppendLine($"        bool __took_{Ident(f.Name)} = false;");
-        sb.AppendLine("        for (int i = 0; i < contributions.Count; i++)");
+        sb.AppendLine("        for (int i = 0; i < contributions.Length; i++)");
         sb.AppendLine("        {");
         sb.AppendLine("            var snap = contributions[i].Snapshot;");
         sb.AppendLine("            var cur  = contributions[i].Current;");

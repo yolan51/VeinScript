@@ -102,7 +102,7 @@ public sealed class VeinWorld
     /// matches on component PRESENCE, so the cache must be invalidated when the component actually
     /// arrives, not when the attach was requested.
     public void Attach<T>(int entity, T component) where T : struct, IVeinComponent<T> =>
-        Defer(() => { _structuralVersion++; _secs.Add(entity, component); Of<T>().Touch(entity); Attached<T>(entity); });
+        Defer(() => { _structuralVersion++; _secs.Add(entity, component); Attached<T>(entity); });
 
     /// `unattach $C from e`. DEFERRED, like every other structural change and like the interpreter's own
     /// `RemoveComponent` — applied at the commit point so no unit in the phase sees a half-changed world.
@@ -136,7 +136,7 @@ public sealed class VeinWorld
     {
         bool isNew = !_secs.Has<T>(entity);
         _secs.Add(entity, component);
-        if (isNew) { _structuralVersion++; Of<T>().Touch(entity); }
+        if (isNew) _structuralVersion++;
     }
 
     public bool Has<T>(int entity) where T : struct, IVeinComponent<T> => _secs.Has<T>(entity);
@@ -191,7 +191,6 @@ public sealed class VeinWorld
         var owned = Collections is { } rules && CollectionHost is { } host && _alive.Contains(entity)
             ? rules.Owned(host, entity, null) : null;
         _alive.Remove(entity);
-        foreach (var b in _buckets.Values) b.Forget(entity);
         // Marks go with the entity: they are components now, so DestroyEntity takes them too.
         _secs.DestroyEntity(entity);
 
@@ -285,47 +284,104 @@ public sealed class VeinWorld
 
     // ---- the fold rule ---------------------------------------------------
 
-    private interface IBucket { void Commit(VeinWorld world); void Forget(int entity); }
+    private interface IBucket { void Commit(VeinWorld world); int Count { get; } }
 
     /// Contributions to one component type this phase. Fully typed: the tuples hold `T`, not an
     /// interface, so nothing boxes between an activation and the fold.
     private sealed class Bucket<T>(VeinWorld world) : IBucket where T : struct, IVeinComponent<T>
     {
-        private readonly List<(int Entity, T Snapshot, T Current)> _items = new();
-        private readonly Dictionary<int, List<(T Snapshot, T Current)>> _byEntity = new();
+        /// This commit's contributions as RUNS, in the order they arrived: a tray's list handed over whole (P4 —
+        /// emptying 100,000 contributions out of the trays one by one was main-thread time the workers waited
+        /// on), or the direct ones gathered in a list of the bucket's own. Folded in that order, as one list.
+        private readonly List<List<(int Entity, T Snapshot, T Current)>> _runs = new();
+        /// The direct run being filled; a handed-over run closes it, so order between the two is kept.
+        private List<(int Entity, T Snapshot, T Current)>? _open;
+        /// Emptied runs, to hand out again rather than allocate.
+        private readonly Stack<List<(int Entity, T Snapshot, T Current)>> _spare = new();
 
-        /// The entities contributed to THIS phase — the only ones a commit visits.
+        // The commit's working space — the bucket's OWN arrays, grown and kept, nothing per entity.
+        //
+        // Each entity used to have its own small list here, made when the shape was attached — the list a destroyed
+        // entity had to be forgotten from, by every bucket, at every destroy. Kept, it made every frame of a long
+        // game a little slower than the last (Vein Cards: 0.2 ms → 5 ms in 12,000 frames). With nothing per
+        // entity, that cannot happen, and a destroy no longer visits every component type. (It was also suspected
+        // of the folds running slower in parallel than alone; it was not that — docs/PERF.md.)
+        private readonly Dictionary<int, int> _slotOf = new();   // entity → its slot, this commit
+        /// The entities contributed to THIS commit, in the order first contributed — the only ones it visits.
         private readonly List<int> _dirty = new();
+        private int[] _slots = Array.Empty<int>();                       // each contribution's slot, in arrival order
+        private int[] _ends = new int[Pad + 2];                          // where each slot ends in _sorted
+        private (T Snapshot, T Current)[] _sorted = Array.Empty<(T, T)>();   // grouped by slot, arrival order kept
 
-        public void Touch(int entity) { if (!_byEntity.ContainsKey(entity)) _byEntity[entity] = new(); }
+        /// `_ends` is written once per contribution; its first Pad ints keep it off a cache line another
+        /// bucket's array may share.
+        private const int Pad = 16;
+
+        public int Count { get; private set; }
+
         public void Add(int entity, T snapshot, T current)
         {
-            // The first contribution since the last commit puts this bucket on the world's touched list.
-            if (_items.Count == 0) world._touched.Add(this);
-            _items.Add((entity, snapshot, current));
+            if (_open is null) Arrive(_open = Rent());
+            _open.Add((entity, snapshot, current));
+            Count++;
         }
 
-        /// A destroyed entity's list goes with it.
-        ///
-        /// IT STAYED, AND EVERY COMMIT WALKED IT: `_byEntity` kept a list for every entity this component was
-        /// ever touched on, and the fold pass ran over all of them. A game that spawns a fading number and
-        /// destroys it ten frames later — Vein Cards does it all the time — made every frame a little slower
-        /// than the last, for the whole session (0.2 ms → 5 ms in 12,000 frames; the interpreter stayed flat).
-        public void Forget(int entity) => _byEntity.Remove(entity);
+        /// A tray's contributions, taken whole; the tray gets an empty list back. On the main thread, as every
+        /// tray is emptied there.
+        public List<(int Entity, T Snapshot, T Current)> Hand(List<(int Entity, T Snapshot, T Current)> items)
+        {
+            _open = null;
+            Arrive(items);
+            Count += items.Count;
+            return Rent();
+        }
+
+        private void Arrive(List<(int Entity, T Snapshot, T Current)> run)
+        {
+            // The first contribution since the last commit puts this bucket on the world's touched list.
+            if (_runs.Count == 0) world._touched.Add(this);
+            _runs.Add(run);
+        }
+
+        private List<(int Entity, T Snapshot, T Current)> Rent() => _spare.Count > 0 ? _spare.Pop() : new();
 
         public void Commit(VeinWorld world)
         {
-            if (_items.Count == 0) return;
+            if (_runs.Count == 0) return;
 
-            // ONE grouping pass. Scanning the contribution list once per entity instead is quadratic in
-            // the entity count — precisely the axis a compiled backend exists to make large.
+            // Group by entity in two passes (a counting sort), keeping each entity's contributions in the order
+            // they arrived. Scanning the contributions once per entity instead is quadratic in the entity count
+            // — precisely the axis a compiled backend exists to make large.
+            _slotOf.Clear();
             _dirty.Clear();
-            foreach (var (entity, snap, cur) in _items)
+            if (_slots.Length < Count) _slots = new int[Math.Max(Count, _slots.Length * 2)];
+            int n = 0;
+            foreach (var run in _runs)
+                foreach (var (entity, _, _) in run)
+                {
+                    if (!_slotOf.TryGetValue(entity, out int slot))
+                    {
+                        _slotOf[entity] = slot = _dirty.Count;
+                        _dirty.Add(entity);
+                        if (_ends.Length < Pad + slot + 1) Array.Resize(ref _ends, (Pad + slot + 1) * 2);
+                        _ends[Pad + slot] = 0;
+                    }
+                    _slots[n++] = slot;
+                    _ends[Pad + slot]++;
+                }
+            // Counts into starts...
+            for (int s = 0, at = 0; s < _dirty.Count; s++)
             {
-                if (!_byEntity.TryGetValue(entity, out var list)) _byEntity[entity] = list = new();
-                if (list.Count == 0) _dirty.Add(entity);
-                list.Add((snap, cur));
+                int count = _ends[Pad + s];
+                _ends[Pad + s] = at;
+                at += count;
             }
+            if (_sorted.Length < n) _sorted = new (T, T)[Math.Max(n, _sorted.Length * 2)];
+            n = 0;
+            // ...and each start moves to its end as its slot fills: slot s is then [end of s - 1, _ends[s]).
+            foreach (var run in _runs)
+                foreach (var (_, snap, cur) in run)
+                    _sorted[_ends[Pad + _slots[n++]]++] = (snap, cur);
 
             // Straight to the STORE, not through `Secs`, and this is the hot path — it runs once per
             // entity per component per frame, for the life of the program.
@@ -341,15 +397,17 @@ public sealed class VeinWorld
             //
             // Attach/Detach deliberately stay on the tracked `Secs` path. They are structural, rare, and
             // outside the frame loop, and keeping them there leaves an engine-side listener working.
-            foreach (int entity in _dirty)
+            for (int s = 0; s < _dirty.Count; s++)
             {
-                var list = _byEntity[entity];
-                if (world._secs.Store.TryGet<T>(entity, out var committed))
+                int from = s == 0 ? 0 : _ends[Pad + s - 1], to = _ends[Pad + s];
+                if (world._secs.Store.TryGet<T>(_dirty[s], out var committed))
                     // Static abstract dispatch: no boxing, no virtual call through an instance.
-                    world._secs.Store.Add(entity, T.Fold(committed!, list));
-                list.Clear();
+                    world._secs.Store.Add(_dirty[s], T.Fold(committed!, new ReadOnlySpan<(T Snapshot, T Current)>(_sorted, from, to - from)));
             }
-            _items.Clear();
+            foreach (var run in _runs) { run.Clear(); _spare.Push(run); }
+            _runs.Clear();
+            _open = null;
+            Count = 0;
         }
     }
 
@@ -401,12 +459,8 @@ public sealed class VeinWorld
     /// One tray's contributions to one component type, kept typed so nothing boxes.
     private sealed class Staged<T>(Bucket<T> bucket) : IStaged where T : struct, IVeinComponent<T>
     {
-        public readonly List<(int Entity, T Snapshot, T Current)> Items = new();
-        public void Replay()
-        {
-            foreach (var (entity, snap, cur) in Items) bucket.Add(entity, snap, cur);
-            Items.Clear();
-        }
+        public List<(int Entity, T Snapshot, T Current)> Items = new();
+        public void Replay() => Items = bucket.Hand(Items);   // handed over whole, not copied
     }
 
     private sealed class Tray
@@ -518,23 +572,66 @@ public sealed class VeinWorld
     /// 100,000 activations through a tray of its own made a frame 40% slower — docs/PERF.md.)
     public int Threads { get; set; } = 1;
 
+    /// The systems that have a block in one phase, in registration order, and how a shared phase is cut into runs
+    /// — worked out once and kept until a mute changes or Threads does, not every frame: walking 10,000 shards to
+    /// ask each its mute and its lane cost 3 ms a frame in cache misses alone (docs/PERF.md).
+    private sealed class PhaseSystems
+    {
+        public readonly List<VeinSystem> Systems = new();
+        public int PlannedAt = -1, PlannedFor;
+        /// The unmuted systems, and the runs over them in system order: `Shared` runs go to workers; a serial
+        /// system is a run of its own, on this thread.
+        public VeinSystem[] Units = Array.Empty<VeinSystem>();
+        public (int From, int To, bool Shared)[] Runs = Array.Empty<(int, int, bool)>();
+        public int[] SharedRuns = Array.Empty<int>();
+    }
+
+    /// Moves whenever who is muted might have changed — a system muted by name, a mark muted, a system's marks.
+    private int _muteVersion;
+
+    private void Plan(PhaseSystems phase, Func<VeinSystem, bool> shareable)
+    {
+        var units = new List<VeinSystem>(phase.Systems.Count);
+        foreach (var s in phase.Systems) if (!IsMuted(s)) units.Add(s);
+        // Runs of neighbours that may share, cut so each worker gets about four (a slow run then does not hold the
+        // others up), and each serial system a run of its own.
+        int shared = 0;
+        foreach (var s in units) if (shareable(s)) shared++;
+        int size = Math.Max(1, (shared + Threads * 4 - 1) / (Threads * 4));
+        var runs = new List<(int From, int To, bool Shared)>();
+        for (int i = 0; i < units.Count;)
+        {
+            int from = i;
+            if (!shareable(units[i])) { runs.Add((from, ++i, false)); continue; }
+            while (i < units.Count && i - from < size && shareable(units[i])) i++;
+            runs.Add((from, i, true));
+        }
+        phase.Units = units.ToArray();
+        phase.Runs = runs.ToArray();
+        phase.SharedRuns = Enumerable.Range(0, runs.Count).Where(k => runs[k].Shared).ToArray();
+        phase.PlannedAt = _muteVersion;
+        phase.PlannedFor = Threads;
+    }
+
     /// One phase of every unmuted system, in registration order — at one thread, straight through; above, the
     /// systems that may share it (`shareable`, the compiler's lane, Ir/Lanes.cs) on workers, the rest after them
-    /// on this thread, one at a time and in order.
+    /// on this thread, one at a time and in order. Every run has its tray, and the trays empty in system order.
     ///
     /// Why the serial ones may wait until the workers are done: what makes a unit serial (spawn, random, a file,
     /// weave, a live setting) is nothing a shareable unit can see within the phase — a spawned identity carries
     /// no shape until the commit, and the rest only serial units touch. Among themselves they keep their order.
-    private void Phase(Func<VeinSystem, bool> shareable, Action<VeinSystem> run)
+    private void Phase(PhaseSystems phase, Func<VeinSystem, bool> shareable, Action<VeinSystem> run)
     {
         if (Threads <= 1)
         {
-            foreach (var s in _systems) if (!IsMuted(s)) run(s);
+            foreach (var s in phase.Systems) if (!IsMuted(s)) run(s);
             return;
         }
         // Mutes change only at a commit, so who runs is known before anyone does.
-        var units = new List<VeinSystem>(_systems.Count);
-        foreach (var s in _systems) if (!IsMuted(s)) units.Add(s);
+        if (phase.PlannedAt != _muteVersion || phase.PlannedFor != Threads) Plan(phase, shareable);
+        var units = phase.Units;
+        var runs = phase.Runs;
+        var shared = phase.SharedRuns;
 
         int mark = BeginTrays(out var suspended);
         try
@@ -544,45 +641,34 @@ public sealed class VeinWorld
                 foreach (var s in units) run(s);
                 return;
             }
-            // Runs of neighbours that may share, cut so each worker gets about four (a slow run then does not hold
-            // the others up), and each serial system a run of its own; every run its tray, in system order.
-            int shared = 0;
-            foreach (var s in units) if (shareable(s)) shared++;
-            int size = Math.Max(1, (shared + Threads * 4 - 1) / (Threads * 4));
-            var runs = new List<(int From, int To, Tray Tray)>();
-            var serial = new List<(int From, int To, Tray Tray)>();
-            for (int i = 0; i < units.Count;)
-            {
-                int from = i;
-                if (!shareable(units[i])) { serial.Add((from, ++i, NextTray())); continue; }
-                while (i < units.Count && i - from < size && shareable(units[i])) i++;
-                runs.Add((from, i, NextTray()));
-            }
+            var trays = new Tray[runs.Length];
+            for (int k = 0; k < runs.Length; k++) trays[k] = NextTray();   // handed out in system order
 
-            if (runs.Count > 0)
+            if (shared.Length > 0)
             {
-                while (_workerLanes.Count < runs.Count) _workerLanes.Add(new Lane());
+                while (_workerLanes.Count < shared.Length) _workerLanes.Add(new Lane());
                 _shared = true;
                 try
                 {
-                    Parallel.For(0, runs.Count, new ParallelOptions { MaxDegreeOfParallelism = Threads }, k =>
+                    Parallel.For(0, shared.Length, new ParallelOptions { MaxDegreeOfParallelism = Threads }, j =>
                     {
-                        var (from, to, tray) = runs[k];
-                        var lane = _workerLanes[k];
-                        lane.Tray = tray;
+                        int k = shared[j];
+                        var lane = _workerLanes[j];
+                        lane.Tray = trays[k];
                         var outer = t_lane;
                         t_lane = lane;
-                        try { for (int i = from; i < to; i++) run(units[i]); }
+                        try { for (int i = runs[k].From; i < runs[k].To; i++) run(units[i]); }
                         finally { t_lane = outer; lane.Tray = null; }
                     });
                 }
                 finally { _shared = false; }
             }
-            foreach (var (from, to, tray) in serial)
+            for (int k = 0; k < runs.Length; k++)
             {
+                if (runs[k].Shared) continue;
                 var outer = TrayNow;
-                TrayNow = tray;
-                try { for (int i = from; i < to; i++) run(units[i]); }
+                TrayNow = trays[k];
+                try { for (int i = runs[k].From; i < runs[k].To; i++) run(units[i]); }
                 finally { TrayNow = outer; }
             }
         }
@@ -628,6 +714,9 @@ public sealed class VeinWorld
         else Err.WriteLine(text);
     }
 
+    /// How many contributions a commit needs before its folds go to workers.
+    private const int ParallelFoldAt = 4096;
+
     /// The one point in a phase where the world changes: folds reconcile every contribution first, then
     /// the queued structural commands apply on top of the reconciled state.
     public void Commit()
@@ -636,7 +725,15 @@ public sealed class VeinWorld
         {
             var touched = _touched.ToArray();
             _touched.Clear();
-            foreach (var b in touched) b.Commit(this);
+            // Each type's fold is its own — its contributions, its store bucket (locked per type) — so with
+            // workers to spare they fold at once. Only for a commit worth it: one runs after EVERY event, and
+            // starting workers for a handful of contributions costs more than folding them here.
+            int work = 0;
+            foreach (var b in touched) work += b.Count;
+            if (Threads > 1 && touched.Length > 1 && work >= ParallelFoldAt)
+                Parallel.For(0, touched.Length, new ParallelOptions { MaxDegreeOfParallelism = Threads }, i => touched[i].Commit(this));
+            else
+                foreach (var b in touched) b.Commit(this);
         }
 
         if (_commands.Count == 0) return;
@@ -648,6 +745,11 @@ public sealed class VeinWorld
     // ---- the frame -------------------------------------------------------
 
     private readonly List<VeinSystem> _systems = new();
+    private readonly PhaseSystems _onces = new(), _ticks = new(), _settleds = new();
+
+    /// Whether the system's class has its own `phase()` — the emitter overrides only the phases a shard declares.
+    private static bool Declares(VeinSystem system, string phase) =>
+        system.GetType().GetMethod(phase, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance, Type.EmptyTypes)?.DeclaringType != typeof(VeinSystem);
 
     /// Each system by the key `mute` names it with — `Author.Bundle.Name`, from the shard's `@key`.
     private readonly Dictionary<string, VeinSystem> _byKey = new(StringComparer.Ordinal);
@@ -656,6 +758,11 @@ public sealed class VeinWorld
     {
         system.Attach(this);
         _systems.Add(system);
+        // Each phase visits only the systems that have a block in it: 10,000 shards with no `settled` were 10,000
+        // empty calls a frame — and, sharing the phase across workers, 10,000 serial runs (docs/PERF.md).
+        if (Declares(system, nameof(VeinSystem.Once))) _onces.Systems.Add(system);
+        if (Declares(system, nameof(VeinSystem.Tick))) _ticks.Systems.Add(system);
+        if (Declares(system, nameof(VeinSystem.Settled))) _settleds.Systems.Add(system);
         system.Key = key;
         if (key is not null) _byKey[key] = system;
         system.Marks.UnionWith(marks);   // `shard X #M` — the marks it starts out carrying (D20)
@@ -666,7 +773,7 @@ public sealed class VeinWorld
     /// finishes the event or phase in progress, so which of the two is registered first never matters.
     public void Mute(string key, bool mute)
     {
-        if (_byKey.TryGetValue(key, out var system)) Defer(() => system.Muted = mute);
+        if (_byKey.TryGetValue(key, out var system)) Defer(() => { system.Muted = mute; _muteVersion++; });
     }
 
     /// Marks under a standing `mute #M` (D20): any system carrying one is silent, whenever it got it.
@@ -674,13 +781,13 @@ public sealed class VeinWorld
 
     /// `mute #M` / `unmute #M` (D20), deferred like `Mute`.
     public void MuteMark(string mark, bool mute) =>
-        Defer(() => { if (mute) _mutedMarks.Add(mark); else _mutedMarks.Remove(mark); });
+        Defer(() => { if (mute) _mutedMarks.Add(mark); else _mutedMarks.Remove(mark); _muteVersion++; });
 
     /// `mark !X #M` / `unmark !X #M` (D20), deferred like `Mute`.
     public void MarkShard(string key, string mark, bool add)
     {
         if (_byKey.TryGetValue(key, out var system))
-            Defer(() => { if (add) system.Marks.Add(mark); else system.Marks.Remove(mark); });
+            Defer(() => { if (add) system.Marks.Add(mark); else system.Marks.Remove(mark); _muteVersion++; });
     }
 
     /// `!S.name` (D28): a setting of a system, read as it stands.
@@ -732,6 +839,7 @@ public sealed class VeinWorld
     {
         _mutedMarks.UnionWith(marks);
         foreach (string key in keys) if (_byKey.TryGetValue(key, out var system)) system.Muted = true;
+        _muteVersion++;
     }
 
     /// `run once` builds the world before anything else, so a query in a later phase finds it.
@@ -805,7 +913,7 @@ public sealed class VeinWorld
     /// FireBoot, Drain — so it is heard after what `run once` emitted and before anything that emitted in turn.
     public void Start(Action? boot = null)
     {
-        Phase(static s => s.ParallelOnce, static s => s.Once());
+        Phase(_onces, static s => s.ParallelOnce, static s => s.Once());
         Commit();
         Compose?.Invoke();   // so the first `settled` reads a composed world
         boot?.Invoke();
@@ -823,10 +931,10 @@ public sealed class VeinWorld
     {
         if (TakeAnswers()) Drain();   // a request answered since the last frame is heard before this one
         Tick++;
-        Phase(static s => s.ParallelTick, static s => s.Tick());
+        Phase(_ticks, static s => s.ParallelTick, static s => s.Tick());
         Commit();
         Compose?.Invoke();   // between the tick commit and `settled` — see the field
-        Phase(static s => s.ParallelSettled, static s => s.Settled());
+        Phase(_settleds, static s => s.ParallelSettled, static s => s.Settled());
         Commit();
         Drain();   // Interp.Frame: events from either phase are handled against a settled world
     }
@@ -1334,7 +1442,7 @@ public interface IVeinComponent<T> : IComponent where T : struct, IVeinComponent
     /// Apply this frame's contributions to `committed` and return the new value. A `folds sum` field
     /// accumulates each contribution's DELTA from its own snapshot; every other reducer takes the
     /// absolute value written.
-    static abstract T Fold(T committed, List<(T Snapshot, T Current)> contributions);
+    static abstract T Fold(T committed, ReadOnlySpan<(T Snapshot, T Current)> contributions);
 }
 
 /// Base for a generated shard. The emitter overrides only the phases the shard declares.

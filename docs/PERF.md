@@ -92,6 +92,25 @@ checksum at every thread count; check-backend's 60 programs print the same at fo
 - **Messages do not gain, as expected.** Their time is the drain: 10,000 events handled one at a time, each
   with its own commit. That is P6 (batches), not P4.
 
+### What profiling a ticks frame found (stopwatches per part, frames 200–600)
+
+- **A shard with no `settled` ran it anyway — serially.** Every system took part in every phase; one without a
+  block got the default lane, serial, so at eight threads 10,000 empty `Settled()` calls each had a tray of their
+  own: `settled` went 0.74 → 4.62 ms. Each phase now visits only the systems that declare a block in it
+  (`settled` 0.07 ms), which also saves 10,000 empty calls a phase at one thread.
+- **Planning the runs cost 3 ms a frame**: walking 10,000 shards twice to ask each its mute and its lane, a
+  virtual call into 10,000 different classes, cache misses all the way. Neither changes between frames — lanes
+  are compiled, mutes change at a commit — so the plan is kept until a mute changes.
+- **Trays are handed over, not copied**: a tray's contributions go to the bucket as one list (replay 0.2 ms).
+- After those: the tick phase **11.1 ms at one thread, 5.3 ms at eight (2.1×)**.
+- **The fold commit does not gain yet** (≈ 2.4 ms at one thread and at eight). The folds do run on several
+  threads, but each takes ~6× longer than alone: 12.7 ms of CPU for 2.2 ms of wall time. Not the garbage
+  collector (4–8 collections in 600 frames); not the per-entity lists either — replacing them with one array per
+  bucket (a counting sort, kept: nothing per entity is left to forget at a destroy) changed nothing. Still open.
+- **The machine was not quiet**: 55% busy before the run (a browser, Discord, a game, VS Code's `veinc lsp`
+  using a core while idle), 93% by the end, and the same one-thread run read 11 to 32 ms. The numbers above were
+  taken between those; the gain at eight threads needs re-measuring on a quiet machine before it is quoted.
+
 ## Reproduce
 
 ```

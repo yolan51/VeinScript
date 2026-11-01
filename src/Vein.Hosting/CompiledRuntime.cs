@@ -121,6 +121,7 @@ internal sealed class CompiledRuntime : IGameRuntime
     public string? ReadFallback { set => _world.ReadFallback = value; }
     public IReadOnlyList<string> Args { set => _world.Args = value; }
     public int DrainCap { set => _world.DrainCap = value; }
+    public int Threads { set => _world.Threads = value; }
 
     public void Resume() => Guard(_world.Resume);
     public long SpawnAt(long id) => _world.SpawnAt((int)id);

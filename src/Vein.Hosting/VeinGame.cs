@@ -90,6 +90,22 @@ public sealed partial class VeinGame
     }
     private int _drainCap = 10_000;
 
+    /// How many workers a compiled program shares a phase across (docs/MULTITHREADING.md). One, the default, runs
+    /// every shard in turn; above one, shards the compiler found free of order-dependent work (spawn, random,
+    /// files, weave, live settings) run at once, and the run still gives exactly what one thread gives. The
+    /// interpreter ignores it. Applies now and to every reload.
+    public int Threads
+    {
+        get => _threads;
+        set
+        {
+            _threads = Math.Max(1, value);
+            if (_runtime is not null) _runtime.Threads = _threads;
+            if (_pending is not null) _pending.Threads = _threads;
+        }
+    }
+    private int _threads = 1;
+
     /// What the last load or reload reported, warnings included. A failed `Reload` leaves the previous
     /// program running and puts its errors here.
     public IReadOnlyList<Diagnostic> Diagnostics { get; private set; } = Array.Empty<Diagnostic>();
@@ -720,6 +736,7 @@ public sealed partial class VeinGame
         runtime.ReadFallback = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(Path));
         runtime.Args = _args;
         runtime.DrainCap = _drainCap;
+        runtime.Threads = _threads;
         return runtime;
     }
 
