@@ -1,0 +1,65 @@
+// samples/carries_list.vein — `x carries $Shape #Mark not #Mark`: the list a `target` takes, as a yes/no.
+//
+//   veinc run samples/carries_list.vein --ticks 2
+//
+// `carries` asked about one `$` or one `#`, so "a live enemy with health" was three tests joined by `and`,
+// the last in parentheses: `v carries $Health and v carries #Enemy and not (v carries #Dead)`. It now reads
+// the list a query head reads (D25): every `$` and `#` must be carried, every `not #M` must not be. As in a
+// target, `not` excludes a MARK; a missing shape is still `not (v carries $Health)` (VS0376 says so).
+//
+// The subject is read once, however long the list. Use it when the answer is all you need; to act on the
+// identity, `target $Health #Enemy not #Dead on v as e { … }` (D22) narrows and binds in one step.
+
+bundle CarriesList by you {
+    shape $Health { hp: int }
+    shape $Label { name: string }
+    mark #Enemy
+    mark #Dead
+
+    event @Hit { victim: Entity, amount: int }
+
+    shard Seed {
+        run once {
+            let orc = spawn()
+            attach $Label to orc { name: "orc" }
+            attach $Health to orc { hp: 10 }
+            mark orc #Enemy
+            let ghost = spawn()
+            attach $Label to ghost { name: "ghost" }
+            attach $Health to ghost { hp: 0 }
+            mark ghost #Enemy #Dead
+            let rock = spawn()
+            attach $Label to rock { name: "rock" }
+            let ally = spawn()
+            attach $Label to ally { name: "ally" }
+            attach $Health to ally { hp: 7 }
+        }
+    }
+
+    shard Sword {
+        hear *Vein.Time.Clock.@Ticked as t {
+            if t.frame == 1 {
+                target $Label as n { emit @Hit { victim: Entity, amount: 3 } }
+            }
+        }
+    }
+
+    shard Judge {
+        hear @Hit as p {
+            target $Label on p.victim as n {
+                if p.victim carries $Health #Enemy not #Dead {
+                    emit *Vein.Console.Io.@Print { text: n.Label.name + ": a live enemy, takes " + string(p.amount) }
+                }
+                if p.victim carries #Enemy #Dead {
+                    emit *Vein.Console.Io.@Print { text: n.Label.name + ": already dead" }
+                }
+                if p.victim carries $Health not #Enemy {
+                    emit *Vein.Console.Io.@Print { text: n.Label.name + ": a friend, spared" }
+                }
+                if not (p.victim carries $Health) {
+                    emit *Vein.Console.Io.@Print { text: n.Label.name + ": nothing to hit" }
+                }
+            }
+        }
+    }
+}

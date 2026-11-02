@@ -1,0 +1,87 @@
+// samples/shape_through_events.vein — a `$Shape` sent through emit → hear → emit → hear → emit: what changes.
+//
+//   veinc run samples/shape_through_events.vein --ticks 2
+//   veinc run samples/shape_through_events.vein --ticks 2 --reverse-hearers      (the same lines)
+//   veinc emit … then run it with --threads 4                                     (the same lines)
+//
+// → frame 1: entity hp 10, gold 0, tags start
+//   found, settled: hp 16, tags start, blessed, healed
+//   fought, settled: gold 10
+//   paid: the payload says hp 16, gold 10
+//   frame 2: entity hp 10, gold 11, tags start
+//
+// THREE THINGS IT SHOWS:
+//
+//   1. An event that includes `$Stats` carries a COPY of the values named at the emit. Nothing links it back to
+//      the entity: the hearers below add 6 hp and two tags to the payload, and the entity still has hp 10 and
+//      one tag at frame 2. Each hearer even gets a copy of its own (D31) — a `+=` on a list cannot reach the
+//      list the shape holds.
+//
+//   2. The include copies the shape's FIELDS, not their folds. `hp` is `folds sum` in `$Stats`, but a payload
+//      field takes `only` unless the EVENT says otherwise — so two hearers adding to it would be a conflict
+//      (VS0409). `@Found` names `hp` and `tags` again, with the folds its hearers need.
+//
+//   3. To change the entity, write the ENTITY: `target $Stats on p.who as s { s.Stats.gold += … }`. That write
+//      follows the shape's fold — `gold folds sum` here, so Tax and Bonus give the same 11 in any order. A shape
+//      field WITHOUT a fold, written by two hearers of one event, keeps the last write: which hearer ran last
+//      decides it, and `--reverse-hearers` changes the result. Give such a field a fold, or let one shard write it.
+//
+// One sender per hop, from a `settled` hearer: it sends the COMBINED payload on, once. When several ordinary
+// hearers each emit the next event, the next hop is heard once per sender, in the order those hearers ran.
+
+bundle ShapeThroughEvents by you {
+    need "Vein.Console"
+
+    shape $Stats { hp: int folds sum, gold: int folds sum, tags: list<string> }
+    mark #Hero
+
+    event @Found  { who: Entity, $Stats, hp: int folds sum, tags: list<string> folds append }
+    event @Fought { who: Entity, $Stats, gold: int folds sum }
+    event @Paid   { who: Entity, $Stats }
+
+    shard Seed {
+        run once {
+            let hero = spawn()
+            attach $Stats to hero { hp: 10, gold: 0, tags: ["start"] }
+            mark hero #Hero
+        }
+    }
+
+    // Each frame: show the entity as it is. Frame 1: send its $Stats into the chain.
+    shard Story {
+        hear *Vein.Time.Clock.@Ticked as t {
+            target $Stats #Hero as h {
+                do print("frame " + t.frame + ": entity hp " + h.Stats.hp + ", gold " + h.Stats.gold + ", tags " + join(h.Stats.tags, ", "))
+                if t.frame == 1 {
+                    emit @Found { who: Entity, hp: h.Stats.hp, gold: h.Stats.gold, tags: h.Stats.tags }
+                }
+            }
+        }
+    }
+
+    // Hop 1: two hearers write the PAYLOAD. Each reads hp 10 as sent; their writes fold.
+    shard Healer  { hear @Found as p { p.hp += 5   p.tags += "healed" } }
+    shard Blesser { hear @Found as p { p.hp += 1   p.tags += "blessed" } }
+    shard Guide {
+        hear @Found settled as p {
+            do print("found, settled: hp " + p.hp + ", tags " + join(p.tags, ", "))
+            emit @Fought { who: p.who, hp: p.hp, gold: p.gold, tags: p.tags }
+        }
+    }
+
+    // Hop 2: two hearers add loot to the payload; the settled hearer puts the total on the ENTITY.
+    shard Bandit   { hear @Fought as p { p.gold += 7 } }
+    shard Merchant { hear @Fought as p { p.gold += 3 } }
+    shard Purse {
+        hear @Fought settled as p {
+            do print("fought, settled: gold " + p.gold)
+            target $Stats on p.who as s { s.Stats.gold += p.gold }
+            emit @Paid { who: p.who, hp: p.hp, gold: p.gold, tags: p.tags }
+        }
+    }
+
+    // Hop 3: two hearers write the entity's folded field — the order they run in decides nothing.
+    shard Tax   { hear @Paid as p { target $Stats on p.who as s { s.Stats.gold -= 1 } } }
+    shard Bonus { hear @Paid as p { target $Stats on p.who as s { s.Stats.gold += 2 } } }
+    shard Echo  { hear @Paid settled as p { do print("paid: the payload says hp " + p.hp + ", gold " + p.gold) } }
+}

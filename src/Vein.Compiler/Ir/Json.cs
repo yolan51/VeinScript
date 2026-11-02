@@ -104,9 +104,29 @@ internal static class Json
                 break;
             }
 
+            // A compiled program's shape or record is a generated struct or class, not a dictionary: its public
+            // fields, in declaration order — what the interpreter's dictionary of the same shape holds. Without
+            // this `toJson(r.Row)` wrote the type's name.
+            case not null when !v.GetType().IsPrimitive && !v.GetType().IsEnum && Fields(v.GetType()) is { Length: > 0 } fields:
+            {
+                sb.Append('{');
+                for (int i = 0; i < fields.Length; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    WriteString(sb, fields[i].Name);
+                    sb.Append(':');
+                    WriteTo(sb, fields[i].GetValue(v));
+                }
+                sb.Append('}');
+                break;
+            }
+
             default: WriteString(sb, v.ToString() ?? ""); break;
         }
     }
+
+    private static System.Reflection.FieldInfo[] Fields(Type t) =>
+        t.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance).OrderBy(f => f.MetadataToken).ToArray();
 
     /// Escapes what JSON requires and nothing more. The control-character branch is the reason this
     /// lives in C# rather than being concatenated in VeinScript: a tab or a newline inside a value

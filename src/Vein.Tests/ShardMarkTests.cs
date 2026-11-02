@@ -224,6 +224,70 @@ public class ShardMarkTests
         Assert.Equal(new[] { "elite", "no boss" }, output);
     }
 
+    // ---- a list, as a target reads it: `x carries $S #M not #N` ----------------------------------
+
+    [Fact]
+    public void A_carries_list_holds_when_every_entry_does()
+    {
+        var output = Run(
+            "  shape $H { hp: int }\n  shape $Boss { phase: int }\n" +
+            "  shard S {\n    run once {\n" +
+            "      let a = spawn()\n      attach $H to a { hp: 1 }\n      mark a #Elite\n" +
+            "      let b = spawn()\n      attach $H to b { hp: 2 }\n      mark b #Elite #Dead\n" +
+            "      let c = spawn()\n      attach $H to c { hp: 3 }\n" +
+            "      let d = spawn()\n      attach $H to d { hp: 4 }\n      attach $Boss to d { phase: 1 }\n      mark d #Elite\n    }\n" +
+            "    each tick { target $H as u {\n" +
+            "      if u carries $H #Elite not #Dead { " + P("\"alive elite \" + u.H.hp") + " }\n" +
+            "      if u carries #Elite $Boss { " + P("\"elite boss \" + u.H.hp") + " }\n" +
+            "      if u carries $H not #Elite not #Dead and u.H.hp > 0 { " + P("\"plain \" + u.H.hp") + " }\n" +
+            "    } }\n  }",
+            ticks: 1);
+
+        Assert.Equal(new[] { "alive elite 1", "plain 3", "alive elite 4", "elite boss 4" }, output);
+    }
+
+    [Fact]
+    public void A_carries_list_reads_a_sender_too()
+    {
+        var output = Run(
+            "  mark #Session\n  event @Hit { n: int }\n" +
+            "  shard Both #Trusted #Session { run once { emit @Hit { n: 1 } } }\n" +
+            "  shard Half #Trusted          { run once { emit @Hit { n: 2 } } }\n" +
+            "  shard Ear { hear @Hit as h {\n" +
+            "    if h.from carries #Trusted #Session { " + P("\"both \" + h.n") + " }\n" +
+            "    if h.from carries #Trusted not #Session { " + P("\"trusted only \" + h.n") + " }\n" +
+            "  } }");
+
+        Assert.Equal(new[] { "both 1", "trusted only 2" }, output);
+    }
+
+    [Fact]
+    public void Not_before_a_shape_in_a_carries_list_is_VS0376()
+    {
+        // As in a target: `not` excludes a mark; a missing shape is asked with `not (x carries $S)`.
+        var d = Assert.Single(Diags("  shape $H { hp: int }\n  shape $Boss { phase: int }\n" +
+                                    "  shard S { each tick { target $H as u { if u carries $H not $Boss { } } } }"),
+                              x => x.Code == "VS0376");
+
+        Assert.Contains("not (x carries $Item)", d.Message);
+    }
+
+    [Fact]
+    public void The_backend_reads_a_carries_list_subject_once()
+    {
+        var entity = new CSharpBackend().Emit(Module(
+            "  shape $H { hp: int }\n" +
+            "  shard S { each tick { target $H as u { if u carries $H #Elite not #Dead { mark u #Seen } } } }"));
+        string cs = entity.Files[0].Contents;
+        Assert.Contains("is var __carries", cs);
+        Assert.Contains("World.Has<H>(__carries", cs);
+        Assert.Contains("!World.MarkedAs<Marks.Dead>(__carries", cs);
+
+        var sender = new CSharpBackend().Emit(Module(
+            "  event @Hit { }\n  shard Ear { hear @Hit as h { if h.from carries #Trusted not #Banned { } } }"));
+        Assert.Contains("?.marks ?? System.Array.Empty<string>(), \"Banned\")", sender.Files[0].Contents);
+    }
+
     [Fact]
     public void Not_without_parentheses_before_carries_is_VS0008()
     {

@@ -305,7 +305,7 @@ public sealed class AstTree
                 return ("Concat", "", FlattenAdd(b).Select(Expr).ToList());
             case BinaryExpr b: return ("Binary", OpSym(b.Op), new List<IrNode> { Expr(b.Left), Expr(b.Right) });
             case UnaryExpr u: return ("Unary", u.Op == UnOp.Neg ? "-" : "not", new List<IrNode> { Expr(u.Operand) });
-            case CarriesExpr c: return ("Carries", (c.IsShape ? "$" : "#") + c.Name, new List<IrNode> { Expr(c.Subject) });
+            case CarriesExpr c: return ("Carries", string.Join(" ", c.Terms.Select(t => (t.Excluded ? "not " : "") + (t.IsShape ? "$" : "#") + t.Name)), new List<IrNode> { Expr(c.Subject) });
             case HasExpr h: return ("Has", "", new List<IrNode> { Expr(h.Collection), Expr(h.Value) });
             case ShardSettingExpr ss: return ("Ref", "!" + ss.Shard + "." + ss.Name, New());
             case ToTextExpr tt: return ("ToText", (tt.Format is null ? "" : "<" + tt.Format + ">") + (tt.Loom ?? "?"), New());

@@ -477,8 +477,17 @@ public sealed record BinaryExpr(BinOp Op, Expr Left, Expr Right, SourceSpan Span
 public enum UnOp { Neg, Not }
 public sealed record UnaryExpr(UnOp Op, Expr Operand, SourceSpan Span) : Expr(Span);
 /// `x carries #M` / `x carries $S` (D20): does a sender (`d.from`), a console address or an entity carry
-/// this mark or shape? `carries` is a contextual word, not a keyword.
-public sealed record CarriesExpr(Expr Subject, bool IsShape, string Name, SourceSpan Span) : Expr(Span);
+/// this mark or shape? `carries` is a contextual word, not a keyword. The list a `target` takes follows it —
+/// `x carries $Health #Enemy not #Dead` — the first entry in IsShape/Name, the rest in More.
+public sealed record CarriesExpr(Expr Subject, bool IsShape, string Name, SourceSpan Span) : Expr(Span)
+{
+    public IReadOnlyList<CarriesTerm> More { get; init; } = Array.Empty<CarriesTerm>();
+
+    /// Every entry, the first included, in the order written.
+    public IEnumerable<CarriesTerm> Terms => More.Prepend(new CarriesTerm(IsShape, Name, false, Span));
+}
+/// One entry of a `carries` list: `$S`, `#M`, or `not #M` (Excluded).
+public sealed record CarriesTerm(bool IsShape, string Name, bool Excluded, SourceSpan Span);
 
 public sealed record StructLitExpr(string TypeName, IReadOnlyList<FieldInit> Fields, SourceSpan Span) : Expr(Span);
 public sealed record ListLitExpr(IReadOnlyList<Expr> Items, SourceSpan Span) : Expr(Span);

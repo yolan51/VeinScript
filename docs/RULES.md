@@ -244,6 +244,11 @@ writer). Two shards writing one unfolded field is a conflict (VS0409 at `veinc c
 time) — give it a fold. To read what everyone wrote, `hear @E settled as p`; to change it afterwards, emit a
 new event. Registration order decides nothing (D31, PAYLOAD-FOLDS.md).
 
+An included `$Shape` brings its fields, NOT their folds: `event @E { $Stats }` makes `hp` `only` even if `$Stats` says
+`folds sum` — write `event @E { $Stats, hp: int folds sum }` (same type, or VS0410). And a payload is a copy: a
+hearer's `p.hp += 5` never reaches the entity; `target $Stats on p.who as s { … }` does
+(`samples/shape_through_events.vein`).
+
 **13c. `$Parent` makes a `$Position` LOCAL, and the runtime publishes `$World`.** An identity carrying
 `*Vein.Core.Relations.$Parent` has its position read as an offset from that parent; the runtime composes
 the chain — parents first, each chain once — and writes `*Vein.Transform.Spatial.$World`. A crate on a
@@ -469,8 +474,12 @@ as they stood at the emit, and the shapes it carries — and an SF's emit is its
 **17f. `x carries #M` is how a body asks what a sender or an entity carries.** `if d.from carries #Trusted`
 branches where an `audience` could only refuse; `if u carries #Boss` tests an entity outside a `target #Boss`
 query. Write `not (x carries #M)` — `not x carries #M` negates `x` first (**VS0008**). A sender's answer is
-what it carried when it EMITTED. `carries` is a word only before a `#`/`$`, so it is still a legal name. The
-C# backend answers it for an entity, not for a `from` (it notes that). SYNTAX-DECISIONS D20.
+what it carried when it EMITTED. `carries` is a word only before a `#`/`$`, so it is still a legal name. Both
+runtimes answer it for an entity and for a `from`. SYNTAX-DECISIONS D20.
+
+It takes the list a `target` takes: `if p.victim carries $Health #Enemy not #Dead` holds when every `$`/`#` is
+carried and no `not #M` is; the subject is read once. As in a target, `not` excludes a MARK — `not $S` is
+**VS0376**; ask for a missing shape with `not (x carries $S)`. `samples/carries_list.vein`.
 
 **17c. An IMPORTED `$Shape` becomes a real component here the moment something attaches it.** A
 qualified include (`builder Conn { *Vein.Rest.Db.$Connection  mark #Conn }`, or a stdlib builder you

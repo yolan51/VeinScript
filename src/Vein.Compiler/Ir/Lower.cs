@@ -1994,6 +1994,18 @@ public sealed partial class Lower
     /// program's own types in generated code, and a user shape called `Provenance` is perfectly legal.
     public const string ProvenanceType = "VeinProvenance";
 
+    /// The entries of a lowered `carries` (after the subject, a name and an is-shape flag each; an excluded
+    /// mark's name wrapped in `not`) — the one reading the interpreter, the C# backend and Lanes share.
+    public static IEnumerable<(string Name, bool IsShape, bool Excluded)> CarriesTerms(IrRuntimeCall carries)
+    {
+        for (int i = 1; i + 1 < carries.Args.Count; i += 2)
+        {
+            var (name, excluded) = carries.Args[i] is IrUnary { Op: IrUnOp.Not, Operand: IrTypeNameExpr n }
+                ? (n, true) : ((IrTypeNameExpr)carries.Args[i], false);
+            yield return (name.Name, carries.Args[i + 1] is IrLiteral { Value: true }, excluded);
+        }
+    }
+
     /// The declaration for it — emitted into any module that declares an event, so a consumer can type
     /// `d.from.kind` without knowing anything the IR does not say.
     ///
@@ -2017,13 +2029,40 @@ public sealed partial class Lower
         foreach (var m in e.Members.OfType<FieldDecl>()) CheckMoneyFloat("@" + e.Name + "." + m.Name, m.Name, m.Type, m.Default, m.Span);
         // A field's fold is written on the event's own field; an included shape's field takes its type's default.
         var declared = e.Members.OfType<FieldDecl>().Where(f => f.Fold is not null).GroupBy(f => f.Name).ToDictionary(g => g.Key, g => g.First());
-        var fields = ExpandMembers(e.Members)
+        var fields = OneFieldPerName(e, ExpandMembers(e.Members))
             .Select(m => PayloadField(e.Name, m.Name, Ty(m.Type), declared.GetValueOrDefault(m.Name), LowerDefault(m.Default))).ToList();
         _payloadFolds[EventKey(Array.Empty<string>(), e.Name)] = fields.GroupBy(f => f.Name).ToDictionary(g => g.Key, g => g.First().Fold);
         // Every event carries its emitter's identity and its provenance — see AddPayloadTail.
         AddPayloadTail(fields);
         return new IrType(EventKey(Array.Empty<string>(), e.Name), IrTypeKind.Message, fields, Array.Empty<IrEnumCase>(), e.Doc,
             new[] { IrAttr.Of("message"), IrAttr.Of("origin", "auto") });
+    }
+
+    /// An event's fields, one per name. A field named again beside the include that brought it —
+    /// `event @Found { $Stats, hp: int folds sum }` — is that field given a fold (the include copies a shape's fields,
+    /// not their folds): one field, where the include put it, its default from the inline one when that has one. A
+    /// type that differs, or a name two includes bring, is VS0410: a payload has one field per name. `report: false`
+    /// for another bundle's event, said where it is declared.
+    private List<(string Name, TypeRef? Type, Expr? Default, string? From)> OneFieldPerName(
+        EventDecl e, List<(string Name, TypeRef? Type, Expr? Default, string? From)> expanded, bool report = true)
+    {
+        var diag = report ? _diag : new DiagnosticBag();
+        var kept = new List<(string Name, TypeRef? Type, Expr? Default, string? From)>();
+        foreach (var f in expanded)
+        {
+            int at = kept.FindIndex(k => k.Name == f.Name);
+            if (at < 0) { kept.Add(f); continue; }
+            var was = kept[at];
+            var inline = was.From is null ? was : f.From is null ? f : default;
+            if (was.From is not null && f.From is not null || was.From is null && f.From is null)
+                diag.Error("VS0410", $"`@{e.Name}.{f.Name}` is declared twice{(was.From is not null && f.From is not null ? $", by ${was.From} and ${f.From}" : "")}: " +
+                    "a payload has one field per name. Rename one, or include the one field you need (`$Shape.field`).", e.Span);
+            else if (Ty(was.Type).ToString() != Ty(f.Type).ToString())
+                diag.Error("VS0410", $"`@{e.Name}.{f.Name}` is {Ty(f.Type)} here but {Ty(was.Type)} in ${(was.From ?? f.From)}: naming an " +
+                    "included field again gives it a fold, and keeps its type.", e.Span);
+            else kept[at] = was with { Default = inline.Default ?? was.Default ?? f.Default };
+        }
+        return kept;
     }
 
     /// A payload field and its FOLD (docs/PAYLOAD-FOLDS.md): every hearer of one event reads the payload as it was
@@ -2528,7 +2567,7 @@ public sealed partial class Lower
         // The OWNER goes with the members, for the same reason the builder branch below passes one.
         if (ResolveEventOwned(path, name) is { Decl: { } decl } owned)
         {
-            _importedEvents[name] = ImportedEvent(EventKey(path, name), ExpandMembers(decl.Members, owned.Key), decl.Doc);
+            _importedEvents[name] = ImportedEvent(EventKey(path, name), OneFieldPerName(decl, ExpandMembers(decl.Members, owned.Key), report: false), decl.Doc);
             return true;
         }
 
@@ -4229,12 +4268,21 @@ public sealed partial class Lower
                 return new IrCall(LowerExpr(c.Callee), c.Args.Select(LowerExpr).ToList());
             case BinaryExpr b: return new IrBinary(MapBin(b.Op), LowerExpr(b.Left), LowerExpr(b.Right));
             case UnaryExpr u: return new IrUnary(u.Op == UnOp.Neg ? IrUnOp.Neg : IrUnOp.Not, LowerExpr(u.Operand));
-            // `x carries #M` (D20). The third argument says which table to look in, since a shape and a
-            // mark may share a name (RULES 14e).
+            // `x carries #M` (D20), or a list, `x carries $S #M not #N`: the subject once, then a pair per
+            // entry — the name, and whether it is a shape, since a shape and a mark may share a name (RULES 14e).
+            // An excluded mark's name is wrapped in `not`. Read back with CarriesTerms.
             case CarriesExpr ce:
-                if (!ce.IsShape) UseMark(ce.Name, ce.Span);
-                return new IrRuntimeCall("Carries", new IrExpr[]
-                    { LowerExpr(ce.Subject), new IrTypeNameExpr(ce.Name), new IrLiteral(ce.IsShape, IrLiteralKind.Bool) });
+            {
+                var args = new List<IrExpr> { LowerExpr(ce.Subject) };
+                foreach (var t in ce.Terms)
+                {
+                    if (!t.IsShape) UseMark(t.Name, t.Span);
+                    IrExpr name = new IrTypeNameExpr(t.Name);
+                    args.Add(t.Excluded ? new IrUnary(IrUnOp.Not, name) : name);
+                    args.Add(new IrLiteral(t.IsShape, IrLiteralKind.Bool));
+                }
+                return new IrRuntimeCall("Carries", args);
+            }
             case StructLitExpr sl: return new IrStructInit(sl.TypeName, sl.Fields.Select(LowerFieldInit).ToList());
             case ListLitExpr ll: return new IrList(ll.Items.Select(LowerExpr).ToList());
             // Only reachable if `base` escaped a bring argument list — the one place the parser admits

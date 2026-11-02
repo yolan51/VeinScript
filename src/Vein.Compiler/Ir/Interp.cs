@@ -3253,19 +3253,23 @@ public sealed class Interp
             // carries what its shard carried when it emitted; a console's `from` is its address, which
             // it carries as a mark (the audience rule); an entity id asks the store, which answers for
             // the COMMITTED world like every other read. Anything else carries nothing.
+            // A list (`x carries $S #M not #N`) holds when every entry does, an excluded mark by being absent.
             case "Carries":
             {
                 var subject = Eval(rc.Args[0], self, locals);
-                string name = Str(Eval(rc.Args[1], self, locals));
-                bool shape = rc.Args[2] is IrLiteral { Value: true };
-                return subject switch
+                foreach (var (name, shape, excluded) in Lower.CarriesTerms(rc))
                 {
-                    Dictionary<string, object?> from =>
-                        (from.GetValueOrDefault(shape ? "shapes" : "marks") as IEnumerable<object?>)?.Any(x => Str(x) == name) == true,
-                    string address => !shape && address == name,
-                    long or int or double => shape ? _store.Has(AsLong(subject), name) : _store.HasTag(AsLong(subject), name),
-                    _ => false,
-                };
+                    bool has = subject switch
+                    {
+                        Dictionary<string, object?> from =>
+                            (from.GetValueOrDefault(shape ? "shapes" : "marks") as IEnumerable<object?>)?.Any(x => Str(x) == name) == true,
+                        string address => !shape && address == name,
+                        long or int or double => shape ? _store.Has(AsLong(subject), name) : _store.HasTag(AsLong(subject), name),
+                        _ => false,
+                    };
+                    if (has == excluded) return false;
+                }
+                return true;
             }
             // `mute #M` / `unmute #M` (D20): the standing rule, queued like the rest.
             case "MuteMark":

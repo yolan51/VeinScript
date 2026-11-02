@@ -73,6 +73,13 @@ thing being removed. The new default is `only`.
 | `Entity`, `Mark`, enums, records | `only` | | `only` |
 | a nested record | per field | each field of the record folds by its own declaration | |
 
+**A `$Shape` included in an event brings its fields, not their folds.** `event @Found { who: Entity, $Stats }` gives
+`hp` the payload default (`only`) even when `$Stats` says `hp: int folds sum`. Name the field again to fold it:
+`event @Found { who: Entity, $Stats, hp: int folds sum }` — one field, where the include put it, same type
+(another type, or one name brought by two includes, is VS0410). The values are a COPY: nothing a hearer writes to
+`p.hp` reaches the entity; writing the entity is `target $Stats on p.who as s { s.Stats.hp += … }`, and that write
+follows the shape's fold. `samples/shape_through_events.vein`.
+
 **`only`** means "at most one value may be written". Zero writes: the emitted value stands. Several
 hearers writing the **same** value: fine, that value. Two **different** values: a conflict.
 

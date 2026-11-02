@@ -355,7 +355,8 @@ hear @Damage as d audience #Session #Trusted { … } // sender must carry these 
 ```
 
 **`carries`**: `if d.from carries #Trusted { … }`, `if e carries $Shield { … }`; negate as
-`not (e carries #M)`.
+`not (e carries #M)`. It takes a target's list: `if e carries $Health #Enemy not #Dead { … }` (`not` before
+marks only).
 
 **mute** (applied at the next commit; missed events are dropped, `var`s kept):
 

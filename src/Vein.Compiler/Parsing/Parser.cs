@@ -1888,7 +1888,20 @@ public sealed class Parser
                         "Write `not (x carries #M)` to negate the test.", cs);
                 Advance();
                 var what = Advance();
-                e = new CarriesExpr(e, what.Kind == TokenKind.ShapeRef, what.Text, cs);
+                // The rest of the list, as a `target` reads it: more `$`/`#`, and `not #M` for a mark the
+                // subject must not carry. `not` before a shape is VS0376 there, and here: `not (x carries $S)`.
+                var more = new List<CarriesTerm>();
+                while (Check(TokenKind.ShapeRef) || Check(TokenKind.MarkRef) || Check(TokenKind.KwNot))
+                {
+                    var at = Here;
+                    if (!Check(TokenKind.KwNot)) { var t = Advance(); more.Add(new CarriesTerm(t.Kind == TokenKind.ShapeRef, t.Text, false, at)); continue; }
+                    Advance();
+                    if (Check(TokenKind.MarkRef)) { more.Add(new CarriesTerm(false, Advance().Text, true, at)); continue; }
+                    _diag.Error("VS0376", "`not` in a `carries` list excludes a MARK: `x carries $Item not #Hidden`. " +
+                        "To ask that a shape is missing, write `not (x carries $Item)`.", at);
+                    if (Check(TokenKind.ShapeRef)) Advance();
+                }
+                e = new CarriesExpr(e, what.Kind == TokenKind.ShapeRef, what.Text, cs) { More = more };
                 continue;
             }
             if (op is null) return e;

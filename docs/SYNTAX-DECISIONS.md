@@ -571,6 +571,13 @@ a contextual word, not a keyword: it is one only when a `#` or `$` follows, so i
 raw `from.marks` / `from.shapes` lists stay unread on purpose — `carries` is the question, and the one a
 second runtime has to reproduce.
 
+**Addendum (DECIDED, the user, 2026-11-01): `carries` takes a target's list.** `x carries $Health #Enemy not #Dead`
+holds when every `$`/`#` is carried and no `not #M` is — the query head of D25, as a yes/no. It was one name per
+test, so the same question was `x carries $Health and x carries #Enemy and not (x carries #Dead)`, and a `target`
+beside it said it in one line. As in a target, `not` takes a mark only (**VS0376**, naming `not (x carries $S)`).
+The subject is read once: the IR is still one `Carries` call, a name and an is-shape flag per entry, an excluded
+name wrapped in `not`; compiled, a list binds the subject to a pattern variable. `samples/carries_list.vein`.
+
 **The C# backend** answers `carries` on an entity (`World.MarkedAs`, `World.Has`) and keeps every D20
 mute and mark in step with the interpreter. `carries` on a sender's `from` it cannot answer — the compiled
 `from` holds a name and a kind — so it emits a call that will not compile, with a note.
@@ -1217,6 +1224,12 @@ shard Z { hear @Ping settled as p { do print(p.score) } }      // emitted + ever
 The user's choices on the open questions: a conflict keeps the emitted value; `set`/`map` default to
 `union`/`merge`; a hearer's emit built from `p` carries its own writes. One implementation for both runtimes
 (`Ir/PayloadFold.cs`). For threads, a hearer's write into its own payload no longer keeps it on the serial lane.
+
+**Addendum (2026-11-01): an included field named again is one field.** `event @Found { $Stats, hp: int folds sum }`
+is how an included field gets a fold — the include brings fields, not folds (a shape's `replace`/`first` would be
+VS0405 on a payload, so inheriting them was not the rule). The interpreter already merged the two by name; the
+C# backend declared `hp` twice and did not compile. Now one field, where the include put it; another type, or one
+name from two includes, is **VS0410**. Corpus unchanged.
 
 ## Reserved-word disposition
 

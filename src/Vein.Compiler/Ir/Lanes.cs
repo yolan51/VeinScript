@@ -210,10 +210,10 @@ public sealed class Lanes
                 case IrRuntimeCall { Name: "AddTag" or "RemoveTag", Args: [_, IrTypeNameExpr m, ..] }:
                     writes.Add("#" + m.Name);
                     break;
-                case IrRuntimeCall { Name: "Carries", Args: [var who, IrTypeNameExpr what, var isShape, ..] }:
+                case IrRuntimeCall { Name: "Carries", Args: [var who, ..] } carries:
                     // On a sender's `from` it asks the payload, which nothing in the batch changes.
                     if (!(who is IrFieldAccess { Field: "from" } || who.ResolvedType?.Name == Lower.ProvenanceType))
-                        reads.Add((isShape is IrLiteral { Value: true } ? "$" : "#") + what.Name);
+                        foreach (var (name, isShape, _) in Lower.CarriesTerms(carries)) reads.Add((isShape ? "$" : "#") + name);
                     break;
                 case IrRuntimeCall { Name: "Emit" }:
                     break;   // an emit is held on the tray and queued in order; a file or network one is serial

@@ -1954,17 +1954,24 @@ public sealed partial class CSharpBackend : IVeinBackend
             // `x carries #M` (D20). On an entity it is the store's own question. On a sender's `from` it
             // cannot be answered here — the compiled `from` has a name and a kind, not marks — so the call
             // is emitted as written and fails to compile, with a note: never a silent `false`.
-            case "Carries" when c.Args.Count > 2 && c.Args[1] is IrTypeNameExpr what:
+            // A list (`x carries $S #M not #N`) reads the subject once, into a pattern variable, and asks each entry.
+            case "Carries" when c.Args.Count > 2:
             {
-                bool shape = c.Args[2] is IrLiteral { Value: true };
-                if (c.Args[0] is IrFieldAccess { Field: "from" } || c.Args[0].ResolvedType?.Name == "VeinProvenance")
+                var terms = Lower.CarriesTerms(c).ToList();
+                bool from = c.Args[0] is IrFieldAccess { Field: "from" } || c.Args[0].ResolvedType?.Name == "VeinProvenance";
+                string subject = from ? $"({Expr(c.Args[0])})" : Ent(c.Args[0]);
+                string who = subject;
+                if (terms.Count > 1)
                 {
-                    // D20: what the sender carried when it EMITTED — the compiled `from` holds its marks and shapes.
-                    return $"(System.Array.IndexOf(({Expr(c.Args[0])})?.{(shape ? "shapes" : "marks")} ?? System.Array.Empty<string>(), \"{Escape(what.Name)}\") >= 0)";
+                    who = "__carries" + ++_localSerial;
+                    subject = $"{subject} is var {who} && ";
                 }
-                return shape
-                    ? $"World.Has<{Ident(what.Name)}>({Ent(c.Args[0])})"
-                    : $"World.MarkedAs<Marks.{Ident(what.Name)}>({Ent(c.Args[0])})";
+                else subject = "";
+                string One((string Name, bool IsShape, bool Excluded) t) => (t.Excluded ? "!" : "") + (from
+                    // D20: what the sender carried when it EMITTED — the compiled `from` holds its marks and shapes.
+                    ? $"(System.Array.IndexOf({who}?.{(t.IsShape ? "shapes" : "marks")} ?? System.Array.Empty<string>(), \"{Escape(t.Name)}\") >= 0)"
+                    : t.IsShape ? $"World.Has<{Ident(t.Name)}>({who})" : $"World.MarkedAs<Marks.{Ident(t.Name)}>({who})");
+                return terms.Count > 1 ? $"({subject}{string.Join(" && ", terms.Select(One))})" : One(terms[0]);
             }
 
             // `mute X` (D18): the key Lower resolved, which `Main` registered the system under. Deferred

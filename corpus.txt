@@ -14,6 +14,7 @@ first/Demo          = Demo
 bundle              = ../VeinScriptBundle
 chain               = ../VeinChain
 cards               = ../VeinCards/VeinProjects/VeinCards
+farm                = ../VeinFarm
 showdown            = ../VeinShowdown
 godot               = ../VeinGodot
 desktop             = ../VeinDesktop
