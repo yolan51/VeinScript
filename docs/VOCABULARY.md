@@ -49,6 +49,14 @@ A bundle that uses a standard name uses THIS meaning; a bundle that needs someth
 (The stdlib has 71 shapes in all; the rest are one module's working data — widgets, documents, clocks — and are not
 promised beyond that module. `veinc symbols stdlib/<file>.vein` lists them.)
 
+### Lookalike names (VS0411, built)
+
+A new shape named like one above plus a copy word — `$Position2d`, `$Position3D`, `$MyPosition`, `$LocalScale`,
+`$VelocityData`, `$RectComponent`, `$NameV2` — is warned: it is a component nothing reads, so hosts, collision and Coop
+never see it. A 2D game uses `$Position` (and `$Velocity`) with z = 0. A name with a real word of its own
+(`$SpawnPosition`, `$PoolSize`, `$TextStyle`) is left alone. The list lives in `src/Vein.Compiler/Ir/Vocabulary.cs`;
+keep it in step with the table above.
+
 ## Game layer — VeinScriptBundle (proposed)
 
 Replaces the names projects invent today: `$Health` is declared 13 times in 11 bundles in 3 versions, and the RPG kit

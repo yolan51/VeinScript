@@ -38,6 +38,9 @@ public static class DiagnosticGuide
         new("VS0220", "A warning, because it fires for any bundle in the index whether or not this program links it. The error is VS0332, at the point an app actually folds two disagreeing declarations into one component.",
             "docs/RULES.md §252"),
 
+        new("VS0411", "The other half of VS0220: the same thing under another name. `$Position2d` is a new component nothing reads — hosts, collision and Coop look for `$Position` — so the identity silently does not draw, move or sync. Fires only for a standard name plus copy words (`My`, `Data`, `Component`, `2d`, `3D` …), so `$Player` and `$PoolSize` are left alone. A warning: rename it to say what is different if it truly is.",
+            "docs/VOCABULARY.md — lookalike names"),
+
         new("VS0332", "Unifying by bare name is deliberate — it is how a capability bundle sees the principal's data (rule 15b). Unifying two declarations that DISAGREE is a name clash wearing that feature's costume: one bundle would silently win by module order, and the other's shards would read fields the component does not have. So the app does not link.",
             "docs/RULES.md §252"),
 

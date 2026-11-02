@@ -1305,6 +1305,15 @@ standard-mark migration: 19 bundles drop their own `mark #Gameplay`, 9 their `#P
 names are used without being declared anywhere (`#Main #Hub #Spoke #Mob` …) — private marks of the bundle that uses
 them, unchanged.
 
+**Built (2026-11-02): lookalike names, VS0411.** VS0220 catches the same name with other fields; nothing caught the
+same thing under another name. `$Position2d` is a new component that hosts, collision and Coop never read, so the
+identity silently does not draw or move. The warning fires for a core standard name (`Vocabulary.CoreShapes`) plus
+only copy words — `My New Old Base Custom Simple Basic Local The Own Data Component Comp Info Value Val State Type V`
+or a digit run (`2`, `2d`, `3D`). Matching by FIELDS was rejected: `$Position $World $Rotation $Scale $Vec3` are all
+`{ x, y, z: float }` and meant to differ. Matching by letters was rejected: `$Player` holds `Layer`, `$PoolSize`
+and `$WorkPool` are their own things. Over the corpus's 324 shape names: 0 hits. The game layer (`$Health` …) joins
+the list in stage 3, when it is declared somewhere.
+
 **Why not 1,000 marks, as HTML has elements?** HTML has about 110, and most pages use 20. A shared mark is a promise
 every bundle keeps forever; a state only one game has is a promise nobody needs, and every common word it takes
 (`#Active`, `#Open`) is one a bundle can no longer use privately.

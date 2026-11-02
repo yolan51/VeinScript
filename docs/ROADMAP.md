@@ -143,6 +143,8 @@ and writing `$View`, that draws `$World` positions.
 ### Tier 3 — writing programs (M each)
 
 - **The shared vocabulary (D32, docs/VOCABULARY.md).** Stage 1 — the decision and the spec — is written.
+  - *Stage 2, done so far:* **VS0411**, a shape named like a core standard one plus a copy word (`$Position2d`,
+    `$MyVelocity`) — `Vocabulary.cs`; 0 hits in the corpus.
   - *Stage 2, compiler:* shapes unify additively in AppLinker (`UnifyEvent`'s rule, plus folds); a warning when a
     bundle declares its own shape or mark under a standard name; marks that are neither standard nor `shared` become
     private to their bundle (a bundle-qualified runtime name, as repeated functions get). Breaks 12 uses of another

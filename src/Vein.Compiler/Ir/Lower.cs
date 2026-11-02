@@ -367,6 +367,7 @@ public sealed partial class Lower
         CheckDeclaredMarks();
         CheckMutedMarks();
         CheckShapeConvergence(bundle);
+        CheckLookalikeShapes(bundle);
 
         // Marks discovered while lowering become Tag types, deduped BY KIND AS WELL AS NAME.
         //
@@ -832,6 +833,28 @@ public sealed partial class Lower
 
         static string Fields(List<FieldDecl> f) =>
             f.Count == 0 ? "{ }" : "{ " + string.Join(", ", f.Select(x => x.Name + ": " + (x.Type?.Name ?? "infer"))) + " }";
+    }
+
+    /// VS0220 is the same name with other fields; this is the other half, the same thing under another name.
+    /// `$Position2d` is a new component that nothing reads — hosts, collision and Coop look for `$Position` —
+    /// so the identity just does not draw or move. A warning, not an error: the name may truly mean something
+    /// else, and renaming it to say what is the fix either way.
+    private void CheckLookalikeShapes(BundleDecl bundle)
+    {
+        void Walk(IEnumerable<Decl> members)
+        {
+            foreach (var m in members)
+            {
+                if (m is PublicatorDecl p) { Walk(p.Members); continue; }
+                if (m is not ShapeDecl s || Vocabulary.LookalikeOf(s.Name) is not { } standard) continue;
+                _diag.Warning("VS0411",
+                    $"'${s.Name}' looks like the standard '${standard}' ({Vocabulary.CoreShapes[standard]}). " +
+                    $"Hosts, collision and Coop read '${standard}' by name and never see '${s.Name}'. " +
+                    $"Use '${standard}'; if it means something else, name what is different (docs/VOCABULARY.md).",
+                    s.Span);
+            }
+        }
+        Walk(bundle.Members);
     }
 
     /// A mark shared by a `use`d bundle counts as declared. The gate above stays on THIS bundle's own

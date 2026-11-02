@@ -438,7 +438,9 @@ one component whether or not they agree on its fields. Only builders and events 
 a shape body takes fields, so reusing `Vein.Transform.Spatial.$Position` means retyping its fields. Get
 them wrong and it is **VS0220** at declaration, or **VS0332** when an app links both. Marks unify the same way,
 with NO check at all (they have no fields). So before naming a shape or mark, look in **docs/VOCABULARY.md**: a
-standard name means what it says there; anything else, pick a name of your own (D32).
+standard name means what it says there; anything else, pick a name of your own (D32). A standard name plus a copy
+word (`$Position2d`, `$MyPosition`, `$VelocityData`) is **VS0411**: it is a new component nothing reads, so the
+identity does not draw or move. A 2D game uses `$Position` with z = 0.
 
 **15c. A shape may BRING marks, and they arrive and leave with it.** `shape $GameCamera { zoom: float,
 #CameraFollow }` — or `mark #A #B` in the body, or several bare marks between the fields — means carrying
