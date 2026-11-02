@@ -1231,6 +1231,15 @@ VS0405 on a payload, so inheriting them was not the rule). The interpreter alrea
 C# backend declared `hp` twice and did not compile. Now one field, where the include put it; another type, or one
 name from two includes, is **VS0410**. Corpus unchanged.
 
+**Addendum (DECIDED, the user, 2026-11-01): write clashes for projects of several bundles.** Two checks:
+- **VS0409 across bundles.** The app linker reports a payload field with no fold written by hearers in different
+  bundles — before, only within one bundle, and the rest only as a conflict mid-run. 0 hits in the corpus.
+- **A shape field with no fold, two shards, two values, one identity, one phase** is reported AT RUN TIME, on both
+  runtimes (`Ir/WriteClash.cs`): a `@DiagnosticRaised`, once a run, the value kept as before. A static VS0411 was
+  built first and dropped: it fired 63 times in the corpus, nearly all for systems moving DIFFERENT identities or
+  modes that never run together (Cameras' Orbit and Fly), which no check before the run can tell apart. Making the
+  default `only` for shape fields, as for payloads, stays open until the run-time count says how much it would touch.
+
 ## Reserved-word disposition
 
 Every keyword currently in [Lexer.cs](../src/Vein.Compiler/Lexing/Lexer.cs) `Keywords`, classified.

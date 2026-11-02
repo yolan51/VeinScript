@@ -2685,9 +2685,14 @@ public sealed partial class Lower
     /// Who writes each payload field — the shard and its `hear` — for VS0409.
     private readonly Dictionary<(string Event, string Field), List<(string Shard, HearBlock Hear)>> _payloadWriters = new();
 
+    /// Every payload field a hearer here writes — the event's bare name (events unify by it at the link), the
+    /// field, the shard and the `hear` — so AppLinker can say VS0409 for hearers in different bundles.
+    public IEnumerable<(string Event, string Field, string Shard, SourceSpan At)> PayloadWriters =>
+        _payloadWriters.SelectMany(kv => kv.Value.Select(w => (kv.Key.Event[(kv.Key.Event.LastIndexOf('.') + 1)..], kv.Key.Field, w.Shard, w.Hear.Span)));
+
     /// VS0409, a warning: two hearers write one payload field that has no fold. At run time two different values
     /// there are a conflict, raised, and the field keeps what was sent — said here, before the program runs. Within
-    /// this bundle; hearers in other bundles meet only when an app links them, and the run-time conflict says it.
+    /// this bundle; hearers in other bundles meet when an app links them (AppLinker says it there).
     private void CheckPayloadWriters()
     {
         foreach (var ((ev, field), writers) in _payloadWriters)

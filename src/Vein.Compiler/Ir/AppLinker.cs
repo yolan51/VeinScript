@@ -94,6 +94,7 @@ public static class AppLinker
         var modules = new List<(string Name, IrModule Module, AppLoad? Load)>();
         var uses = new List<LockEntry>();
         var parts = new List<LinkedPart>();
+        var payloadWriters = new List<(string Bundle, string Event, string Field, string Shard, SourceSpan At)>();
         foreach (var r in resolved)
         {
             var lower = new Lower(diag, baseDir);
@@ -101,10 +102,12 @@ public static class AppLinker
             modules.Add((r.Bundle.Name, module, r.Load));
             uses.AddRange(lower.OutsideUses);
             parts.Add(new LinkedPart(r.Bundle, r.File, module, lower.FlowSites, r.Needed) { Looms = lower.Looms, Formats = lower.Formats });
+            payloadWriters.AddRange(lower.PayloadWriters.Select(w => (r.Bundle.Name, w.Event, w.Field, w.Shard, w.At)));
         }
 
         var principal = modules[0];
         var merged = Merge(app.Name, modules, principal.Name, diag, span);
+        CheckPayloadWritersAcrossBundles(merged, payloadWriters, diag);
         var overrides = BootOverrides(principal.Load, diag, span);
 
         return new LinkedApp(merged, app.Name, principal.Name,
@@ -139,6 +142,32 @@ public static class AppLinker
         // Named after the bundle, as a hand-written manifest would be (`app KitDemo { load "KitDemo.vein" }`).
         string manifest = Path.Combine(dir, Path.GetFileNameWithoutExtension(full) + ".implicit.app.vein");
         return Link(manifest, $"app {bundle.Name} {{ load \"{Path.GetFileName(full)}\" }}", diag);
+    }
+
+    /// VS0409 for hearers that only meet in an app: a payload field with no fold, written by hearers in different
+    /// bundles. Each bundle already said it for its own hearers; what is left is what the link brought together —
+    /// in a project of several bundles, the collisions nobody can see from one file. (A SHAPE field written by two
+    /// shards is found while the program runs instead — WriteClash — since only then is it known whether the two
+    /// writes reach one identity.)
+    private static void CheckPayloadWritersAcrossBundles(
+        IrModule merged, IReadOnlyList<(string Bundle, string Event, string Field, string Shard, SourceSpan At)> payloadWriters,
+        DiagnosticBag diag)
+    {
+        // A payload's folds are its declaration's: the event as the merge kept it, by its bare name.
+        var folds = merged.Types.Where(t => t.Kind == IrTypeKind.Message)
+                                .GroupBy(t => t.Name[(t.Name.LastIndexOf('.') + 1)..], StringComparer.Ordinal)
+                                .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        foreach (var g in payloadWriters.GroupBy(w => (w.Event, w.Field)))
+        {
+            var writers = g.GroupBy(w => (w.Bundle, w.Shard)).Select(x => x.First()).ToList();
+            if (writers.Select(w => w.Bundle).Distinct().Count() < 2) continue;
+            if (folds.GetValueOrDefault(g.Key.Event)?.Fields.FirstOrDefault(f => f.Name == g.Key.Field)?.Fold is not FoldReducer.Only) continue;
+            var (a, b) = (writers[0], writers.First(w => w.Bundle != writers[0].Bundle));
+            diag.Warning("VS0409", $"`@{g.Key.Event}.{g.Key.Field}` has no fold and is written by {a.Bundle}.{a.Shard} and {b.Bundle}.{b.Shard}" +
+                (writers.Count > 2 ? $" (and {writers.Count - 2} more)" : "") + ", in different bundles: two different values there are a " +
+                $"conflict, and the field keeps what was sent. Give it a fold — `{g.Key.Field}: … folds sum`, `folds join \", \"`, " +
+                "`folds append` — or let one shard write it.", b.At);
+        }
     }
 
     /// Fold every module into one. Types dedupe by name; shards and functions accumulate; only the

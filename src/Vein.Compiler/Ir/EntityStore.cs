@@ -276,9 +276,18 @@ public sealed class EntityStore
     /// interpreter's own top-level queries read the value from before — found by samples/advanced/02.
     private readonly List<(long Entity, Dictionary<Cell, object?> Pending, Dictionary<Cell, object?> Snapshots)> _layers = new();
 
-    private sealed record Contribution(long Entity, string Shape, string Field, object? Value, FoldReducer? Fold, int Order);
+    /// `Writer` is the unit that made it, `Changed` whether it left the field other than it found it — what
+    /// WriteClash needs, and all a compiled fold can see (it compares each copy with its snapshot).
+    private sealed record Contribution(long Entity, string Shape, string Field, object? Value, FoldReducer? Fold, int Order,
+                                       StoreWriter? Writer = null, bool Changed = true);
     private readonly List<Contribution> _contributions = new();
     private int _order;
+
+    /// The unit running now, set by the runtime around each one: who a contribution came from.
+    public StoreWriter? Writer { get; set; }
+
+    /// What the last Commit found two shards disagreeing about (WriteClash), with the second writer — taken by the runtime.
+    public List<(WriteClash.Clash Clash, StoreWriter Second)> Clashes { get; } = new();
 
     /// Begin one unit activation — a single schedule block running over a single entity — or a nested query
     /// inside one, which gets a layer of its own.
@@ -336,7 +345,8 @@ public sealed class EntityStore
     {
         var fold = FoldOf(cell.Shape, cell.Field);
         object? contributed = fold == FoldReducer.Sum ? Subtract(value, snapshot) : value;
-        _contributions.Add(new Contribution(cell.Entity, cell.Shape, cell.Field, contributed, fold, _order++));
+        _contributions.Add(new Contribution(cell.Entity, cell.Shape, cell.Field, contributed, fold, _order++,
+                                            Writer, !PayloadFold.Same(value, snapshot)));
     }
 
     /// Reconcile every contribution from this phase and apply it. Sum/Min/Max/All/Any are
@@ -363,6 +373,7 @@ public sealed class EntityStore
                 FoldReducer.First => ordered[0].Value,
                 _ => ordered[^1].Value,          // Replace, and an unfolded field: last writer wins
             };
+            if (fold is null or FoldReducer.Replace or FoldReducer.First && ordered.Count > 1) FindClash(cell, ordered);
 
             var table = Table(cell.Shape);
             if (!table.TryGetValue(cell.Entity, out var row)) table[cell.Entity] = row = new Dictionary<string, object?>(StringComparer.Ordinal);
@@ -370,6 +381,21 @@ public sealed class EntityStore
         }
         _contributions.Clear();
         _order = 0;
+    }
+
+    /// WriteClash: the first shard that changed the field, against the first other shard that changed it to
+    /// something else. Writes by one shard are not compared: they run in the order written.
+    private void FindClash(Cell cell, List<Contribution> ordered)
+    {
+        Contribution? first = null;
+        foreach (var c in ordered)
+        {
+            if (!c.Changed || c.Writer is null) continue;
+            if (first is null) { first = c; continue; }
+            if (c.Writer.Shard == first.Writer!.Shard || PayloadFold.Same(c.Value, first.Value)) continue;
+            Clashes.Add((new WriteClash.Clash(cell.Shape, cell.Entity, cell.Field, first.Writer.Shard, first.Value, c.Writer.Shard, c.Value), c.Writer));
+            return;
+        }
     }
 
     /// Did this phase do anything? Drives the run-until-quiescent loop.

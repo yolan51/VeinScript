@@ -230,6 +230,9 @@ bindings — `IrSelfRef` carries its binding's name and resolves out of the same
 **13. `folds` reconciles concurrent writes; `settled` is where the reconciled value is readable.** Two
 shards doing `hp -= 1` in one tick give `hp - 2`, because each contributes a *delta* from its own
 snapshot. Reading `hp` during the tick sees an unreconciled value — death checks belong in `settled`.
+A field WITHOUT a fold keeps one writer's value, chosen by the order the shards run in: two shards setting it to
+different values on one identity in one phase is said at the commit (`has no fold and was written as … in one
+phase`), once a run, on both runtimes. Writes of one shard, of the same value, or to different identities are fine.
 
 **13b. `folds` ACCUMULATES across ticks — it does not recompute.** A `folds sum` field keeps its value
 and each tick's contributions land on top: a per-tick "count my children" reads 2, then 4, then 6.

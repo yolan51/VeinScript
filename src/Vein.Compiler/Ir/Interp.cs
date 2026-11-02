@@ -1564,10 +1564,12 @@ public sealed class Interp
         // statement running, which belongs to the unit outside.
         var outer = _unit;
         var outerAt = _at;
+        var outerWriter = _store.Writer;
         _unit = (owner.Name, what, at);
         _at = null;
+        _store.Writer = new StoreWriter(owner.Name, what, at?.File ?? "", at?.Line ?? 0);
         try { RunUnit(body, owner, locals, what, canRaise, at); }
-        finally { _unit = outer; _at = outerAt; }
+        finally { _unit = outer; _at = outerAt; _store.Writer = outerWriter; }
     }
 
     /// The unit of work running now: its shard, its phase (`once`, `tick`, `hear @E`) and where it is written.
@@ -1876,10 +1878,35 @@ public sealed class Interp
     private void CommitPhase()
     {
         _store.Commit();
+        ReportClashes();
         if (_commands.Count == 0) return;
         var pending = _commands.ToList();
         _commands.Clear();
         foreach (var c in pending) c();
+    }
+
+    /// Clashes already said (WriteClash.Key): once for the run, not once a frame.
+    private readonly HashSet<string> _clashesSaid = new(StringComparer.Ordinal);
+
+    /// WriteClash: two shards wrote different values to one unfolded shape field of one identity in the phase just
+    /// committed. The value stays the last writer's, as before; this says it, as a payload conflict is said.
+    private void ReportClashes()
+    {
+        if (_store.Clashes.Count == 0) return;
+        var found = WriteClash.InOrder(_store.Clashes.ToList(), c => c.Clash).ToList();
+        _store.Clashes.Clear();
+        foreach (var (clash, second) in found)
+        {
+            if (!_clashesSaid.Add(WriteClash.Key(clash))) continue;
+            string message = $"{Where(second.Shard, second.Phase, second.File.Length == 0 ? null : new SourceAt(second.File, second.Line))}: {WriteClash.Describe(clash)}";
+            // Said once a run, so a @DiagnosticRaised hearer that clashes itself cannot loop.
+            Emit("DiagnosticRaised", new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["severity"] = 2L, ["message"] = message,
+                ["shard"] = second.Shard, ["phase"] = second.Phase, ["file"] = second.File, ["line"] = second.Line,
+                ["origin"] = null, ["bundle"] = _bundle,
+            });
+        }
     }
 
     /// Process the event queue until empty. @Response is captured; @Print (console mode) is written to

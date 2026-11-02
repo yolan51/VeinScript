@@ -199,6 +199,11 @@ all contributions deterministically, independent of shard order. Reducers: `sum 
 first all any` (see [KEYWORDS.md §3.5](KEYWORDS.md#35-fold-reducers)). `folds` is a field modifier,
 not a statement — it desugars to `@fold(field, reducer)` metadata on the shape.
 
+A field with no fold (or `replace`/`first`) keeps one writer's value, and which one is the order the shards run
+in. When two shards change it to **different** values on the **same** identity in one phase, both runtimes say so
+at the commit — a `@DiagnosticRaised` naming the field, the two shards and their values, once a run — and keep the
+value as before. Give the field a fold, or let one shard write it.
+
 ### 3.6 `#mark` — a tag an identity wears
 
 A `#Mark` is boolean identity state with no fields. Referenced with `#`; added/removed by shards via

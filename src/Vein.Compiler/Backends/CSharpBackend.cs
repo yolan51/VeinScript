@@ -701,6 +701,32 @@ public sealed partial class CSharpBackend : IVeinBackend
         sb.AppendLine("        }");
         sb.AppendLine("        return committed;");
         sb.AppendLine("    }");
+
+        // WriteClash (Ir/WriteClash.cs): two shards that changed an unfolded field to different values in one commit.
+        // The same comparison as EntityStore.FindClash: the first writer against the first other shard that disagrees.
+        var unfolded = t.Fields.Where(f => f.Fold is null or FoldReducer.Replace or FoldReducer.First).ToList();
+        if (unfolded.Count > 0)
+        {
+            sb.AppendLine($"    public static void Clashes(int entity, ReadOnlySpan<({name} Snapshot, {name} Current)> c, ReadOnlySpan<VeinUnit> units, " +
+                          "List<(Vein.Compiler.Ir.WriteClash.Clash Clash, VeinUnit Second)> into)");
+            sb.AppendLine("    {");
+            foreach (var f in unfolded)
+            {
+                string fn = Ident(f.Name);
+                sb.AppendLine("        {");
+                sb.AppendLine("            int w = -1;");
+                sb.AppendLine("            for (int i = 0; i < c.Length; i++)");
+                sb.AppendLine("            {");
+                sb.AppendLine($"                if (c[i].Current.{fn} == c[i].Snapshot.{fn} || units[i] is null) continue;");
+                sb.AppendLine("                if (w < 0) { w = i; continue; }");
+                sb.AppendLine($"                if (units[i].Shard == units[w].Shard || Equals(c[i].Current.{fn}, c[w].Current.{fn})) continue;");
+                sb.AppendLine($"                into.Add((new(\"{Escape(t.Name)}\", entity, \"{Escape(f.Name)}\", units[w].Shard, c[w].Current.{fn}, units[i].Shard, c[i].Current.{fn}), units[i]));");
+                sb.AppendLine("                break;");
+                sb.AppendLine("            }");
+                sb.AppendLine("        }");
+            }
+            sb.AppendLine("    }");
+        }
         sb.AppendLine("}");
         sb.AppendLine();
     }

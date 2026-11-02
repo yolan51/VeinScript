@@ -284,7 +284,12 @@ public sealed class VeinWorld
 
     // ---- the fold rule ---------------------------------------------------
 
-    private interface IBucket { void Commit(VeinWorld world); int Count { get; } }
+    private interface IBucket
+    {
+        void Commit(VeinWorld world);
+        int Count { get; }
+        List<(Vein.Compiler.Ir.WriteClash.Clash Clash, VeinUnit Second)> Clashes { get; }
+    }
 
     /// Contributions to one component type this phase. Fully typed: the tuples hold `T`, not an
     /// interface, so nothing boxes between an activation and the fold.
@@ -293,11 +298,11 @@ public sealed class VeinWorld
         /// This commit's contributions as RUNS, in the order they arrived: a tray's list handed over whole (P4 —
         /// emptying 100,000 contributions out of the trays one by one was main-thread time the workers waited
         /// on), or the direct ones gathered in a list of the bucket's own. Folded in that order, as one list.
-        private readonly List<List<(int Entity, T Snapshot, T Current)>> _runs = new();
+        private readonly List<List<(int Entity, T Snapshot, T Current, VeinUnit? Unit)>> _runs = new();
         /// The direct run being filled; a handed-over run closes it, so order between the two is kept.
-        private List<(int Entity, T Snapshot, T Current)>? _open;
+        private List<(int Entity, T Snapshot, T Current, VeinUnit? Unit)>? _open;
         /// Emptied runs, to hand out again rather than allocate.
-        private readonly Stack<List<(int Entity, T Snapshot, T Current)>> _spare = new();
+        private readonly Stack<List<(int Entity, T Snapshot, T Current, VeinUnit? Unit)>> _spare = new();
 
         // The commit's working space — the bucket's OWN arrays, grown and kept, nothing per entity.
         //
@@ -312,6 +317,10 @@ public sealed class VeinWorld
         private int[] _slots = Array.Empty<int>();                       // each contribution's slot, in arrival order
         private int[] _ends = new int[Pad + 2];                          // where each slot ends in _sorted
         private (T Snapshot, T Current)[] _sorted = Array.Empty<(T, T)>();   // grouped by slot, arrival order kept
+        private VeinUnit?[] _units = Array.Empty<VeinUnit?>();              // who made each of _sorted
+
+        /// What this commit's fold found two shards disagreeing about (WriteClash), and the second writer.
+        public List<(Vein.Compiler.Ir.WriteClash.Clash Clash, VeinUnit Second)> Clashes { get; } = new();
 
         /// `_ends` is written once per contribution; its first Pad ints keep it off a cache line another
         /// bucket's array may share.
@@ -319,16 +328,16 @@ public sealed class VeinWorld
 
         public int Count { get; private set; }
 
-        public void Add(int entity, T snapshot, T current)
+        public void Add(int entity, T snapshot, T current, VeinUnit? unit)
         {
             if (_open is null) Arrive(_open = Rent());
-            _open.Add((entity, snapshot, current));
+            _open.Add((entity, snapshot, current, unit));
             Count++;
         }
 
         /// A tray's contributions, taken whole; the tray gets an empty list back. On the main thread, as every
         /// tray is emptied there.
-        public List<(int Entity, T Snapshot, T Current)> Hand(List<(int Entity, T Snapshot, T Current)> items)
+        public List<(int Entity, T Snapshot, T Current, VeinUnit? Unit)> Hand(List<(int Entity, T Snapshot, T Current, VeinUnit? Unit)> items)
         {
             _open = null;
             Arrive(items);
@@ -336,14 +345,14 @@ public sealed class VeinWorld
             return Rent();
         }
 
-        private void Arrive(List<(int Entity, T Snapshot, T Current)> run)
+        private void Arrive(List<(int Entity, T Snapshot, T Current, VeinUnit? Unit)> run)
         {
             // The first contribution since the last commit puts this bucket on the world's touched list.
             if (_runs.Count == 0) world._touched.Add(this);
             _runs.Add(run);
         }
 
-        private List<(int Entity, T Snapshot, T Current)> Rent() => _spare.Count > 0 ? _spare.Pop() : new();
+        private List<(int Entity, T Snapshot, T Current, VeinUnit? Unit)> Rent() => _spare.Count > 0 ? _spare.Pop() : new();
 
         public void Commit(VeinWorld world)
         {
@@ -357,7 +366,7 @@ public sealed class VeinWorld
             if (_slots.Length < Count) _slots = new int[Math.Max(Count, _slots.Length * 2)];
             int n = 0;
             foreach (var run in _runs)
-                foreach (var (entity, _, _) in run)
+                foreach (var (entity, _, _, _) in run)
                 {
                     if (!_slotOf.TryGetValue(entity, out int slot))
                     {
@@ -376,12 +385,16 @@ public sealed class VeinWorld
                 _ends[Pad + s] = at;
                 at += count;
             }
-            if (_sorted.Length < n) _sorted = new (T, T)[Math.Max(n, _sorted.Length * 2)];
+            if (_sorted.Length < n) { _sorted = new (T, T)[Math.Max(n, _sorted.Length * 2)]; _units = new VeinUnit?[_sorted.Length]; }
             n = 0;
             // ...and each start moves to its end as its slot fills: slot s is then [end of s - 1, _ends[s]).
             foreach (var run in _runs)
-                foreach (var (_, snap, cur) in run)
-                    _sorted[_ends[Pad + _slots[n++]]++] = (snap, cur);
+                foreach (var (_, snap, cur, unit) in run)
+                {
+                    int at = _ends[Pad + _slots[n++]]++;
+                    _sorted[at] = (snap, cur);
+                    _units[at] = unit;
+                }
 
             // Straight to the STORE, not through `Secs`, and this is the hot path — it runs once per
             // entity per component per frame, for the life of the program.
@@ -401,8 +414,14 @@ public sealed class VeinWorld
             {
                 int from = s == 0 ? 0 : _ends[Pad + s - 1], to = _ends[Pad + s];
                 if (world._secs.Store.TryGet<T>(_dirty[s], out var committed))
+                {
                     // Static abstract dispatch: no boxing, no virtual call through an instance.
-                    world._secs.Store.Add(_dirty[s], T.Fold(committed!, new ReadOnlySpan<(T Snapshot, T Current)>(_sorted, from, to - from)));
+                    var span = new ReadOnlySpan<(T Snapshot, T Current)>(_sorted, from, to - from);
+                    world._secs.Store.Add(_dirty[s], T.Fold(committed!, span));
+                    // Two shards that disagree about an unfolded field (WriteClash) — only an identity two
+                    // contributions reached can have one, so the usual single writer costs nothing here.
+                    if (to - from > 1) T.Clashes(_dirty[s], span, new ReadOnlySpan<VeinUnit?>(_units, from, to - from), Clashes);
+                }
             }
             foreach (var run in _runs) { run.Clear(); _spare.Push(run); }
             _runs.Clear();
@@ -430,8 +449,8 @@ public sealed class VeinWorld
     /// absolute value — the distinction that makes `hp -= 1` from two shards mean `hp − 2`, not `2·hp − 2`.
     public void Contribute<T>(int entity, T snapshot, T current) where T : struct, IVeinComponent<T>
     {
-        if (TrayNow is { } tray) tray.StagedFor(Of<T>()).Items.Add((entity, snapshot, current));
-        else Of<T>().Add(entity, snapshot, current);
+        if (TrayNow is { } tray) tray.StagedFor(Of<T>()).Items.Add((entity, snapshot, current, Unit));
+        else Of<T>().Add(entity, snapshot, current, Unit);
     }
 
     // ---- trays (the multithreading plan, P2) ---------------------------------------------------------------
@@ -459,7 +478,7 @@ public sealed class VeinWorld
     /// One tray's contributions to one component type, kept typed so nothing boxes.
     private sealed class Staged<T>(Bucket<T> bucket) : IStaged where T : struct, IVeinComponent<T>
     {
-        public List<(int Entity, T Snapshot, T Current)> Items = new();
+        public List<(int Entity, T Snapshot, T Current, VeinUnit? Unit)> Items = new();
         public void Replay() => Items = bucket.Hand(Items);   // handed over whole, not copied
     }
 
@@ -710,6 +729,26 @@ public sealed class VeinWorld
         else Err.WriteLine(text);
     }
 
+    /// Clashes already said (WriteClash.Key): once for the run, not once a frame.
+    private readonly HashSet<string> _clashesSaid = new(StringComparer.Ordinal);
+
+    /// WriteClash, as Interp.ReportClashes: the buckets folded each on its own (on workers, perhaps), so what they
+    /// found is put in the one order both runtimes report in, then raised at the second writer's unit.
+    private void ReportClashes(IBucket[] touched)
+    {
+        List<(Vein.Compiler.Ir.WriteClash.Clash Clash, VeinUnit Second)>? found = null;
+        foreach (var b in touched)
+            if (b.Clashes.Count > 0) { (found ??= new()).AddRange(b.Clashes); b.Clashes.Clear(); }
+        if (found is null) return;
+        foreach (var (clash, second) in Vein.Compiler.Ir.WriteClash.InOrder(found, c => c.Clash))
+        {
+            if (!_clashesSaid.Add(Vein.Compiler.Ir.WriteClash.Key(clash))) continue;
+            string message = $"{second.Where}: {Vein.Compiler.Ir.WriteClash.Describe(clash)}";
+            if (Diagnose is { } raise) raise(2, message, second);
+            else { Faulted = true; ErrLine($"(error: {message})"); }
+        }
+    }
+
     /// How many contributions a commit needs before its folds go to workers.
     private const int ParallelFoldAt = 4096;
 
@@ -730,6 +769,7 @@ public sealed class VeinWorld
                 Parallel.For(0, touched.Length, new ParallelOptions { MaxDegreeOfParallelism = Threads }, i => touched[i].Commit(this));
             else
                 foreach (var b in touched) b.Commit(this);
+            ReportClashes(touched);
         }
 
         if (_commands.Count == 0) return;
@@ -1649,6 +1689,11 @@ public interface IVeinComponent<T> : IComponent where T : struct, IVeinComponent
     /// accumulates each contribution's DELTA from its own snapshot; every other reducer takes the
     /// absolute value written.
     static abstract T Fold(T committed, ReadOnlySpan<(T Snapshot, T Current)> contributions);
+
+    /// WriteClash: the first unit that changed an unfolded field against the first unit of ANOTHER shard that
+    /// changed it to something else — one per field, into `into`. Generated for a shape with an unfolded field.
+    static virtual void Clashes(int entity, ReadOnlySpan<(T Snapshot, T Current)> contributions, ReadOnlySpan<VeinUnit?> units,
+                                List<(Vein.Compiler.Ir.WriteClash.Clash Clash, VeinUnit Second)> into) { }
 }
 
 /// Base for a generated shard. The emitter overrides only the phases the shard declares.

@@ -8,9 +8,9 @@ shared rule (`src/Vein.Compiler/Ir/PayloadFold.cs`). Written as a proposal from 
 from `p` carries its own writes.
 
 **Not yet:** a map's value fold (`map<string, int folds sum>` — two hearers putting one key is a conflict for
-now); a nested record folding field by field (it is one `only` value); VS0409 across linked bundles (it checks
-one bundle — the run-time conflict covers the rest); a compiled payload's nested record is copied by
-reference, not all the way down.
+now); a nested record folding field by field (it is one `only` value); a compiled payload's nested record is
+copied by reference, not all the way down. *(VS0409 across linked bundles is done: the app linker reports hearers
+in different bundles, 2026-11-01.)*
 
 **Measured before the change** (`tools/check-hearer-order.sh`: each of the corpus's 300 programs run as written
 and with every event's hearers in reverse, 30 frames): 147 the same, 9 the same lines in another order, 1
