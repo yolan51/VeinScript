@@ -1240,6 +1240,79 @@ name from two includes, is **VS0410**. Corpus unchanged.
   modes that never run together (Cameras' Orbit and Fly), which no check before the run can tell apart. Making the
   default `only` for shape fields, as for payloads, stays open until the run-time count says how much it would touch.
 
+## D32 — A shared vocabulary: standard shapes and marks, additive shapes, private marks {#vocabulary}
+
+**ADOPTED AS DIRECTION (the user, 2026-11-01). Not implemented** — this records the decision and what it would touch;
+the compiler work is stage 2 and the vocabulary bundles stage 3 (ROADMAP). The spec: [VOCABULARY.md](VOCABULARY.md).
+
+**The problem.** In a project of several large bundles, `$Health` must mean one thing everywhere, as HTML's
+`<button>` does. Shapes and marks unify by bare name across a link (RULES 15b), so the language already behaves as
+if there were one vocabulary — but nobody wrote it, and it drifts:
+
+- `$Health` is declared 13 times in 11 bundles in 3 versions (`{ hp: int folds sum }`, `{ hp: int }` with no fold,
+  `{ hp: int folds sum, mp: int }`), while VeinScriptBundle's RPG kit names the same idea `$Life { hp: float, max,
+  regen }`. 57 shape names are declared in 2+ bundles, 41 of them with different fields (`$Score` 5 versions,
+  `$Player` 5, `$Task` 5). A link of two of them is VS0332; a `$Health` beside a `$Life` is two health systems that
+  never see each other, with no message at all.
+- Marks are worse: they have no fields, so two bundles' `#Active` merge at the link **with no diagnostic** — the type
+  table is keyed by bare name and kind (AppLinker.cs:221-277) and `SameShape` is always true for a field-less tag. 85
+  mark names are declared in 2+ bundles (`#Gameplay` 19, `#Row` 12, `#Hero` 11, `#Player` 9).
+- The stdlib holds 71 shapes and 67 marks; 41 of those marks are used by no bundle outside the stdlib, many of them one
+  app's (`#AddCard`, `#LaneBar`, `#TaskCard`).
+
+Counts: `bash tools/corpus-files.sh | node vocab-count.js` over corpus.txt (418 files, 295 bundles), a read-only
+script kept outside the repo. The samples are separate programs, so "declared in 2+ bundles" there is drift in
+NAMING rather than a link that fails today — the drift a project of several bundles inherits.
+
+**Decided.**
+
+1. **Two layers.** The cross-domain core stays in the stdlib (`$Name $Owner $Parent $Place $Position $Rotation $Scale
+   $Text $Image $Tint $Rect` …, and the UI marks hosts read). The game/RPG vocabulary (`$Health $Velocity $Team
+   $Inventory` …) lives in VeinScriptBundle (Vein.Bundles.Game/Rpg): versioned and pinned in `vein.lock`, where the
+   stdlib is tied to the compiler that shipped it (VS0378) and every change would need a compiler release. No engine
+   name appears in either layer, so this keeps VeinScript engine-neutral.
+2. **A written meaning per standard shape** — space, units, field types, defaults, fold, who reads it. A shape's
+   NAME says its space: `$Position/$Rotation/$Scale` are world space (a 2D game uses z = 0, so movement, collision and
+   cameras serve both), `$Rect` is screen/layout pixels. Two `$Position`s (2D, 3D) would double every system.
+3. **Shapes change additively.** Today two declarations of one shape must match exactly (`SameShape`, VS0332). They
+   take the rule events already have (`UnifyEvent`, AppLinker.cs:247-258): the fields both declare agree in type,
+   default and fold, and a field only one declares carries a default — so `$Health` v2 may add `regen: float = 0.0`
+   and still link with a bundle built against v1. Never change a field's type or fold, never remove or rename one; a
+   redesign is a new name and a deprecation warning on the old. Prefer a new small shape (`$Regen`, `$Shield`) over
+   growing one. This only relaxes VS0332: nothing that links today stops linking.
+4. **About 25 standard marks, not 1,000.** A mark is a state, and most states belong to one domain (`#Watered`). The
+   standard ones are those two domains or two independent bundles need with one meaning: interaction `#Hidden
+   #Disabled #Selected #Focused #Hovered #Pressed #Dragging`; lifecycle `#Pending #Done #Failed #Dead`; network `#Mine
+   #Mirror #Authority #Synced`; game `#Player #Enemy #Solid`; and the cross-bundle groups `#Gameplay` and `#Walking`.
+   They keep their bare runtime names — hosts read `#Hidden` (VeinGame.cs:641), `#Synced/#Mirror/#Mine` (VeinCoop.cs)
+   and the desktop widget marks (DesktopRunner.cs:874-942) by string.
+5. **Other marks become private to their bundle unless `shared`.** `shared` already applies to a mark in a
+   publicator (Parser.cs:224-239) and only shared marks are indexed (BundleIndex.cs:437); what changes is the link: a
+   private mark two bundles declare stays two marks, by a bundle-qualified runtime name — as AppLinker already
+   qualifies a function two bundles declare (AppLinker.cs:204-219). **The standard marks come first**: `#Gameplay` is
+   declared privately in 19 bundles and Pause's `mute #Gameplay` must reach them all (D20), and Cameras' `mute
+   #Walking` silences Movement's shards — made private as they are, both would silently stop working. As standard
+   marks they keep D20's "a mute reaches every bundle".
+6. **One-app marks leave the stdlib.** The planner's (`#TaskCard #TaskLane #AddLane #LaneBar #AddCard #MoveLeft`
+   …) move to the bundle that uses them; the document-frame and tab marks the stdlib's own widgets put on their parts
+   become private to `Vein.Desktop`. Marks a host reads stay (`#Radio #Switch #Badge #Multiline #MenuBar #Menu
+   #MenuItem #Toolbar #StatusBar #Draggable #Flat #Row #Accent`).
+
+**What it would touch.** The additive rule: nothing (it only accepts more). Private marks: 12 uses of another bundle's
+private mark break — `#Server` in 7 chat samples (declared privately in MeshClient/MeshServer), `#Session #Trusted
+#Banned` in Demo, Arcade and Lobby (declared privately in AudienceMarks/Observers) — each fixed by `shared`. The
+standard-mark migration: 19 bundles drop their own `mark #Gameplay`, 9 their `#Player`, 3 their `#Enemy`. 15 mark
+names are used without being declared anywhere (`#Main #Hub #Spoke #Mob` …) — private marks of the bundle that uses
+them, unchanged.
+
+**Why not 1,000 marks, as HTML has elements?** HTML has about 110, and most pages use 20. A shared mark is a promise
+every bundle keeps forever; a state only one game has is a promise nobody needs, and every common word it takes
+(`#Active`, `#Open`) is one a bundle can no longer use privately.
+
+**Why not namespaced names at use sites (`*Vein.Bundles.Rpg.#Dead`)?** RULES 17b keeps the qualified form for
+includes and discovery; use sites stay bare. The standard list and private-by-default marks give the same protection
+without qualifying every `mark e #Dead`.
+
 ## Reserved-word disposition
 
 Every keyword currently in [Lexer.cs](../src/Vein.Compiler/Lexing/Lexer.cs) `Keywords`, classified.

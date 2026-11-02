@@ -142,6 +142,14 @@ and writing `$View`, that draws `$World` positions.
 
 ### Tier 3 — writing programs (M each)
 
+- **The shared vocabulary (D32, docs/VOCABULARY.md).** Stage 1 — the decision and the spec — is written.
+  - *Stage 2, compiler:* shapes unify additively in AppLinker (`UnifyEvent`'s rule, plus folds); a warning when a
+    bundle declares its own shape or mark under a standard name; marks that are neither standard nor `shared` become
+    private to their bundle (a bundle-qualified runtime name, as repeated functions get). Breaks 12 uses of another
+    bundle's private mark (`#Server`, `#Session`, `#Trusted`, `#Banned` in samples), each fixed by `shared`.
+  - *Stage 3, vocabulary:* the game layer in VeinScriptBundle (`$Health` replacing `$Life`, `$Mana`, `$Team` …), the
+    standard marks declared once (`#Gameplay` from 19 private declarations), one-app marks out of the stdlib, the
+    samples and kits migrated. Decide `float` vs `int` for `hp` first.
 - **Named arguments, `name: value`** — `clamp(v: speed, lo: 0.0, hi: 1.0)`.
   - It is the spelling `emit @E { f: v }` already uses, so `bring Card(title: "x")` reads like the
     `emit @Card { title: "x" }` it lowers to.
